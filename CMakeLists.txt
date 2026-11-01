@@ -18,6 +18,7 @@ endif()
 option(MODSYNTH_BUILD_TESTS "Build the C++ tests" ${MODSYNTH_DEV_BUILD})
 option(MODSYNTH_BUILD_BENCH "Build the benchmarks" OFF)
 option(MODSYNTH_BUILD_PYTHON "Build the Python extension (always on for wheels)" OFF)
+option(MODSYNTH_BUILD_COMPILER "Build the authoring compiler, which firmware never links" ${MODSYNTH_DEV_BUILD})
 option(MODSYNTH_INSTALL "Install the headers and CMake package" ${MODSYNTH_DEV_BUILD})
 
 add_library(modsynth INTERFACE)
@@ -29,6 +30,25 @@ target_include_directories(modsynth INTERFACE
 target_compile_features(modsynth INTERFACE cxx_std_23)
 target_compile_options(modsynth INTERFACE $<$<PLATFORM_ID:Emscripten>:-msimd128>)
 
+if(MODSYNTH_BUILD_COMPILER)
+    include(FetchContent)
+    FetchContent_Declare(nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.12.0
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL
+        SYSTEM
+        FIND_PACKAGE_ARGS 3.12
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+
+    add_library(modsynth_compiler INTERFACE)
+    add_library(modsynth::compiler ALIAS modsynth_compiler)
+    target_link_libraries(modsynth_compiler INTERFACE modsynth nlohmann_json::nlohmann_json)
+    # Wavetables enter a chunk hash, so FMA must not make a native host disagree with wasm
+    target_compile_options(modsynth_compiler INTERFACE -ffp-contract=off)
+endif()
+
 if(SKBUILD OR MODSYNTH_BUILD_PYTHON)
     find_package(Python 3.12 REQUIRED
         COMPONENTS Interpreter Development.Module
@@ -38,12 +58,12 @@ if(SKBUILD OR MODSYNTH_BUILD_PYTHON)
 
     # NOMINSIZE: nanobind defaults to -Os, which would also apply to the DSP templates
     # instantiated in this translation unit.
-    nanobind_add_module(_core NOMINSIZE STABLE_ABI bindings/python.cpp)
+    nanobind_add_module(_core NOMINSIZE STABLE_ABI bindings/Python.cpp)
     target_link_libraries(_core PRIVATE modsynth)
     install(TARGETS _core LIBRARY DESTINATION modsynth COMPONENT python)
 elseif(EMSCRIPTEN AND PROJECT_IS_TOP_LEVEL)
-    add_executable(modsynth_wasm bindings/wasm.cpp)
-    set_target_properties(modsynth_wasm PROPERTIES OUTPUT_NAME modsynth)
+    add_executable(modsynth_wasm bindings/Wasm.cpp)
+    set_target_properties(modsynth_wasm PROPERTIES OUTPUT_NAME Modsynth)
     target_link_libraries(modsynth_wasm PRIVATE modsynth)
 
     # A single ES module that can be imported from an AudioWorkletProcessor without
@@ -51,45 +71,95 @@ elseif(EMSCRIPTEN AND PROJECT_IS_TOP_LEVEL)
     # createModsynth() is async and addModule() doesn't wait for top-level await, so call
     # registerProcessor() first and only use the module once the promise resolves.
     # Memory growth stays off (the default): growing detaches any cached HEAPF32 subarray.
+    # Plain C exports rather than embind, so the audio thread never allocates a binding object.
     target_link_options(modsynth_wasm PRIVATE
-        -lembind
         -sEXPORT_ES6
         -sEXPORT_NAME=createModsynth
         -sSINGLE_FILE
         -sENVIRONMENT=web,worker,worklet,node
-        -sEXPORTED_RUNTIME_METHODS=HEAPF32
+        -sEXPORTED_RUNTIME_METHODS=HEAPF32,HEAPU8
         -sFILESYSTEM=0
+        -sINITIAL_MEMORY=134217728
+        -sALLOW_MEMORY_GROWTH=0
     )
+
+    # The compiler is a separate instance on a worker, per section 12, and also runs in Node for exports.
+    # It allocates freely and throws, so it shares nothing with the worklet's heap.
+    if(MODSYNTH_BUILD_COMPILER)
+        add_executable(modsynth_compiler_wasm bindings/WasmCompiler.cpp)
+        set_target_properties(modsynth_compiler_wasm PROPERTIES OUTPUT_NAME ModsynthCompiler)
+        target_link_libraries(modsynth_compiler_wasm PRIVATE modsynth_compiler)
+        target_compile_options(modsynth_compiler_wasm PRIVATE -fwasm-exceptions)
+        target_link_options(modsynth_compiler_wasm PRIVATE
+            -lembind
+            -fwasm-exceptions
+            -sEXPORT_ES6
+            -sEXPORT_NAME=createCompiler
+            -sSINGLE_FILE
+            -sENVIRONMENT=web,worker,node
+            -sFILESYSTEM=0
+            -sALLOW_MEMORY_GROWTH=1
+        )
+    endif()
 endif()
 
 if(MODSYNTH_BUILD_TESTS OR MODSYNTH_BUILD_BENCH)
     include(FetchContent)
 endif()
 
+if(MODSYNTH_BUILD_COMPILER AND NOT EMSCRIPTEN)
+    add_executable(modsynth_compile tools/CompileImage.cpp)
+    target_link_libraries(modsynth_compile PRIVATE modsynth_compiler)
+    add_executable(modsynth_render tools/Render.cpp)
+    target_link_libraries(modsynth_render PRIVATE modsynth)
+endif()
+
 if(MODSYNTH_BUILD_TESTS)
     enable_testing()
 
-    # Catch2's REQUIRE reports failures by throwing, which aborts the whole test run under
-    # Emscripten's default of no exception catching. Set here so it also reaches Catch2.
+    # The compiler reports failures by throwing, which aborts the whole test under Emscripten's
+    # default of no exception catching. Set here so it also reaches GoogleTest.
     if(EMSCRIPTEN)
         add_compile_options(-fwasm-exceptions)
-        add_link_options(-fwasm-exceptions)
+        add_link_options(-fwasm-exceptions -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576)
+        set(gtest_disable_pthreads ON CACHE BOOL "" FORCE)
     endif()
 
-    FetchContent_Declare(Catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.16.1
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.18.0
         GIT_SHALLOW TRUE
         EXCLUDE_FROM_ALL
         SYSTEM
-        FIND_PACKAGE_ARGS 3
+        FIND_PACKAGE_ARGS NAMES GTest
     )
-    FetchContent_MakeAvailable(Catch2)
+    FetchContent_MakeAvailable(googletest)
+    include(GoogleTest)
 
-    file(GLOB MODSYNTH_TEST_SOURCES CONFIGURE_DEPENDS test/*.cpp)
-    add_executable(modsynth_tests ${MODSYNTH_TEST_SOURCES})
-    target_link_libraries(modsynth_tests PRIVATE modsynth Catch2::Catch2WithMain)
-    add_test(NAME modsynth_tests COMMAND modsynth_tests)
+    # The demo project is data, shared with the web app's seed, so embed it rather than copy it.
+    file(READ examples/Demo.json MODSYNTH_DEMO_JSON)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS examples/Demo.json)
+    configure_file(examples/DemoJson.hpp.in generated/DemoJson.hpp @ONLY)
+
+    # Tests sit beside what they test, as FooTest.cpp, and each file is its own target.
+    file(GLOB_RECURSE MODSYNTH_TEST_SOURCES CONFIGURE_DEPENDS
+        include/*Test.cpp
+        bindings/*Test.cpp
+        tools/*Test.cpp
+    )
+    foreach(source IN LISTS MODSYNTH_TEST_SOURCES)
+        cmake_path(GET source STEM name)
+        add_executable(${name} ${source})
+        target_link_libraries(${name} PRIVATE modsynth_compiler GTest::gtest_main)
+        target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+        if(EMSCRIPTEN)
+            add_test(NAME ${name} COMMAND ${name})
+        else()
+            gtest_discover_tests(${name})
+        endif()
+    endforeach()
 endif()
 
 if(MODSYNTH_BUILD_BENCH)
@@ -115,7 +185,10 @@ if(MODSYNTH_INSTALL)
     set(MODSYNTH_CMAKE_DIR share/cmake/modsynth)
 
     install(TARGETS modsynth EXPORT modsynthTargets)
-    install(DIRECTORY include/ DESTINATION include)
+    install(DIRECTORY include/ DESTINATION include
+        PATTERN "*Test.cpp" EXCLUDE
+        PATTERN "TestSupport.hpp" EXCLUDE
+    )
     install(EXPORT modsynthTargets
         NAMESPACE modsynth::
         FILE modsynthConfig.cmake

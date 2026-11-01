@@ -50,7 +50,8 @@ def main() -> int:
         return 2
     for line in changed.stdout.splitlines():
         status, path = line.split(maxsplit=1)
-        if status != "A" and not path.endswith(".py"):
+        # The scripts that write them are not part of the contract: each revision adds a line to Make.sh.
+        if status != "A" and not path.endswith((".py", ".sh")):
             problems.append(f"{path} is a golden file, and golden files never change")
 
     for problem in problems:

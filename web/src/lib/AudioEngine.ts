@@ -53,7 +53,8 @@ export const LOAD_ERRORS = [
 	'bad asset',
 	'bad patch',
 	'bad program',
-	'not enough memory for this program'
+	'not enough memory for this program',
+	'image needs a newer engine'
 ];
 
 // The master and up to seven tracks, from the compiler's report. Registers change between generations, so these are

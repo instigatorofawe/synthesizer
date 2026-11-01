@@ -1,0 +1,64 @@
+// The opcode registry. APPEND ONLY: an image holds these numbers forever, so a line on main never changes or moves, and
+// tools/CheckAppendOnly.py fails a pull request that tries. A new line needs a golden image that uses it, which
+// GoldenTest enforces, and a higher kFormatRevision. docs/Format.md says what each one does.
+//
+// Include this with any of the macros below defined. The rest expand to nothing.
+
+#ifndef MODSYNTH_OP
+#define MODSYNTH_OP(...)
+#endif
+#ifndef MODSYNTH_INSTR
+#define MODSYNTH_INSTR(...)
+#endif
+#ifndef MODSYNTH_MIX
+#define MODSYNTH_MIX(...)
+#endif
+
+// Steps. `control` means it may run in the control phase. `ends` means a voice stays alive until this step reports done.
+// clang-format off
+//          name        id  outs out     ins in0     in1     in2     in3     resource max_mode control ends
+MODSYNTH_OP(Fill,        1, 1,   Buffer, 1,  Scalar, None,   None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(Noise,       2, 1,   Buffer, 0,  None,   None,   None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(Osc,         3, 1,   Buffer, 1,  Scalar, None,   None,   None,   Table,   0,       false,  false)
+MODSYNTH_OP(Biquad,      4, 1,   Buffer, 3,  Buffer, Scalar, Scalar, None,   None,    2,       false,  false)
+MODSYNTH_OP(Env,         5, 1,   Buffer, 4,  Scalar, Scalar, Scalar, Scalar, None,    0,       false,  true)
+MODSYNTH_OP(Sample,      6, 2,   Buffer, 1,  Scalar, None,   None,   None,   Asset,   0,       false,  true)
+MODSYNTH_OP(Mul,         7, 1,   Buffer, 2,  Buffer, Buffer, None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(MulS,        8, 1,   Buffer, 2,  Buffer, Scalar, None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(Add,         9, 1,   Buffer, 2,  Buffer, Buffer, None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(AddS,       10, 1,   Buffer, 2,  Buffer, Scalar, None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(Pan,        11, 2,   Buffer, 2,  Buffer, Scalar, None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(DelayWrite, 12, 0,   None,   1,  Buffer, None,   None,   None,   Delay,   0,       false,  false)
+MODSYNTH_OP(DelayRead,  13, 1,   Buffer, 1,  Scalar, None,   None,   None,   Delay,   1,       false,  false)
+MODSYNTH_OP(Comb,       14, 1,   Buffer, 4,  Buffer, Scalar, Scalar, Scalar, Delay,   0,       false,  false)
+MODSYNTH_OP(Allpass,    15, 1,   Buffer, 3,  Buffer, Scalar, Scalar, None,   Delay,   0,       false,  false)
+MODSYNTH_OP(Follow,     16, 1,   Buffer, 2,  Buffer, Scalar, None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(KMul,       17, 1,   Scalar, 2,  Scalar, Scalar, None,   None,   None,    0,       true,   false)
+MODSYNTH_OP(KAdd,       18, 1,   Scalar, 2,  Scalar, Scalar, None,   None,   None,    0,       true,   false)
+MODSYNTH_OP(KMtoF,      19, 1,   Scalar, 1,  Scalar, None,   None,   None,   None,    0,       true,   false)
+MODSYNTH_OP(KRatio,     20, 1,   Scalar, 1,  Scalar, None,   None,   None,   None,    127,     true,   false)
+MODSYNTH_OP(KSnap,      21, 1,   Scalar, 1,  Buffer, None,   None,   None,   None,    0,       false,  false)
+MODSYNTH_OP(KLfo,       22, 1,   Scalar, 2,  Scalar, Scalar, None,   None,   None,    0,       true,   false)
+
+// Instructions. a, b and c say which fields it uses. An unused field must be zero.
+//             name      id  a  b  c
+MODSYNTH_INSTR(End,       0, 0, 0, 0)
+MODSYNTH_INSTR(Wait,      1, 0, 0, 1)
+MODSYNTH_INSTR(NoteOn,    2, 1, 1, 1)
+MODSYNTH_INSTR(SetPatch,  3, 1, 0, 0)
+MODSYNTH_INSTR(SetParam,  4, 0, 1, 1)
+MODSYNTH_INSTR(Ramp,      5, 0, 1, 1)
+MODSYNTH_INSTR(RampArg,   6, 0, 0, 1)
+MODSYNTH_INSTR(Call,      7, 0, 1, 1)
+MODSYNTH_INSTR(Tempo,     8, 0, 0, 1)
+
+// Mixer steps.
+//           name      id
+MODSYNTH_MIX(RunVoices, 1)
+MODSYNTH_MIX(RunInsert, 2)
+MODSYNTH_MIX(Gather,    3)
+// clang-format on
+
+#undef MODSYNTH_OP
+#undef MODSYNTH_INSTR
+#undef MODSYNTH_MIX

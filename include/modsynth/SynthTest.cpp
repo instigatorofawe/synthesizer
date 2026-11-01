@@ -469,3 +469,55 @@ TEST(SynthMono, TheSameImageRunsOnBothBuilds) {
     Rig<kMono> mono(image);
     EXPECT_EQ(mono.engine.load_error(), LoadError::None);
 }
+
+namespace {
+
+// A looping f32 asset of one constant value, played by a voice with a stable state id.
+std::vector<std::byte> sample_image(u32 frames) {
+    compiler::detail::Writer asset;
+    AssetHeader a{};
+    a.encoding = static_cast<u8>(AssetEncoding::F32);
+    a.channels = 1;
+    a.root_key = 60;
+    a.native_rate = kRate;
+    a.frames = frames;
+    a.loop_end = frames;
+    asset.put(a);
+    asset.put_all(std::vector<float>(frames + 1, 0.25f));
+    const compiler::Chunk asset_chunk = compiler::detail::make_chunk(ChunkKind::Asset, std::move(asset.bytes));
+
+    HandPatch patch;
+    patch.header.buffers = 2;
+    patch.header.voice_scalars = kBuiltinVoiceScalars;
+    patch.header.out_left = operand(Bank::Buffer, 0);
+    patch.header.out_right = operand(Bank::Buffer, 1);
+    patch.refs = {asset_chunk.hash};
+    patch.consts = {1.0f};
+    WireStep step{};
+    step.op = static_cast<u8>(Op::Sample);
+    step.state_id = 1;
+    step.out[0] = operand(Bank::Buffer, 0);
+    step.out[1] = operand(Bank::Buffer, 1);
+    step.in[0] = operand(Bank::Const, 0);
+    patch.voice = {step};
+    const compiler::Chunk patch_chunk = patch.chunk();
+
+    return assemble({asset_chunk, patch_chunk, minimal_program(patch_chunk.hash).chunk()});
+}
+
+}  // namespace
+
+TEST(Swap, ASampleCarriedToAShorterAssetStaysInsideIt) {
+    Rig<kStereo> rig(sample_image(4096));
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    ASSERT_TRUE(rig.engine.send({.kind = EventKind::NoteOn, .note = 60, .velocity = 100}));
+    (void)render_stereo(rig, 16);  // 2048 samples into the long asset
+
+    rig.swap_to(sample_image(16));
+    (void)render_stereo(rig, 64);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    ASSERT_EQ(rig.engine.generation(), 2u);
+
+    // Past the end of the short asset is the rest of the image, so any stray read changes this value.
+    for (const float x : render_stereo(rig, 4)) ASSERT_EQ(x, 0.25f);
+}

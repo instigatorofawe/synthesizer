@@ -111,27 +111,38 @@ class Bits {
            s.take(v.steps, steps, sizeof(WireStep), 4) && s.remaining() == 0;
 }
 
-// True if every step reads only what is defined, writes only where section 18 allows, and names real resources.
+// True if every step reads only what is defined, writes only where section 18 of the design allows, and names real
+// resources. Whatever a chunk does not use must be zero, so a later revision can give it a meaning.
 [[nodiscard]] inline bool validate_patch(const PatchView& p, const ChunkTable& chunks) {
     using detail::Bits;
     const PatchHeader& h = p.h;
+    if (h.reserved != 0 || static_cast<u32>(h.control_steps) + h.voice_steps > kMaxPatchSteps) return false;
     if (h.buffers > kMaxRegisters || h.voice_scalars > kMaxRegisters || h.track_scalars > kMaxRegisters ||
-        h.params > kMaxRegisters || h.voice_scalars < kBuiltinVoiceScalars || h.inputs > 2) {
+        h.params > kMaxPatchParams || h.refs > kMaxPatchRefs || h.delays > kMaxPatchDelays ||
+        h.consts > kMaxPatchConsts || h.voice_scalars < kBuiltinVoiceScalars || h.inputs > 2) {
         return false;
     }
 
-    Bits buffers, voice, track;
-    for (u32 i = 0; i < kBuiltinVoiceScalars; ++i) voice.set(i);
+    // What is defined, and which scalars belong to the engine: the note, velocity and gate, and every parameter.
+    Bits buffers, voice, track, engine_voice, engine_track;
+    for (u32 i = 0; i < kBuiltinVoiceScalars; ++i) {
+        voice.set(i);
+        engine_voice.set(i);
+    }
     for (u32 i = 0; i < h.params; ++i) {
         const ParamDesc d = p.param(i);
-        if (!std::isfinite(d.min) || !std::isfinite(d.max) || !std::isfinite(d.def) || d.min > d.max) return false;
+        if (d.reserved != 0 || (i > 0 && d.id <= p.param(i - 1).id)) return false;
+        if (!std::isfinite(d.min) || !std::isfinite(d.max) || !std::isfinite(d.def)) return false;
+        if (d.min > d.max || d.def < d.min || d.def > d.max) return false;
         if (d.scope == static_cast<u8>(ParamScope::Voice)) {
-            if (d.reg >= h.voice_scalars || d.reg < kBuiltinVoiceScalars) return false;
+            if (d.reg >= h.voice_scalars || d.reg < kBuiltinVoiceScalars || engine_voice.get(d.reg)) return false;
             voice.set(d.reg);
+            engine_voice.set(d.reg);
         } else if (d.scope == static_cast<u8>(ParamScope::Track)) {
-            if (d.reg >= h.track_scalars) return false;
+            if (d.reg >= h.track_scalars || engine_track.get(d.reg)) return false;
             track.set(d.reg);
-        } else if (d.scope != static_cast<u8>(ParamScope::Global)) {
+            engine_track.set(d.reg);
+        } else if (d.scope != static_cast<u8>(ParamScope::Global) || d.reg != 0) {
             return false;
         }
     }
@@ -149,7 +160,7 @@ class Bits {
     }
     for (u32 i = 0; i < h.delays; ++i) {
         const float seconds = p.delay(i);
-        if (!(seconds > 0.0f) || seconds > 60.0f) return false;
+        if (!(seconds > 0.0f) || seconds > kMaxDelaySeconds) return false;
     }
 
     const auto readable = [&](u16 o, Arg kind, bool control) {
@@ -169,7 +180,8 @@ class Bits {
                 return false;
         }
     };
-    // Section 18: a voice writes only voice scalars, control steps write only track scalars, nothing writes a global.
+    // Section 18: a voice writes only its own voice scalars, control steps write only track scalars, and nothing writes
+    // a global. A Step leaves the engine's own scalars alone too, or a ramp and a Step would fight over one value.
     const auto write = [&](u16 o, Arg kind, bool control) {
         const u16 i = operand_index(o);
         switch (operand_bank(o)) {
@@ -178,11 +190,11 @@ class Bits {
                 buffers.set(i);
                 return true;
             case Bank::Voice:
-                if (kind != Arg::Scalar || control || i >= h.voice_scalars) return false;
+                if (kind != Arg::Scalar || control || i >= h.voice_scalars || engine_voice.get(i)) return false;
                 voice.set(i);
                 return true;
             case Bank::Track:
-                if (kind != Arg::Scalar || !control || i >= h.track_scalars) return false;
+                if (kind != Arg::Scalar || !control || i >= h.track_scalars || engine_track.get(i)) return false;
                 track.set(i);
                 return true;
             default:
@@ -195,32 +207,42 @@ class Bits {
         const bool control = i < h.control_steps;
         const WireStep s = p.step(i);
         if (!op_known(s.op)) return false;
-        const Op op = static_cast<Op>(s.op);
-        const OpSignature sig = op_signature(op);
-        if (control && !sig.control) return false;
+        const OpSignature sig = op_signature(static_cast<Op>(s.op));
+        if ((control && !sig.control) || s.mode > sig.max_mode) return false;
+        for (u32 a = sig.ins; a < 4; ++a) {
+            if (s.in[a] != 0) return false;
+        }
+        for (u32 a = sig.outs; a < 2; ++a) {
+            if (s.out[a] != 0) return false;
+        }
         for (u32 a = 0; a < sig.ins; ++a) {
             if (!readable(s.in[a], sig.in[a], control)) return false;
+        }
+        // Two outputs are written one after the other, so sharing a register would make the result depend on the
+        // kernel.
+        if (sig.outs == 2) {
+            if (s.out[0] == s.out[1]) return false;
+            for (u32 a = 0; a < sig.ins; ++a) {
+                if (s.in[a] == s.out[0] || s.in[a] == s.out[1]) return false;
+            }
         }
         for (u32 a = 0; a < sig.outs; ++a) {
             if (!write(s.out[a], sig.out_kind, control)) return false;
         }
         switch (sig.resource) {
-            case Resource::Table: {
+            case Resource::Table:
                 if (s.resource >= h.refs || !chunks.find(p.ref(s.resource), ChunkKind::Table)) return false;
                 break;
-            }
-            case Resource::Asset: {
+            case Resource::Asset:
                 if (s.resource >= h.refs || !chunks.find(p.ref(s.resource), ChunkKind::Asset)) return false;
                 break;
-            }
             case Resource::Delay:
                 if (s.resource >= h.delays) return false;
                 break;
-            default:
+            case Resource::None:
+                if (s.resource != 0) return false;
                 break;
         }
-        if (op == Op::Biquad && s.mode > static_cast<u8>(BiquadMode::BandPass)) return false;
-        if (op == Op::DelayRead && s.mode > kReadBeforeWrite) return false;
     }
     if (operand_bank(h.out_left) != Bank::Buffer || operand_bank(h.out_right) != Bank::Buffer) return false;
     const u16 left = operand_index(h.out_left), right = operand_index(h.out_right);
@@ -231,14 +253,14 @@ class Bits {
 [[nodiscard]] inline bool table_shape_ok(ByteSpan bytes, TableHeader& h) {
     if (bytes.size() < sizeof(TableHeader)) return false;
     h = load<TableHeader>(bytes.data());
-    if (h.length < 2 || h.length > (1u << 24) || !std::has_single_bit(h.length)) return false;
+    if (h.reserved != 0 || h.length < 2 || h.length > (1u << 24) || !std::has_single_bit(h.length)) return false;
     return (bytes.size() - sizeof(TableHeader)) / sizeof(float) == static_cast<std::size_t>(h.length) + 1;
 }
 
 [[nodiscard]] inline bool asset_shape_ok(ByteSpan bytes, AssetHeader& h) {
     if (bytes.size() < sizeof(AssetHeader)) return false;
     h = load<AssetHeader>(bytes.data());
-    if (h.channels != 1 && h.channels != 2) return false;
+    if (h.flags != 0 || (h.channels != 1 && h.channels != 2)) return false;
     if (h.encoding > static_cast<u8>(AssetEncoding::F32) || h.root_key > 127) return false;
     if (!(h.native_rate >= 1.0f) || h.native_rate > 1e6f) return false;
     if (h.frames == 0 || h.frames > (1u << 30)) return false;
@@ -286,26 +308,39 @@ struct ProgramView {
 }
 
 namespace detail {
-// Walks a stream's instructions. `ticks` receives the sum of its Waits, which never wraps: it saturates.
-[[nodiscard]] inline bool validate_stream(const ProgramView& p, u32 begin, u32 length, bool clip, bool conductor,
-                                          u32 slots, u64& ticks) {
+
+enum class Stream : u8 { Track, Clip, Conductor };
+
+struct StreamTotals {
+    u64 ticks = 0;     // the sum of its Waits and Calls
+    u64 expanded = 0;  // instructions run, with every repeat unrolled
+    u32 slots = 0;     // one more than the highest slot its SetPatch names
+};
+
+// Each addition is checked at once, and each addend fits well inside a u64, so neither total can wrap.
+[[nodiscard]] inline bool validate_stream(const ProgramView& p, u32 begin, u32 length, Stream kind, u32 track_slots,
+                                          StreamTotals& t) {
     if (begin > p.h.code || length > p.h.code - begin) return false;
-    ticks = 0;
+    t = {};
+    const bool conductor = kind == Stream::Conductor;
     for (u32 i = 0; i < length; ++i) {
         const Instruction in = p.instruction(begin + i);
         if (in.op >= static_cast<u8>(Instr::kCount)) return false;
+        const InstrFields used = instr_fields(static_cast<Instr>(in.op));
+        if ((!used.a && in.a != 0) || (!used.b && in.b != 0) || (!used.c && in.c != 0)) return false;
+        ++t.expanded;
         switch (static_cast<Instr>(in.op)) {
             case Instr::End:
-                if (i + 1 != length) return false;
                 break;
             case Instr::Wait:
-                ticks += in.c;
+                t.ticks += in.c;
                 break;
             case Instr::NoteOn:
-                if (conductor || in.a > 127 || in.b > 127 || in.c == 0) return false;
+                if (conductor || in.a > 127 || in.b > 127 || in.c == 0 || in.c > kMaxTicks) return false;
                 break;
             case Instr::SetPatch:
-                if (conductor || in.a >= slots) return false;
+                if (conductor) return false;
+                t.slots = std::max<u32>(t.slots, in.a + 1u);
                 break;
             case Instr::SetParam:
                 if (conductor || !std::isfinite(std::bit_cast<float>(in.c))) return false;
@@ -313,31 +348,51 @@ namespace detail {
             case Instr::Ramp: {
                 if (conductor || !std::isfinite(std::bit_cast<float>(in.c)) || i + 1 >= length) return false;
                 const Instruction arg = p.instruction(begin + i + 1);
-                if (arg.op != static_cast<u8>(Instr::RampArg)) return false;
+                if (arg.op != static_cast<u8>(Instr::RampArg) || arg.a != 0 || arg.b != 0) return false;
+                if (arg.c == 0 || arg.c > kMaxTicks) return false;
                 ++i;
+                ++t.expanded;
                 break;
             }
-            case Instr::Call:
+            case Instr::Call: {
                 // Clips cannot nest, and a repeat must spend time, so no stream can spin without a Wait.
-                if (conductor || clip || in.b >= p.h.clips || in.c == 0) return false;
-                ticks += static_cast<u64>(p.clip(in.b).ticks) * in.c;
+                if (kind != Stream::Track || in.b >= p.h.clips || in.c == 0) return false;
+                const ClipDesc clip = p.clip(in.b);
+                if (clip.slots > track_slots) return false;
+                t.ticks += static_cast<u64>(clip.ticks) * in.c;
+                t.expanded += (static_cast<u64>(clip.length) + 1) * in.c;
                 break;
+            }
             case Instr::Tempo:
                 if (!conductor || in.c < 1000 || in.c > 60000000) return false;
                 break;
             default:
                 return false;
         }
+        if (t.ticks > kMaxTicks || t.expanded > kMaxExpanded) return false;
     }
-    return true;
+    // A track and the conductor end with End, and only there. A clip returns to its caller, so it has none.
+    for (u32 i = 0; i + 1 < length; ++i) {
+        if (p.instruction(begin + i).op == static_cast<u8>(Instr::End)) return false;
+    }
+    if (kind == Stream::Clip) return length == 0 || p.instruction(begin + length - 1).op != static_cast<u8>(Instr::End);
+    return length != 0 && p.instruction(begin + length - 1).op == static_cast<u8>(Instr::End);
 }
+
 }  // namespace detail
 
 [[nodiscard]] inline bool validate_program(const ProgramView& p, const ChunkTable& chunks) {
     using detail::Bits;
+    using detail::Stream;
+    using detail::StreamTotals;
     const ProgramHeader& h = p.h;
-    if (h.ppq == 0 || h.ppq > 65535 || h.uspq < 1000 || h.uspq > 60000000) return false;
-    if (h.buses == 0 || h.buses > kMaxRegisters || h.tracks > kMaxRegisters || h.inserts > kMaxRegisters) return false;
+    if (h.reserved != 0 || h.ppq == 0 || h.ppq > 65535 || h.uspq < 1000 || h.uspq > 60000000) return false;
+    if (h.buses == 0 || h.buses > kMaxRegisters || h.tracks > kMaxTracks || h.inserts > kMaxInserts) return false;
+    if (h.patches > kMaxChunks || h.slots > kMaxSlots || h.clips > kMaxClips || h.mix_steps > kMaxMixSteps ||
+        h.gather_inputs > kMaxGatherInputs || h.mix_regs > kMaxMixRegisters || h.globals > kMaxGlobals ||
+        h.inits > kMaxInits) {
+        return false;
+    }
 
     for (u32 i = 0; i < h.patches; ++i) {
         if (!chunks.find(p.patch(i), ChunkKind::Patch)) return false;
@@ -349,73 +404,94 @@ namespace detail {
         PatchView v;
         if (!parse_patch({c->data, c->size}, v) || v.h.inputs != 0) return false;
     }
-    u64 ticks = 0;
+    StreamTotals totals;
     for (u32 i = 0; i < h.clips; ++i) {
         const ClipDesc c = p.clip(i);
         if (c.ticks == 0) return false;
-        if (!detail::validate_stream(p, c.begin, c.length, true, false, 256, ticks)) return false;
-        if (ticks != c.ticks) return false;
+        if (!detail::validate_stream(p, c.begin, c.length, Stream::Clip, 0, totals)) return false;
+        if (totals.ticks != c.ticks || totals.slots != c.slots) return false;
     }
+
+    // Every track's slots follow the last's, so their sum is the table's size and no two tracks can share one.
+    u32 next_slot = 0;
+    u64 expanded = 0, length_ticks = 0;
     for (u32 i = 0; i < h.tracks; ++i) {
         const TrackDesc t = p.track(i);
-        if (t.voices == 0 || t.voices > 256 || t.slot_count == 0) return false;
-        if (t.slot_begin > h.slots || t.slot_count > h.slots - t.slot_begin) return false;
-        if (!detail::validate_stream(p, t.stream_begin, t.stream_length, false, false, t.slot_count, ticks)) {
+        if (t.voices == 0 || t.voices > kMaxVoices || t.slot_count == 0 || t.slot_count > kMaxTrackSlots) return false;
+        if (t.slot_begin != next_slot || t.slot_count > h.slots - next_slot) return false;
+        next_slot += t.slot_count;
+        for (u32 k = 0; k < i; ++k) {
+            if (p.track(k).id == t.id) return false;
+        }
+        if (!detail::validate_stream(p, t.stream_begin, t.stream_length, Stream::Track, t.slot_count, totals)) {
             return false;
         }
-        // A clip can be called from tracks with different slot counts, so its SetPatch is checked per caller.
-        for (u32 k = 0; k < t.stream_length; ++k) {
-            const Instruction in = p.instruction(t.stream_begin + k);
-            if (in.op == static_cast<u8>(Instr::Ramp)) ++k;
-            if (in.op != static_cast<u8>(Instr::Call)) continue;
-            const ClipDesc c = p.clip(in.b);
-            for (u32 n = 0; n < c.length; ++n) {
-                const Instruction ci = p.instruction(c.begin + n);
-                if (ci.op == static_cast<u8>(Instr::Ramp)) ++n;
-                if (ci.op == static_cast<u8>(Instr::SetPatch) && ci.a >= t.slot_count) return false;
-            }
-        }
+        if (totals.slots > t.slot_count) return false;
+        expanded += totals.expanded;
+        length_ticks = std::max(length_ticks, totals.ticks);
     }
-    if (!detail::validate_stream(p, h.conductor_begin, h.conductor_length, false, true, 0, ticks)) return false;
+    if (next_slot != h.slots || length_ticks != h.length_ticks) return false;
+    if (!detail::validate_stream(p, h.conductor_begin, h.conductor_length, Stream::Conductor, 0, totals)) return false;
+    if (expanded + totals.expanded > kMaxExpanded) return false;
 
     for (u32 i = 0; i < h.inserts; ++i) {
-        if (p.insert(i).patch >= h.patches) return false;
+        const InsertDesc in = p.insert(i);
+        if (in.patch >= h.patches) return false;
+        for (u32 k = 0; k < i; ++k) {
+            if (p.insert(k).id == in.id) return false;
+        }
     }
     for (u32 i = 0; i < h.mix_regs; ++i) {
         if (!std::isfinite(p.mix_value(i))) return false;
     }
     for (u32 i = 0; i < h.globals; ++i) {
-        if (!std::isfinite(p.global(i).value)) return false;
+        const GlobalDesc g = p.global(i);
+        if (g.reserved != 0 || !std::isfinite(g.value) || (i > 0 && g.id <= p.global(i - 1).id)) return false;
     }
     for (u32 i = 0; i < h.inits; ++i) {
         const ParamInit in = p.init(i);
-        if (in.target_kind > 1 || in.target >= (in.target_kind == 0 ? h.tracks : h.inserts)) return false;
-        if (!std::isfinite(in.value)) return false;
+        if (in.reserved != 0 || in.target_kind > 1) return false;
+        if (in.target >= (in.target_kind == 0 ? h.tracks : h.inserts) || !std::isfinite(in.value)) return false;
     }
 
-    // Every global a patch reads must exist in this Program.
+    // Every global a patch reads must exist in this Program. Both lists are sorted, so a binary search is enough.
+    const auto has_global = [&](u16 id) {
+        u32 low = 0, high = h.globals;
+        while (low < high) {
+            const u32 middle = low + (high - low) / 2;
+            const u16 found = p.global(middle).id;
+            if (found == id) return true;
+            if (found < id) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return false;
+    };
     for (u32 i = 0; i < h.patches; ++i) {
         const ChunkRef* c = chunks.find(p.patch(i), ChunkKind::Patch);
         PatchView v;
         if (!parse_patch({c->data, c->size}, v)) return false;
         for (u32 k = 0; k < v.h.params; ++k) {
             const ParamDesc d = v.param(k);
-            if (d.scope != static_cast<u8>(ParamScope::Global)) continue;
-            bool found = false;
-            for (u32 g = 0; g < h.globals && !found; ++g) found = p.global(g).id == d.id;
-            if (!found) return false;
+            if (d.scope == static_cast<u8>(ParamScope::Global) && !has_global(d.id)) return false;
         }
     }
 
+    // The mixer. Every step overwrites its destination, so the only sums in a frame are inside a Gather or a RunVoices,
+    // which are one step each. That is section 18's rule that a bus is gathered by one task.
     Bits defined, ran_track, ran_insert;
     u32 last_task = 0;
     for (u32 i = 0; i < h.mix_steps; ++i) {
         const MixStep m = p.mix_step(i);
-        if (m.dst >= h.buses || m.task < last_task || m.task >= kMaxRegisters) return false;
+        if (m.reserved != 0 || m.dst >= h.buses || m.task >= kMaxTasks) return false;
+        if (m.task != last_task && m.task != last_task + 1) return false;
+        if (i == 0 && m.task != 0) return false;
         last_task = m.task;
         switch (static_cast<MixOp>(m.op)) {
             case MixOp::RunVoices:
-                if (m.a >= h.tracks || ran_track.get(m.a)) return false;
+                if (m.a >= h.tracks || ran_track.get(m.a) || m.src != 0 || m.key != kNone) return false;
                 ran_track.set(m.a);
                 break;
             case MixOp::RunInsert: {
@@ -430,10 +506,10 @@ namespace detail {
                 break;
             }
             case MixOp::Gather: {
-                if (m.a > h.gather_inputs || m.src > h.gather_inputs - m.a) return false;
+                if (m.key != kNone || m.a > h.gather_inputs || m.src > h.gather_inputs - m.a) return false;
                 for (u32 k = 0; k < m.src; ++k) {
                     const GatherInput in = p.gather_input(m.a + k);
-                    if (in.src >= h.buses || !defined.get(in.src) || in.src == m.dst) return false;
+                    if (in.reserved != 0 || in.src >= h.buses || !defined.get(in.src) || in.src == m.dst) return false;
                     if (in.gain_left >= h.mix_regs || in.gain_right >= h.mix_regs) return false;
                 }
                 break;
@@ -459,6 +535,7 @@ enum class LoadError : u8 {
     BadPatch,
     BadProgram,
     OutOfMemory,
+    TooNew,
 };
 
 [[nodiscard]] inline const char* to_string(LoadError e) {
@@ -485,6 +562,8 @@ enum class LoadError : u8 {
             return "bad program";
         case LoadError::OutOfMemory:
             return "not enough memory for this program";
+        case LoadError::TooNew:
+            return "image needs a newer engine";
     }
     return "unknown";
 }
@@ -571,10 +650,48 @@ class Loader {
 
     [[nodiscard]] static std::size_t padded(std::size_t n) { return (n + kChunkAlign - 1) / kChunkAlign * kChunkAlign; }
 
+    // True if the bytes after a chunk's payload are all there, and are zero.
+    [[nodiscard]] bool padding_ok(std::size_t end, u32 size) const {
+        const std::size_t pad = padded(size) - size;
+        if (pad > image_.size() - end) return false;
+        for (std::size_t i = 0; i < pad; ++i) {
+            if (image_[end + i] != std::byte{0}) return false;
+        }
+        return true;
+    }
+
+    // True if the list is the one layout an image may have: assets, tables, patches and Programs, in that order, with
+    // the first three each sorted by hash. Sorting also makes a repeat impossible.
+    [[nodiscard]] bool entries_ok() const {
+        u32 programs = 0;
+        for (u32 i = 0; i < manifest_.entries; ++i) {
+            const ManifestEntry e = entry(i);
+            if (e.reserved != 0 || e.present > 1) return false;
+            if (e.kind < static_cast<u8>(ChunkKind::Asset) || e.kind > static_cast<u8>(ChunkKind::Program))
+                return false;
+            programs += e.kind == static_cast<u8>(ChunkKind::Program);
+            if (i == 0) continue;
+            const ManifestEntry previous = entry(i - 1);
+            if (e.kind < previous.kind) return false;
+            if (e.kind == previous.kind && e.kind != static_cast<u8>(ChunkKind::Program) && e.hash <= previous.hash) {
+                return false;
+            }
+        }
+        return programs == manifest_.programs;
+    }
+
     u32 parse_manifest() {
         if (reinterpret_cast<std::uintptr_t>(image_.data()) % kChunkAlign != 0) {
             fail(LoadError::BadManifest);  // samples are used in place, so they must be aligned
             return 1;
+        }
+        // A version from the future is the one failure a user can act on, so it gets its own error.
+        if (image_.size() >= sizeof(ChunkHeader)) {
+            const ChunkHeader first = load<ChunkHeader>(image_.data());
+            if (first.magic == kChunkMagic && first.version > kFormatVersion) {
+                fail(LoadError::TooNew);
+                return 1;
+            }
         }
         ChunkHeader ch;
         if (!read_header(0, ch) || ch.kind != static_cast<u8>(ChunkKind::Manifest) ||
@@ -588,12 +705,19 @@ class Loader {
             return 1;
         }
         manifest_ = load<ManifestHeader>(body);
-        if (manifest_.entries > kMaxChunks ||
-            manifest_.entries > (ch.size - sizeof(ManifestHeader)) / sizeof(ManifestEntry)) {
-            fail(LoadError::BadManifest);
+        if (manifest_.revision > kFormatRevision) {
+            fail(LoadError::TooNew);
             return 1;
         }
         entries_ = body + sizeof(ManifestHeader);
+        // Exactly the header and its entries, which is a multiple of the chunk alignment, so a manifest has no padding.
+        const bool sized = manifest_.entries <= kMaxChunks &&
+                           (ch.size - sizeof(ManifestHeader)) / sizeof(ManifestEntry) == manifest_.entries &&
+                           (ch.size - sizeof(ManifestHeader)) % sizeof(ManifestEntry) == 0;
+        if (manifest_.reserved != 0 || !sized || !entries_ok()) {
+            fail(LoadError::BadManifest);
+            return 1;
+        }
         programs_ = manifest_.programs;
         cursor_ = sizeof(ChunkHeader) + padded(ch.size);
         phase_ = Phase::Hash;
@@ -605,6 +729,10 @@ class Loader {
 
     u32 verify_chunk(u32 budget) {
         if (entry_ == manifest_.entries) {
+            if (cursor_ != image_.size()) {
+                fail(LoadError::BadChunk);  // Nothing may follow the last chunk
+                return 1;
+            }
             phase_ = Phase::Resolve;
             entry_ = 0;
             return 1;
@@ -615,8 +743,7 @@ class Loader {
             return 1;
         }
         ChunkHeader ch;
-        if (!read_header(cursor_, ch) || ch.hash != e.hash || ch.size != e.size || ch.kind != e.kind ||
-            ch.kind == static_cast<u8>(ChunkKind::Manifest) || ch.kind > static_cast<u8>(ChunkKind::Program)) {
+        if (!read_header(cursor_, ch) || ch.hash != e.hash || ch.size != e.size || ch.kind != e.kind) {
             fail(LoadError::BadChunk);
             return 1;
         }
@@ -629,6 +756,10 @@ class Loader {
 
         if (hash_ != ch.hash) {
             fail(LoadError::BadHash);
+            return take;
+        }
+        if (!padding_ok(cursor_ + sizeof(ChunkHeader) + ch.size, ch.size)) {
+            fail(LoadError::BadChunk);
             return take;
         }
         // A chunk the table already holds is discarded here: same hash, same bytes.

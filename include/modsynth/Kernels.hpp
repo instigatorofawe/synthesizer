@@ -401,6 +401,8 @@ struct Kernels {
         const u64 loop_length = looping ? static_cast<u64>(a.loop_end - a.loop_start) << 32 : 0;
         const u64 loop_end = static_cast<u64>(a.loop_end) << 32;
         if (looping && inc >= loop_length) inc = loop_length - 1;  // so one subtraction below is always enough
+        // A live swap carries position over from a Sample that may have played a longer asset.
+        if (looping && st.position >= loop_end) st.position = static_cast<u64>(a.loop_start) << 32;
 
         const u32 start = c.gate.on < N ? c.gate.on : 0;
         std::fill(left, left + start, 0.0f);

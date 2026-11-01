@@ -48,9 +48,10 @@ struct Event {
     u32 tick_end = 0;
 };
 
+// 64-bit on every target: a hostile Program's total must not wrap on the way to being refused.
 struct MemorySizes {
-    std::size_t fast = 0;
-    std::size_t bulk = 0;
+    u64 fast = 0;
+    u64 bulk = 0;
 };
 
 struct TapBlock {
@@ -86,12 +87,12 @@ class Synth {
         std::byte* fast = memory.fast.data();
         std::size_t fast_size = memory.fast.size();
         if constexpr (C.tap_slots > 0) {
-            const std::size_t taps = sizeof(float) * tap_block * C.tap_slots;
+            const std::size_t taps = std::min(sizeof(float) * tap_block * C.tap_slots, fast_size);
             for (u32 i = 0; i < C.tap_slots; ++i) {
                 taps_[i].data = reinterpret_cast<float*>(fast) + i * tap_block;
             }
             fast += taps;
-            fast_size -= taps;
+            fast_size -= taps;  // Too little memory leaves regions empty, so every load reports OutOfMemory
         }
         const std::size_t fast_each = fast_size / C.generations / 16 * 16;
         const std::size_t bulk_each = memory.bulk.size() / C.generations / 16 * 16;
@@ -112,14 +113,11 @@ class Synth {
         const ChunkRef* c = chunks.find(program, ChunkKind::Program);
         ProgramView p;
         if (!c || !parse_program({c->data, c->size}, p)) return {};
-        Bump fast(nullptr, std::numeric_limits<std::size_t>::max()),
-            bulk(nullptr, std::numeric_limits<std::size_t>::max());
+        Bump fast(nullptr), bulk(nullptr);
         Generation g;
         g.program = p;
         reserve<true>(g, chunks, fast, bulk, rate);
-        const auto rounded = [](std::size_t n) {
-            return (n + 15) / 16 * 16;
-        };  // The constructor keeps regions 16-aligned
+        const auto rounded = [](u64 n) { return (n + 15) / 16 * 16; };  // The constructor keeps regions 16-aligned
         return {rounded(kGenerationBytes + fast.used()), rounded(bulk.used())};
     }
     [[nodiscard]] static constexpr std::size_t tap_bytes() { return sizeof(float) * tap_block * C.tap_slots; }
@@ -268,22 +266,24 @@ class Synth {
     static constexpr float kFadeSamples = 2048.0f;
     using K = Kernels<C, B>;
 
+    // Counts in 64 bits on every target. Format limits keep the largest possible total far below 2^64, so it cannot
+    // wrap even on the dry run that decides whether a Program fits. Only a total that fit is ever turned into a
+    // pointer.
     class Bump {
        public:
-        Bump(std::byte* base, std::size_t size) : base_(base), size_(size) {}
+        explicit Bump(std::byte* base) : base_(base) {}
         template <class T>
-        [[nodiscard]] T* array(std::size_t count) {
-            const std::size_t align = std::max<std::size_t>(alignof(T), 8);
-            const std::size_t start = (used_ + align - 1) / align * align;
+        [[nodiscard]] T* array(u64 count) {
+            const u64 align = std::max<std::size_t>(alignof(T), 8);
+            const u64 start = (used_ + align - 1) / align * align;
             used_ = start + count * sizeof(T);
-            return base_ ? reinterpret_cast<T*>(base_ + start) : nullptr;
+            return base_ ? reinterpret_cast<T*>(base_ + static_cast<std::size_t>(start)) : nullptr;
         }
-        [[nodiscard]] std::size_t used() const { return used_; }
+        [[nodiscard]] u64 used() const { return used_; }
 
        private:
         std::byte* base_;
-        std::size_t size_;
-        std::size_t used_ = 0;
+        u64 used_ = 0;
     };
 
     struct Region {
@@ -308,7 +308,7 @@ class Synth {
     struct PatchSizes {
         u32 voice_state = 0;  // including the DelayLine array at its start
         u32 control_state = 0;
-        u32 bulk_floats = 0;
+        u64 bulk_floats = 0;
     };
 
     struct ParamState {
@@ -483,7 +483,7 @@ class Synth {
                 slot->params = params;
             }
         };
-        const auto reserve_voice = [&](Voice* voice, u32 scalars, u32 state, u32 floats) {
+        const auto reserve_voice = [&](Voice* voice, u32 scalars, u32 state, u64 floats) {
             auto* s = fast.template array<float>(scalars);
             auto* st = fast.template array<std::byte>(state);
             auto* b = bulk.template array<float>(floats);
@@ -503,7 +503,8 @@ class Synth {
                 tracks[t].slots = slots;
                 tracks[t].voices = voices;
             }
-            u32 scalars = 0, state = 0, floats = 0;  // sized for the largest slot, per section 6
+            u32 scalars = 0, state = 0;  // sized for the largest slot, per section 6
+            u64 floats = 0;
             for (u32 s = 0; s < d.slot_count; ++s) {
                 const u32 patch = p.slot(d.slot_begin + s);
                 const PatchView v = patch_view(chunks, p.patch(patch));
@@ -525,10 +526,10 @@ class Synth {
                           sizes.bulk_floats);
         }
 
-        auto* buses = fast.template array<float>(static_cast<std::size_t>(h.buses) * Ch * N);
+        auto* buses = fast.template array<float>(static_cast<u64>(h.buses) * Ch * N);
         auto* mix = fast.template array<float>(h.mix_regs);
         auto* globals = fast.template array<float>(h.globals);
-        auto* scratch = fast.template array<float>(static_cast<std::size_t>(max_buffers) * N * E::max_workers);
+        auto* scratch = fast.template array<float>(static_cast<u64>(max_buffers) * N * E::max_workers);
         u32 task_count = 0;
         for (u32 i = 0; i < h.mix_steps; ++i) {
             if (i == 0 || p.mix_step(i).task != p.mix_step(i - 1).task) ++task_count;
@@ -546,7 +547,7 @@ class Synth {
             // Worst case, every pair of tasks conflicts.
             auto* deps = fast.template array<u16>(task_count);
             auto* begin = fast.template array<u16>(task_count + 1);
-            auto* succ = fast.template array<u16>(static_cast<std::size_t>(task_count) * task_count);
+            auto* succ = fast.template array<u16>(static_cast<u64>(task_count) * task_count);
             if constexpr (!Dry) {
                 g.plan.count = task_count;
                 g.plan.deps = deps;
@@ -587,7 +588,7 @@ class Synth {
         g->program = p;
         g->chunks = chunks_;
         g->region = region;
-        Bump fast(r.fast + kGenerationBytes, r.fast_size - kGenerationBytes), bulk(r.bulk, r.bulk_size);
+        Bump fast(r.fast + kGenerationBytes), bulk(r.bulk);
         reserve<false>(*g, *chunks_, fast, bulk, rate_);
         pending_ = g;
         bind_phase_ = BindPhase::Patches;

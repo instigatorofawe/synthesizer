@@ -1,4 +1,5 @@
 // The main thread's handle on the worklet.
+import { LiveReports } from '#lib/LiveReports.ts';
 import type { CompileReport, ProgramReport } from '#lib/Request.ts';
 
 // Matches EventKind in Synth.hpp.
@@ -20,6 +21,7 @@ export interface EngineState {
 	playing: boolean;
 	voices: number;
 	generation: number;
+	liveId: number;
 	error: number;
 	loading: boolean;
 	guardTrips: number;
@@ -71,7 +73,16 @@ export function tapTargets(program: ProgramReport): TapTarget[] {
 }
 
 export class AudioEngine {
-	state: EngineState = { tick: 0, playing: false, voices: 0, generation: 0, error: 0, loading: false, guardTrips: 0 };
+	state: EngineState = {
+		tick: 0,
+		playing: false,
+		voices: 0,
+		generation: 0,
+		liveId: 0,
+		error: 0,
+		loading: false,
+		guardTrips: 0
+	};
 	onState: (state: EngineState) => void = () => {};
 	onTap: (slot: number, block: TapBlock) => void = () => {};
 	onTargets: (targets: TapTarget[]) => void = () => {};
@@ -79,9 +90,7 @@ export class AudioEngine {
 	private context: AudioContext | null = null;
 	private node: AudioWorkletNode | null = null;
 	private ready: Promise<void> | null = null;
-	private appliedGeneration = -1;
-	private queued: { generation: number; report: CompileReport }[] = [];
-	private loads = 0;
+	private reports = new LiveReports();
 
 	// Must be called from a user gesture, because browsers keep an AudioContext suspended until then.
 	start(): Promise<void> {
@@ -123,15 +132,9 @@ export class AudioEngine {
 		}
 	}
 
-	// After a swap the new program's registers differ, so taps are re-sent from the report that matches this generation.
+	// After a swap the new program's registers differ, so taps are re-sent from the report for the image now live.
 	private applyTargets() {
-		const generation = this.state.generation;
-		if (generation === this.appliedGeneration) return;
-		const match = this.queued.findLast((q) => q.generation <= generation);
-		if (!match) return;
-		this.queued = this.queued.filter((q) => q.generation > generation);
-		this.appliedGeneration = generation;
-		const program = match.report.programs[0];
+		const program = this.reports.take(this.state.liveId)?.programs[0];
 		if (!program) return;
 		const targets = tapTargets(program);
 		for (const t of targets) {
@@ -142,8 +145,7 @@ export class AudioEngine {
 
 	load(image: Uint8Array, report: CompileReport, program = 0) {
 		const bytes = image.slice().buffer;
-		this.queued.push({ generation: ++this.loads, report });
-		this.node?.port.postMessage({ type: 'load', image: bytes, program }, [bytes]);
+		this.node?.port.postMessage({ type: 'load', image: bytes, program, id: this.reports.add(report) }, [bytes]);
 	}
 
 	private send(event: Record<string, number>) {

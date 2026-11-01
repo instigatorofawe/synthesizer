@@ -50,6 +50,38 @@ test('editing during playback swaps generations without stopping', async ({ page
 	expect(problems).toEqual([]);
 });
 
+test('a compile from page load cannot race the first load', async ({ page }) => {
+	// Slow every reply from the compiler, so the compile started at page load finishes after audio has started.
+	await page.addInitScript(() => {
+		window.Worker = class extends window.Worker {
+			set onmessage(handler: (event: MessageEvent) => void) {
+				super.onmessage = (event) => setTimeout(() => handler(event), 1200);
+			}
+		};
+	});
+	await page.goto('/timelines/song');
+	await page.getByRole('button', { name: 'Start audio' }).click();
+	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await page.waitForTimeout(2000);
+	await expect(page.getByTestId('generation')).toHaveText('1');
+});
+
+test('rapid edits settle on the newest image, with scopes on its registers', async ({ page }) => {
+	await startPlaying(page);
+	await expect(page.getByTestId('voices')).not.toHaveText('0');
+	const editor = page.getByLabel('Timeline JSON');
+	const text = await editor.inputValue();
+	// A send moves bus registers, so scopes left on an older report would read the wrong bus.
+	const removed = text.replace(/"sends": \[[^\]]*\]/, '"sends": []');
+	expect(removed).not.toBe(text);
+	for (const version of [removed, text, removed]) {
+		await editor.fill(version);
+		await page.waitForTimeout(280); // Just past the debounce, so each compile starts while the last may be loading
+	}
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(3);
+});
+
 test('a broken edit shows where it failed and the old image keeps playing', async ({ page }) => {
 	await startPlaying(page);
 	const editor = page.getByLabel('Timeline JSON');

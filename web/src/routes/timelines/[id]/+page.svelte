@@ -71,6 +71,7 @@
 		if (!timeline) return;
 		const request = buildRequest(data.patches, data.assets, [{ id: data.timeline.id, name, timeline }]);
 		const result = await compiler.compile(request);
+		if (!result) return;
 		report = result.report;
 		if (result.report.ok && started) engine.load(result.image, result.report);
 	}

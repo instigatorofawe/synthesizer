@@ -17,6 +17,9 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		this.request = null; // The newest load that has not started. Older ones are superseded.
 		this.copy = null;
 		this.pool = [];
+		this.loadingId = 0; // Which load the engine is working on, and which one is live, so the main thread can match reports
+		this.liveId = 0;
+		this.generation = 0;
 		this.tapStart = new Array(TAP_SLOTS).fill(null);
 		this.quanta = 0;
 		this.port.onmessage = (e) => this.receive(e.data);
@@ -67,22 +70,23 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 	advanceLoad() {
 		const m = this.engine;
 		if (!this.copy && this.request && !m._ms_loading()) {
-			const { image, program } = this.request;
+			const { image, program, id } = this.request;
 			this.request = null;
 			const bytes = new Uint8Array(image);
 			if (bytes.length > m._ms_image_capacity()) {
 				this.port.postMessage({ type: 'load-rejected', reason: 'image is larger than the image slot' });
 			} else {
-				this.copy = { bytes, offset: 0, program, target: m._ms_image_buffer() };
+				this.copy = { bytes, offset: 0, program, id, target: m._ms_image_buffer() };
 			}
 		}
 		if (this.copy) {
-			const { bytes, offset, target, program } = this.copy;
+			const { bytes, offset, target, program, id } = this.copy;
 			const end = Math.min(offset + COPY_PER_QUANTUM, bytes.length);
 			m.HEAPU8.set(bytes.subarray(offset, end), target + offset);
 			this.copy.offset = end;
 			if (end === bytes.length) {
 				m._ms_load(bytes.length, program);
+				this.loadingId = id;
 				this.copy = null;
 			}
 		}
@@ -112,6 +116,11 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		this.advanceLoad();
 		this.flushEvents();
 		m._ms_render();
+		const generation = m._ms_generation();
+		if (generation !== this.generation) {
+			this.generation = generation;
+			this.liveId = this.loadingId;
+		}
 		output[0].set(this.left);
 		if (output[1]) output[1].set(this.right);
 		this.collectTaps();
@@ -121,7 +130,8 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 				tick: m._ms_tick(),
 				playing: m._ms_playing() !== 0,
 				voices: m._ms_voices(),
-				generation: m._ms_generation(),
+				generation,
+				liveId: this.liveId,
 				error: m._ms_error(),
 				loading: m._ms_loading() !== 0,
 				guardTrips: m._ms_guard_trips()

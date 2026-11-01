@@ -205,8 +205,10 @@ class Workspace {
             if (Piece* p = pick(r, ChunkKind::Asset)) mutate_asset(*p, r);
         } else if (roll < 87) {
             if (Piece* p = pick(r, ChunkKind::Table)) mutate_table(*p, r);
-        } else if (roll < 95) {
+        } else if (roll < 94) {
             mutate_set(r, donor);
+        } else if (roll < 96) {
+            mutate_sizes(r);
         } else {
             Piece& p = pieces_[r.below(count_)];
             if (p.size >= 4) store(base(p) + r.below(p.size / 4) * 4, interesting(r));
@@ -223,6 +225,29 @@ class Workspace {
             if (chosen-- == 0) return &pieces_[i];
         }
         return nullptr;
+    }
+
+    // Every multiplier in a memory total at its limit at once: the most voices on every track, and the longest delay
+    // lines in every patch. No single change does this, and the steps towards it add no coverage, so without this a
+    // total that wraps at 4 GB is never reached, and that is the bug a 32-bit target exists to find.
+    void mutate_sizes(Rng& r) {
+        for (u32 i = 0; i < count_; ++i) {
+            Piece& p = pieces_[i];
+            if (!p.present) continue;
+            if (p.kind == static_cast<u8>(ChunkKind::Patch)) {
+                PatchView v;
+                if (!parse_patch(bytes(p), v)) continue;
+                for (u32 k = 0; k < v.h.delays; ++k) store(base(p) + v.delays + k * 4u, u32{0x42700000});
+            } else if (p.kind == static_cast<u8>(ChunkKind::Program)) {
+                ProgramView v;
+                if (!parse_program(bytes(p), v)) continue;
+                for (u32 k = 0; k < v.h.tracks; ++k) {
+                    if (!r.chance(80)) continue;
+                    store(base(p) + v.tracks + k * sizeof(TrackDesc) + offsetof(TrackDesc, voices),
+                          static_cast<u16>(kMaxVoices));
+                }
+            }
+        }
     }
 
     // Which chunks there are: drop one, leave one out as a thin image does, or borrow one from another image.
@@ -377,7 +402,8 @@ class Workspace {
                 const std::int32_t delta = r.chance(70) ? 4 : -4;
                 if (delta < 0 && v.h.delays == 0) break;
                 if (!resize(p, delta > 0 ? at : at - 4, delta)) break;
-                if (delta > 0) store(base(p) + at, odd_float(r));
+                // The longest line is usual here: on many voices, one is enough to pass 4 GB in a 32-bit total.
+                if (delta > 0) store(base(p) + at, r.chance(50) ? u32{0x42700000} : odd_float(r));
                 store(base(p) + offsetof(PatchHeader, delays), static_cast<u16>(v.h.delays + (delta > 0 ? 1 : -1)));
                 break;
             }

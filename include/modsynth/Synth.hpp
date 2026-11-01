@@ -659,7 +659,7 @@ class Synth {
             DecodedStep& d = control ? b.control[i] : b.voice[i - v.h.control_steps];
             d.op = w.op;
             d.mode = w.mode;
-            d.resource = w.resource;
+            d.resource = op == Op::Noise ? static_cast<u16>(i) : w.resource;
             u32& cursor = control ? control_state : voice_state;
             d.state = cursor;
             cursor += aligned(K::state_size(op));

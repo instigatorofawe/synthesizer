@@ -1,7 +1,8 @@
-# modsynth design, revision 7
+# modsynth design, revision 8
 
-Status: Milestone 1 is implemented, and the wire format is explicitly unstable until Milestone 2. This document replaces all
-earlier revisions, and everything needed from them is included here. Sections about later milestones are still proposals.
+Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1. `docs/Format.md` is its specification,
+and where this document and that one differ, that one is right. This document replaces all earlier revisions, and everything
+needed from them is included here. Sections about later milestones are still proposals.
 
 Evidence tags:
 - [measured]: run in a throwaway prototype, numbers quoted.
@@ -93,8 +94,8 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
 - A Step writes only scalars of its own instance, and instances share no mutable state. Section 18 explains why, and the
   validator enforces it on every target.
 - Delay time is in seconds with a declared maximum, sized at bind time. Only feedback needs a delay of at least one frame.
-  Feed-forward delays are ordered write-first, so short Haas and flanger delays work. A reblocked region, a step range
-  run at a smaller n, is reserved in the format for sub-frame feedback.
+  Feed-forward delays are ordered write-first, so short Haas and flanger delays work. Sub-frame feedback, a step range run at a
+  smaller n, will arrive as new opcodes, which an older engine refuses cleanly. Nothing needed to be reserved for it.
 - The loader lowers wire Steps into a private decoded array, so run time never re-reads validated bytes.
 - Kernels are total: safe for every input value. Wrapped oscillators use u32 phase and power-of-two tables.
 
@@ -262,8 +263,8 @@ index. One path serves every case.
   compile-time and load-time limit alongside the memory limit.
 - Denormals: FTZ on native, explicit state flushing on wasm, and FZ left to measurement on Cortex-M.
 
-Revision 2's fuzz run did not exercise header rejection or most of each Program, and it ran only on 64-bit. Its
-replacement is coverage-guided and structure-aware, mutates headers and sizes, and renders each Program to completion.
+Revision 2's fuzz run did not exercise header rejection or most of each Program, and it ran only on 64-bit. Section 23 describes
+its replacement.
 
 ## 15. Embedded performance
 
@@ -304,9 +305,11 @@ Findings to apply in Milestone 7:
 
 - CMSIS-DSP is worth having on this chip, but only if built with `ARM_MATH_LOOPUNROLL`. Without it, the gain mostly
   disappears.
-- Build with `-ffp-contract=off` on M4. `vfma` costs 3 cycles where `vmul` plus `vadd` cost 2, so contraction costs time
-  here. This rests on the timing table, not on a board.
+- `-ffp-contract=off` is now set on every target, for a different reason: section 16. On M4 it also saves time, since `vfma` costs 3
+  cycles where `vmul` plus `vadd` cost 2. That part rests on the timing table, not on a board.
 - Hold coefficients in locals in scalar kernels. The prototype's reload per sample cost 56% on the biquad.
+- Kernels no longer call libm, which also drops it from the firmware. Section 16 says why. Its replacements run at control rate, and have not
+  been measured.
 - Per-frame filter modulation is affordable: a coefficient update costs 245 to 285 cycles, about 2% of a voice per filter
   at frame 64.
 - Frame 32 costs about 10% more than frame 128, so frame size can be chosen for latency and RAM.
@@ -351,22 +354,23 @@ Use it for:
 It cannot tell you about real time: wait states, caches, DMA, I2S output, or bus contention. The author has a board for
 that, and any promise about voice counts waits for it.
 
-Golden audio compares within a tolerance of −100 dB relative to peak, and audio is not required to be bit-identical
-across targets. Until the format freezes, the reference is a native render from the same run, because a committed golden
-would change with every kernel edit. Milestone 2 commits golden images.
+Golden audio compares within a tolerance of −100 dB relative to peak, and audio is not required to be bit-identical across
+targets. The reference is committed: `golden/` holds images written at the freeze, with their renders, and they never change.
 
-Three seconds of the demo project, Program 0, compared with a native render [measured]:
+Measured at the freeze against those references, which a macOS arm64 build wrote. `Demo` is 122,880 stereo samples and `AllOps` 102,400;
+each mono render has half as many. Zero means exactly that: every sample's bits match.
 
-| Build | Samples differing | Worst difference |
-|---|---|---|
-| Cortex-M4 on QEMU, stereo, scalar | 98% | −110.5 dB |
-| Cortex-M4 on QEMU, mono, scalar | 98% | −115.9 dB |
-| Cortex-M4 on QEMU, stereo, CMSIS-DSP | 98% | −111.2 dB |
-| wasm, as the worklet runs it | 98% | −110.4 dB |
+| Target | Compiler | Stereo samples that differ | Mono samples that differ |
+|---|---|---|---|
+| macOS arm64 | Clang | 0 of both | 0 of both |
+| Linux arm64 | GCC 14.2 | 0 of both | 0 of both |
+| Linux x86-64, emulated | GCC 14.2 | 0 of both | 0 of both |
+| wasm32 under Node | Emscripten 6.0 | 0 of both | no mono build |
+| Cortex-M4 on the L475 model, scalar | arm-none-eabi-gcc 14.2 | 0 of both | 0 of both |
+| Cortex-M4 on the L475 model, CMSIS-DSP | arm-none-eabi-gcc 14.2 | Demo at most −123.9 dB, AllOps at most −108.0 dB | no mono build |
 
-On the M4 the 14,536-byte image ran from flash, with `fast` in SRAM2 and `bulk` in SRAM1. These numbers say the code is
-right, and they say nothing about real time. The firmware's symbol check found no threading symbols or exclusive-access
-instructions in any of the three ELFs.
+The scalar results come from `Math.hpp` and `-ffp-contract=off`: nothing in the signal path reaches libm or merges a multiply into an add. The
+CMSIS kernels trade that for speed, which is why the tolerance exists and why they are the one row that needs it.
 
 Note: Homebrew's `arm-none-eabi-gcc` has no C library. Use Arm's toolchain or a Debian container.
 
@@ -415,14 +419,15 @@ calling thread also works rather than only waiting, tasks are claimed with atomi
 sets the same FTZ state as the caller, because FTZ is per-thread and a mismatch would change the output depending on which
 thread ran a task.
 
-**Rules the format must keep, enforced before the Milestone 2 freeze.** They cost nothing on embedded, but relaxing them
-after the freeze would be impossible, because images relying on the looser rules would already exist.
+**Rules the format keeps, enforced since the Milestone 2 freeze.** They cost nothing on embedded, but relaxing them later would
+be impossible, because images relying on the looser rules would then exist.
 
 - A voice writes only voice scalars and an insert writes only scalars of its own track. Global scalars change only in the
   control phase. A shared LFO becomes a track-scope control Step, which runs before the voices.
 - Instances share no mutable state. Noise generator state is per voice and seeded deterministically, and delay lines
   belong to one instance. Tables and assets are read-only.
-- Sums run in compiled order, because float addition is not associative. A bus's inputs are gathered by one task.
+- Sums run in compiled order, because float addition is not associative. A bus's inputs are gathered by one task. The format makes
+  this structural: every mixer step overwrites its destination, so the only sums are inside one step.
 - Output guards and counters are per instance, and the control phase collects them.
 
 **Bus registers.** Allocating registers by last use saves serial RAM but hides parallelism: two tracks that reuse one
@@ -450,7 +455,7 @@ No speedup or worst-frame figure has been measured. Those wait for Milestone 7.
 
 - `ShuffledExecutor` is a test double that runs a random valid task order on one thread each frame and compares the
   output. It needs no threads, so it runs on every target, including wasm and QEMU, and it catches a missing dependency
-  deterministically.
+  deterministically. The fuzzer asserts this on every image the validator accepts.
 - A ThreadSanitizer job runs `PoolExecutor` on native.
 - A firmware check fails if the linked ELF has threading symbols. It must be explicit: a bare-metal toolchain with a full
   C++ library would compile `parallel.hpp` without complaint. Homebrew's fails only because it has no `<atomic>`.
@@ -548,7 +553,7 @@ both.
 
 Assets, tables and patches are sorted by kind and then hash, so the same set in any order gives identical bytes. Programs
 keep request order, because their position is how a bank selects one. [measured: the native and wasm compilers gave a
-byte-identical 14,536-byte image for the demo project, whose library has 5 patches and whose image holds 4.]
+byte-identical image for the demo project, whose library has 5 patches and whose image holds 4.]
 
 **One Program is bound at a time.** A bundle shares image bytes, not RAM. `bind(image, program)` decodes only the patches
 that Program uses, so a bank of songs on flash costs RAM for one. It follows that fit is two numbers: flash is the sum of
@@ -562,7 +567,7 @@ fails and names the track and the parameter, rather than dropping the automation
 
 Real-time parallel playback on a native host, voice-level parallelism, Highway, deadline shedding, two-way device sync,
 disk streaming, compressed assets, live editing on embedded, patch revision pinning, authentication, a tick-to-offset seek
-index, and persisting knob moves made during playback. Each waits for a real need or a measured budget failure.
+index, persisting knob moves made during playback, and validating a Patch or Program in slices. Each waits for a real need or a measured budget failure.
 
 ## 22. Milestones
 
@@ -577,8 +582,7 @@ requests run CI, so checks run locally before a push.
    two-phase frame, `ShuffledExecutor` tests, the firmware check for threading symbols, the SvelteKit app with its SQLite
    schema and server actions, and the patch selection, bundles and thin images from section 20.
 2. **Format freeze.** Written spec, golden images, append-only opcodes, coverage-guided fuzzing on wasm32 and 32-bit ARM,
-   and validator enforcement of the rules in section 18. Hash choice is settled here. FNV-1a 64 at 12 cycles per byte would
-   be acceptable.
+   and validator enforcement of the rules in section 18. Hash choice is settled here: FNV-1a 64, for the reasons in `docs/Format.md`.
 3. **Browser graph editor and full compiler.** Subpatches, rate conversion, errors shown on nodes, oscilloscope probes on
    graph nodes.
 4. **DAW views.** Timeline, piano roll, mixer with per-track scopes, full Program compiler, asset import.
@@ -589,5 +593,60 @@ requests run CI, so checks run locally before a push.
    instruction-count CI gate, size budget, kernel tuning from section 15, browser load and heap costs, audio-thread
    allocation from the scope, and parallel speedup. Accelerate and Highway follow only if a measured budget fails.
 
-Until Milestone 7 sets real limits, the op cost limit in section 14 has placeholder values, so a hostile image can still
-overrun a frame. Lazy delay clearing is not deferred.
+Until Milestone 7 sets real limits, there is no op cost limit, so a hostile image can still overrun a frame, and a load can still take
+longer than a frame: the format's limits bound that cost but do not make it small, and Patch and Program validation run whole rather than
+in slices. Lazy delay clearing is not deferred.
+
+## 23. Fuzzing
+
+Fuzzing runs on what a device actually is. An image that wraps a bounds check on 32 bits is fine on 64, and only an M-profile FPU faults on
+an unaligned `VLDR`, so a desktop run cannot stand in for the rest. libFuzzer runs on neither wasm nor bare metal, so `fuzz/` is a small
+coverage-guided engine of its own, one source on every target.
+
+| Target | Word size | Detection | Coverage |
+|---|---|---|---|
+| Desktop | 64 | ASan, UBSan, float-cast-overflow | `trace-pc-guard` |
+| wasm32 under Node | 32 | ASan, UBSan, float-cast-overflow | `trace-pc-guard` |
+| Cortex-M4 on QEMU's `mps2-an386` | 32 | MPU guards, canaries, CPU faults | `trace-pc` |
+
+The L475 model's 128 KB cannot hold two generations and a mutated image, so this one target uses a machine with the same core and more
+memory. The L475 remains what golden audio runs on.
+
+**Mutation is structure-aware.** Flipping bytes teaches a fuzzer about hashes and nothing else. The mutator holds a list of chunks, changes
+what is in them, repairs the totals the validator recomputes, and seals the result: new hashes, references that follow them, and the sorted
+order a manifest demands. A small share of inputs is damaged on purpose, to cover the shallow checks.
+
+**An input is a recipe,** a seed image and a chain of mutation seeds, 12 bytes in the corpus. So a corpus fits on a device, and a finding on
+Cortex-M replays on a desktop under sanitizers with the same bytes. The mutator uses no floats, which is what makes that exact.
+
+**Oracles catch what a crash would not.** Each accepted image plays on an engine given exactly what `bytes_required()` asked for, so a short
+sum is caught where it is used, then:
+
+- A second time with memory filled differently. The output must be identical, or something read old memory.
+- With `ShuffledExecutor`. The output must be identical, or section 18 has a hole.
+- With less memory than it asked for, which must be refused.
+- On a mono engine, which folds through different code.
+
+Half of them first play an intact image and then swap to the mutated one, because state carried across a swap is its own trust boundary. Output
+must always be finite, a refused image must leave nothing behind, and events carry wild values throughout.
+
+A Program plays to its end, at a low sample rate so that this takes few frames, or to a limit of 256 frames.
+
+**The fuzzer is tested too.** A run that finds nothing says nothing unless it could have found something, so bugs were planted in scratch copies,
+one per oracle. All of them were found:
+
+| Planted bug | Caught by | How soon |
+|---|---|---|
+| Sample position not guarded across a swap | ASan, reading poisoned memory | about 20 s |
+| Voice state not cleared | "output depends on old memory" | under 10 s |
+| Memory sum one line short | ASan, reading poisoned memory | under 10 s |
+| A read of an unwritten buffer allowed | "output depends on old memory" | under 10 s |
+| A track run by two mixer steps | "output depends on task order" | about 10 s |
+| A Step allowed to write a shared global | "output depends on task order" | under 10 s |
+| A `size_t` wrap in `Bump` | wasm32 and Cortex-M4 | not on desktop, where it cannot wrap |
+
+Some survived the first runs, for 150 s and more, and the misses became changes: the `AllOps` seed, a shared global on an independent track, a step mutator
+aimed at forbidden banks, a size mutator, and an independent recomputation of delay memory. The 32-bit bug is why the matrix has more than one word
+size. A recipe found on Cortex-M4, `0:3219687050,256226439`, failed the same way when replayed on wasm32.
+
+CI runs each target for a short time on a new seed. That is a smoke test, and the soak figures in the pull request are what a long run found.

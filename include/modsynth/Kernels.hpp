@@ -10,18 +10,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <numbers>
 
 #include <modsynth/Backend.hpp>
 #include <modsynth/Config.hpp>
 #include <modsynth/Format.hpp>
+#include <modsynth/Math.hpp>
 
 namespace modsynth {
-
-[[nodiscard]] inline float clamp(float x, float lo, float hi) {
-    x = x >= lo ? x : lo;
-    return x <= hi ? x : hi;
-}
 
 struct DecodedOperand {
     u16 bank;
@@ -31,8 +26,8 @@ struct DecodedOperand {
 struct DecodedStep {
     u8 op;
     u8 mode;
-    u16 resource;
-    u32 state;  // byte offset in the instance's state block
+    u16 resource;  // For Noise, which has none, the step's position, because that is what seeds it
+    u32 state;     // byte offset in the instance's state block
     DecodedOperand out[2];
     DecodedOperand in[4];
 };
@@ -252,7 +247,9 @@ struct Kernels {
 
     static void noise(const DecodedStep& s, RunContext& c) {
         auto& st = state<NoiseState>(c, s);
-        if (st.x == 0) st.x = (c.seed ^ (s.state * 2654435761u)) | 1u;  // per voice and repeatable, per section 18
+        // Per voice and repeatable, per section 18. The seed must not depend on where this state happens to sit: a
+        // pointer in DelayLine makes that differ between 32 and 64 bits, and a filter's state differs between backends.
+        if (st.x == 0) st.x = (c.seed ^ (static_cast<u32>(s.resource) * 2654435761u)) | 1u;
         u32 x = st.x;
         float* out = buffer(c, s.out[0]);
         for (u32 i = 0; i < N; ++i) {
@@ -292,13 +289,17 @@ struct Kernels {
         if (cutoff != st.cutoff || q != st.q) {
             st.cutoff = cutoff;
             st.q = q;
-            const float w = 2.0f * std::numbers::pi_v<float> * cutoff * c.inverse_rate;
-            const float cosw = std::cos(w), alpha = std::sin(w) / (2.0f * q);
+            // 1 - cos(w) from a half angle, because cos(w) near 1 loses most of its bits and a low cutoff needs them.
+            const float turns = cutoff * c.inverse_rate;
+            const float half = sin_turns(turns * 0.5f);
+            const float one_minus_cos = 2.0f * half * half;
+            const float cosw = 1.0f - one_minus_cos;
+            const float alpha = sin_turns(turns) / (2.0f * q);
             const float a0 = 1.0f / (1.0f + alpha);
             BiquadCoeffs k{};
             switch (static_cast<BiquadMode>(s.mode)) {
                 case BiquadMode::HighPass: {
-                    const float h = (1.0f + cosw) * 0.5f * a0;
+                    const float h = (2.0f - one_minus_cos) * 0.5f * a0;
                     k = {h, -2.0f * h, h, 0.0f, 0.0f};
                     break;
                 }
@@ -306,7 +307,7 @@ struct Kernels {
                     k = {alpha * a0, 0.0f, -alpha * a0, 0.0f, 0.0f};
                     break;
                 default: {
-                    const float l = (1.0f - cosw) * 0.5f * a0;
+                    const float l = one_minus_cos * 0.5f * a0;
                     k = {l, 2.0f * l, l, 0.0f, 0.0f};
                 }
             }
@@ -329,11 +330,11 @@ struct Kernels {
         }
         if (decay != st.decay) {
             st.decay = decay;
-            st.decay_coef = std::exp(-c.inverse_rate / decay);
+            st.decay_coef = exp_minus(c.inverse_rate / decay);
         }
         if (release != st.release) {
             st.release = release;
-            st.release_coef = std::exp(-c.inverse_rate / release);
+            st.release_coef = exp_minus(c.inverse_rate / release);
         }
 
         float* out = buffer(c, s.out[0]);
@@ -550,7 +551,7 @@ struct Kernels {
         const float release = clamp(scalar(c, s.in[1]), 1e-4f, 60.0f);
         if (release != st.release) {
             st.release = release;
-            st.coef = std::exp(-c.inverse_rate / release);
+            st.coef = exp_minus(c.inverse_rate / release);
         }
         const float* in = buffer(c, s.in[0]);
         float* out = buffer(c, s.out[0]);
@@ -568,7 +569,7 @@ struct Kernels {
         const float in = clamp(scalar(c, s.in[0]), -48.0f, 200.0f);
         if (in != st.in || st.out == 0.0f) {
             st.in = in;
-            st.out = 440.0f * std::pow(2.0f, (in - 69.0f) / 12.0f);
+            st.out = 440.0f * pow2((in - 69.0f) / 12.0f);
         }
         set_scalar(c, s.out[0], st.out);
     }
@@ -578,7 +579,7 @@ struct Kernels {
         const float in = clamp(scalar(c, s.in[0]), -48.0f, 200.0f);
         if (in != st.in || st.out == 0.0f) {
             st.in = in;
-            st.out = std::pow(2.0f, (in - static_cast<float>(s.mode)) / 12.0f);
+            st.out = pow2((in - static_cast<float>(s.mode)) / 12.0f);
         }
         set_scalar(c, s.out[0], st.out);
     }
@@ -587,7 +588,7 @@ struct Kernels {
         auto& st = state<LfoState>(c, s);
         const float rate = clamp(scalar(c, s.in[0]), 0.0f, 1000.0f);
         const float phase = static_cast<float>(st.phase) * 2.3283064e-10f;
-        set_scalar(c, s.out[0], scalar(c, s.in[1]) * std::sin(phase * 2.0f * std::numbers::pi_v<float>));
+        set_scalar(c, s.out[0], scalar(c, s.in[1]) * sin_turns(phase));
         st.phase += static_cast<u32>(clamp(rate * static_cast<float>(N) * c.inverse_rate, 0.0f, 0.5f) * 4294967040.0f);
     }
 };

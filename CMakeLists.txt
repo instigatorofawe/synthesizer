@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 project(modsynth VERSION 0.1.0 LANGUAGES CXX) # pyproject.toml reads the version from this line
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF) # There are no modules, and scanning needs clang-scan-deps
 
 # With no build type CMake compiles at -O0, which is a poor default for real-time audio
 if(PROJECT_IS_TOP_LEVEL AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -29,7 +30,9 @@ target_include_directories(modsynth INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(modsynth INTERFACE cxx_std_23)
-target_compile_options(modsynth INTERFACE $<$<PLATFORM_ID:Emscripten>:-msimd128>)
+# Fused multiply-add rounds differently, enough to move a resonant filter by -100 dB, which is the limit golden audio allows.
+# Wasm has none, so every target builds without it and they all round alike. See docs/Format.md section 10.
+target_compile_options(modsynth INTERFACE $<$<PLATFORM_ID:Emscripten>:-msimd128> -ffp-contract=off)
 
 if(MODSYNTH_BUILD_COMPILER)
     include(FetchContent)
@@ -46,8 +49,6 @@ if(MODSYNTH_BUILD_COMPILER)
     add_library(modsynth_compiler INTERFACE)
     add_library(modsynth::compiler ALIAS modsynth_compiler)
     target_link_libraries(modsynth_compiler INTERFACE modsynth nlohmann_json::nlohmann_json)
-    # Wavetables enter a chunk hash, so FMA must not make a native host disagree with wasm
-    target_compile_options(modsynth_compiler INTERFACE -ffp-contract=off)
 endif()
 
 if(SKBUILD OR MODSYNTH_BUILD_PYTHON)
@@ -122,7 +123,7 @@ if(MODSYNTH_BUILD_TESTS)
     # default of no exception catching. Set here so it also reaches GoogleTest.
     if(EMSCRIPTEN)
         add_compile_options(-fwasm-exceptions)
-        add_link_options(-fwasm-exceptions -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576)
+        add_link_options(-fwasm-exceptions -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1048576 -sNODERAWFS=1)
         set(gtest_disable_pthreads ON CACHE BOOL "" FORCE)
     endif()
 
@@ -155,6 +156,7 @@ if(MODSYNTH_BUILD_TESTS)
         add_executable(${name} ${source})
         target_link_libraries(${name} PRIVATE modsynth_compiler GTest::gtest_main)
         target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+        target_compile_definitions(${name} PRIVATE MODSYNTH_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/golden")
         if(EMSCRIPTEN)
             add_test(NAME ${name} COMMAND ${name})
         else()

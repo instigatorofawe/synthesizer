@@ -1,5 +1,5 @@
-// Renders a linked image and writes the audio to a host file over semihosting, so it can be compared with the desktop.
-// It runs on QEMU's b-l475e-iot01a. Real audio output belongs to Milestone 5.
+// Renders the golden images linked into it and writes the audio to host files over semihosting, to be compared with the
+// golden renders. It runs on QEMU's b-l475e-iot01a. Real audio output belongs to Milestone 5.
 
 #include <array>
 #include <cstddef>
@@ -23,8 +23,6 @@ namespace {
 
 constexpr SynthConfig kConfig{.frame_size = 128, .channels = MODSYNTH_CHANNELS, .tap_slots = 0, .generations = 1};
 using Engine = Synth<kConfig, Dsp>;
-
-constexpr u32 kFrames = 1400;  // About three seconds
 
 [[gnu::section(".sram2")]] alignas(16) std::byte g_fast[28 * 1024];
 alignas(16) std::byte g_bulk[60 * 1024];
@@ -72,48 +70,50 @@ void write_output(int file, const void* data, std::size_t size) {
 
 }  // namespace
 
-// Linked into flash, so it is validated and used in place.
-__asm(
-    ".section .rodata.image,\"a\"\n"
-    ".balign 8\n"
-    ".global g_image\n"
-    "g_image:\n"
-    ".incbin \"" MODSYNTH_IMAGE_PATH
-    "\"\n"
-    ".global g_image_end\n"
-    "g_image_end:\n"
-    ".text\n");
-extern const std::byte g_image[];
-extern const std::byte g_image_end[];
+// Linked into flash, so they are validated and used in place.
+#define MODSYNTH_LINK_IMAGE(name, path)  \
+    __asm(                               \
+        ".section .rodata.image,\"a\"\n" \
+        ".balign 8\n"                    \
+        ".global " #name "\n" #name      \
+        ":\n"                            \
+        ".incbin \"" path                \
+        "\"\n"                           \
+        ".global " #name "_end\n" #name  \
+        "_end:\n"                        \
+        ".text\n");                      \
+    extern const std::byte name[];       \
+    extern const std::byte name##_end[];
 
-int main() {
+MODSYNTH_LINK_IMAGE(g_demo, MODSYNTH_GOLDEN "/Demo.image")
+MODSYNTH_LINK_IMAGE(g_all_ops, MODSYNTH_GOLDEN "/AllOps.image")
+
+namespace {
+
+// Each engine starts from nothing, in the same memory.
+bool render(const char* path, const std::byte* begin, const std::byte* end, u32 frames) {
     ChunkTable table{std::span(g_refs)};
     auto* engine = new (g_engine) Engine({std::span(g_fast), std::span(g_bulk), 48000.0f});
-    engine->load(table, {g_image, static_cast<std::size_t>(g_image_end - g_image)}, 0);
+    engine->load(table, {begin, static_cast<std::size_t>(end - begin)}, 0);
     while (engine->pump(4096)) {
     }
     if (engine->load_error() != LoadError::None) {
         print("load failed: ");
         print(to_string(engine->load_error()));
         print("\n");
-        finish(false);
+        return false;
     }
+    print(path);
+    print(": flash image ");
+    print_number(static_cast<u32>(end - begin));
+    print(" bytes\n");
 
-    print("flash image ");
-    print_number(static_cast<u32>(g_image_end - g_image));
-    print(" bytes, fast ");
-    print_number(sizeof(g_fast));
-    print(", bulk ");
-    print_number(sizeof(g_bulk));
-    print("\n");
-
-    const int file = open_output(MODSYNTH_OUTPUT);
-    if (file < 0) finish(false);
-
+    const int file = open_output(path);
+    if (file < 0) return false;
     engine->send({.kind = EventKind::Play});
     std::array<float*, kConfig.channels> outputs;
     for (u32 channel = 0; channel < kConfig.channels; ++channel) outputs[channel] = g_out[channel];
-    for (u32 f = 0; f < kFrames; ++f) {
+    for (u32 f = 0; f < frames; ++f) {
         engine->render(outputs);
         write_output(file, g_out, sizeof(g_out));
     }
@@ -121,7 +121,20 @@ int main() {
     print("guard trips ");
     print_number(engine->guard_trips());
     print("\n");
-    finish(engine->guard_trips() == 0);
+    return engine->guard_trips() == 0;
+}
+
+}  // namespace
+
+int main() {
+    print("fast ");
+    print_number(sizeof(g_fast));
+    print(", bulk ");
+    print_number(sizeof(g_bulk));
+    print("\n");
+    const bool ok = render(MODSYNTH_OUTPUT ".Demo.f32", g_demo, g_demo_end, 480) &&
+                    render(MODSYNTH_OUTPUT ".AllOps.f32", g_all_ops, g_all_ops_end, 400);
+    finish(ok);
 }
 
 extern "C" {

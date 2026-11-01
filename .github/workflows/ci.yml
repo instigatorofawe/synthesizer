@@ -20,8 +20,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # The append-only check compares with the base branch
       - uses: astral-sh/setup-uv@v10.3.3
       - run: uvx pre-commit run --all-files --show-diff-on-failure
+      - run: python3 tools/CheckAppendOnly.py "origin/$GITHUB_BASE_REF"
+      - name: Read the golden images from the specification alone
+        run: |
+          python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image
+          python3 tools/ReadImage.py --example golden/Minimal.image
 
   native:
     name: native (${{ matrix.name }})
@@ -61,9 +68,41 @@ jobs:
       - run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
           gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib qemu-system-arm ninja-build
-      - run: cmake -S . -B build/tools -G Ninja -DMODSYNTH_BUILD_TESTS=OFF -DMODSYNTH_BUILD_COMPILER=ON -DMODSYNTH_INSTALL=OFF
-      - run: cmake --build build/tools --target modsynth_compile modsynth_render
       - run: firmware/Check.sh
+        env:
+          FUZZ_SECONDS: 60
+          FUZZ_RANDOM: ${{ github.run_id }}
+
+  # Coverage-guided, with sanitizers, from the golden images. Each run takes a new random seed, and prints it, so CI explores
+  # further every time and a failure prints a recipe that replays anywhere.
+  fuzz:
+    name: fuzz (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: desktop, configure: cmake, binary: build/modsynth_fuzz }
+          - { name: wasm32, configure: emcmake cmake, binary: node build/modsynth_fuzz.js }
+    env:
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v7
+      - uses: mymindstorm/setup-emsdk@v16
+        if: matrix.name == 'wasm32'
+        with:
+          version: 6.0.13
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libclang-rt-dev
+        if: matrix.name == 'desktop'
+      - run: >-
+          ${{ matrix.configure }} -B build -DMODSYNTH_BUILD_FUZZ=ON -DMODSYNTH_BUILD_TESTS=OFF
+          -DMODSYNTH_BUILD_COMPILER=OFF -DMODSYNTH_INSTALL=OFF
+      - run: cmake --build build --target modsynth_fuzz
+      - run: >-
+          ${{ matrix.binary }} 90 ${{ github.run_id }}
+          golden/AllOps.image golden/Demo.image
+        env:
+          ASAN_OPTIONS: detect_leaks=0
 
   web:
     runs-on: ubuntu-latest

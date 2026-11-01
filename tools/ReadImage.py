@@ -78,18 +78,18 @@ MIX_OPS = {
 }
 
 
-def number(text: str) -> float:
+def limit_value(text: str) -> float:
     """A limit as the header or the document writes it: 256, 60.0f, 0x7FFFFFFF, 1u << 24, 2^24 or 2^31 − 1."""
     text = text.strip().rstrip("f").replace("u", "").replace("−", "-")
     if "<<" in text:
         left, right = text.split("<<")
-        return number(left) * 2 ** number(right)
+        return limit_value(left) * 2 ** limit_value(right)
     if " - " in text:
         left, right = text.split(" - ")
-        return number(left) - number(right)
+        return limit_value(left) - limit_value(right)
     if "^" in text:
         left, right = text.split("^")
-        return number(left) ** number(right)
+        return limit_value(left) ** limit_value(right)
     return int(text, 16) if text.startswith("0x") else float(text)
 
 
@@ -152,9 +152,9 @@ def check_document() -> None:
     for name, text in limits:
         found = re.search(rf"inline constexpr \w+ {name} = ([^;]+);", HEADER)
         require(found is not None, f"{name} is not in Format.hpp")
-        value = number(found.group(1))
+        value = limit_value(found.group(1))
         require(
-            number(text) == value,
+            limit_value(text) == value,
             f"{name}: document says {text.strip()}, header {value}",
         )
 

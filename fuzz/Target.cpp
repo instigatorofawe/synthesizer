@@ -63,6 +63,29 @@ void send_event(Engine& engine, Rng& r, const ProgramHeader& h) {
     (void)engine.send(e);
 }
 
+// What a Program's delay lines take, counted here in 64 bits and apart from the engine's own sum. A total that wrapped
+// at 4 GB lands somewhere arbitrary, and would usually still be refused as too large, so comparing the two catches a
+// wrap wherever it lands, rather than only when it lands somewhere small enough to run.
+[[nodiscard]] u64 delay_line_bytes(const ChunkTable& table, const ProgramView& p, float rate, u32 frame) {
+    const auto floats_for = [&](u32 patch) {
+        const ChunkRef* c = table.find(p.patch(patch), ChunkKind::Patch);
+        PatchView v;
+        if (!c || !parse_patch({c->data, c->size}, v)) fail("a validated patch no longer parses");
+        u64 floats = 0;
+        for (u32 i = 0; i < v.h.delays; ++i) floats += static_cast<u64>(v.delay(i) * rate) + frame + 4;
+        return floats;
+    };
+    u64 total = 0;
+    for (u32 t = 0; t < p.h.tracks; ++t) {
+        const TrackDesc d = p.track(t);
+        u64 largest = 0;
+        for (u32 s = 0; s < d.slot_count; ++s) largest = std::max(largest, floats_for(p.slot(d.slot_begin + s)));
+        total += largest * d.voices;
+    }
+    for (u32 i = 0; i < p.h.inserts; ++i) total += floats_for(p.insert(i).patch);
+    return total * sizeof(float);
+}
+
 // Plays one Program from the start to its end, or to the frame limit. Returns a hash of every output sample, so two
 // runs can be compared bit for bit.
 template <SynthConfig C, class E>
@@ -75,6 +98,8 @@ u64 play(ChunkTable& table, u64 program, ChunkTable* from, u64 from_program, flo
     if (!c || !parse_program({c->data, c->size}, view)) fail("a validated Program no longer parses");
 
     MemorySizes need = Engine::bytes_required(table, program, rate);
+    if (need.bulk < delay_line_bytes(table, view, rate, C.frame_size))
+        fail("bytes_required() is short of the delay lines");
     if (from) {
         const MemorySizes old = Engine::bytes_required(*from, from_program, rate);
         need = {std::max(need.fast, old.fast), std::max(need.bulk, old.bulk)};

@@ -1394,7 +1394,11 @@ inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& order
     u32 programs = 0;
     Writer body;
     for (const Chunk* c : ordered) programs += c->kind == ChunkKind::Program;
-    body.put(ManifestHeader{static_cast<u32>(ordered.size()), programs, kFormatRevision, 0});
+    // Not kFormatRevision: an image needs only the revision of what it uses, so it keeps loading on older engines.
+    // Everything this compiler can write is in revision 0. A revision that adds an opcode raises this for images that
+    // use it.
+    constexpr u32 needs_revision = 0;
+    body.put(ManifestHeader{static_cast<u32>(ordered.size()), programs, needs_revision, 0});
     for (const Chunk* c : ordered) {
         const bool present = !omit.count(c->hash);
         body.put(ManifestEntry{c->hash, static_cast<u32>(c->payload.size()), static_cast<u8>(c->kind),

@@ -1,0 +1,30 @@
+{
+ "patches": {
+  "tone": {
+   "name": "A constant",
+   "graph": {
+    "nodes": [
+     {"id": 1, "type": "const", "value": 0.5},
+     {"id": 2, "type": "out"}
+    ],
+    "edges": [{"from": 1, "to": 2, "input": "l"}]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "one",
+   "name": "One note",
+   "timeline": {
+    "ppq": 480,
+    "clips": [
+     {"id": "note", "length": 480, "notes": [{"tick": 0, "note": 60, "vel": 100, "dur": 240}]}
+    ],
+    "tracks": [
+     {"id": 1, "voices": 1, "slots": ["tone"], "placements": [{"clip": "note", "tick": 0}]}
+    ],
+    "master": {"gain": 1.0}
+   }
+  }
+ ]
+}

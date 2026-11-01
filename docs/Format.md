@@ -272,18 +272,23 @@ samples.
 What each one does:
 
 - **Fill.** Every sample is the value.
-- **Noise.** A 32-bit xorshift (13, 17, 5) scaled to −1 to 1. Its state starts from a value derived from the track id, the voice
-  index, the voice's age and the step, so a voice's noise is repeatable and no two share it.
-- **Osc.** A 32-bit phase, incremented by `clamp(frequency, 0, rate / 2) / rate`. The top bits index the table, and the output
-  interpolates linearly to the next entry, which is why a table has a guard. It wraps because the phase does.
-- **Biquad.** A transposed direct form II biquad with RBJ cookbook coefficients. Cutoff is clamped to 10 Hz to `0.45 * rate`, and
-  q to 0.1 to 30. A band-pass has constant 0 dB peak gain.
+- **Noise.** A 32-bit xorshift: `x ^= x << 13`, `x ^= x >> 17`, `x ^= x << 5`, with each sample `x` as a signed integer times
+  `4.656612873e-10`. It starts from `(seed xor (step * 2654435761)) or 1`, where `step` is this step's position in the Patch counting control
+  steps, and in 32 bits. For a voice, `seed` is `(track id << 16) xor (voice index << 8) xor age`, and `age` counts the notes the track has
+  started, this one included. For an insert it is 1. So noise is repeatable, and depends on nothing about where its state is stored.
+- **Osc.** A 32-bit phase, incremented per sample by `clamp(frequency, 0, rate / 2) * (1 / rate) * 4294967040`, truncated to an integer. The
+  top bits index the table, and the output interpolates linearly to the next entry, which is why a table has a guard. It wraps because the
+  phase does.
+- **Biquad.** A transposed direct form II biquad with RBJ cookbook coefficients. Cutoff is clamped to 10 Hz to `0.45 * rate`, and q to 0.1 to
+  30. With `t = cutoff / rate`, `1 - cos(w)` is `2 * sin_turns(t / 2)^2`, which keeps its bits at a low cutoff, and `alpha` is
+  `sin_turns(t) / (2 * q)`. A band-pass has constant 0 dB peak gain. A coefficient is worked out again only when cutoff or q changes.
 - **Env.** Attack, decay and release are in seconds, clamped to 0.0001 to 60. Sustain is clamped to 0 to 1. Attack is linear to 1.
-  Decay is exponential towards sustain, and is done within 0.0001 of it. Release is exponential towards 0, and is done below
-  0.0001. A gate change takes effect at its sample offset within the frame.
+  Decay is exponential towards sustain with coefficient `exp_minus(1 / (decay * rate))`, and is done within 0.0001 of it. Release is
+  exponential towards 0, likewise, and is done below 0.0001. A gate change takes effect at its sample offset within the frame.
 - **Sample.** A 32.32 position, advanced by `clamp(ratio, 0, 256) * native_rate / rate` per sample, capped at 65536 and held below
-  the loop length so one wrap is always enough. The output interpolates linearly. A one-shot writes 0 from the frame it passes
-  its last frame in. A mono asset writes one signal to both outputs. A note starting at an offset within a frame writes 0 before it.
+  the loop length so one wrap is always enough. The output interpolates linearly. A one-shot writes 0 once its position passes its last
+  frame, and is done. A looping Sample whose position is past `loop_end`, which only a live edit can cause, restarts at `loop_start`. A mono
+  asset writes one signal to both outputs. A note starting at an offset within a frame writes 0 before it.
 - **Mul, MulS, Add, AddS.** Per sample. An output may be the same register as an input.
 - **Pan.** `left = in * (1 - p) / 2` and `right = in * (1 + p) / 2`, with `p` clamped to −1 to 1. This law is linear, so `left + right`
   is always `in`, whatever `p` is.
@@ -294,12 +299,39 @@ What each one does:
 - **Comb.** A feedback comb with a one-pole low-pass in the loop: `low = y * (1 - damp) + low * damp`, then the line takes
   `in + low * feedback` and the output is `y`, the delayed sample. Feedback is clamped to ±0.995 and damp to 0 to 0.99.
 - **Allpass.** The line takes `in + y * feedback`, and the output is `y - in`. Feedback is clamped to ±0.995.
-- **Follow.** A peak follower: `level = max(|in|, level * exp(-1 / (release * rate)))`. Release is clamped to 0.0001 to 60.
+- **Follow.** A peak follower: `level = max(|in|, level * exp_minus(1 / (release * rate)))`. Release is clamped to 0.0001 to 60.
 - **KMul, KAdd.** One scalar operation.
-- **KMtoF.** `440 * 2^((note - 69) / 12)`, with `note` clamped to −48 to 200.
-- **KRatio.** `2^((note - mode) / 12)`, with `note` clamped the same way. This is what plays an asset at pitch.
+- **KMtoF.** `440 * pow2((note - 69) / 12)`, with `note` clamped to −48 to 200.
+- **KRatio.** `pow2((note - mode) / 12)`, with `note` clamped the same way. This is what plays an asset at pitch.
 - **KSnap.** Writes the last sample of a buffer to a scalar, so audio can drive a control input.
-- **KLfo.** A sine at `rate` Hz, clamped to 0 to 1000, times `depth`. Its phase advances once a frame.
+- **KLfo.** `sin_turns(phase / 2^32) * depth`, with a 32-bit phase advanced once a frame by `clamp(rate * N / sample rate, 0, 0.5) * 4294967040`,
+  truncated to an integer, for `rate` clamped to 0 to 1000 Hz.
+
+### Arithmetic
+
+A kernel uses only IEEE 754 `+`, `-`, `*`, `/` and conversions, in binary32, without fused multiply-add, so its result is defined to the bit.
+The three functions a C library would normally supply are defined here instead, in binary32, because each library rounds differently, and in a
+filter coefficient that alone reaches −90 dB. `round(x)` is `x + 0.5`, or `x - 0.5` if `x` is negative, truncated towards zero.
+
+    pow2(x):                    x clamped to -126 to 127
+        n = round(x), f = x - n
+        p = 1.52527338e-5
+        for k in 1.54035304e-4, 1.33335581e-3, 9.61812911e-3, 5.55041087e-2, 2.40226507e-1, 6.93147181e-1, 1:
+            p = p * f + k
+        return p * 2^n
+
+    exp_minus(x):
+        return pow2(x * -1.44269504)
+
+    sin_turns(t):               sin(2 pi t)
+        t = t - round(t)
+        if t > 0.25: t = 0.5 - t
+        if t < -0.25: t = -0.5 - t
+        x = t * 6.28318531, y = x * x
+        p = -2.50521084e-8
+        for k in 2.75573192e-6, -1.98412698e-4, 8.33333333e-3, -1.66666667e-1, 1:
+            p = p * y + k
+        return p * x
 
 Every kernel is total: any finite or non-finite input gives defined behaviour, with no out-of-range read. A voice whose output is not
 finite is stopped, and an insert whose output is not finite restarts empty. The final output is checked as well and replaced with
@@ -497,17 +529,43 @@ channel-symmetric mixes.
 
 ## 8. An example
 
-The smallest image that plays: one patch, which fills a buffer with 0.5, and a Program with one track and no notes. Bytes are in hexadecimal.
-`tools/ReadImage.py --example` prints this image, and a test holds it to the bytes the C++ writes.
+The smallest project that makes a sound: one patch holding a constant, played by one track for one note. It is `golden/Minimal.image`,
+and `tools/ReadImage.py --example` fails if these bytes stop being that file.
 
-    Manifest header:  4D 53 43 4B  00 01 0000  30 00 00 00  00000000  <hash>
-    Manifest body:    02 00 00 00  01 00 00 00  00 00 00 00  00 00 00 00
-    Entry 0, Patch:   <hash>  58 00 00 00  03  01  0000
-    Entry 1, Program: <hash>  6C 00 00 00  04  01  0000
+    4d 53 43 4b 00 01 00 00 30 00 00 00 00 00 00 00
+    b2 e2 17 50 3e af ee 79 02 00 00 00 01 00 00 00
+    00 00 00 00 00 00 00 00 97 17 55 00 e2 ed d8 8f
+    34 00 00 00 03 01 00 00 85 47 11 7d 73 06 ec aa
+    b0 00 00 00 04 01 00 00 4d 53 43 4b 03 01 00 00
+    34 00 00 00 00 00 00 00 97 17 55 00 e2 ed d8 8f
+    00 00 01 00 01 00 03 00 00 00 00 00 00 00 01 00
+    00 00 00 00 00 20 00 20 00 00 00 00 00 00 00 3f
+    01 00 00 00 00 00 00 00 00 20 00 00 00 a0 00 00
+    00 00 00 00 00 00 00 00 4d 53 43 4b 04 01 00 00
+    b0 00 00 00 00 00 00 00 85 47 11 7d 73 06 ec aa
+    e0 01 00 00 20 a1 07 00 e0 01 00 00 04 00 00 00
+    01 00 00 00 05 00 00 00 01 00 01 00 01 00 01 00
+    00 00 02 00 01 00 02 00 02 00 00 00 00 00 01 00
+    00 00 00 00 97 17 55 00 e2 ed d8 8f 01 00 01 00
+    00 00 01 00 02 00 00 00 02 00 00 00 00 00 00 00
+    00 00 00 00 02 00 00 00 e0 01 00 00 00 00 00 00
+    01 00 00 00 00 00 00 00 00 00 ff ff 03 00 01 00
+    00 00 01 00 01 00 ff ff 00 00 00 00 01 00 00 00
+    f3 04 35 3f f3 04 35 3f 02 3c 64 00 f0 00 00 00
+    01 00 00 00 e0 01 00 00 07 00 00 00 01 00 00 00
+    00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 
-The patch's payload is 88 bytes: its 28-byte header with `voice_steps` 1, `buffers` 1, `voice_scalars` 3, `consts` 1 and both outputs `0x2000`,
-then the constant `00 00 00 3F`, a 20-byte step, and no other sections. That is not the 88 of the header above unless the example is run,
-which is why the tool prints it rather than this document claiming it.
+Reading it:
+
+- Bytes 0 to 23 are the manifest's header: the magic `MSCK`, kind 0, version 1, size `0x30`, and its hash. Bytes 24 to 39 are the
+  manifest's header proper: 2 entries, 1 Program, revision 0. Then two entries of 16 bytes each.
+- Byte 72 starts the Patch chunk, whose payload is 52 bytes: a 28-byte header with one voice step, one buffer, three voice scalars, one
+  constant and both outputs `0x2000` (bank 1, buffer 0), then the constant `0x3F000000`, which is 0.5, and a Fill step. It is padded to 56
+  bytes.
+- Byte 152 starts the Program chunk. Its 52-byte header gives 480 ppq, 500,000 microseconds per quarter, a length of 480 ticks and a
+  conductor at instruction 4, 1 long, within 5 instructions of code. The tables follow in section 7's order. The two mix registers hold
+  `0x3F3504F3`, which is √½, because a centred track is equal-power. The code is a NoteOn and a Wait in the clip, then a Call and an End for
+  the track, then the conductor's End.
 
 ## 9. Limits
 
@@ -549,3 +607,7 @@ is what the per-op cost limit in the design is for.
 - Between them they must use every opcode, instruction and mixer step, and `GoldenTest` fails if a new one lacks a golden. A new
   revision adds new files alongside the old.
 - A kernel may change only within that tolerance. A larger change is a different op with a new number.
+
+An engine must be built without fused multiply-add contraction, which is `-ffp-contract=off`. Contraction changes rounding, and in a
+resonant filter that alone reaches −100 dB. The CMake target `modsynth` sets it for you. With that, the arithmetic above and the scalar backend,
+every target gives identical bits. −100 dB is what a backend such as CMSIS-DSP is allowed, whose kernels may order their sums differently.

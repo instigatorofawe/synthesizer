@@ -1,7 +1,8 @@
 """Wrote AllOps.json, a project built to use every opcode, instruction and mixer step in revision 0 of the format.
 
-It sounds like nothing in particular, and that is fine. Its job is to pin what each one does. The images in this directory
-never change: a later revision adds a new project alongside this one. See docs/Format.md.
+It sounds like nothing in particular, and that is fine. Its job is to pin what each one does, on every target, so it is sized
+to fit the smallest one, an L476's 32 KB and 96 KB of RAM. The images in this directory never change: a later revision adds a
+new project alongside this one. See docs/Format.md.
 """
 
 import base64
@@ -101,14 +102,14 @@ kitchen = {
         {
             "id": 23,
             "type": "delay",
-            "max": 0.1,
+            "max": 0.012,
             "inputs": {"time": 0.01},
         },  # Feed-forward
         {"id": 24, "type": "add"},
-        {"id": 25, "type": "delay", "max": 0.1, "inputs": {"time": 0.03}},  # Feedback
+        {"id": 25, "type": "delay", "max": 0.032, "inputs": {"time": 0.03}},  # Feedback
         {"id": 26, "type": "mul", "inputs": {"b": 0.4}},
-        {"id": 27, "type": "comb", "max": 0.05, "inputs": {"time": 0.02}},
-        {"id": 28, "type": "allpass", "max": 0.02, "inputs": {"time": 0.007}},
+        {"id": 27, "type": "comb", "max": 0.022, "inputs": {"time": 0.02}},
+        {"id": 28, "type": "allpass", "max": 0.008, "inputs": {"time": 0.007}},
         {"id": 29, "type": "follow", "inputs": {"release": 0.05}},
         {"id": 30, "type": "mul"},
         {"id": 31, "type": "add"},
@@ -290,7 +291,7 @@ timeline = {
         {
             "id": 1,
             "name": "Kitchen",
-            "voices": 3,
+            "voices": 2,
             "slots": ["kitchen", "stereo-f32"],
             "params": {"1": 900},
             "gain": 0.7,

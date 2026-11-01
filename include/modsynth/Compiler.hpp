@@ -536,12 +536,16 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         } else if (type == "osc") {
             const std::string wave = n.config.value("wave", "sine");
             const std::string quality = n.config.value("mode", "bandlimited");
-            if (quality != "bandlimited" && quality != "naive") {
+            if (quality != "bandlimited" && quality != "naive" && quality != "fixed") {
                 throw CompileError(node_where(id), "unknown osc mode '" + quality + "'");
             }
+            if (quality == "fixed" && wave != "sine") throw CompileError(node_where(id), "only sine has a fixed mode");
             if (wave != "square" && input(n, "width")) throw CompileError(node_where(id), "only square has a width");
             const u8 mode = quality == "naive" ? kNaive : 0;
-            if (wave == "sine") {
+            if (quality == "fixed") {
+                const Value freq = scalar_in(n, "freq");
+                set("out", audio_step(Op::Tone, {freq}, 1, state).out[0]);
+            } else if (wave == "sine") {
                 const u16 table = add_ref(make_sine_table());
                 const Value freq = scalar_in(n, "freq");
                 set("out", audio_step(Op::Osc, {freq}, 1, state, 0, table).out[0]);

@@ -29,10 +29,9 @@ struct Golden {
 // decision. Revision 1 made one: saw, square and triangle left their tables for opcodes that fix their aliasing, which
 // moved Demo and AllOps.
 constexpr Golden kGoldens[] = {
-    {"Minimal", 8, 0x1b3153f13f3ea109ull},
-    {"Demo", 480, 0xf694720f988ffd99ull},
-    {"AllOps", 400, 0x29497ab1023f14d3ull},
-    {"Waves", 200, 0xf4c0e84598e9134eull},
+    {"Minimal", 8, 0x1b3153f13f3ea109ull},  {"Demo", 480, 0xf694720f988ffd99ull},
+    {"AllOps", 400, 0x29497ab1023f14d3ull}, {"Waves", 200, 0xf4c0e84598e9134eull},
+    {"Tones", 200, 0x6d4b1572d83c6384ull},
 };
 
 std::vector<std::byte> read_file(const std::string& path) {
@@ -162,6 +161,7 @@ TEST(Golden, EachImageDeclaresTheRevisionItNeeds) {
         EXPECT_EQ(revision(name), 0u) << name;
     }
     EXPECT_EQ(revision("Waves.image"), 1u);
+    EXPECT_EQ(revision("Tones.image"), 2u);
 }
 
 TEST(Golden, AThinImageFromTheFreezePlaysOnChunksFromTheFreeze) {

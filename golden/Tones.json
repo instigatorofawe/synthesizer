@@ -1,0 +1,59 @@
+{
+ "patches": {
+  "tones": {
+   "name": "Two fixed sines, one from the note with an LFO on its pitch that it must ignore, and one from a constant",
+   "graph": {
+    "nodes": [
+     {"id": 1, "type": "note"},
+     {"id": 2, "type": "lfo", "inputs": {"rate": 40.0, "depth": 12.0}},
+     {"id": 3, "type": "add"},
+     {"id": 4, "type": "mtof"},
+     {"id": 5, "type": "osc", "wave": "sine", "mode": "fixed"},
+     {"id": 6, "type": "osc", "wave": "sine", "mode": "fixed", "inputs": {"freq": 1000.0}},
+     {"id": 7, "type": "add"},
+     {"id": 8, "type": "env", "inputs": {"attack": 0.002, "decay": 0.03, "sustain": 0.7, "release": 0.01}},
+     {"id": 9, "type": "mul"},
+     {"id": 10, "type": "out"}
+    ],
+    "edges": [
+     {"from": 1, "port": "pitch", "to": 3, "input": "a"},
+     {"from": 2, "to": 3, "input": "b"},
+     {"from": 3, "to": 4, "input": "in"},
+     {"from": 4, "to": 5, "input": "freq"},
+     {"from": 5, "to": 7, "input": "a"},
+     {"from": 6, "to": 7, "input": "b"},
+     {"from": 7, "to": 9, "input": "a"},
+     {"from": 8, "to": 9, "input": "b"},
+     {"from": 9, "to": 10, "input": "l"}
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "scale",
+   "name": "Six octaves of fixed sines",
+   "timeline": {
+    "ppq": 480,
+    "clips": [
+     {
+      "id": "octaves",
+      "length": 480,
+      "notes": [
+       {"tick": 0, "note": 36, "vel": 100, "dur": 70},
+       {"tick": 80, "note": 48, "vel": 100, "dur": 70},
+       {"tick": 160, "note": 60, "vel": 100, "dur": 70},
+       {"tick": 240, "note": 72, "vel": 100, "dur": 70},
+       {"tick": 320, "note": 84, "vel": 100, "dur": 70},
+       {"tick": 400, "note": 96, "vel": 100, "dur": 70}
+      ]
+     }
+    ],
+    "tracks": [
+     {"id": 1, "voices": 1, "slots": ["tones"], "placements": [{"clip": "octaves", "tick": 0}]}
+    ],
+    "master": {"gain": 0.2}
+   }
+  }
+ ]
+}

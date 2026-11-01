@@ -18,6 +18,7 @@ make_golden Minimal 8
 make_golden Demo 480
 make_golden AllOps 400
 make_golden Waves 200
+make_golden Tones 200
 
 # What a device receives when it already has every chunk but the Programs.
 if [ -e golden/Demo.thin.image ]; then

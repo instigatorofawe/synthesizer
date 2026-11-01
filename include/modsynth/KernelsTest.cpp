@@ -81,6 +81,89 @@ TEST(Oscillators, ANoteStartsFromZeroSoItDoesNotClick) {
     EXPECT_EQ(Oscillator<>(Op::Pulse, kNaive, 100.0f).render(1)[0], 1.0f);
 }
 
+TEST(Tone, IsASineStartingFromZero) {
+    for (const float hz : {20.0f, 440.0f, 4186.0f, 12000.0f}) {
+        const auto audio = Oscillator<>(Op::Tone, 0, hz).render(32);
+        EXPECT_EQ(audio[0], 0.0f);
+        for (std::size_t i = 0; i < audio.size(); ++i) {
+            const double exact = std::sin(2.0 * kPi * static_cast<double>(hz) * static_cast<double>(i) / kRate);
+            ASSERT_NEAR(audio[i], exact, 1e-3) << hz << " Hz, sample " << i;
+        }
+    }
+}
+
+// 2 cos(w) has few bits left at a low note, which would put 20 Hz 6 cents flat.
+TEST(Tone, IsInTuneFromBottomToTop) {
+    for (const float hz : {20.0f, 110.0f, 4186.0f, 12000.0f}) {
+        const auto audio = Oscillator<>(Op::Tone, 0, hz).render(22500);  // A minute
+        double first = -1.0, last = -1.0;
+        double rises = 0.0;
+        for (std::size_t i = 1; i < audio.size(); ++i) {
+            if (audio[i - 1] > 0.0f || audio[i] <= 0.0f) continue;
+            const double at = static_cast<double>(i) - static_cast<double>(audio[i]) / (audio[i] - audio[i - 1]);
+            if (first < 0.0) {
+                first = at;
+            } else {
+                last = at;
+                rises += 1.0;
+            }
+        }
+        const double measured = rises * static_cast<double>(kRate) / (last - first);
+        EXPECT_NEAR(1200.0 * std::log2(measured / static_cast<double>(hz)), 0.0, 0.01) << hz;
+    }
+}
+
+TEST(Tone, HoldsItsFirstFrequencyWhateverTheInputDoes) {
+    Oscillator<> moved(Op::Tone, 0, 440.0f);
+    Oscillator<> held(Op::Tone, 0, 440.0f);
+    for (u32 frame = 0; frame < 64; ++frame) {
+        const auto a = moved.render(1);
+        const auto b = held.render(1);
+        EXPECT_EQ(a, b) << "frame " << frame;
+        moved.scalars[0] = frame % 2 == 0 ? 12000.0f : kNan;
+    }
+}
+
+// The input a recursive sine fears most is a frequency that keeps moving, and this one never hears it.
+TEST(Tone, KeepsItsLevelForAnHour) {
+    Oscillator<> tone(Op::Tone, 0, 110.0f);
+    constexpr u32 kFramesPerSecond = static_cast<u32>(kRate) / kMono.frame_size;
+    float first = 0.0f;
+    for (const float v : tone.render(kFramesPerSecond)) first = std::max(first, std::abs(v));
+    for (u32 second = 1; second < 3600; ++second) tone.render(kFramesPerSecond);
+    float last = 0.0f;
+    for (const float v : tone.render(kFramesPerSecond)) last = std::max(last, std::abs(v));
+    EXPECT_NEAR(last, first, 1e-3f);
+}
+
+TEST(Tone, StaysInRangeForAnyInput) {
+    for (const float hz : {0.001f, 0.5f, 22000.0f, 23999.0f, 24000.0f, 1e9f, kInfinity}) {
+        float peak = 0.0f;
+        for (const float v : Oscillator<>(Op::Tone, 0, hz).render(4096)) peak = std::max(peak, std::abs(v));
+        EXPECT_LE(peak, 1.001f) << hz;
+    }
+    for (const float hz : {0.0f, -440.0f, -kInfinity, kNan}) {
+        for (const float v : Oscillator<>(Op::Tone, 0, hz).render(4)) EXPECT_EQ(v, 0.0f) << hz;
+    }
+}
+
+TEST(Tone, StartsOnTheNoteAndNotTheFrame) {
+    constexpr u32 kOffset = 40;
+    Oscillator<> late(Op::Tone, 0, 440.0f);
+    late.context.gate.on = kOffset;
+    const auto delayed = late.render(4);
+    const auto exact = Oscillator<>(Op::Tone, 0, 440.0f).render(4);
+    for (u32 i = 0; i < kOffset; ++i) EXPECT_EQ(delayed[i], 0.0f);
+    for (u32 i = kOffset; i < delayed.size(); ++i) ASSERT_EQ(delayed[i], exact[i - kOffset]) << "sample " << i;
+}
+
+TEST(Tone, StartsWhenItFirstHasAFrequency) {
+    Oscillator<> late(Op::Tone, 0, 0.0f);
+    for (const float v : late.render(2)) EXPECT_EQ(v, 0.0f);
+    late.scalars[0] = 440.0f;
+    EXPECT_EQ(late.render(4), Oscillator<>(Op::Tone, 0, 440.0f).render(4));
+}
+
 TEST(Oscillators, NaiveSawAndTriangleAreTheDocumentedFormulas) {
     constexpr float kFrequency = 440.0f;
     const u32 inc = static_cast<u32>(kFrequency * (1.0f / kRate) * 4294967040.0f);

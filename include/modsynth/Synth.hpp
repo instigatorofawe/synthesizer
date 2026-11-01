@@ -1506,7 +1506,7 @@ class Synth {
     float fade_step_ = 0.0f;
     u32 generation_ = 0;
 
-    Loader loader_{dummy_table()};
+    Loader loader_;
     ChunkTable* chunks_ = nullptr;
     u32 program_index_ = 0;
     u64 program_hash_ = 0;
@@ -1521,11 +1521,6 @@ class Synth {
 
     struct NoTaps {};
     [[no_unique_address]] std::conditional_t<(C.tap_slots > 0), std::array<Tap, C.tap_slots>, NoTaps> taps_{};
-
-    [[nodiscard]] static ChunkTable& dummy_table() {
-        static ChunkTable table;
-        return table;
-    }
 };
 
 }  // namespace modsynth

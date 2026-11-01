@@ -110,6 +110,8 @@ endif()
 if(MODSYNTH_BUILD_COMPILER AND NOT EMSCRIPTEN)
     add_executable(modsynth_compile tools/CompileImage.cpp)
     target_link_libraries(modsynth_compile PRIVATE modsynth_compiler)
+    add_executable(modsynth_render tools/Render.cpp)
+    target_link_libraries(modsynth_render PRIVATE modsynth)
 endif()
 
 if(MODSYNTH_BUILD_TESTS)

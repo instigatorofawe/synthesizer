@@ -495,7 +495,7 @@ struct Kernels {
         const float wanted = clamp(seconds, 0.0f, 3600.0f) * c.rate;
         const u32 ceiling = line.length - 1;
         const u32 d = wanted < static_cast<float>(ceiling) ? static_cast<u32>(wanted) : ceiling;
-        return std::max(d, 1u);
+        return std::max<u32>(d, 1);
     }
 
     static void comb(const DecodedStep& s, RunContext& c) {

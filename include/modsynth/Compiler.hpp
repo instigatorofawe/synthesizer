@@ -1004,7 +1004,8 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         }
     };
     const auto add_inits = [&](const json& d, u16 kind, u16 target) {
-        for (const auto& [key, value] : d.value("params", json::object()).items()) {
+        const json params = d.value("params", json::object());  // Named: GCC 14 ends a temporary before .items() runs
+        for (const auto& [key, value] : params.items()) {
             inits.push_back({kind, target, static_cast<u16>(std::stoi(key)), 0, value.get<float>()});
         }
     };

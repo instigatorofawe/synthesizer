@@ -114,7 +114,7 @@ struct LoadedImage {
 };
 
 template <class R>
-[[nodiscard]] std::vector<float> render_stereo(R& rig, u32 frames) {
+std::vector<float> render_stereo(R& rig, u32 frames) {
     std::vector<float> out(frames * 128 * 2);
     for (u32 f = 0; f < frames; ++f) {
         float* left = out.data() + f * 256;

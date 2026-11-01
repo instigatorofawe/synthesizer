@@ -35,5 +35,6 @@
   },
   "imports": {
     "#lib/*": "./src/lib/*"
-  }
+  },
+  "packageManager": "pnpm@12.16.1"
 }

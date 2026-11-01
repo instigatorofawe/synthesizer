@@ -226,7 +226,9 @@ TEST(CompileImage, ABundleSharesEachChunkOnce) {
     EXPECT_EQ(count_kind(result.report, "patch"), 2);
     EXPECT_EQ(count_kind(result.report, "program"), 3);
     for (const json& c : result.report.at("chunks")) {
-        if (c.at("kind") == "patch" && c.at("size") > 0) EXPECT_GE(c.at("programs").get<int>(), 1);
+        if (c.at("kind") == "patch") {
+            EXPECT_GE(c.at("programs").get<int>(), 1);
+        }
     }
     int shared = 0;
     for (const json& c : result.report.at("chunks")) shared += c.at("programs") == 2;

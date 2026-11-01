@@ -493,6 +493,7 @@ enum class LoadError : u8 {
 // so a bad image leaves the previous set intact.
 class Loader {
    public:
+    Loader() = default;
     explicit Loader(ChunkTable& table) : table_(&table) {}
 
     void begin(ByteSpan image) {
@@ -638,7 +639,7 @@ class Loader {
         cursor_ += sizeof(ChunkHeader) + padded(ch.size);
         ++entry_;
         scan_ = 0;
-        return std::max(take, 1u);
+        return std::max<u32>(take, 1);
     }
 
     u32 resolve_entry() {
@@ -681,7 +682,7 @@ class Loader {
                 scan_ = 0;
                 ++entry_;
             }
-            return std::max(take, 1u);
+            return std::max<u32>(take, 1);
         }
         if (e.kind == static_cast<u8>(ChunkKind::Asset)) {
             AssetHeader h;
@@ -703,7 +704,7 @@ class Loader {
                     scan_ = 0;
                     ++entry_;
                 }
-                return std::max(take, 1u);
+                return std::max<u32>(take, 1);
             }
         }
         ++entry_;
@@ -734,7 +735,7 @@ class Loader {
         return c->size;
     }
 
-    ChunkTable* table_;
+    ChunkTable* table_ = nullptr;
     ByteSpan image_;
     ManifestHeader manifest_{};
     const std::byte* entries_ = nullptr;

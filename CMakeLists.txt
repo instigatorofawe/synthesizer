@@ -19,6 +19,7 @@ option(MODSYNTH_BUILD_TESTS "Build the C++ tests" ${MODSYNTH_DEV_BUILD})
 option(MODSYNTH_BUILD_BENCH "Build the benchmarks" OFF)
 option(MODSYNTH_BUILD_PYTHON "Build the Python extension (always on for wheels)" OFF)
 option(MODSYNTH_BUILD_COMPILER "Build the authoring compiler, which firmware never links" ${MODSYNTH_DEV_BUILD})
+option(MODSYNTH_BUILD_FUZZ "Build the coverage-guided fuzzer, with sanitizers" OFF)
 option(MODSYNTH_INSTALL "Install the headers and CMake package" ${MODSYNTH_DEV_BUILD})
 
 add_library(modsynth INTERFACE)
@@ -162,6 +163,24 @@ if(MODSYNTH_BUILD_TESTS)
     endforeach()
 endif()
 
+if(MODSYNTH_BUILD_FUZZ)
+    # Only Target.cpp is instrumented, so what a mutation discovers is new engine behaviour and not a new path through
+    # the mutator. It links first, so that an inline function both files use keeps its instrumented copy.
+    set(MODSYNTH_FUZZ_SANITIZE -fsanitize=address,undefined,float-cast-overflow -fno-sanitize-recover=all)
+    add_library(modsynth_fuzz_target OBJECT fuzz/Target.cpp)
+    target_link_libraries(modsynth_fuzz_target PRIVATE modsynth)
+    target_compile_options(modsynth_fuzz_target PRIVATE
+        ${MODSYNTH_FUZZ_SANITIZE} -O1 -g -fno-omit-frame-pointer -fsanitize-coverage=trace-pc-guard)
+    add_executable(modsynth_fuzz $<TARGET_OBJECTS:modsynth_fuzz_target> fuzz/Main.cpp)
+    target_link_libraries(modsynth_fuzz PRIVATE modsynth)
+    target_compile_options(modsynth_fuzz PRIVATE ${MODSYNTH_FUZZ_SANITIZE} -O1 -g -fno-omit-frame-pointer)
+    target_link_options(modsynth_fuzz PRIVATE ${MODSYNTH_FUZZ_SANITIZE})
+    if(EMSCRIPTEN)
+        target_link_options(modsynth_fuzz PRIVATE -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=2147483648
+            -sSTACK_SIZE=4194304 -sNODERAWFS=1)
+    endif()
+endif()
+
 if(MODSYNTH_BUILD_BENCH)
     set(BENCHMARK_ENABLE_TESTING OFF)
     set(BENCHMARK_ENABLE_INSTALL OFF)
@@ -188,6 +207,7 @@ if(MODSYNTH_INSTALL)
     install(DIRECTORY include/ DESTINATION include
         PATTERN "*Test.cpp" EXCLUDE
         PATTERN "TestSupport.hpp" EXCLUDE
+        PATTERN "ShuffledExecutor.hpp" EXCLUDE
     )
     install(EXPORT modsynthTargets
         NAMESPACE modsynth::

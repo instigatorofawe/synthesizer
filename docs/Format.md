@@ -1,0 +1,551 @@
+# modsynth image format, version 1
+
+This is the specification of the bytes a compiler writes and an engine loads. An image written to this document plays on
+every engine that claims to read it, forever. `include/modsynth/Format.hpp` and `Opcodes.def` must agree with it, and
+`tools/ReadImage.py`, written from this document alone, checks that they do.
+
+Words: **must** is a rule that a reader enforces by refusing the image. Everything refused is listed in the sections
+below, so an image either loads or fails one named rule.
+
+## 1. Conventions
+
+- All integers are unsigned and little-endian unless a field says otherwise. Floats are IEEE 754 binary32, little-endian.
+- Offsets and sizes count bytes. A count named after a table counts its elements.
+- Fields have no alignment of their own: a reader copies each field out, so any field may sit at any offset.
+- Samples are used in place, so an image must start on an 8-byte boundary. Everything that needs alignment follows from
+  that: chunks are 8-aligned, and each chunk places its float data on a 4-byte boundary within it.
+- A field named `reserved` must be 0. So must anything a rule below calls unused. A field that was ever ignored could
+  never be given a meaning, because images with junk in it would already exist.
+
+## 2. Compatibility
+
+Three kinds of change are possible after this freeze, and nothing else is.
+
+1. **A new opcode.** Lines in `Opcodes.def` are append-only: a number once used never changes meaning, and a line on
+   `main` never changes or moves. CI fails a pull request that breaks this.
+2. **A higher limit.** The limits in section 9 may rise and may never fall, because an image that fit once must keep fitting.
+3. **A reserved field gaining a meaning.** A new value in a reserved field or flag.
+
+Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
+can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
+damaged. A compiler writes the lowest revision that covers what it actually used, so an unchanged project keeps loading
+on old engines. This document describes revision 0.
+
+The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
+version so far, and no such change is planned. A version above the engine's gets the same refusal.
+
+Old images keep their sound as well as their shape. Sound within −100 dB of peak of the golden renders, on every target,
+is part of this contract: see section 10.
+
+## 3. Image
+
+    Manifest chunk
+    chunk 0
+    chunk 1
+    ...
+
+A chunk is a 24-byte header and its payload. If the payload is not a multiple of 8, zero bytes pad it to one. Padding must
+be zero, and it is not counted in `size`. Each chunk follows the last with nothing between them, and nothing may follow the
+last chunk, so the image's size is exact.
+
+### Chunk header, 24 bytes
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u32 | `magic` | `0x4B43534D`, which is the ASCII `MSCK` |
+| 4 | u8 | `kind` | 0 Manifest, 1 Asset, 2 Table, 3 Patch, 4 Program |
+| 5 | u8 | `version` | 1 |
+| 6 | u16 | `reserved` | |
+| 8 | u32 | `size` | payload bytes, without padding |
+| 12 | u32 | `reserved` | |
+| 16 | u64 | `hash` | see below |
+
+### Hash
+
+    h = 14695981039346656037
+    for each byte b of [version, kind, payload...]:
+        h = ((h xor b) * 1099511628211) mod 2^64
+
+This is FNV-1a 64 over the version byte, the kind byte and the payload. The hash is a chunk's identity: a Patch names a
+Table by its hash, and two chunks with one hash are one chunk. A reader that already holds a hash discards the arriving
+bytes. Every byte of an image is therefore covered: the payload and two header bytes by the hash, the magic and reserved
+fields by fixed values, `size` by the hashed manifest, and padding by the rule that it is zero.
+
+**The choice is settled, for these reasons.** A hash here does two jobs, and neither needs a cryptographic one:
+
+- *Corruption.* Each step is a bijection, so one changed byte can never collide, and the multiplier spreads a second
+  changed neighbour too far to cancel it. Beyond that a random corruption collides about once in 2^64. Stored images are
+  also length-checked by the manifest.
+- *Identity.* An image holds at most `kMaxChunks`, 1024, chunks. The chance of an accidental collision among them is about
+  2^-45.
+
+It costs about 12 cycles per byte on a Cortex-M4, or about 160 ms per MB at 80 MHz, and it is four lines of code. That cost
+is paid once, on receipt.
+
+**It is not authentication.** Anyone can construct a collision. A hostile image is handled by validation, which assumes
+nothing about where the bytes came from, so a collision can at worst substitute one valid chunk for another. A product
+that must refuse images from an unknown source should sign the image's bytes, around this format. A move to a stronger hash
+would be a new version, and the need for one would be a new requirement rather than a defect in this one.
+
+### Manifest
+
+The first chunk, and the only one of kind 0. Its payload is exactly a 16-byte header and `entries` entries of 16 bytes, so it
+never has padding.
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u32 | `entries` | |
+| 4 | u32 | `programs` | how many entries are Programs |
+| 8 | u32 | `revision` | the lowest engine revision that can read this image |
+| 12 | u32 | `reserved` | |
+
+Each entry:
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u64 | `hash` | |
+| 8 | u32 | `size` | |
+| 12 | u8 | `kind` | 1 to 4 |
+| 13 | u8 | `present` | 1 if the bytes follow in this image, 0 if the receiver must already hold them |
+| 14 | u16 | `reserved` | |
+
+Entries must be in one order: every Asset, then every Table, then every Patch, then every Program. Assets, Tables and Patches
+must each be in strictly ascending `hash` order, which also forbids a repeat. Programs keep their order, because a Program's
+position is how a host selects it. The same set of chunks therefore always gives the same bytes.
+
+Chunks follow in manifest order, skipping those with `present` 0. A chunk's header must match its entry in `hash`, `size` and
+`kind`. An entry with `present` 0 must be satisfied by a chunk the receiver holds, matching `hash`, `size` and `kind`.
+
+An image with `present` 0 entries is **thin**: it carries a Program and leaves out what the receiver already has. An image may
+have no Programs at all, which is how a library of patches is sent ahead of them.
+
+A reader verifies everything before it commits anything. An image that fails at any point leaves the receiver as it was.
+
+## 4. Asset chunk (kind 1)
+
+A 20-byte header, then `(frames + 1) * channels` samples, interleaved.
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u8 | `encoding` | 0 i16, 1 f32 |
+| 1 | u8 | `channels` | 1 or 2 |
+| 2 | u8 | `root_key` | MIDI note, at most 127 |
+| 3 | u8 | `flags` | must be 0. Reserved for streaming and compression. |
+| 4 | f32 | `native_rate` | 1 to 1,000,000 Hz |
+| 8 | u32 | `frames` | 1 to 2^30 |
+| 12 | u32 | `loop_start` | |
+| 16 | u32 | `loop_end` | 0 means a one-shot |
+
+The extra frame is a guard, so interpolation can always read the next frame. A compiler writes the frame at `loop_start` there
+for a looping asset, and silence for a one-shot. If `loop_end` is not 0, then `loop_start < loop_end <= frames` must hold. The
+payload size must match exactly. f32 samples must be finite.
+
+## 5. Table chunk (kind 2)
+
+An 8-byte header, then `length + 1` f32 samples, all finite. The extra sample is a guard.
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u32 | `length` | a power of two, from 2 to 2^24 |
+| 4 | u32 | `reserved` | |
+
+The payload size must match exactly.
+
+## 6. Patch chunk (kind 3)
+
+A Patch is a list of steps. Its bytes depend on its graph alone: nothing about a track, a target or a Program is in it. That is
+what lets two Programs share one hash.
+
+### Header, 28 bytes
+
+All u16 but the last.
+
+| Offset | Field | Meaning |
+|---|---|---|
+| 0 | `control_steps` | steps run once per frame per track or insert, in the control phase |
+| 2 | `voice_steps` | steps run once per frame per voice or insert, in the audio phase |
+| 4 | `buffers` | scratch buffers, each one frame long |
+| 6 | `voice_scalars` | at least 3 |
+| 8 | `track_scalars` | |
+| 10 | `params` | |
+| 12 | `refs` | |
+| 14 | `consts` | |
+| 16 | `delays` | |
+| 18 | `inputs` | stereo input pairs: 0 for an instrument, 1 for an insert, 2 for one with a sidechain |
+| 20 | `out_left` | an operand naming a buffer |
+| 22 | `out_right` | an operand naming a buffer. Equal to `out_left` for a mono patch. |
+| 24 | u32 `reserved` | |
+
+### Body
+
+In this order, with no padding, since every section's size is a multiple of 4 and the header's size is too. The payload must end
+exactly at the end of the last section.
+
+| Section | Element | Count |
+|---|---|---|
+| Parameters | 20 bytes | `params` |
+| References | u64 hash of a Table or Asset | `refs` |
+| Constants | f32, finite | `consts` |
+| Delay lines | f32 maximum seconds, above 0 and at most 60 | `delays` |
+| Input ports | u16 left, u16 right, each a buffer index | `inputs` |
+| Control steps, then voice steps | 20 bytes | `control_steps + voice_steps` |
+
+### Parameter, 20 bytes
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u16 | `id` | stable, and what Instructions address. Strictly ascending within a Patch. |
+| 2 | u8 | `scope` | 0 voice, 1 track, 2 global |
+| 3 | u8 | `reserved` | |
+| 4 | u16 | `reg` | its register in that scope's bank, or 0 for global. Two parameters must not share one. |
+| 6 | u16 | `smooth_ms` | how long a track-scope change glides |
+| 8 | f32 | `min` | |
+| 12 | f32 | `max` | |
+| 16 | f32 | `default` | `min <= default <= max`, all finite |
+
+A global parameter has no register. An operand reads it by the parameter's position in this table, and the value comes from the
+Program's global with the same `id`.
+
+### Operands
+
+An operand is a u16: a bank in the top 3 bits, and an index in the low 13.
+
+| Bank | Name | Index is | Lives |
+|---|---|---|---|
+| 0 | none | | |
+| 1 | Buffer | scratch buffer | for one step's worth of a frame |
+| 2 | Voice | voice scalar | one per voice |
+| 3 | Track | track scalar | one per track slot or insert |
+| 4 | Global | position in the parameter table | one per Program |
+| 5 | Const | position in the constant table | in the image |
+
+Bank 6 and 7 are invalid. Voice scalars 0, 1 and 2 are always the note (0 to 127), the velocity (0 to 1) and the gate (0 or 1).
+In an insert all three are 0.
+
+### Step, 20 bytes
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u8 | `op` | see below |
+| 1 | u8 | `mode` | must not exceed the op's maximum |
+| 2 | u16 | `resource` | see below, or 0 if the op takes none |
+| 4 | u32 | `state_id` | identifies this step's state across a live edit, or 0 |
+| 8 | u16[2] | `out` | operands. Those past the op's count must be 0. |
+| 12 | u16[4] | `in` | operands. Those past the op's count must be 0. |
+
+`state_id` never changes what a Program sounds like when played once. When an edit replaces one generation with another, state
+is carried from a step to the step with the same non-zero `state_id` and the same `op`. A step's resource is a position in the
+reference table, for a Table or an Asset, or in the delay line table, for a Delay. A step using a reference must find the kind it
+needs there.
+
+### Opcodes
+
+`B` is an operand naming a buffer. `S` is one naming a scalar, in any bank that can be read. In the formulas below, `N` is the
+frame size, `rate` is the sample rate in Hz, and `clamp(x, lo, hi)` sends NaN to `lo`. All outputs are written for all `N`
+samples.
+
+| Op | Name | Out | In | Mode | Resource | Runs in |
+|---|---|---|---|---|---|---|
+| 1 | Fill | B | S value | | | voice |
+| 2 | Noise | B | | | | voice |
+| 3 | Osc | B | S frequency | | Table | voice |
+| 4 | Biquad | B | B in, S cutoff, S q | 0 low, 1 high, 2 band | | voice |
+| 5 | Env | B | S attack, S decay, S sustain, S release | | | voice |
+| 6 | Sample | B left, B right | S ratio | | Asset | voice |
+| 7 | Mul | B | B a, B b | | | voice |
+| 8 | MulS | B | B a, S b | | | voice |
+| 9 | Add | B | B a, B b | | | voice |
+| 10 | AddS | B | B a, S b | | | voice |
+| 11 | Pan | B left, B right | B in, S position | | | voice |
+| 12 | DelayWrite | | B in | | Delay | voice |
+| 13 | DelayRead | B | S seconds | 0 after the write, 1 before it | Delay | voice |
+| 14 | Comb | B | B in, S seconds, S feedback, S damp | | Delay | voice |
+| 15 | Allpass | B | B in, S seconds, S feedback | | Delay | voice |
+| 16 | Follow | B | B in, S release | | | voice |
+| 17 | KMul | S | S a, S b | | | either |
+| 18 | KAdd | S | S a, S b | | | either |
+| 19 | KMtoF | S | S note | | | either |
+| 20 | KRatio | S | S note | root key, at most 127 | | either |
+| 21 | KSnap | S | B in | | | voice |
+| 22 | KLfo | S | S rate, S depth | | | either |
+
+What each one does:
+
+- **Fill.** Every sample is the value.
+- **Noise.** A 32-bit xorshift (13, 17, 5) scaled to −1 to 1. Its state starts from a value derived from the track id, the voice
+  index, the voice's age and the step, so a voice's noise is repeatable and no two share it.
+- **Osc.** A 32-bit phase, incremented by `clamp(frequency, 0, rate / 2) / rate`. The top bits index the table, and the output
+  interpolates linearly to the next entry, which is why a table has a guard. It wraps because the phase does.
+- **Biquad.** A transposed direct form II biquad with RBJ cookbook coefficients. Cutoff is clamped to 10 Hz to `0.45 * rate`, and
+  q to 0.1 to 30. A band-pass has constant 0 dB peak gain.
+- **Env.** Attack, decay and release are in seconds, clamped to 0.0001 to 60. Sustain is clamped to 0 to 1. Attack is linear to 1.
+  Decay is exponential towards sustain, and is done within 0.0001 of it. Release is exponential towards 0, and is done below
+  0.0001. A gate change takes effect at its sample offset within the frame.
+- **Sample.** A 32.32 position, advanced by `clamp(ratio, 0, 256) * native_rate / rate` per sample, capped at 65536 and held below
+  the loop length so one wrap is always enough. The output interpolates linearly. A one-shot writes 0 from the frame it passes
+  its last frame in. A mono asset writes one signal to both outputs. A note starting at an offset within a frame writes 0 before it.
+- **Mul, MulS, Add, AddS.** Per sample. An output may be the same register as an input.
+- **Pan.** `left = in * (1 - p) / 2` and `right = in * (1 + p) / 2`, with `p` clamped to −1 to 1. This law is linear, so `left + right`
+  is always `in`, whatever `p` is.
+- **DelayWrite.** Writes the frame to the delay line.
+- **DelayRead.** Reads the line `seconds` behind the write position, clamped to what the line can hold. Mode 0 reads after this frame's
+  write, so short delays work. Mode 1 reads before it, for feedback, and so reads at least one frame back. Anything older than what
+  has been written reads as 0.
+- **Comb.** A feedback comb with a one-pole low-pass in the loop: `low = y * (1 - damp) + low * damp`, then the line takes
+  `in + low * feedback` and the output is `y`, the delayed sample. Feedback is clamped to ±0.995 and damp to 0 to 0.99.
+- **Allpass.** The line takes `in + y * feedback`, and the output is `y - in`. Feedback is clamped to ±0.995.
+- **Follow.** A peak follower: `level = max(|in|, level * exp(-1 / (release * rate)))`. Release is clamped to 0.0001 to 60.
+- **KMul, KAdd.** One scalar operation.
+- **KMtoF.** `440 * 2^((note - 69) / 12)`, with `note` clamped to −48 to 200.
+- **KRatio.** `2^((note - mode) / 12)`, with `note` clamped the same way. This is what plays an asset at pitch.
+- **KSnap.** Writes the last sample of a buffer to a scalar, so audio can drive a control input.
+- **KLfo.** A sine at `rate` Hz, clamped to 0 to 1000, times `depth`. Its phase advances once a frame.
+
+Every kernel is total: any finite or non-finite input gives defined behaviour, with no out-of-range read. A voice whose output is not
+finite is stopped, and an insert whose output is not finite restarts empty. The final output is checked as well and replaced with
+silence if it is not finite.
+
+### What the validator requires of a Patch
+
+- `control_steps + voice_steps`, `params`, `refs`, `consts`, `delays`, `buffers` and both scalar counts are within section 9, and
+  `voice_scalars` is at least 3 and `inputs` at most 2.
+- **Every read follows a write.** Walking the steps in order, a buffer may be read only if a step or input port has written it.
+  A scalar may be read only if it is a built-in, a parameter, or a step has written it. Reading happens before writing within a step.
+- **A step writes only what it owns**, which is the rule that makes Programs order-independent:
+  - A voice step writes buffers and voice scalars. A control step writes track scalars only.
+  - Nothing writes a global or a constant.
+  - No step writes a built-in or a parameter's register. Those belong to the engine.
+  - A control step reads no voice scalar and no buffer, because no voice exists at that time.
+- A control step's op is one marked "either" above.
+- An op with two outputs names two different registers, and neither may be one of its inputs, because the outputs are written one
+  after the other.
+- `out_left` and `out_right` name buffers that have been written.
+- Each reference names a Table or an Asset that exists, and each step's resource is in range and of the right kind.
+
+## 7. Program chunk (kind 4)
+
+A Program is the compiled form of a timeline. Each track has an Instruction stream, and a mixer list routes the results.
+
+### Header, 52 bytes
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u32 | `ppq` | ticks per quarter note, 1 to 65535 |
+| 4 | u32 | `uspq` | initial microseconds per quarter, 1000 to 60,000,000 |
+| 8 | u32 | `length_ticks` | must equal the longest track's tick total |
+| 12 | u32 | `conductor_begin` | first instruction of the conductor stream |
+| 16 | u32 | `conductor_length` | |
+| 20 | u32 | `code` | |
+| 24 | u16 | `patches` | |
+| 26 | u16 | `tracks` | |
+| 28 | u16 | `slots` | |
+| 30 | u16 | `clips` | |
+| 32 | u16 | `inserts` | |
+| 34 | u16 | `mix_steps` | |
+| 36 | u16 | `gather_inputs` | |
+| 38 | u16 | `buses` | at least 1 |
+| 40 | u16 | `mix_regs` | |
+| 42 | u16 | `globals` | |
+| 44 | u16 | `inits` | |
+| 46 | u16 | `master` | the bus register that is the output |
+| 48 | u32 | `reserved` | |
+
+### Body
+
+In this order. The only padding is after the slots, to bring the clips to a 4-byte boundary, which is zero or two bytes. The payload
+must end exactly at the end of the last section.
+
+| Section | Element | Count |
+|---|---|---|
+| Patches | u64 hash | `patches` |
+| Tracks | 16 bytes | `tracks` |
+| Slots | u16 index into Patches | `slots` |
+| Clips | 16 bytes | `clips` |
+| Inserts | 4 bytes | `inserts` |
+| Mixer steps | 12 bytes | `mix_steps` |
+| Gather inputs | 8 bytes | `gather_inputs` |
+| Mix registers | f32 initial value, finite | `mix_regs` |
+| Globals | 8 bytes, `id` strictly ascending | `globals` |
+| Initial values | 12 bytes | `inits` |
+| Code | 8 bytes | `code` |
+
+### Tables
+
+Track, 16 bytes:
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u16 | `id` | stable across edits, unique in a Program |
+| 2 | u16 | `voices` | 1 to 256 |
+| 4 | u16 | `slot_begin` | must equal the sum of the previous tracks' `slot_count`, so tracks own slots in order and share none |
+| 6 | u16 | `slot_count` | 1 to 256. The sum over all tracks must equal `slots`. |
+| 8 | u32 | `stream_begin` | |
+| 12 | u32 | `stream_length` | |
+
+A slot is a patch a track can play, and each slot must have no input ports.
+
+Clip, 16 bytes:
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u32 | `begin` | |
+| 4 | u32 | `length` | |
+| 8 | u32 | `ticks` | at least 1, and must equal the sum of the clip's Waits |
+| 12 | u32 | `slots` | must equal one more than the highest slot its SetPatch names, or 0 if it has none |
+
+Insert, 4 bytes: u16 `id`, stable and unique in a Program, and u16 `patch`, an index into Patches.
+
+Global, 8 bytes: u16 `id`, u16 `reserved`, f32 `value`, which is finite. Every global parameter of every Patch in the Program must
+have a Global with its `id`.
+
+Initial value, 12 bytes:
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u16 | `target_kind` | 0 track, 1 insert |
+| 2 | u16 | `target` | an index into that table |
+| 4 | u16 | `id` | a parameter id |
+| 6 | u16 | `reserved` | |
+| 8 | f32 | `value` | finite |
+
+Applied at load, then clamped to the parameter's range. An `id` no patch has does nothing.
+
+### Instructions, 8 bytes
+
+| Offset | Type | Field |
+|---|---|---|
+| 0 | u8 | `op` |
+| 1 | u8 | `a` |
+| 2 | u16 | `b` |
+| 4 | u32 | `c` |
+
+| Op | Name | a | b | c | Where |
+|---|---|---|---|---|---|
+| 0 | End | | | | Tracks and the conductor |
+| 1 | Wait | | | ticks | Anywhere |
+| 2 | NoteOn | note, 0 to 127 | velocity, 0 to 127 | duration, 1 to `kMaxTicks` | Tracks and clips |
+| 3 | SetPatch | slot | | | Tracks and clips |
+| 4 | SetParam | | param id | value, f32 bits, finite | Tracks and clips |
+| 5 | Ramp | | param id | target, f32 bits, finite | Tracks and clips, then RampArg |
+| 6 | RampArg | | | ticks, 1 to `kMaxTicks` | Only straight after a Ramp |
+| 7 | Call | | clip | repeats, at least 1 | Tracks only |
+| 8 | Tempo | | | microseconds per quarter, 1000 to 60,000,000 | The conductor only |
+
+A field left blank must be 0. A track's stream and the conductor's must each end in one End, and contain no other. A clip must not
+contain an End, because it returns to its caller. Calls do not nest, and a clip's `ticks` is at least 1, so a stream cannot run
+forever without time passing.
+
+A track's `SetPatch` applies to the next note, so held notes finish on the old patch. It must name a slot the track has. For a clip,
+that is what `slots` declares, and a track may only call a clip whose `slots` is at most its `slot_count`. An unknown parameter id in
+SetParam or Ramp does nothing, and a parameter of a slot that is not selected still changes.
+
+A stream's **tick total** is the sum of its Waits, plus `clip.ticks * repeats` for each Call. Every stream's total must be at most
+`kMaxTicks`. The **expanded size** of a stream counts its instructions, with `clip.length + 1` for each repeat of each Call, and the
+sum for all streams must be at most `kMaxExpanded`. These two limits are why a tick and a locate are always bounded.
+
+### Time
+
+All tracks share one tick clock. At sample rate `rate`, one tick lasts `uspq / (1,000,000 * ppq)` seconds, kept as an exact
+rational so a tempo map does not drift. An event lands on the first sample at or after its tick, which gives it a sample offset within
+the frame. Each Tempo applies at its tick, and rounds to that sample.
+
+Transport (play, stop, locate, loop range) is the engine's state, not the image's. A locate replays the streams silently from the
+start, which chases held notes and parameters, and that is why the expanded size is limited.
+
+### Mixer
+
+A list of steps over bus registers, each one a stereo pair of frames, run in order.
+
+Mixer step, 12 bytes:
+
+| Offset | Type | Field | Meaning |
+|---|---|---|---|
+| 0 | u8 | `op` | 1 RunVoices, 2 RunInsert, 3 Gather |
+| 1 | u8 | `reserved` | |
+| 2 | u16 | `task` | steps with one task run together, in order |
+| 4 | u16 | `a` | the track, the insert, or the first gather input |
+| 6 | u16 | `dst` | the bus it writes |
+| 8 | u16 | `src` | RunInsert: the input bus. Gather: how many inputs. RunVoices: 0. |
+| 10 | u16 | `key` | RunInsert: the sidechain bus, or `0xFFFF`. Otherwise `0xFFFF`. |
+
+- **RunVoices** renders a track's active voices, summed in voice order, into `dst`.
+- **RunInsert** fills the patch's input ports from `src`, and from `key` if it has a second pair, runs its voice steps once, and writes
+  its output to `dst`. It requires a patch with an input port, and with two if `key` is used. A `dst` may equal `src`.
+- **Gather** sums its inputs into `dst`, in order. Each input is scaled by its two gain registers.
+
+Gather input, 8 bytes: u16 `src`, u16 `gain_left`, u16 `gain_right`, u16 `reserved`. The gains are mix registers, so a fader move changes
+nothing in the image.
+
+The validator requires:
+
+- `task` starts at 0, and each step's is the same as the last or one more.
+- A bus may be read only after a step has written it. A step's own `dst` does not count, except that a RunInsert may overwrite its
+  input. A Gather must not read its own `dst`.
+- Each track and each insert is run by at most one step. Each step overwrites its `dst` without reading it.
+
+Those rules make a mixer list order-independent. An instance's state is touched by exactly one step, so two tasks can only interact
+through a bus register, and every read or write of one is stated in the list. An engine may therefore run tasks in any order that keeps
+each register's reads and writes in sequence, on any number of threads, and it gets identical bits. All summing happens inside one step,
+so no rounding depends on which task got there first.
+
+### Output on a mono engine
+
+An image has no channel count: an engine is built mono or stereo, and one image plays on both. A mono engine folds as it runs. A
+stereo patch or insert output becomes `(left + right) / 2`, a Gather input's gain becomes `(left gain + right gain) / 2`, Pan writes `in / 2`
+to both outputs, and Sample folds a stereo asset as it reads it. Mono output equals `(L + R) / 2` of a stereo render only for centred,
+channel-symmetric mixes.
+
+## 8. An example
+
+The smallest image that plays: one patch, which fills a buffer with 0.5, and a Program with one track and no notes. Bytes are in hexadecimal.
+`tools/ReadImage.py --example` prints this image, and a test holds it to the bytes the C++ writes.
+
+    Manifest header:  4D 53 43 4B  00 01 0000  30 00 00 00  00000000  <hash>
+    Manifest body:    02 00 00 00  01 00 00 00  00 00 00 00  00 00 00 00
+    Entry 0, Patch:   <hash>  58 00 00 00  03  01  0000
+    Entry 1, Program: <hash>  6C 00 00 00  04  01  0000
+
+The patch's payload is 88 bytes: its 28-byte header with `voice_steps` 1, `buffers` 1, `voice_scalars` 3, `consts` 1 and both outputs `0x2000`,
+then the constant `00 00 00 3F`, a 20-byte step, and no other sections. That is not the 88 of the header above unless the example is run,
+which is why the tool prints it rather than this document claiming it.
+
+## 9. Limits
+
+| Name | Value | Applies to |
+|---|---|---|
+| `kMaxChunks` | 1024 | entries in a manifest, and patches in a Program |
+| `kMaxRegisters` | 256 | buffers, voice scalars, track scalars and buses |
+| `kMaxPatchSteps` | 4096 | control and voice steps together |
+| `kMaxPatchParams` | 256 | |
+| `kMaxPatchRefs` | 256 | |
+| `kMaxPatchDelays` | 256 | |
+| `kMaxPatchConsts` | 8192 | |
+| `kMaxDelaySeconds` | 60 | one delay line |
+| `kMaxTracks` | 256 | |
+| `kMaxInserts` | 256 | |
+| `kMaxVoices` | 256 | per track |
+| `kMaxSlots` | 1024 | across a Program |
+| `kMaxTrackSlots` | 256 | on one track |
+| `kMaxClips` | 4096 | |
+| `kMaxMixSteps` | 1024 | |
+| `kMaxTasks` | 256 | |
+| `kMaxGatherInputs` | 4096 | |
+| `kMaxMixRegisters` | 8192 | |
+| `kMaxGlobals` | 256 | |
+| `kMaxInits` | 4096 | |
+| `kMaxTicks` | 2^31 − 1 | a stream's total, a note, and a ramp |
+| `kMaxExpanded` | 2^24 | a Program's instructions with every repeat unrolled |
+
+These bound validation and sizing. The engine computes what a Program needs in 64 bits on every target, and the largest total these
+limits allow cannot wrap. They do not bound what a frame costs: an image can pass all of them and still be too much for a device, which
+is what the per-op cost limit in the design is for.
+
+## 10. Golden images
+
+`golden/` holds images written at this freeze, each with its render on a stereo and a mono engine. They are the contract in executable form.
+
+- A golden image and its render never change, and CI fails a pull request that edits or removes one.
+- Every engine, on every target, must load each one and match its render within −100 dB of peak.
+- Between them they must use every opcode, instruction and mixer step, and `GoldenTest` fails if a new one lacks a golden. A new
+  revision adds new files alongside the old.
+- A kernel may change only within that tolerance. A larger change is a different op with a new number.

@@ -87,7 +87,7 @@ class Synth {
         std::byte* fast = memory.fast.data();
         std::size_t fast_size = memory.fast.size();
         if constexpr (C.tap_slots > 0) {
-            const std::size_t taps = std::min(sizeof(float) * tap_block * C.tap_slots, fast_size);
+            const std::size_t taps = std::min<std::size_t>(sizeof(float) * tap_block * C.tap_slots, fast_size);
             for (u32 i = 0; i < C.tap_slots; ++i) {
                 taps_[i].data = reinterpret_cast<float*>(fast) + i * tap_block;
             }
@@ -217,6 +217,13 @@ class Synth {
                 audio_phase(*old_, false);
                 crossfade(out);
             }
+            // Voices and inserts are guarded, but a Gather's gains are not, and huge finite values can still sum to
+            // infinity. A host must never receive that, so this is the last guard.
+            for (u32 ch = 0; ch < C.channels; ++ch) {
+                if (K::finite(out[ch])) continue;
+                B::fill(0.0f, out[ch], N);
+                ++master_guard_trips_;
+            }
         }
         sample_index_ += N;
         if constexpr (C.tap_slots > 0) finish_taps();
@@ -236,7 +243,7 @@ class Synth {
     }
     [[nodiscard]] u32 guard_trips() const {
         if (!live_) return 0;
-        u32 n = 0;
+        u32 n = master_guard_trips_;
         for (u32 t = 0; t < live_->program.h.tracks; ++t) n += live_->tracks[t].guard_trips;
         for (u32 i = 0; i < live_->program.h.inserts; ++i) n += live_->inserts[i].guard_trips;
         return n;
@@ -1506,6 +1513,7 @@ class Synth {
     float fade_ = 0.0f;
     float fade_step_ = 0.0f;
     u32 generation_ = 0;
+    u32 master_guard_trips_ = 0;
 
     Loader loader_;
     ChunkTable* chunks_ = nullptr;

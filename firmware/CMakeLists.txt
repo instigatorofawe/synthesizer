@@ -71,3 +71,34 @@ endfunction()
 add_firmware(Stereo 2 scalar)
 add_firmware(Mono 1 scalar)
 add_firmware(StereoCmsis 2 cmsis)
+
+# The fuzzer, on QEMU's mps2-an386, whose Cortex-M4 has the room for it. Only Target.cpp is instrumented, so what a
+# mutation discovers is new engine behaviour and not a new path through the mutator. It links first, so that an inline
+# function both files use keeps its instrumented copy.
+set(MODSYNTH_FUZZ_SEED_A "" CACHE FILEPATH "First image to fuzz from")
+set(MODSYNTH_FUZZ_SEED_B "" CACHE FILEPATH "Second image to fuzz from")
+set(MODSYNTH_FUZZ_SECONDS 60 CACHE STRING "How long the fuzzer runs")
+set(MODSYNTH_FUZZ_RANDOM 1 CACHE STRING "Random seed for the fuzzer")
+if(MODSYNTH_FUZZ_SEED_A AND MODSYNTH_FUZZ_SEED_B)
+    set(FUZZ_FLAGS ${ARCH} -O2 -g -ffp-contract=off -fno-math-errno -fno-exceptions -fno-rtti -fno-threadsafe-statics
+        -ffunction-sections -fdata-sections -Wall -Wextra -Wno-psabi)
+    add_library(fuzz_target OBJECT ../fuzz/Target.cpp)
+    target_compile_features(fuzz_target PRIVATE cxx_std_23)
+    target_include_directories(fuzz_target PRIVATE ../include)
+    target_compile_options(fuzz_target PRIVATE ${FUZZ_FLAGS} -fsanitize-coverage=trace-pc)
+
+    add_executable(Fuzz $<TARGET_OBJECTS:fuzz_target> Fuzz.cpp)
+    set_target_properties(Fuzz PROPERTIES SUFFIX .elf LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/An386.ld)
+    target_compile_features(Fuzz PRIVATE cxx_std_23)
+    target_include_directories(Fuzz PRIVATE ../include)
+    target_compile_definitions(Fuzz PRIVATE
+        MODSYNTH_FUZZ_SEED_A="${MODSYNTH_FUZZ_SEED_A}"
+        MODSYNTH_FUZZ_SEED_B="${MODSYNTH_FUZZ_SEED_B}"
+        MODSYNTH_FUZZ_SECONDS=${MODSYNTH_FUZZ_SECONDS}
+        MODSYNTH_FUZZ_RANDOM=${MODSYNTH_FUZZ_RANDOM}
+    )
+    target_compile_options(Fuzz PRIVATE ${FUZZ_FLAGS})
+    target_link_options(Fuzz PRIVATE ${ARCH} -nostartfiles --specs=nano.specs --specs=nosys.specs
+        -Wl,--gc-sections -T ${CMAKE_CURRENT_SOURCE_DIR}/An386.ld)
+    target_link_libraries(Fuzz PRIVATE m)
+endif()

@@ -4,44 +4,17 @@
 #include <cstddef>
 #include <deque>
 #include <memory>
-#include <random>
 #include <string>
 #include <vector>
 
 #include <modsynth/Compiler.hpp>
 #include <modsynth/Modsynth.hpp>
+#include <modsynth/ShuffledExecutor.hpp>
 
 namespace modsynth_test {
 
 using namespace modsynth;
 using compiler::json;
-
-// One thread, a random valid order each frame. Finds an undeclared dependency with no threads at all.
-struct ShuffledExecutor {
-    static constexpr u32 max_workers = 1;
-    static constexpr bool uses_edges = true;
-    using Plan = Schedule;
-    std::mt19937 rng{1234};
-
-    template <class F>
-    void run(const Schedule& s, F&& f) {
-        std::vector<u32> ready;
-        std::vector<u32> pending(s.deps, s.deps + s.count);
-        for (u32 t = 0; t < s.count; ++t) {
-            if (pending[t] == 0) ready.push_back(t);
-        }
-        while (!ready.empty()) {
-            const std::size_t i = rng() % ready.size();
-            const u32 t = ready[i];
-            ready[i] = ready.back();
-            ready.pop_back();
-            f(t, 0u);
-            for (u32 e = s.succ_begin[t]; e < s.succ_begin[t + 1]; ++e) {
-                if (--pending[s.succ[e]] == 0) ready.push_back(s.succ[e]);
-            }
-        }
-    }
-};
 
 inline constexpr SynthConfig kStereo{.frame_size = 128, .channels = 2, .tap_slots = 2, .generations = 2};
 inline constexpr SynthConfig kMono{.frame_size = 128, .channels = 1, .tap_slots = 0, .generations = 1};

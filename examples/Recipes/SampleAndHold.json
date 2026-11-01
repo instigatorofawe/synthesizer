@@ -1,0 +1,187 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "sample",
+      "asset": "steps",
+      "inputs": {
+       "ratio": 1.0
+      }
+     },
+     {
+      "id": 4,
+      "type": "mul",
+      "inputs": {
+       "b": 1500.0
+      }
+     },
+     {
+      "id": 5,
+      "type": "add",
+      "inputs": {
+       "b": 1800.0
+      }
+     },
+     {
+      "id": 6,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 7,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "q": 6.0
+      }
+     },
+     {
+      "id": 8,
+      "type": "env",
+      "inputs": {
+       "attack": 0.01,
+       "decay": 0.1,
+       "sustain": 0.9,
+       "release": 0.2
+      }
+     },
+     {
+      "id": 9,
+      "type": "mul"
+     },
+     {
+      "id": 10,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "port": "l",
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 6,
+      "input": "freq"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 7,
+      "input": "cutoff"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "in"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "b"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 10,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 3240,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 45,
+        "vel": 100,
+        "dur": 3000
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 1,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.2603
+    }
+   }
+  }
+ ],
+ "assets": {
+  "steps": {
+   "encoding": "f32",
+   "channels": 1,
+   "root_key": 60,
+   "rate": 64.0,
+   "frames": 128,
+   "data": "BxmAPgcZgD4HGYA+BxmAPgcZgD4HGYA+BxmAPgcZgD6bX0s/m19LP5tfSz+bX0s/m19LP5tfSz+bX0s/m19LP60mDT+tJg0/rSYNP60mDT+tJg0/rSYNP60mDT+tJg0/pbEMv6WxDL+lsQy/pbEMv6WxDL+lsQy/pbEMv6WxDL82ocy+NqHMvjahzL42ocy+NqHMvjahzL42ocy+NqHMvmZCPz9mQj8/ZkI/P2ZCPz9mQj8/ZkI/P2ZCPz9mQj8/3k19v95Nfb/eTX2/3k19v95Nfb/eTX2/3k19v95Nfb8NeCQ/DXgkPw14JD8NeCQ/DXgkPw14JD8NeCQ/DXgkP3wZGD98GRg/fBkYP3wZGD98GRg/fBkYP3wZGD98GRg/pFaDvaRWg72kVoO9pFaDvaRWg72kVoO9pFaDvaRWg73escm+3rHJvt6xyb7escm+3rHJvt6xyb7escm+3rHJvmXk4r5l5OK+ZeTivmXk4r5l5OK+ZeTivmXk4r5l5OK+eAP7vngD+754A/u+eAP7vngD+754A/u+eAP7vngD+76r9+C9q/fgvav34L2r9+C9q/fgvav34L2r9+C9q/fgvZAJFTyQCRU8kAkVPJAJFTyQCRU8kAkVPJAJFTyQCRU8CiDbPQog2z0KINs9CiDbPQog2z0KINs9CiDbPQog2z0=",
+   "loop_start": 0,
+   "loop_end": 128
+  }
+ }
+}

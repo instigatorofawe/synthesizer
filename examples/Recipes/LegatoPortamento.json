@@ -1,0 +1,183 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 3,
+      "type": "mtof"
+     },
+     {
+      "id": 4,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 5,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "cutoff": 2200.0,
+       "q": 1.2
+      }
+     },
+     {
+      "id": 6,
+      "type": "env",
+      "inputs": {
+       "attack": 0.005,
+       "decay": 0.1,
+       "sustain": 1.0,
+       "release": 0.1
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul"
+     },
+     {
+      "id": 8,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "freq"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "in"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 8,
+      "input": "l"
+     }
+    ],
+    "params": [
+     {
+      "id": 1,
+      "name": "pitch",
+      "scope": "track",
+      "min": 0,
+      "max": 127,
+      "default": 60,
+      "smooth_ms": 0
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 2840,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 60,
+        "vel": 100,
+        "dur": 2600
+       }
+      ],
+      "automation": [
+       {
+        "tick": 0,
+        "param": 1,
+        "value": 57.0
+       },
+       {
+        "tick": 480,
+        "param": 1,
+        "value": 64.0,
+        "ramp": 96
+       },
+       {
+        "tick": 960,
+        "param": 1,
+        "value": 69.0,
+        "ramp": 96
+       },
+       {
+        "tick": 1440,
+        "param": 1,
+        "value": 67.0,
+        "ramp": 96
+       },
+       {
+        "tick": 1920,
+        "param": 1,
+        "value": 60.0,
+        "ramp": 192
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 1,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.4576
+    }
+   }
+  }
+ ]
+}

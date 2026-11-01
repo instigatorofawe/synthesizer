@@ -1,0 +1,801 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 0.5
+      }
+     },
+     {
+      "id": 4,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 5,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 6,
+      "type": "mul"
+     },
+     {
+      "id": 7,
+      "type": "mul",
+      "inputs": {
+       "b": 1.5
+      }
+     },
+     {
+      "id": 8,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 9,
+      "type": "param",
+      "param": 2
+     },
+     {
+      "id": 10,
+      "type": "mul"
+     },
+     {
+      "id": 11,
+      "type": "add"
+     },
+     {
+      "id": 12,
+      "type": "mul",
+      "inputs": {
+       "b": 1.0
+      }
+     },
+     {
+      "id": 13,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 14,
+      "type": "param",
+      "param": 3
+     },
+     {
+      "id": 15,
+      "type": "mul"
+     },
+     {
+      "id": 16,
+      "type": "add"
+     },
+     {
+      "id": 17,
+      "type": "mul",
+      "inputs": {
+       "b": 2.0
+      }
+     },
+     {
+      "id": 18,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 19,
+      "type": "param",
+      "param": 4
+     },
+     {
+      "id": 20,
+      "type": "mul"
+     },
+     {
+      "id": 21,
+      "type": "add"
+     },
+     {
+      "id": 22,
+      "type": "mul",
+      "inputs": {
+       "b": 3.0
+      }
+     },
+     {
+      "id": 23,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 24,
+      "type": "param",
+      "param": 5
+     },
+     {
+      "id": 25,
+      "type": "mul"
+     },
+     {
+      "id": 26,
+      "type": "add"
+     },
+     {
+      "id": 27,
+      "type": "mul",
+      "inputs": {
+       "b": 4.0
+      }
+     },
+     {
+      "id": 28,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 29,
+      "type": "param",
+      "param": 6
+     },
+     {
+      "id": 30,
+      "type": "mul"
+     },
+     {
+      "id": 31,
+      "type": "add"
+     },
+     {
+      "id": 32,
+      "type": "mul",
+      "inputs": {
+       "b": 5.0
+      }
+     },
+     {
+      "id": 33,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 34,
+      "type": "param",
+      "param": 7
+     },
+     {
+      "id": 35,
+      "type": "mul"
+     },
+     {
+      "id": 36,
+      "type": "add"
+     },
+     {
+      "id": 37,
+      "type": "mul",
+      "inputs": {
+       "b": 6.0
+      }
+     },
+     {
+      "id": 38,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 39,
+      "type": "param",
+      "param": 8
+     },
+     {
+      "id": 40,
+      "type": "mul"
+     },
+     {
+      "id": 41,
+      "type": "add"
+     },
+     {
+      "id": 42,
+      "type": "mul",
+      "inputs": {
+       "b": 8.0
+      }
+     },
+     {
+      "id": 43,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 44,
+      "type": "param",
+      "param": 9
+     },
+     {
+      "id": 45,
+      "type": "mul"
+     },
+     {
+      "id": 46,
+      "type": "add"
+     },
+     {
+      "id": 47,
+      "type": "mul",
+      "inputs": {
+       "b": 0.15
+      }
+     },
+     {
+      "id": 48,
+      "type": "env",
+      "inputs": {
+       "attack": 0.004,
+       "decay": 0.01,
+       "sustain": 1.0,
+       "release": 0.02
+      }
+     },
+     {
+      "id": 49,
+      "type": "mul"
+     },
+     {
+      "id": 50,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "freq"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 8,
+      "input": "freq"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 10,
+      "input": "a"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 10,
+      "input": "b"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "port": "out",
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 12,
+      "port": "out",
+      "to": 13,
+      "input": "freq"
+     },
+     {
+      "from": 13,
+      "port": "out",
+      "to": 15,
+      "input": "a"
+     },
+     {
+      "from": 14,
+      "port": "out",
+      "to": 15,
+      "input": "b"
+     },
+     {
+      "from": 11,
+      "port": "out",
+      "to": 16,
+      "input": "a"
+     },
+     {
+      "from": 15,
+      "port": "out",
+      "to": 16,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 17,
+      "input": "a"
+     },
+     {
+      "from": 17,
+      "port": "out",
+      "to": 18,
+      "input": "freq"
+     },
+     {
+      "from": 18,
+      "port": "out",
+      "to": 20,
+      "input": "a"
+     },
+     {
+      "from": 19,
+      "port": "out",
+      "to": 20,
+      "input": "b"
+     },
+     {
+      "from": 16,
+      "port": "out",
+      "to": 21,
+      "input": "a"
+     },
+     {
+      "from": 20,
+      "port": "out",
+      "to": 21,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 22,
+      "input": "a"
+     },
+     {
+      "from": 22,
+      "port": "out",
+      "to": 23,
+      "input": "freq"
+     },
+     {
+      "from": 23,
+      "port": "out",
+      "to": 25,
+      "input": "a"
+     },
+     {
+      "from": 24,
+      "port": "out",
+      "to": 25,
+      "input": "b"
+     },
+     {
+      "from": 21,
+      "port": "out",
+      "to": 26,
+      "input": "a"
+     },
+     {
+      "from": 25,
+      "port": "out",
+      "to": 26,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 27,
+      "input": "a"
+     },
+     {
+      "from": 27,
+      "port": "out",
+      "to": 28,
+      "input": "freq"
+     },
+     {
+      "from": 28,
+      "port": "out",
+      "to": 30,
+      "input": "a"
+     },
+     {
+      "from": 29,
+      "port": "out",
+      "to": 30,
+      "input": "b"
+     },
+     {
+      "from": 26,
+      "port": "out",
+      "to": 31,
+      "input": "a"
+     },
+     {
+      "from": 30,
+      "port": "out",
+      "to": 31,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 32,
+      "input": "a"
+     },
+     {
+      "from": 32,
+      "port": "out",
+      "to": 33,
+      "input": "freq"
+     },
+     {
+      "from": 33,
+      "port": "out",
+      "to": 35,
+      "input": "a"
+     },
+     {
+      "from": 34,
+      "port": "out",
+      "to": 35,
+      "input": "b"
+     },
+     {
+      "from": 31,
+      "port": "out",
+      "to": 36,
+      "input": "a"
+     },
+     {
+      "from": 35,
+      "port": "out",
+      "to": 36,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 37,
+      "input": "a"
+     },
+     {
+      "from": 37,
+      "port": "out",
+      "to": 38,
+      "input": "freq"
+     },
+     {
+      "from": 38,
+      "port": "out",
+      "to": 40,
+      "input": "a"
+     },
+     {
+      "from": 39,
+      "port": "out",
+      "to": 40,
+      "input": "b"
+     },
+     {
+      "from": 36,
+      "port": "out",
+      "to": 41,
+      "input": "a"
+     },
+     {
+      "from": 40,
+      "port": "out",
+      "to": 41,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 42,
+      "input": "a"
+     },
+     {
+      "from": 42,
+      "port": "out",
+      "to": 43,
+      "input": "freq"
+     },
+     {
+      "from": 43,
+      "port": "out",
+      "to": 45,
+      "input": "a"
+     },
+     {
+      "from": 44,
+      "port": "out",
+      "to": 45,
+      "input": "b"
+     },
+     {
+      "from": 41,
+      "port": "out",
+      "to": 46,
+      "input": "a"
+     },
+     {
+      "from": 45,
+      "port": "out",
+      "to": 46,
+      "input": "b"
+     },
+     {
+      "from": 46,
+      "port": "out",
+      "to": 47,
+      "input": "a"
+     },
+     {
+      "from": 47,
+      "port": "out",
+      "to": 49,
+      "input": "a"
+     },
+     {
+      "from": 48,
+      "port": "out",
+      "to": 49,
+      "input": "b"
+     },
+     {
+      "from": 49,
+      "port": "out",
+      "to": 50,
+      "input": "l"
+     }
+    ],
+    "params": [
+     {
+      "id": 1,
+      "name": "bar1",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 1.0,
+      "smooth_ms": 20
+     },
+     {
+      "id": 2,
+      "name": "bar2",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 1.0,
+      "smooth_ms": 20
+     },
+     {
+      "id": 3,
+      "name": "bar3",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 1.0,
+      "smooth_ms": 20
+     },
+     {
+      "id": 4,
+      "name": "bar4",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.0,
+      "smooth_ms": 20
+     },
+     {
+      "id": 5,
+      "name": "bar5",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.0,
+      "smooth_ms": 20
+     },
+     {
+      "id": 6,
+      "name": "bar6",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.0,
+      "smooth_ms": 20
+     },
+     {
+      "id": 7,
+      "name": "bar7",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.0,
+      "smooth_ms": 20
+     },
+     {
+      "id": 8,
+      "name": "bar8",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.0,
+      "smooth_ms": 20
+     },
+     {
+      "id": 9,
+      "name": "bar9",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.0,
+      "smooth_ms": 20
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 3060,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 48,
+        "vel": 100,
+        "dur": 1380
+       },
+       {
+        "tick": 0,
+        "note": 60,
+        "vel": 100,
+        "dur": 1380
+       },
+       {
+        "tick": 0,
+        "note": 64,
+        "vel": 100,
+        "dur": 1380
+       },
+       {
+        "tick": 0,
+        "note": 67,
+        "vel": 100,
+        "dur": 1380
+       },
+       {
+        "tick": 1440,
+        "note": 53,
+        "vel": 100,
+        "dur": 1380
+       },
+       {
+        "tick": 1440,
+        "note": 60,
+        "vel": 100,
+        "dur": 1380
+       },
+       {
+        "tick": 1440,
+        "note": 65,
+        "vel": 100,
+        "dur": 1380
+       },
+       {
+        "tick": 1440,
+        "note": 69,
+        "vel": 100,
+        "dur": 1380
+       }
+      ],
+      "automation": [
+       {
+        "tick": 720,
+        "param": 4,
+        "value": 1.0,
+        "ramp": 240
+       },
+       {
+        "tick": 720,
+        "param": 6,
+        "value": 0.9,
+        "ramp": 240
+       },
+       {
+        "tick": 720,
+        "param": 9,
+        "value": 0.8,
+        "ramp": 240
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 4,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.3385
+    }
+   }
+  }
+ ]
+}

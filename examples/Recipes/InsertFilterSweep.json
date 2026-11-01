@@ -1,0 +1,484 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "param",
+      "param": 5
+     },
+     {
+      "id": 3,
+      "type": "mtof"
+     },
+     {
+      "id": 4,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 5,
+      "type": "env",
+      "inputs": {
+       "attack": 0.002,
+       "decay": 0.1,
+       "sustain": 1.0,
+       "release": 0.1
+      }
+     },
+     {
+      "id": 6,
+      "type": "mul"
+     },
+     {
+      "id": 7,
+      "type": "mul",
+      "inputs": {
+       "b": 0.0
+      }
+     },
+     {
+      "id": 8,
+      "type": "add",
+      "inputs": {
+       "b": 1.0
+      }
+     },
+     {
+      "id": 9,
+      "type": "mul"
+     },
+     {
+      "id": 10,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "freq"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "b"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 10,
+      "input": "l"
+     }
+    ],
+    "params": [
+     {
+      "id": 5,
+      "name": "cut",
+      "scope": "global",
+      "min": 100,
+      "max": 8000,
+      "default": 500,
+      "smooth_ms": 10
+     }
+    ]
+   }
+  },
+  "fx": {
+   "name": "fx",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in",
+      "index": 0
+     },
+     {
+      "id": 2,
+      "type": "param",
+      "param": 5
+     },
+     {
+      "id": 3,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "q": 1.0
+      }
+     },
+     {
+      "id": 4,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "q": 1.0
+      }
+     },
+     {
+      "id": 5,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "cutoff"
+     },
+     {
+      "from": 1,
+      "port": "l",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 4,
+      "input": "cutoff"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 4,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 5,
+      "input": "l"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "r"
+     }
+    ],
+    "params": [
+     {
+      "id": 5,
+      "name": "cut",
+      "scope": "global",
+      "min": 100,
+      "max": 8000,
+      "default": 500,
+      "smooth_ms": 10
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 2340,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 41,
+        "vel": 100,
+        "dur": 2100
+       },
+       {
+        "tick": 0,
+        "note": 53,
+        "vel": 90,
+        "dur": 2100
+       }
+      ],
+      "automation": [
+       {
+        "tick": 240,
+        "param": 5,
+        "value": 500.0
+       },
+       {
+        "tick": 264,
+        "param": 5,
+        "value": 532.0464324992079
+       },
+       {
+        "tick": 288,
+        "param": 5,
+        "value": 566.1468126702683
+       },
+       {
+        "tick": 312,
+        "param": 5,
+        "value": 602.4327839040271
+       },
+       {
+        "tick": 336,
+        "param": 5,
+        "value": 641.0444269934077
+       },
+       {
+        "tick": 360,
+        "param": 5,
+        "value": 682.130800910683
+       },
+       {
+        "tick": 384,
+        "param": 5,
+        "value": 725.8505182447126
+       },
+       {
+        "tick": 408,
+        "param": 5,
+        "value": 772.372357519601
+       },
+       {
+        "tick": 432,
+        "param": 5,
+        "value": 821.8759147586129
+       },
+       {
+        "tick": 456,
+        "param": 5,
+        "value": 874.552296808686
+       },
+       {
+        "tick": 480,
+        "param": 5,
+        "value": 930.6048591020996
+       },
+       {
+        "tick": 504,
+        "param": 5,
+        "value": 990.2499907034003
+       },
+       {
+        "tick": 528,
+        "param": 5,
+        "value": 1053.7179496722356
+       },
+       {
+        "tick": 552,
+        "param": 5,
+        "value": 1121.2537519669856
+       },
+       {
+        "tick": 576,
+        "param": 5,
+        "value": 1193.1181173207726
+       },
+       {
+        "tick": 600,
+        "param": 5,
+        "value": 1269.588475741377
+       },
+       {
+        "tick": 624,
+        "param": 5,
+        "value": 1350.9600385206136
+       },
+       {
+        "tick": 648,
+        "param": 5,
+        "value": 1437.5469378877697
+       },
+       {
+        "tick": 672,
+        "param": 5,
+        "value": 1529.6834397066964
+       },
+       {
+        "tick": 696,
+        "param": 5,
+        "value": 1627.7252338981295
+       },
+       {
+        "tick": 720,
+        "param": 5,
+        "value": 1732.0508075688772
+       },
+       {
+        "tick": 744,
+        "param": 5,
+        "value": 1843.0629061487864
+       },
+       {
+        "tick": 768,
+        "param": 5,
+        "value": 1961.1900881761683
+       },
+       {
+        "tick": 792,
+        "param": 5,
+        "value": 2086.888379733874
+       },
+       {
+        "tick": 816,
+        "param": 5,
+        "value": 2220.64303492292
+       },
+       {
+        "tick": 840,
+        "param": 5,
+        "value": 2362.9704091699073
+       },
+       {
+        "tick": 864,
+        "param": 5,
+        "value": 2514.4199526000853
+       },
+       {
+        "tick": 888,
+        "param": 5,
+        "value": 2675.5763311714054
+       },
+       {
+        "tick": 912,
+        "param": 5,
+        "value": 2847.06168375813
+       },
+       {
+        "tick": 936,
+        "param": 5,
+        "value": 3029.538023897402
+       },
+       {
+        "tick": 960,
+        "param": 5,
+        "value": 3223.709795470626
+       },
+       {
+        "tick": 984,
+        "param": 5,
+        "value": 3430.326592185795
+       },
+       {
+        "tick": 1008,
+        "param": 5,
+        "value": 3650.1860513592346
+       },
+       {
+        "tick": 1032,
+        "param": 5,
+        "value": 3884.1369331681017
+       },
+       {
+        "tick": 1056,
+        "param": 5,
+        "value": 4133.082397261005
+       },
+       {
+        "tick": 1080,
+        "param": 5,
+        "value": 4397.983489375984
+       },
+       {
+        "tick": 1104,
+        "param": 5,
+        "value": 4679.862851425821
+       },
+       {
+        "tick": 1128,
+        "param": 5,
+        "value": 4979.808669373357
+       },
+       {
+        "tick": 1152,
+        "param": 5,
+        "value": 5298.978874137442
+       },
+       {
+        "tick": 1176,
+        "param": 5,
+        "value": 5638.605611746991
+       },
+       {
+        "tick": 1200,
+        "param": 5,
+        "value": 6000.0
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 2,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ],
+      "inserts": [
+       {
+        "id": 7,
+        "patch": "fx"
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.3538
+    }
+   }
+  }
+ ]
+}

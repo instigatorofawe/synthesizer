@@ -1,0 +1,199 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0001,
+       "decay": 0.035,
+       "sustain": 0.0,
+       "release": 0.035
+      }
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 170.0
+      }
+     },
+     {
+      "id": 4,
+      "type": "add",
+      "inputs": {
+       "b": 46.0
+      }
+     },
+     {
+      "id": 5,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 6,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0002,
+       "decay": 0.32,
+       "sustain": 0.0,
+       "release": 0.32
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul"
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "freq"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 3720,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 36,
+        "vel": 127,
+        "dur": 120
+       },
+       {
+        "tick": 720,
+        "note": 36,
+        "vel": 100,
+        "dur": 120
+       },
+       {
+        "tick": 960,
+        "note": 36,
+        "vel": 127,
+        "dur": 120
+       },
+       {
+        "tick": 1920,
+        "note": 36,
+        "vel": 127,
+        "dur": 120
+       },
+       {
+        "tick": 2400,
+        "note": 36,
+        "vel": 110,
+        "dur": 120
+       },
+       {
+        "tick": 2880,
+        "note": 36,
+        "vel": 127,
+        "dur": 120
+       },
+       {
+        "tick": 3360,
+        "note": 36,
+        "vel": 100,
+        "dur": 120
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 2,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.4886
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,415 @@
+[
+ {
+  "name": "AdditiveBell",
+  "file": "AdditiveBell.json",
+  "seconds": 5.0,
+  "group": "combinations",
+  "listen_for": "Struck inharmonic bell tones whose high partials die away first, leaving a low hum."
+ },
+ {
+  "name": "AudioRateAmplitudeModulation",
+  "file": "AudioRateAmplitudeModulation.json",
+  "seconds": 3.7,
+  "group": "combinations",
+  "listen_for": "A buzzy line an octave below itself, because the signal's level is being wobbled at audio rate by a tone at half its pitch."
+ },
+ {
+  "name": "DrawbarOrgan",
+  "file": "DrawbarOrgan.json",
+  "seconds": 3.2,
+  "group": "combinations",
+  "listen_for": "An organ chord that starts round and hollow, then turns bright and full as upper drawbars are pulled out."
+ },
+ {
+  "name": "PhaseModElectricPiano",
+  "file": "PhaseModElectricPiano.json",
+  "seconds": 3.85,
+  "group": "combinations",
+  "listen_for": "A bell-edged electric piano whose attack gets brighter on harder notes, using phase modulation built from multiplied polynomials rather than a modulation input."
+ },
+ {
+  "name": "RingModulation",
+  "file": "RingModulation.json",
+  "seconds": 3.0,
+  "group": "combinations",
+  "listen_for": "Metallic, clangorous notes where the partials are sums and differences of two tones, not a scale of harmonics."
+ },
+ {
+  "name": "Clap",
+  "file": "Clap.json",
+  "seconds": 4.5,
+  "group": "drums",
+  "listen_for": "A hand clap made of three quick noise bursts followed by a short tail, on the backbeat."
+ },
+ {
+  "name": "DrumLoop",
+  "file": "DrumLoop.json",
+  "seconds": 4.3,
+  "group": "drums",
+  "listen_for": "Kick, snare, clap and hats playing together as a two-bar loop."
+ },
+ {
+  "name": "HiHat",
+  "file": "HiHat.json",
+  "seconds": 4.2,
+  "group": "drums",
+  "listen_for": "An eighth-note hi-hat pattern of filtered noise with a longer open hat on the off-beat."
+ },
+ {
+  "name": "Kick808",
+  "file": "Kick808.json",
+  "seconds": 4.75,
+  "group": "drums",
+  "listen_for": "A deep kick drum whose pitch dives in the first few tens of milliseconds, then rings as a low tone."
+ },
+ {
+  "name": "Snare",
+  "file": "Snare.json",
+  "seconds": 4.0,
+  "group": "drums",
+  "listen_for": "A snare hit that mixes a short pitched body with a burst of band-limited noise."
+ },
+ {
+  "name": "ChebyshevWavefold",
+  "file": "ChebyshevWavefold.json",
+  "seconds": 2.85,
+  "group": "effects",
+  "listen_for": "A sine that blooms through a vowel-like sweep of harmonics as its level rises into a fifth-order polynomial, then folds back to simple."
+ },
+ {
+  "name": "Chorus",
+  "file": "Chorus.json",
+  "seconds": 2.7,
+  "group": "effects",
+  "listen_for": "A clean chord made wider and gently wavering by two slowly moving delays; a faint grain on the top end is the delay stepping in whole samples."
+ },
+ {
+  "name": "Compressor",
+  "file": "Compressor.json",
+  "seconds": 3.5,
+  "group": "effects",
+  "listen_for": "A line of loud and soft notes evened out, with the hard hits held down so the quiet ones sit closer to them."
+ },
+ {
+  "name": "CubicSaturation",
+  "file": "CubicSaturation.json",
+  "seconds": 3.5,
+  "group": "effects",
+  "listen_for": "The same note grows from clean to warmly distorted as velocity pushes it harder into a cubic curve."
+ },
+ {
+  "name": "Flanger",
+  "file": "Flanger.json",
+  "seconds": 5.0,
+  "group": "effects",
+  "listen_for": "A sustained buzzy tone with a jet-like sweep moving up and down through it."
+ },
+ {
+  "name": "HaasWidener",
+  "file": "HaasWidener.json",
+  "seconds": 2.5,
+  "group": "effects",
+  "listen_for": "A mono line that sounds wide because the right channel arrives twelve milliseconds later."
+ },
+ {
+  "name": "InsertFilterSweep",
+  "file": "InsertFilterSweep.json",
+  "seconds": 3.0,
+  "group": "effects",
+  "listen_for": "A held chord whose filter opens over a second, automated on the insert through a stepped global parameter, the only route a clip has to an insert."
+ },
+ {
+  "name": "ParametricEq",
+  "file": "ParametricEq.json",
+  "seconds": 2.75,
+  "group": "effects",
+  "listen_for": "A held chord with one narrow 12 dB boost sweeping up through its harmonics, like a slow wah."
+ },
+ {
+  "name": "Phaser",
+  "file": "Phaser.json",
+  "seconds": 4.75,
+  "group": "effects",
+  "listen_for": "A held chord with soft notches sweeping slowly up and down its spectrum."
+ },
+ {
+  "name": "PingPongDelay",
+  "file": "PingPongDelay.json",
+  "seconds": 5.55,
+  "group": "effects",
+  "listen_for": "Short notes whose echoes bounce left, right, left, right and fade away."
+ },
+ {
+  "name": "PrecutGrainCloud",
+  "file": "PrecutGrainCloud.json",
+  "seconds": 3.0,
+  "group": "effects",
+  "listen_for": "A shimmering cloud of overlapping tiny fragments of a tone, built from sixteen precut grains that the timeline triggers one by one."
+ },
+ {
+  "name": "Reverb",
+  "file": "Reverb.json",
+  "seconds": 3.5,
+  "group": "effects",
+  "listen_for": "Short plucks that bloom into a stereo room tail from a send bus of eight combs and four all-passes."
+ },
+ {
+  "name": "SidechainDucking",
+  "file": "SidechainDucking.json",
+  "seconds": 4.95,
+  "group": "effects",
+  "listen_for": "A sustained pad that dips sharply on every kick and swells back, the classic pumping sound."
+ },
+ {
+  "name": "Vocoder",
+  "file": "Vocoder.json",
+  "seconds": 3.4,
+  "group": "effects",
+  "listen_for": "A chord speaking a sequence of vowel shapes, with eight filter bands imposing a second track's formants on a saw."
+ },
+ {
+  "name": "FormantVowels",
+  "file": "FormantVowels.json",
+  "seconds": 3.5,
+  "group": "filters",
+  "listen_for": "A single sung note moving through ah, ee, oh and eh as three band-pass filters glide between vowel positions."
+ },
+ {
+  "name": "KeyboardTrackedFilter",
+  "file": "KeyboardTrackedFilter.json",
+  "seconds": 3.0,
+  "group": "filters",
+  "listen_for": "A rising arpeggio across five octaves that keeps the same tone colour because the cutoff follows the pitch."
+ },
+ {
+  "name": "ResonantSawBass",
+  "file": "ResonantSawBass.json",
+  "seconds": 3.0,
+  "group": "filters",
+  "listen_for": "A low saw line where each note opens with a resonant filter squelch that quickly closes."
+ },
+ {
+  "name": "VelocityFilterAmp",
+  "file": "VelocityFilterAmp.json",
+  "seconds": 2.5,
+  "group": "filters",
+  "listen_for": "One repeated note getting louder and brighter as it is struck harder, then falling back."
+ },
+ {
+  "name": "Wind",
+  "file": "Wind.json",
+  "seconds": 6.0,
+  "group": "filters",
+  "listen_for": "A rising and falling whoosh of noise through a slowly wandering band-pass filter."
+ },
+ {
+  "name": "Arpeggio",
+  "file": "Arpeggio.json",
+  "seconds": 4.25,
+  "group": "modulation",
+  "listen_for": "A steady up-and-down sixteenth-note arpeggio, written into the clip because the engine has no arpeggiator of its own."
+ },
+ {
+  "name": "AutoPan",
+  "file": "AutoPan.json",
+  "seconds": 4.0,
+  "group": "modulation",
+  "listen_for": "A chord that drifts smoothly from one ear to the other and back."
+ },
+ {
+  "name": "ChannelAftertouch",
+  "file": "ChannelAftertouch.json",
+  "seconds": 3.25,
+  "group": "modulation",
+  "listen_for": "A held chord that opens up as pressure rises and closes as it eases, modelled as one channel-wide parameter."
+ },
+ {
+  "name": "CurvedEnvelope",
+  "file": "CurvedEnvelope.json",
+  "seconds": 2.5,
+  "group": "modulation",
+  "listen_for": "Snappy plucks with a steep curved decay, made by multiplying an envelope by itself twice."
+ },
+ {
+  "name": "LegatoPortamento",
+  "file": "LegatoPortamento.json",
+  "seconds": 3.25,
+  "group": "modulation",
+  "listen_for": "One unbroken monophonic line that slides between pitches with no new attack; the notes are a pitch ramp on a single held note."
+ },
+ {
+  "name": "LoopingEnvelope",
+  "file": "LoopingEnvelope.json",
+  "seconds": 3.2,
+  "group": "modulation",
+  "listen_for": "A held chord that retriggers its own decaying envelope every eighth note, using a looped sample of the envelope shape."
+ },
+ {
+  "name": "MacroKnob",
+  "file": "MacroKnob.json",
+  "seconds": 3.05,
+  "group": "modulation",
+  "listen_for": "A dull, round note that a single macro turns bright, detuned and resonant while fading out its sub-octave."
+ },
+ {
+  "name": "MonoLead",
+  "file": "MonoLead.json",
+  "seconds": 2.85,
+  "group": "modulation",
+  "listen_for": "A single-voice lead where each new note cuts off the last and retriggers its filter and level envelopes."
+ },
+ {
+  "name": "PerVoiceLfo",
+  "file": "PerVoiceLfo.json",
+  "seconds": 4.1,
+  "group": "modulation",
+  "listen_for": "Three notes entering one by one that swell out of step, because each voice restarts its own LFO."
+ },
+ {
+  "name": "PitchBend",
+  "file": "PitchBend.json",
+  "seconds": 3.5,
+  "group": "modulation",
+  "listen_for": "A held note bent up a whole tone, down below where it started, then back to centre."
+ },
+ {
+  "name": "SampleAndHold",
+  "file": "SampleAndHold.json",
+  "seconds": 4.0,
+  "group": "modulation",
+  "listen_for": "A filter jumping to a new random cutoff eight times a second, using a looped stepped sample as the random source."
+ },
+ {
+  "name": "SawLfoFilter",
+  "file": "SawLfoFilter.json",
+  "seconds": 3.5,
+  "group": "modulation",
+  "listen_for": "A filter that repeatedly climbs and then snaps back three times a second, using a saw oscillator as a per-note LFO."
+ },
+ {
+  "name": "SharedLfo",
+  "file": "SharedLfo.json",
+  "seconds": 3.6,
+  "group": "modulation",
+  "listen_for": "Three notes entering one by one that all swell together, because one LFO runs for the whole track."
+ },
+ {
+  "name": "SquareLfoFilter",
+  "file": "SquareLfoFilter.json",
+  "seconds": 3.5,
+  "group": "modulation",
+  "listen_for": "A filter jumping between dark and bright three times a second, using a square oscillator as a per-note LFO."
+ },
+ {
+  "name": "StepSequencer",
+  "file": "StepSequencer.json",
+  "seconds": 4.0,
+  "group": "modulation",
+  "listen_for": "An eight-step acid-like bass loop repeating four times, with each step setting its own pitch and filter cutoff."
+ },
+ {
+  "name": "TempoSyncedLfo",
+  "file": "TempoSyncedLfo.json",
+  "seconds": 4.5,
+  "group": "modulation",
+  "listen_for": "A filter wobbling exactly twice per beat at 120 beats per minute, with the rate worked out by hand for this tempo."
+ },
+ {
+  "name": "TranceGate",
+  "file": "TranceGate.json",
+  "seconds": 4.25,
+  "group": "modulation",
+  "listen_for": "A held chord chopped into sharp sixteenth notes at 120 beats per minute by a low-frequency square wave."
+ },
+ {
+  "name": "Tremolo",
+  "file": "Tremolo.json",
+  "seconds": 4.0,
+  "group": "modulation",
+  "listen_for": "Sustained notes pulsing smoothly in volume six times a second."
+ },
+ {
+  "name": "TriangleLfoFilter",
+  "file": "TriangleLfoFilter.json",
+  "seconds": 3.5,
+  "group": "modulation",
+  "listen_for": "A filter sweep that rises and falls in straight lines three times a second, using a triangle oscillator as a per-note LFO."
+ },
+ {
+  "name": "VibratoModWheel",
+  "file": "VibratoModWheel.json",
+  "seconds": 3.8,
+  "group": "modulation",
+  "listen_for": "A held note that starts straight, then gains a singing vibrato as the mod wheel rises."
+ },
+ {
+  "name": "VoiceStealing",
+  "file": "VoiceStealing.json",
+  "seconds": 3.55,
+  "group": "modulation",
+  "listen_for": "A three-note pattern of long notes on two voices, where each new note cuts the oldest off abruptly with a faint tick."
+ },
+ {
+  "name": "DetunedSupersaw",
+  "file": "DetunedSupersaw.json",
+  "seconds": 4.25,
+  "group": "oscillators",
+  "listen_for": "A wide, shimmering chord stack where seven detuned saws beat slowly against each other on every note."
+ },
+ {
+  "name": "LoopedSample",
+  "file": "LoopedSample.json",
+  "seconds": 3.0,
+  "group": "oscillators",
+  "listen_for": "A sustained chord that holds as long as the notes are down because each sample loops, then fades on release."
+ },
+ {
+  "name": "OneShotSample",
+  "file": "OneShotSample.json",
+  "seconds": 3.0,
+  "group": "oscillators",
+  "listen_for": "One recorded hit replayed at seven pitches, ringing to its own end even though each key is released at once."
+ },
+ {
+  "name": "PluckedString",
+  "file": "PluckedString.json",
+  "seconds": 3.8,
+  "group": "oscillators",
+  "listen_for": "A Karplus-Strong guitar-like line where each noise burst rings as a pitched string and darkens as it fades."
+ },
+ {
+  "name": "PwmPad",
+  "file": "PwmPad.json",
+  "seconds": 4.75,
+  "group": "oscillators",
+  "listen_for": "A slow chord pad whose tone hollows and thickens as the pulse width sweeps."
+ },
+ {
+  "name": "StereoUnison",
+  "file": "StereoUnison.json",
+  "seconds": 3.5,
+  "group": "oscillators",
+  "listen_for": "One wide lead note spread across the stereo field, with five detuned saws panned from left to right."
+ },
+ {
+  "name": "SubOscillator",
+  "file": "SubOscillator.json",
+  "seconds": 2.5,
+  "group": "oscillators",
+  "listen_for": "A saw line with a square wave one octave below that adds weight under each note."
+ },
+ {
+  "name": "VelocityLayers",
+  "file": "VelocityLayers.json",
+  "seconds": 3.5,
+  "group": "oscillators",
+  "listen_for": "The same note struck softly and hard, flipping to a brighter recording above the middle of the velocity range."
+ },
+ {
+  "name": "WavetableMorph",
+  "file": "WavetableMorph.json",
+  "seconds": 4.75,
+  "group": "oscillators",
+  "listen_for": "Two long notes that each sweep smoothly from a pure sine, through a hollow square-like wave, to a bright saw, using three looped single-cycle samples."
+ }
+]

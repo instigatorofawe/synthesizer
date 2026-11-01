@@ -1,0 +1,501 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "add",
+      "inputs": {
+       "b": -0.3
+      }
+     },
+     {
+      "id": 3,
+      "type": "mtof"
+     },
+     {
+      "id": 4,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 5,
+      "type": "add",
+      "inputs": {
+       "b": -0.2
+      }
+     },
+     {
+      "id": 6,
+      "type": "mtof"
+     },
+     {
+      "id": 7,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 8,
+      "type": "add",
+      "inputs": {
+       "b": -0.1
+      }
+     },
+     {
+      "id": 9,
+      "type": "mtof"
+     },
+     {
+      "id": 10,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 11,
+      "type": "add",
+      "inputs": {
+       "b": 0.0
+      }
+     },
+     {
+      "id": 12,
+      "type": "mtof"
+     },
+     {
+      "id": 13,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 14,
+      "type": "add",
+      "inputs": {
+       "b": 0.1
+      }
+     },
+     {
+      "id": 15,
+      "type": "mtof"
+     },
+     {
+      "id": 16,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 17,
+      "type": "add",
+      "inputs": {
+       "b": 0.2
+      }
+     },
+     {
+      "id": 18,
+      "type": "mtof"
+     },
+     {
+      "id": 19,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 20,
+      "type": "add",
+      "inputs": {
+       "b": 0.3
+      }
+     },
+     {
+      "id": 21,
+      "type": "mtof"
+     },
+     {
+      "id": 22,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 23,
+      "type": "add"
+     },
+     {
+      "id": 24,
+      "type": "add"
+     },
+     {
+      "id": 25,
+      "type": "add"
+     },
+     {
+      "id": 26,
+      "type": "add"
+     },
+     {
+      "id": 27,
+      "type": "add"
+     },
+     {
+      "id": 28,
+      "type": "add"
+     },
+     {
+      "id": 29,
+      "type": "mul",
+      "inputs": {
+       "b": 0.2
+      }
+     },
+     {
+      "id": 30,
+      "type": "env",
+      "inputs": {
+       "attack": 0.01,
+       "decay": 0.2,
+       "sustain": 0.8,
+       "release": 0.25
+      }
+     },
+     {
+      "id": 31,
+      "type": "mul"
+     },
+     {
+      "id": 32,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "freq"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "in"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "freq"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "in"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 10,
+      "input": "freq"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 11,
+      "port": "out",
+      "to": 12,
+      "input": "in"
+     },
+     {
+      "from": 12,
+      "port": "out",
+      "to": 13,
+      "input": "freq"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 14,
+      "input": "a"
+     },
+     {
+      "from": 14,
+      "port": "out",
+      "to": 15,
+      "input": "in"
+     },
+     {
+      "from": 15,
+      "port": "out",
+      "to": 16,
+      "input": "freq"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 17,
+      "input": "a"
+     },
+     {
+      "from": 17,
+      "port": "out",
+      "to": 18,
+      "input": "in"
+     },
+     {
+      "from": 18,
+      "port": "out",
+      "to": 19,
+      "input": "freq"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 20,
+      "input": "a"
+     },
+     {
+      "from": 20,
+      "port": "out",
+      "to": 21,
+      "input": "in"
+     },
+     {
+      "from": 21,
+      "port": "out",
+      "to": 22,
+      "input": "freq"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 23,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 23,
+      "input": "b"
+     },
+     {
+      "from": 23,
+      "port": "out",
+      "to": 24,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "port": "out",
+      "to": 24,
+      "input": "b"
+     },
+     {
+      "from": 24,
+      "port": "out",
+      "to": 25,
+      "input": "a"
+     },
+     {
+      "from": 13,
+      "port": "out",
+      "to": 25,
+      "input": "b"
+     },
+     {
+      "from": 25,
+      "port": "out",
+      "to": 26,
+      "input": "a"
+     },
+     {
+      "from": 16,
+      "port": "out",
+      "to": 26,
+      "input": "b"
+     },
+     {
+      "from": 26,
+      "port": "out",
+      "to": 27,
+      "input": "a"
+     },
+     {
+      "from": 19,
+      "port": "out",
+      "to": 27,
+      "input": "b"
+     },
+     {
+      "from": 27,
+      "port": "out",
+      "to": 28,
+      "input": "a"
+     },
+     {
+      "from": 22,
+      "port": "out",
+      "to": 28,
+      "input": "b"
+     },
+     {
+      "from": 28,
+      "port": "out",
+      "to": 29,
+      "input": "a"
+     },
+     {
+      "from": 29,
+      "port": "out",
+      "to": 31,
+      "input": "a"
+     },
+     {
+      "from": 30,
+      "port": "out",
+      "to": 31,
+      "input": "b"
+     },
+     {
+      "from": 31,
+      "port": "out",
+      "to": 32,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 3360,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 57,
+        "vel": 100,
+        "dur": 700
+       },
+       {
+        "tick": 0,
+        "note": 60,
+        "vel": 100,
+        "dur": 700
+       },
+       {
+        "tick": 0,
+        "note": 64,
+        "vel": 100,
+        "dur": 700
+       },
+       {
+        "tick": 960,
+        "note": 55,
+        "vel": 100,
+        "dur": 700
+       },
+       {
+        "tick": 960,
+        "note": 59,
+        "vel": 100,
+        "dur": 700
+       },
+       {
+        "tick": 960,
+        "note": 62,
+        "vel": 100,
+        "dur": 700
+       },
+       {
+        "tick": 1920,
+        "note": 53,
+        "vel": 100,
+        "dur": 1200
+       },
+       {
+        "tick": 1920,
+        "note": 57,
+        "vel": 100,
+        "dur": 1200
+       },
+       {
+        "tick": 1920,
+        "note": 60,
+        "vel": 100,
+        "dur": 1200
+       },
+       {
+        "tick": 1920,
+        "note": 65,
+        "vel": 100,
+        "dur": 1200
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 5,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.2219
+    }
+   }
+  }
+ ]
+}

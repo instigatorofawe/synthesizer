@@ -1,0 +1,281 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "triangle"
+     },
+     {
+      "id": 4,
+      "type": "env",
+      "inputs": {
+       "attack": 0.001,
+       "decay": 0.05,
+       "sustain": 0.0,
+       "release": 0.05
+      }
+     },
+     {
+      "id": 5,
+      "type": "mul"
+     },
+     {
+      "id": 6,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "fx": {
+   "name": "fx",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in",
+      "index": 0
+     },
+     {
+      "id": 2,
+      "type": "add"
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 0.5
+      }
+     },
+     {
+      "id": 4,
+      "type": "delay",
+      "max": 0.6,
+      "inputs": {
+       "time": 0.25
+      }
+     },
+     {
+      "id": 5,
+      "type": "delay",
+      "max": 0.6,
+      "inputs": {
+       "time": 0.25
+      }
+     },
+     {
+      "id": 6,
+      "type": "mul",
+      "inputs": {
+       "b": 0.55
+      }
+     },
+     {
+      "id": 7,
+      "type": "add"
+     },
+     {
+      "id": 8,
+      "type": "add"
+     },
+     {
+      "id": 9,
+      "type": "add"
+     },
+     {
+      "id": 10,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "l",
+      "to": 2,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 2,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "in"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 4,
+      "input": "in"
+     },
+     {
+      "from": 1,
+      "port": "l",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 9,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 10,
+      "input": "l"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 10,
+      "input": "r"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 3360,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 72,
+        "vel": 110,
+        "dur": 60
+       },
+       {
+        "tick": 1920,
+        "note": 79,
+        "vel": 110,
+        "dur": 60
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 4,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ],
+      "inserts": [
+       {
+        "id": 7,
+        "patch": "fx"
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.6097
+    }
+   }
+  }
+ ]
+}

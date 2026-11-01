@@ -2,15 +2,20 @@
 # requires-python = ">=3.12,<3.14"
 # dependencies = ["numpy", "soundcard"]
 # ///
-"""Plays the oscillators through the sound card, to hear what each mode does.
+"""Plays the oscillators and the recipes through the sound card.
 
-Each sound is a scale over six octaves, then a sweep up to the top of the keyboard. Aliasing is easiest to hear on the sweep,
-as tones that fall while the note rises. Turn your volume down before the first run.
+Each oscillator is a scale over six octaves, then a sweep up to the top of the keyboard. Aliasing is easiest to hear on the
+sweep, as tones that fall while the note rises. The recipes in examples/Recipes are short pieces made of the same parts, from
+a detuned supersaw to a drum loop. Turn your volume down before the first run.
 
-    uv run examples/Listen.py                 # everything, about 95 seconds
+    uv run examples/Listen.py                 # every oscillator, about 95 seconds
     uv run examples/Listen.py saw square      # only these
     uv run examples/Listen.py --mode naive    # only this mode
     uv run examples/Listen.py --gain 0.05     # quieter
+    uv run examples/Listen.py --list          # the recipes, and what to listen for
+    uv run examples/Listen.py Kick808 Reverb  # any recipes or oscillators, by name
+    uv run examples/Listen.py --group drums   # one group of recipes
+    uv run examples/Listen.py --recipes       # all of them, about 4 minutes
 
 This renders with the native tools, because the Python binding has no engine in it yet:
 
@@ -20,6 +25,7 @@ This renders with the native tools, because the Python binding has no engine in 
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 import tempfile
@@ -29,6 +35,10 @@ import numpy as np
 import soundcard
 
 ROOT = Path(__file__).resolve().parent.parent
+RECIPES = ROOT / "examples" / "Recipes"
+RECIPE_PEAK = (
+    0.45  # Each recipe is rendered to this, so --gain sets where its peak lands
+)
 RATE = 48000
 BLOCK = 128
 TICKS_PER_SECOND = 960  # 480 ticks per beat at 120 bpm
@@ -157,38 +167,79 @@ def project(sound: dict, mode: str | None, gain: float) -> dict:
     }
 
 
+def render_request(request: Path, blocks: int, channels: int) -> np.ndarray:
+    """One row per sample. modsynth_render writes each channel's block in turn."""
+    with tempfile.TemporaryDirectory() as folder:
+        image = Path(folder) / "out.image"
+        samples = Path(folder) / "out.f32"
+        subprocess.run([find_tool("modsynth_compile"), request, image], check=True)
+        subprocess.run(
+            [find_tool("modsynth_render"), image, samples, str(blocks), str(channels)],
+            check=True,
+        )
+        audio = np.fromfile(samples, dtype="<f4")
+    return audio.reshape(-1, channels, BLOCK).transpose(0, 2, 1).reshape(-1, channels)
+
+
 def render(sound: dict, mode: str | None, gain: float) -> np.ndarray:
     blocks = TOTAL_TICKS * RATE // TICKS_PER_SECOND // BLOCK
     with tempfile.TemporaryDirectory() as folder:
         request = Path(folder) / "request.json"
-        image = Path(folder) / "out.image"
-        samples = Path(folder) / "out.f32"
         request.write_text(json.dumps(project(sound, mode, gain)))
-        subprocess.run([find_tool("modsynth_compile"), request, image], check=True)
-        subprocess.run(
-            [find_tool("modsynth_render"), image, samples, str(blocks), "1"], check=True
-        )
-        return np.fromfile(samples, dtype="<f4")
+        return render_request(request, blocks, 1)
+
+
+def render_recipe(recipe: dict, gain: float) -> np.ndarray:
+    blocks = math.ceil(recipe["seconds"] * RATE / BLOCK)
+    return render_request(RECIPES / recipe["file"], blocks, 2) * (gain / RECIPE_PEAK)
+
+
+def list_recipes(recipes: list[dict]) -> None:
+    for group in sorted({r["group"] for r in recipes}):
+        print(group)
+        for recipe in recipes:
+            if recipe["group"] == group:
+                print(f"  {recipe['name']:32}{recipe['listen_for']}")
 
 
 def main() -> None:
+    recipes = json.loads((RECIPES / "Index.json").read_text())
+    by_name = {recipe["name"]: recipe for recipe in recipes}
+    groups = sorted({recipe["group"] for recipe in recipes})
+
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("sounds", nargs="*", help=f"any of {', '.join(SOUNDS)}")
+    parser.add_argument(
+        "sounds", nargs="*", help=f"any of {', '.join(SOUNDS)}, or a recipe"
+    )
     parser.add_argument("--mode", choices=MODES, help="play only this mode")
     parser.add_argument("--gain", type=float, default=0.2, help="default 0.2")
+    parser.add_argument("--list", action="store_true", help="list the recipes")
+    parser.add_argument("--recipes", action="store_true", help="play every recipe")
+    parser.add_argument("--group", choices=groups, help="play one group of recipes")
     args = parser.parse_args()
-    if unknown := set(args.sounds) - set(SOUNDS):
+    if unknown := set(args.sounds) - set(SOUNDS) - set(by_name):
         parser.error(f"unknown sound: {', '.join(sorted(unknown))}")
+    if args.list:
+        list_recipes(recipes)
+        return
+
+    chosen = [by_name[name] for name in args.sounds if name in by_name]
+    chosen += [r for r in recipes if args.recipes or r["group"] == args.group]
+    named = [name for name in args.sounds if name in SOUNDS]
+    oscillators = named or ([] if chosen else list(SOUNDS))
 
     speaker = soundcard.default_speaker()
     print(f"Playing through {speaker.name}. Ctrl-C stops.")
-    for name in args.sounds or SOUNDS:
+    for name in oscillators:
         sound = SOUNDS[name]
         for mode in sound.get("modes", MODES):
             if mode and args.mode and mode != args.mode:
                 continue
             print(f"{name} {mode or ''}".strip(), flush=True)
             speaker.play(render(sound, mode, args.gain), samplerate=RATE)
+    for recipe in chosen:
+        print(f"{recipe['name']}: {recipe['listen_for']}", flush=True)
+        speaker.play(render_recipe(recipe, args.gain), samplerate=RATE)
 
 
 if __name__ == "__main__":

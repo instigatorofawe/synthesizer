@@ -100,7 +100,9 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
   wrong for anything above half the frame rate, 187.5 Hz at frame 128: a 1 kHz modulator on a cutoff gave sidebands at +-125 Hz. Only a
   patch's author knows which case this is, so a `snap` node says so, and every wire has one rate. Env is audio, so a filter or pitch
   envelope goes through one. `Demo` and `AllOps` predate the rule, so `GoldenTest` adds their snaps to the JSON it compiles. A snap has its
-  own place among the steps, which moved their bytes, and they render bit for bit as they did [measured].
+  own place among the steps, which moved their bytes, and they render bit for bit as they did [measured]. It can also move a Noise step, whose seed
+  comes from its position, so adding one to a patch with noise can change the noise sequence, at the same level. Of 11 recipes that needed
+  snaps, 2 did, and with noise taken out they too matched to the bit [measured].
 - The loader lowers wire Steps into a private decoded array, so run time never re-reads validated bytes.
 - Kernels are total: safe for every input value. Wrapped oscillators use u32 phase and power-of-two tables.
 

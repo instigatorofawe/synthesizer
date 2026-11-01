@@ -103,6 +103,10 @@
      {
       "id": 16,
       "type": "out"
+     },
+     {
+      "id": 17,
+      "type": "snap"
      }
     ],
     "edges": [
@@ -119,8 +123,7 @@
       "input": "a"
      },
      {
-      "from": 4,
-      "port": "out",
+      "from": 17,
       "to": 5,
       "input": "freq"
      },
@@ -195,6 +198,12 @@
       "port": "out",
       "to": 16,
       "input": "l"
+     },
+     {
+      "from": 4,
+      "to": 17,
+      "input": "in",
+      "port": "out"
      }
     ]
    }

@@ -193,6 +193,14 @@
      {
       "id": 16,
       "type": "out"
+     },
+     {
+      "id": 17,
+      "type": "snap"
+     },
+     {
+      "id": 18,
+      "type": "snap"
      }
     ],
     "edges": [
@@ -233,8 +241,7 @@
       "input": "a"
      },
      {
-      "from": 6,
-      "port": "out",
+      "from": 17,
       "to": 7,
       "input": "in"
      },
@@ -269,8 +276,7 @@
       "input": "a"
      },
      {
-      "from": 11,
-      "port": "out",
+      "from": 18,
       "to": 12,
       "input": "in"
      },
@@ -315,6 +321,18 @@
       "port": "out",
       "to": 16,
       "input": "r"
+     },
+     {
+      "from": 6,
+      "to": 17,
+      "input": "in",
+      "port": "out"
+     },
+     {
+      "from": 11,
+      "to": 18,
+      "input": "in",
+      "port": "out"
      }
     ]
    }

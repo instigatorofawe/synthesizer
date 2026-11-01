@@ -18,6 +18,7 @@ checked against committed renders in [golden](golden).
 | `golden` | Images from the freeze and their renders. They never change. |
 | `web` | The SvelteKit app, with Drizzle over SQLite |
 | `examples/Demo.json` | The project every target renders. `MakeDemo.py` regenerates it. |
+| `examples/Listen.py` | Plays each oscillator and mode through the sound card, with `uv run examples/Listen.py`. |
 
 ## Native
 
@@ -54,13 +55,13 @@ and then fuzzes on a Cortex-M4. `FUZZ_SECONDS` and `FUZZ_RANDOM` set how long, a
 
     cmake -B build/fuzz -DMODSYNTH_BUILD_FUZZ=ON -DMODSYNTH_BUILD_TESTS=OFF -DMODSYNTH_BUILD_COMPILER=OFF -DMODSYNTH_INSTALL=OFF
     cmake --build build/fuzz --target modsynth_fuzz
-    build/fuzz/modsynth_fuzz 60 1 golden/AllOps.image golden/Demo.image
+    build/fuzz/modsynth_fuzz 60 1 golden/AllOps.image golden/Demo.image golden/Waves.image
 
 The arguments are seconds, a random seed, and the images to start from. Use `emcmake cmake` for wasm32 and run the result with
 `node`. A failure prints a recipe, and `--replay` runs it again on any target, with the same image, under whatever sanitizers
 that target has:
 
-    build/fuzz/modsynth_fuzz --replay 0:3219687050,256226439 1 golden/AllOps.image golden/Demo.image
+    build/fuzz/modsynth_fuzz --replay 0:3219687050,256226439 1 golden/AllOps.image golden/Demo.image golden/Waves.image
 
 Fuzz with `AllOps.image` as well as `Demo.image`. The demo's tasks all depend on each other and it has no globals, so on its own it
 cannot exercise the rules that make task order irrelevant. Section 23 of the design says what each oracle catches.
@@ -71,7 +72,7 @@ Before changing anything in `Format.hpp`, `Opcodes.def` or a kernel, read sectio
 files are append-only, and CI enforces that against the base branch. `tools/ReadImage.py` reads images from the specification alone, and
 fails if the document and the code disagree:
 
-    python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image
+    python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image
     python3 tools/ReadImage.py --example golden/Minimal.image
     python3 tools/CheckAppendOnly.py origin/main
 

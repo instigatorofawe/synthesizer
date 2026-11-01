@@ -75,6 +75,7 @@ add_firmware(StereoCmsis 2 cmsis)
 # function both files use keeps its instrumented copy.
 set(MODSYNTH_FUZZ_SEED_A ${MODSYNTH_GOLDEN}/AllOps.image CACHE FILEPATH "First image to fuzz from")
 set(MODSYNTH_FUZZ_SEED_B ${MODSYNTH_GOLDEN}/Demo.image CACHE FILEPATH "Second image to fuzz from")
+set(MODSYNTH_FUZZ_SEED_C ${MODSYNTH_GOLDEN}/Waves.image CACHE FILEPATH "Third image to fuzz from")
 set(MODSYNTH_FUZZ_SECONDS 60 CACHE STRING "How long the fuzzer runs")
 set(MODSYNTH_FUZZ_RANDOM 1 CACHE STRING "Random seed for the fuzzer")
 set(FUZZ_FLAGS ${ARCH} -O2 -g -ffp-contract=off -fno-math-errno -fno-exceptions -fno-rtti -fno-threadsafe-statics
@@ -91,6 +92,7 @@ target_include_directories(Fuzz PRIVATE ../include)
 target_compile_definitions(Fuzz PRIVATE
     MODSYNTH_FUZZ_SEED_A="${MODSYNTH_FUZZ_SEED_A}"
     MODSYNTH_FUZZ_SEED_B="${MODSYNTH_FUZZ_SEED_B}"
+    MODSYNTH_FUZZ_SEED_C="${MODSYNTH_FUZZ_SEED_C}"
     MODSYNTH_FUZZ_SECONDS=${MODSYNTH_FUZZ_SECONDS}
     MODSYNTH_FUZZ_RANDOM=${MODSYNTH_FUZZ_RANDOM}
 )

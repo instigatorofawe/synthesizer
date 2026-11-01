@@ -146,12 +146,91 @@ TEST(CompilePatch, ReusesBuffersByLastUse) {
     EXPECT_LT(v.h.buffers, v.h.voice_steps);
 }
 
+TEST(CompilePatch, OscillatorModesAndWidthsAreChecked) {
+    json graph = simple_graph("saw");
+    graph["nodes"][2]["mode"] = "fancy";
+    EXPECT_THROW(compile_patch(graph, "p"), CompileError);
+
+    graph = simple_graph("wobble");
+    EXPECT_THROW(compile_patch(graph, "p"), CompileError);
+
+    // Silently ignoring a wire would be worse than refusing it.
+    for (const char* wave : {"saw", "triangle", "sine"}) {
+        graph = simple_graph(wave);
+        graph["nodes"].push_back({{"id", 5}, {"type", "const"}, {"value", 0.3}});
+        graph["edges"].push_back({{"from", 5}, {"to", 3}, {"input", "width"}});
+        EXPECT_THROW(compile_patch(graph, "p"), CompileError) << wave;
+    }
+    graph = simple_graph("square");
+    graph["nodes"].push_back({{"id", 5}, {"type", "const"}, {"value", 0.3}});
+    graph["edges"].push_back({{"from", 5}, {"to", 3}, {"input", "width"}});
+    EXPECT_NO_THROW(compile_patch(graph, "p"));
+}
+
+TEST(CompileImage, OscillatorsCompileToTheirOwnOpcodes) {
+    const auto compiled = [](const char* wave, const char* mode) {
+        json request = request_with({wave}, {program("a", one_note_timeline(wave))});
+        if (*mode) request["patches"][wave]["graph"]["nodes"][2]["mode"] = mode;
+        const LoadedImage loaded(compile_image(request).image);
+        EXPECT_EQ(loaded.loader.status(), LoadStatus::Ready) << to_string(loaded.loader.error());
+        for (u32 i = 0; i < loaded.table.size(); ++i) {
+            const ChunkRef& c = loaded.storage[i];
+            PatchView v;
+            if (c.kind != static_cast<u8>(ChunkKind::Patch) || !parse_patch({c.data, c.size}, v)) continue;
+            for (u32 s = 0; s < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++s) {
+                const WireStep step = v.step(s);
+                const Op op = static_cast<Op>(step.op);
+                if (op == Op::Osc || op == Op::Saw || op == Op::Pulse || op == Op::Triangle) {
+                    return std::pair(op, step.mode);
+                }
+            }
+        }
+        ADD_FAILURE() << "no oscillator";
+        return std::pair(Op::Fill, u8{0});
+    };
+    EXPECT_EQ(compiled("sine", ""), std::pair(Op::Osc, u8{0}));
+    EXPECT_EQ(compiled("saw", ""), std::pair(Op::Saw, u8{0}));
+    EXPECT_EQ(compiled("saw", "naive"), std::pair(Op::Saw, kNaive));
+    EXPECT_EQ(compiled("square", ""), std::pair(Op::Pulse, u8{0}));
+    EXPECT_EQ(compiled("square", "naive"), std::pair(Op::Pulse, kNaive));
+    EXPECT_EQ(compiled("triangle", ""), std::pair(Op::Triangle, u8{0}));
+    EXPECT_EQ(compiled("triangle", "naive"), std::pair(Op::Triangle, u8{0}));
+}
+
+TEST(CompileImage, OnlySineCarriesATable) {
+    const auto tables = [](const char* wave) {
+        return count_kind(compile_image(request_with({wave}, {program("a", one_note_timeline(wave))})).report, "table");
+    };
+    EXPECT_EQ(tables("sine"), 1);
+    for (const char* wave : {"saw", "square", "triangle"}) EXPECT_EQ(tables(wave), 0) << wave;
+}
+
+TEST(CompileImage, DeclaresOnlyTheRevisionItUses) {
+    const auto revision_of = [](const std::vector<std::byte>& image) {
+        return load<ManifestHeader>(image.data() + sizeof(ChunkHeader)).revision;
+    };
+    const auto compile = [](const char* wave) {
+        return compile_image(request_with({wave}, {program("a", one_note_timeline(wave))}));
+    };
+    EXPECT_EQ(revision_of(compile("sine").image), 0u);
+    for (const char* wave : {"saw", "square", "triangle"}) EXPECT_EQ(revision_of(compile(wave).image), 1u) << wave;
+
+    // A thin image omits the patch, and a receiver still has to run it.
+    json request = request_with({"saw"}, {program("a", one_note_timeline("saw"))});
+    json omit = json::array();
+    for (const json& c : compile("saw").report.at("chunks")) {
+        if (c.at("kind") == "patch") omit.push_back(c.at("hash"));
+    }
+    request["omit"] = omit;
+    EXPECT_EQ(revision_of(compile_image(request).image), 1u);
+}
+
 TEST(CompileImage, HoldsOnlyPatchesTheProgramReaches) {
     const auto result =
         compile_image(request_with({"saw", "sine", "square"}, {program("a", one_note_timeline("saw"))}));
     EXPECT_EQ(patch_ids(result.report, 0), std::vector<std::string>{"saw"});
     EXPECT_EQ(count_kind(result.report, "patch"), 1);
-    EXPECT_EQ(count_kind(result.report, "table"), 1);
+    EXPECT_EQ(count_kind(result.report, "table"), 0);
     EXPECT_EQ(result.report.at("library_patches"), 3);
     EXPECT_EQ(result.report.at("compiled_patches"), 1);
 }
@@ -222,8 +301,8 @@ TEST(CompileImage, PatchBytesDoNotDependOnTheTimeline) {
 
 TEST(CompileImage, ABundleSharesEachChunkOnce) {
     const auto result = compile_image(request_with(
-        {"saw", "sine"}, {program("a", one_note_timeline("saw")), program("b", one_note_timeline("saw", "72")),
-                          program("c", one_note_timeline("sine"))}));
+        {"saw", "sine"}, {program("a", one_note_timeline("sine")), program("b", one_note_timeline("sine", "72")),
+                          program("c", one_note_timeline("saw"))}));
     EXPECT_EQ(count_kind(result.report, "patch"), 2);
     EXPECT_EQ(count_kind(result.report, "program"), 3);
     for (const json& c : result.report.at("chunks")) {
@@ -233,7 +312,7 @@ TEST(CompileImage, ABundleSharesEachChunkOnce) {
     }
     int shared = 0;
     for (const json& c : result.report.at("chunks")) shared += c.at("programs") == 2;
-    EXPECT_GE(shared, 2);  // saw's patch and its table
+    EXPECT_GE(shared, 2);  // sine's patch and its table
 }
 
 TEST(CompileImage, TwoLibraryPatchesWithTheSameBytesMerge) {

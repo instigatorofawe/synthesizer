@@ -162,7 +162,9 @@ TEST(Rules, ImageLayout) {
               LoadError::BadManifest);
     const u32 one = 1;
     EXPECT_EQ(load_error(with_manifest(good, offsetof(ManifestHeader, reserved), &one, 4)), LoadError::BadManifest);
-    EXPECT_EQ(load_error(with_manifest(good, offsetof(ManifestHeader, revision), &one, 4)), LoadError::TooNew);
+    const u32 newer_revision = kFormatRevision + 1;
+    EXPECT_EQ(load_error(with_manifest(good, offsetof(ManifestHeader, revision), &newer_revision, 4)),
+              LoadError::TooNew);
 
     const u8 two = 2;
     EXPECT_EQ(load_error(with_manifest(good, sizeof(ManifestHeader) + offsetof(ManifestEntry, present), &two, 1)),
@@ -180,6 +182,18 @@ TEST(Rules, ImageLayout) {
     first.version = kFormatVersion + 1;
     std::memcpy(newer.data(), &first, sizeof first);
     EXPECT_EQ(load_error(newer), LoadError::TooNew);
+}
+
+TEST(Rules, AnImageMustDeclareTheRevisionOfItsOpcodes) {
+    Hand hand;
+    hand.patch.voice[0].op = static_cast<u8>(Op::Saw);
+    const auto declared = hand.bytes();
+    ASSERT_EQ(load<ManifestHeader>(declared.data() + sizeof(ChunkHeader)).revision, 1u);
+    EXPECT_EQ(load_error(declared), LoadError::None);
+
+    // Saying 0 would get an old engine to call this damaged, when it only needs to be newer.
+    const u32 zero = 0;
+    EXPECT_EQ(load_error(with_manifest(declared, offsetof(ManifestHeader, revision), &zero, 4)), LoadError::BadPatch);
 }
 
 TEST(Rules, ChunksMustBeInManifestOrder) {

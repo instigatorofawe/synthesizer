@@ -1,6 +1,6 @@
-# modsynth design, revision 8
+# modsynth design, revision 9
 
-Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1. `docs/Format.md` is its specification,
+Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 1. `docs/Format.md` is its specification,
 and where this document and that one differ, that one is right. This document replaces all earlier revisions, and everything
 needed from them is included here. Sections about later milestones are still proposals.
 
@@ -290,6 +290,24 @@ Cycles per sample, frame 64:
 | Reverb comb, f32 / i16 line | 25.8 / 34.8 | none |
 | Reverb allpass | 20.5 | none |
 
+The native oscillators came later, from a pass that prices the wavetable oscillator at 19.5, so compare them with that. Their band-limited forms
+pay only beside a jump, so they cost more at high notes, and the ranges run from 110 Hz to 4186 Hz:
+
+| Oscillator | Cycles per sample |
+|---|---|
+| Wavetable, now only sine and custom tables | 19.5 |
+| Saw, band-limited / naive | 14.0 to 15.6 / 9.4 |
+| Pulse, band-limited / naive | 19.3 to 22.7 / 10.7 |
+| Triangle | 11.4 |
+
+Cycles were not the reason for them. Saw, square and triangle used to be one table each, with 48 harmonics at every pitch. Above 500 Hz those
+fold back, and at 1760 Hz the saw's aliases were at −15 dB, about as bad as no anti-aliasing at all. Below it the table runs out, so a 110 Hz saw
+stopped at 5.3 kHz. PolyBLEP gives −29 dB at 1760 Hz and keeps the top end, at the price of −36 dB where the table had −85 dB at 440 Hz, and about
+3 dB of droop at 15 kHz [measured]. One table per octave would beat both, at the table's cycle cost, but an image would hold roughly 80 KB per wave
+and the format would need a table with levels [estimate]. Naive stays available as mode 1, because it is half the cost, is fine for a low note, and
+is sometimes the sound that is wanted. Triangle has only the naive form: PolyBLAMP doubled its cost and gained about 12 dB. In a graph, `"mode": "naive"` on an `osc` node
+selects it, and a square takes a `width` input.
+
 Whole voice (2 oscillators, noise, 2 filters, envelope), per voice with 4 held:
 
 | Build | Cycles per sample |
@@ -357,17 +375,17 @@ that, and any promise about voice counts waits for it.
 Golden audio compares within a tolerance of −100 dB relative to peak, and audio is not required to be bit-identical across
 targets. The reference is committed: `golden/` holds images written at the freeze, with their renders, and they never change.
 
-Measured at the freeze against those references, which a macOS arm64 build wrote. `Demo` is 122,880 stereo samples and `AllOps` 102,400;
-each mono render has half as many. Zero means exactly that: every sample's bits match.
+Measured against those references, which a macOS arm64 build wrote. `Demo` is 122,880 stereo samples, `AllOps` 102,400 and `Waves`, from revision 1,
+51,200. Each mono render has half as many. Zero means exactly that: every sample's bits match.
 
 | Target | Compiler | Stereo samples that differ | Mono samples that differ |
 |---|---|---|---|
-| macOS arm64 | Clang | 0 of both | 0 of both |
-| Linux arm64 | GCC 14.2 | 0 of both | 0 of both |
-| Linux x86-64, emulated | GCC 14.2 | 0 of both | 0 of both |
-| wasm32 under Node | Emscripten 6.0 | 0 of both | no mono build |
-| Cortex-M4 on the L475 model, scalar | arm-none-eabi-gcc 14.2 | 0 of both | 0 of both |
-| Cortex-M4 on the L475 model, CMSIS-DSP | arm-none-eabi-gcc 14.2 | Demo at most −123.9 dB, AllOps at most −108.0 dB | no mono build |
+| macOS arm64 | Clang | 0 of all | 0 of all |
+| Linux arm64 | GCC 14.2 | 0 of all | 0 of all |
+| Linux x86-64, emulated | GCC 14.2 | 0 of all | 0 of all |
+| wasm32 under Node | Emscripten 6.0 | 0 of all | no mono build |
+| Cortex-M4 on the L475 model, scalar | arm-none-eabi-gcc 14.2 | 0 of all | 0 of all |
+| Cortex-M4 on the L475 model, CMSIS-DSP | arm-none-eabi-gcc 14.2 | Demo at most −123.9 dB, AllOps at most −108.0 dB, Waves 0 | no mono build |
 
 The scalar results come from `Math.hpp` and `-ffp-contract=off`: nothing in the signal path reaches libm or merges a multiply into an add. The
 CMSIS kernels trade that for speed, which is why the tolerance exists and why they are the one row that needs it.

@@ -39,6 +39,9 @@ MODSYNTH_OP(KMtoF,      19, 1,   Scalar, 1,  Scalar, None,   None,   None,   Non
 MODSYNTH_OP(KRatio,     20, 1,   Scalar, 1,  Scalar, None,   None,   None,   None,    127,     true,   false)
 MODSYNTH_OP(KSnap,      21, 1,   Scalar, 1,  Buffer, None,   None,   None,   None,    0,       false,  false)
 MODSYNTH_OP(KLfo,       22, 1,   Scalar, 2,  Scalar, Scalar, None,   None,   None,    0,       true,   false)
+MODSYNTH_OP(Saw,        23, 1,   Buffer, 1,  Scalar, None,   None,   None,   None,    1,       false,  false)
+MODSYNTH_OP(Pulse,      24, 1,   Buffer, 2,  Scalar, Scalar, None,   None,   None,    1,       false,  false)
+MODSYNTH_OP(Triangle,   25, 1,   Buffer, 1,  Scalar, None,   None,   None,   None,    0,       false,  false)
 
 // Instructions. a, b and c say which fields it uses. An unused field must be zero.
 //             name      id  a  b  c

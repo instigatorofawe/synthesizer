@@ -154,7 +154,7 @@ test('a bundle exports with shared patches, and thin without them', async ({ pag
 	await page.getByRole('button', { name: 'Export saved bundle' }).click();
 	const full = await download;
 	expect(full.suggestedFilename()).toBe('Demo set.msimg');
-	await expect(page.getByText('4 of 4 patches compiled in, 3 chunks shared between 2 programs')).toBeVisible();
+	await expect(page.getByText('4 of 4 patches compiled in, 2 chunks shared between 2 programs')).toBeVisible();
 
 	const second = page.waitForEvent('download');
 	await page.getByLabel('Programs only').check();

@@ -84,31 +84,10 @@ inline double exact_sin_turns(double turns) {
     return sum;
 }
 
-inline Chunk make_wave_table(const std::string& wave, const std::string& where) {
+inline Chunk make_sine_table() {
     constexpr u32 length = 2048;
-    constexpr int harmonics = 48;
     std::vector<float> samples(length);
-    for (u32 i = 0; i < length; ++i) {
-        const double t = static_cast<double>(i) / length;
-        double v = 0.0;
-        if (wave == "sine") {
-            v = exact_sin_turns(t);
-        } else if (wave == "saw") {
-            for (int h = 1; h <= harmonics; ++h) v += exact_sin_turns(t * h) / h * (h % 2 ? 1.0 : -1.0);
-            v *= 0.6;
-        } else if (wave == "square") {
-            for (int h = 1; h <= harmonics; h += 2) v += exact_sin_turns(t * h) / h;
-            v *= 0.9;
-        } else if (wave == "triangle") {
-            for (int h = 1; h <= harmonics; h += 2) {
-                v += exact_sin_turns(t * h) / (h * h) * (((h - 1) / 2) % 2 ? -1.0 : 1.0);
-            }
-            v *= 0.8;
-        } else {
-            throw CompileError(where, "unknown wave '" + wave + "'");
-        }
-        samples[i] = static_cast<float>(v);
-    }
+    for (u32 i = 0; i < length; ++i) samples[i] = static_cast<float>(exact_sin_turns(static_cast<double>(i) / length));
     Writer w;
     w.put(TableHeader{length, 0});
     w.put_all(samples);
@@ -210,7 +189,7 @@ inline const std::vector<NodeSpec>& node_specs() {
         {"note", {}, {"pitch", "velocity", "gate"}},
         {"param", {}, {"out"}},
         {"const", {}, {"out"}},
-        {"osc", {{"freq", 440.0f}}, {"out"}},
+        {"osc", {{"freq", 440.0f}, {"width", 0.5f}}, {"out"}},
         {"noise", {}, {"out"}},
         {"biquad", {{"in", 0.0f}, {"cutoff", 1000.0f}, {"q", 0.707f}}, {"out"}},
         {"env", {{"attack", 0.01f}, {"decay", 0.1f}, {"sustain", 0.7f}, {"release", 0.2f}}, {"out"}},
@@ -555,9 +534,29 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         } else if (type == "const") {
             set("out", constant(n.config.value("value", 0.0f)));
         } else if (type == "osc") {
-            const u16 table = add_ref(make_wave_table(n.config.value("wave", "sine"), node_where(id)));
-            const Value freq = scalar_in(n, "freq");
-            set("out", audio_step(Op::Osc, {freq}, 1, state, 0, table).out[0]);
+            const std::string wave = n.config.value("wave", "sine");
+            const std::string quality = n.config.value("mode", "bandlimited");
+            if (quality != "bandlimited" && quality != "naive") {
+                throw CompileError(node_where(id), "unknown osc mode '" + quality + "'");
+            }
+            if (wave != "square" && input(n, "width")) throw CompileError(node_where(id), "only square has a width");
+            const u8 mode = quality == "naive" ? kNaive : 0;
+            if (wave == "sine") {
+                const u16 table = add_ref(make_sine_table());
+                const Value freq = scalar_in(n, "freq");
+                set("out", audio_step(Op::Osc, {freq}, 1, state, 0, table).out[0]);
+            } else if (wave == "saw") {
+                const Value freq = scalar_in(n, "freq");
+                set("out", audio_step(Op::Saw, {freq}, 1, state, mode).out[0]);
+            } else if (wave == "square") {
+                const Value freq = scalar_in(n, "freq"), width = scalar_in(n, "width");
+                set("out", audio_step(Op::Pulse, {freq, width}, 1, state, mode).out[0]);
+            } else if (wave == "triangle") {
+                const Value freq = scalar_in(n, "freq");
+                set("out", audio_step(Op::Triangle, {freq}, 1, state).out[0]);
+            } else {
+                throw CompileError(node_where(id), "unknown wave '" + wave + "'");
+            }
         } else if (type == "noise") {
             set("out", audio_step(Op::Noise, {}, 1, state).out[0]);
         } else if (type == "biquad") {
@@ -1394,10 +1393,18 @@ inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& order
     u32 programs = 0;
     Writer body;
     for (const Chunk* c : ordered) programs += c->kind == ChunkKind::Program;
-    // Not kFormatRevision: an image needs only the revision of what it uses, so it keeps loading on older engines.
-    // Everything this compiler can write is in revision 0. A revision that adds an opcode raises this for images that
-    // use it.
-    constexpr u32 needs_revision = 0;
+    // Not kFormatRevision: an image needs only the revision of what it uses, so it keeps loading on older engines. This
+    // covers omitted chunks too, as a receiver runs those just the same.
+    u32 needs_revision = 0;
+    for (const Chunk* c : ordered) {
+        PatchView v;
+        if (c->kind != ChunkKind::Patch || !parse_patch({c->payload.data(), c->payload.size()}, v)) continue;
+        const u32 steps = static_cast<u32>(v.h.control_steps) + v.h.voice_steps;
+        for (u32 i = 0; i < steps; ++i) {
+            const u8 op = v.step(i).op;
+            if (op_known(op)) needs_revision = std::max(needs_revision, op_revision(static_cast<Op>(op)));
+        }
+    }
     body.put(ManifestHeader{static_cast<u32>(ordered.size()), programs, needs_revision, 0});
     for (const Chunk* c : ordered) {
         const bool present = !omit.count(c->hash);

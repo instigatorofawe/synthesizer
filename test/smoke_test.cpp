@@ -2,6 +2,4 @@
 
 #include <modsynth/modsynth.hpp>
 
-TEST_CASE("test harness runs") {
-    SUCCEED();
-}
+TEST_CASE("test harness runs") { SUCCEED(); }

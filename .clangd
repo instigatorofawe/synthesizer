@@ -1,0 +1,11 @@
+CompileFlags:
+  CompilationDatabase: build/native # clangd only searches build/ itself, not its subdirectories
+Style:
+  AngledHeaders: ["modsynth/.*"] # Otherwise auto-includes are quoted and land in the wrong block
+---
+# Finding Emscripten's headers also needs the editor to pass clangd --query-driver='**/em++',
+# which can't be set from this file.
+If:
+  PathMatch: bindings/wasm\.cpp
+CompileFlags:
+  CompilationDatabase: build/wasm

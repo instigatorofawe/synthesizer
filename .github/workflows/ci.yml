@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4 # With Makefiles a bare --parallel means unlimited jobs
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uvx pre-commit run --all-files --show-diff-on-failure
+
+  native:
+    name: native (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gcc, os: ubuntu-latest, cxx: g++ }
+          - { name: clang, os: ubuntu-latest, cxx: clang++ }
+          - { name: macos, os: macos-latest, cxx: clang++ }
+    env:
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: cmake -B build -DMODSYNTH_BUILD_BENCH=ON
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: cmake --install build --prefix install
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: mymindstorm/setup-emsdk@v16
+        with:
+          version: 6.0.13
+      - run: emcmake cmake -B build
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+
+  python:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      UV_PYTHON_PREFERENCE: only-managed # A system Python may not have the headers the extension needs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uv build
+      - name: Import the abi3 wheel on the oldest and newest supported Python
+        run: |
+          for python in 3.12 3.15; do
+            uv run --isolated --no-project --python "$python" --with dist/*.whl python -c "import modsynth"
+          done

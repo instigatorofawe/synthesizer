@@ -144,6 +144,10 @@
      {
       "id": 21,
       "type": "out"
+     },
+     {
+      "id": 22,
+      "type": "snap"
      }
     ],
     "edges": [
@@ -211,11 +215,16 @@
      },
      {
       "from": 11,
+      "to": 22,
+      "input": "in"
+     },
+     {
+      "from": 22,
       "to": 13,
       "input": "cutoff"
      },
      {
-      "from": 11,
+      "from": 22,
       "to": 14,
       "input": "cutoff"
      },

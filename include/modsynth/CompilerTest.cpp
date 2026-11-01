@@ -83,6 +83,87 @@ TEST(CompilePatch, DeadNodesLeaveNoTrace) {
     EXPECT_EQ(compile_patch(graph, "p").chunk.hash, base);
 }
 
+// Noise into one input of a node, and that node into the output.
+json wired_to(const std::string& type, const std::string& input, const std::string& port = "") {
+    json consumer = {{"id", 2}, {"type", type}};
+    if (type == "osc") consumer["wave"] = "square";
+    json edge_out = {{"from", 2}, {"to", 3}, {"input", "l"}};
+    if (!port.empty()) edge_out["port"] = port;
+    json graph;
+    graph["nodes"] = json::array({json{{"id", 1}, {"type", "noise"}}, consumer, json{{"id", 3}, {"type", "out"}}});
+    graph["edges"] = json::array({json{{"from", 1}, {"to", 2}, {"input", input}}, edge_out});
+    return graph;
+}
+
+struct FrameInput {
+    const char* type;
+    const char* input;
+    const char* port;
+};
+constexpr FrameInput kFrameInputs[] = {
+    {"osc", "freq", ""},         {"osc", "width", ""},      {"biquad", "cutoff", ""}, {"biquad", "q", ""},
+    {"env", "attack", ""},       {"env", "decay", ""},      {"env", "sustain", ""},   {"env", "release", ""},
+    {"mtof", "in", ""},          {"ratio", "in", ""},       {"pan", "position", "l"}, {"delay", "time", ""},
+    {"comb", "time", ""},        {"comb", "feedback", ""},  {"comb", "damp", ""},     {"allpass", "time", ""},
+    {"allpass", "feedback", ""}, {"follow", "release", ""}, {"lfo", "rate", ""},      {"lfo", "depth", ""},
+};
+
+TEST(CompilePatch, AudioCannotReachAnInputReadOnceAFrame) {
+    for (const FrameInput& f : kFrameInputs) {
+        SCOPED_TRACE(std::string(f.type) + "." + f.input);
+        try {
+            compile_patch(wired_to(f.type, f.input, f.port), "p");
+            ADD_FAILURE() << "compiled";
+        } catch (const CompileError& e) {
+            EXPECT_NE(std::string(e.what()).find("put a snap node on the wire"), std::string::npos) << e.what();
+        }
+    }
+}
+
+TEST(CompilePatch, ASnapNodeLetsAudioThrough) {
+    for (const FrameInput& f : kFrameInputs) {
+        SCOPED_TRACE(std::string(f.type) + "." + f.input);
+        json graph = wired_to(f.type, f.input, f.port);
+        graph["nodes"].push_back({{"id", 4}, {"type", "snap"}});
+        graph["edges"][0]["from"] = 4;
+        graph["edges"].push_back({{"from", 1}, {"to", 4}, {"input", "in"}});
+        EXPECT_NO_THROW(compile_patch(graph, "p"));
+    }
+}
+
+TEST(CompilePatch, AnEnvelopeIsAudio) {
+    const json direct = json::parse(R"({
+      "nodes": [{"id": 1, "type": "env"}, {"id": 2, "type": "biquad"}, {"id": 3, "type": "out"}],
+      "edges": [{"from": 1, "to": 2, "input": "cutoff"}, {"from": 2, "to": 3, "input": "l"}]})");
+    EXPECT_THROW(compile_patch(direct, "p"), CompileError);
+
+    const json scaled = json::parse(R"({
+      "nodes": [{"id": 1, "type": "env"}, {"id": 2, "type": "biquad"}, {"id": 3, "type": "out"},
+                {"id": 4, "type": "mul", "inputs": {"b": 3000.0}}],
+      "edges": [{"from": 1, "to": 4, "input": "a"}, {"from": 4, "to": 2, "input": "cutoff"},
+                {"from": 2, "to": 3, "input": "l"}]})");
+    EXPECT_THROW(compile_patch(scaled, "p"), CompileError);
+}
+
+TEST(CompilePatch, ASumOfFrameRateValuesIsNotAudio) {
+    const json graph = json::parse(R"({
+      "nodes": [{"id": 1, "type": "note"}, {"id": 2, "type": "lfo"}, {"id": 3, "type": "add"},
+                {"id": 4, "type": "mtof"}, {"id": 5, "type": "osc", "wave": "saw"}, {"id": 6, "type": "out"}],
+      "edges": [{"from": 1, "port": "pitch", "to": 3, "input": "a"}, {"from": 2, "to": 3, "input": "b"},
+                {"from": 3, "to": 4, "input": "in"}, {"from": 4, "to": 5, "input": "freq"},
+                {"from": 5, "to": 6, "input": "l"}]})");
+    EXPECT_NO_THROW(compile_patch(graph, "p"));
+}
+
+TEST(CompilePatch, ASnapOnAFrameRateWireDoesNothing) {
+    json graph = simple_graph("saw");
+    const u64 base = compile_patch(graph, "p").chunk.hash;
+    graph["nodes"].push_back({{"id", 5}, {"type", "snap"}});
+    graph["edges"][1]["from"] = 5;
+    graph["edges"].push_back({{"from", 2}, {"to", 5}, {"input", "in"}});
+    EXPECT_EQ(compile_patch(graph, "p").chunk.hash, base);
+}
+
 TEST(CompilePatch, RejectsACycleWithNoDelay) {
     const json graph = json::parse(R"({
       "nodes": [{"id": 1, "type": "add"}, {"id": 2, "type": "biquad"}, {"id": 3, "type": "out"}],

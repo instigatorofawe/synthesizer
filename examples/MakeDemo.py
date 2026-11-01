@@ -91,6 +91,7 @@ lead = {
         {"id": 19, "type": "mul"},
         {"id": 20, "type": "mul"},
         {"id": 21, "type": "out"},
+        {"id": 22, "type": "snap"},  # The envelope, read once a frame for the cutoffs
     ],
     "edges": [
         {"from": 1, "port": "pitch", "to": 2, "input": "in"},
@@ -105,8 +106,9 @@ lead = {
         {"from": 12, "to": 11, "input": "b"},
         {"from": 6, "to": 13, "input": "in"},
         {"from": 7, "to": 14, "input": "in"},
-        {"from": 11, "to": 13, "input": "cutoff"},
-        {"from": 11, "to": 14, "input": "cutoff"},
+        {"from": 11, "to": 22, "input": "in"},
+        {"from": 22, "to": 13, "input": "cutoff"},
+        {"from": 22, "to": 14, "input": "cutoff"},
         {"from": 13, "to": 16, "input": "a"},
         {"from": 15, "to": 16, "input": "b"},
         {"from": 14, "to": 17, "input": "a"},

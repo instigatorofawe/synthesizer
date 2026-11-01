@@ -96,6 +96,11 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
 - Delay time is in seconds with a declared maximum, sized at bind time. Only feedback needs a delay of at least one frame.
   Feed-forward delays are ordered write-first, so short Haas and flanger delays work. Sub-frame feedback, a step range run at a
   smaller n, will arrive as new opcodes, which an older engine refuses cleanly. Nothing needed to be reserved for it.
+- An input read once a frame refuses audio, and that is a compile error. Reading one sample in 128 is right for an envelope and silently
+  wrong for anything above half the frame rate, 187.5 Hz at frame 128: a 1 kHz modulator on a cutoff gave sidebands at +-125 Hz. Only a
+  patch's author knows which case this is, so a `snap` node says so, and every wire has one rate. Env is audio, so a filter or pitch
+  envelope goes through one. `Demo` and `AllOps` predate the rule, so `GoldenTest` adds their snaps to the JSON it compiles. A snap has its
+  own place among the steps, which moved their bytes, and they render bit for bit as they did [measured].
 - The loader lowers wire Steps into a private decoded array, so run time never re-reads validated bytes.
 - Kernels are total: safe for every input value. Wrapped oscillators use u32 phase and power-of-two tables.
 

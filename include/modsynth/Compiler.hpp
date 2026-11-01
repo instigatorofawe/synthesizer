@@ -197,6 +197,7 @@ inline const std::vector<NodeSpec>& node_specs() {
         {"mul", {{"a", 1.0f}, {"b", 1.0f}}, {"out"}},
         {"add", {{"a", 0.0f}, {"b", 0.0f}}, {"out"}},
         {"mtof", {{"in", 69.0f}}, {"out"}},
+        {"snap", {{"in", 0.0f}}, {"out"}},
         {"ratio", {{"in", 60.0f}}, {"out"}},
         {"pan", {{"in", 0.0f}, {"position", 0.0f}}, {"l", "r"}},
         {"delay", {{"in", 0.0f}, {"time", 0.25f}}, {"out"}},
@@ -478,7 +479,6 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         return ir;
     };
     const auto to_buffer = [&](Value v) { return v.audio() ? v : audio_step(Op::Fill, {v}, 1, 0).out[0]; };
-    const auto to_scalar = [&](Value v) { return v.audio() ? control_step(Op::KSnap, {v}, 0) : v; };
 
     const auto input = [&](const Node& n, const std::string& name) -> std::optional<Value> {
         const auto edge = n.edges.find(name);
@@ -493,9 +493,17 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         }
         return 0.0f;
     };
+    // An input read once a frame refuses audio, because reading one sample in every 128 is right for an envelope and
+    // silently wrong for anything fast, and only the patch's author knows which this is. A snap node says so.
     const auto scalar_in = [&](const Node& n, const std::string& name) {
         const auto v = input(n, name);
-        return v ? to_scalar(*v) : constant(default_of(n, name));
+        if (!v) return constant(default_of(n, name));
+        if (v->audio()) {
+            throw CompileError(node_where(n.id), "input '" + name +
+                                                     "' is read once a frame and cannot take audio. To read it "
+                                                     "once a frame on purpose, put a snap node on the wire");
+        }
+        return *v;
     };
     const auto buffer_in = [&](const Node& n, const std::string& name) {
         const auto v = input(n, name);
@@ -594,6 +602,11 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
             }
         } else if (type == "mtof") {
             set("out", control_step(Op::KMtoF, {scalar_in(n, "in")}, state));
+        } else if (type == "snap") {
+            const auto in = input(n, "in");
+            set("out", in && in->audio() ? control_step(Op::KSnap, {*in}, 0)
+                       : in              ? *in
+                                         : constant(default_of(n, "in")));
         } else if (type == "ratio") {
             const int root = n.config.value("root", 60);
             if (root < 0 || root > 127) throw CompileError(node_where(id), "root must be 0 to 127");

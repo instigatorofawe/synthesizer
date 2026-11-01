@@ -18,6 +18,7 @@ checked against committed renders in [golden](golden).
 | `golden` | Images from the freeze and their renders. They never change. |
 | `web` | The SvelteKit app, with Drizzle over SQLite |
 | `examples/Demo.json` | The project every target renders. `MakeDemo.py` regenerates it. |
+| `examples/Listen.py` | Plays each oscillator and mode through the sound card, with `uv run examples/Listen.py`. |
 
 ## Native
 

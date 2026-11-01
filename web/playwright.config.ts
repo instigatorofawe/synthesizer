@@ -1,0 +1,20 @@
+import { defineConfig } from '@playwright/test';
+
+const port = 5321;
+
+export default defineConfig({
+	testDir: 'e2e',
+	testMatch: '*Test.ts',
+	workers: 1,
+	timeout: 30000,
+	use: {
+		baseURL: `http://127.0.0.1:${port}`,
+		launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] }
+	},
+	webServer: {
+		command: 'rm -rf .e2e && node build/index.js',
+		port,
+		reuseExistingServer: false,
+		env: { HOST: '127.0.0.1', PORT: String(port), DATABASE_PATH: '.e2e/Test.sqlite' }
+	}
+});

@@ -26,11 +26,13 @@ struct Golden {
 
 // A change here means a project compiles to different chunks than it used to. Old images still play, but a thin image
 // from a new compiler no longer matches chunks a device got from an old one. That can be fine, and it must be a
-// decision.
+// decision. Revision 1 made one: saw, square and triangle left their tables for opcodes that fix their aliasing, which
+// moved Demo and AllOps.
 constexpr Golden kGoldens[] = {
     {"Minimal", 8, 0x1b3153f13f3ea109ull},
-    {"Demo", 480, 0x00b566d02e497dbeull},
-    {"AllOps", 400, 0xc37532b6c282279aull},
+    {"Demo", 480, 0xf694720f988ffd99ull},
+    {"AllOps", 400, 0x29497ab1023f14d3ull},
+    {"Waves", 200, 0xf4c0e84598e9134eull},
 };
 
 std::vector<std::byte> read_file(const std::string& path) {
@@ -104,7 +106,7 @@ TEST(Golden, TheCompilerStillWritesTheseBytes) {
 // enums rather than a list, so it cannot fall out of step with the registry.
 TEST(Golden, BetweenThemTheImagesUseEverything) {
     std::vector<bool> ops(static_cast<u32>(Op::kCount)), instructions(static_cast<u32>(Instr::kCount)), mix(8);
-    std::vector<bool> biquad(3), delay_read(2);
+    std::vector<bool> biquad(3), delay_read(2), saw(2), pulse(2);
     bool i16 = false, f32 = false, mono = false, stereo = false, looped = false, one_shot = false;
 
     for (const Golden& g : kGoldens) {
@@ -120,6 +122,8 @@ TEST(Golden, BetweenThemTheImagesUseEverything) {
                     ops[step.op] = true;
                     if (step.op == static_cast<u8>(Op::Biquad)) biquad[step.mode] = true;
                     if (step.op == static_cast<u8>(Op::DelayRead)) delay_read[step.mode] = true;
+                    if (step.op == static_cast<u8>(Op::Saw)) saw[step.mode] = true;
+                    if (step.op == static_cast<u8>(Op::Pulse)) pulse[step.mode] = true;
                 }
             } else if (c.kind == static_cast<u8>(ChunkKind::Program)) {
                 ProgramView v;
@@ -143,7 +147,21 @@ TEST(Golden, BetweenThemTheImagesUseEverything) {
                 mix[static_cast<u32>(MixOp::Gather)]);
     for (u32 i = 0; i < biquad.size(); ++i) EXPECT_TRUE(biquad[i]) << "biquad mode " << i;
     for (u32 i = 0; i < delay_read.size(); ++i) EXPECT_TRUE(delay_read[i]) << "delay read mode " << i;
+    for (u32 i = 0; i < saw.size(); ++i) EXPECT_TRUE(saw[i]) << "saw mode " << i;
+    for (u32 i = 0; i < pulse.size(); ++i) EXPECT_TRUE(pulse[i]) << "pulse mode " << i;
     EXPECT_TRUE(i16 && f32 && mono && stereo && looped && one_shot);
+}
+
+// An image from before a revision must go on declaring the old one, or it would stop loading on old engines.
+TEST(Golden, EachImageDeclaresTheRevisionItNeeds) {
+    const auto revision = [](const char* name) {
+        const auto bytes = read_file(golden_path(name));
+        return load<ManifestHeader>(bytes.data() + sizeof(ChunkHeader)).revision;
+    };
+    for (const char* name : {"Minimal.image", "Demo.image", "AllOps.image", "Demo.thin.image"}) {
+        EXPECT_EQ(revision(name), 0u) << name;
+    }
+    EXPECT_EQ(revision("Waves.image"), 1u);
 }
 
 TEST(Golden, AThinImageFromTheFreezePlaysOnChunksFromTheFreeze) {

@@ -166,7 +166,7 @@ describe('exports from saved rows', () => {
 		const { report } = await compileSnapshot(snapshot(db, ['song', 'ballad']));
 		expect(report.programs.length).toBe(2);
 		expect(report.chunks.filter((c) => c.kind === 'patch').length).toBe(4);
-		expect(report.chunks.filter((c) => c.programs === 2).map((c) => c.kind).sort()).toEqual(['patch', 'patch', 'table']);
+		expect(report.chunks.filter((c) => c.programs === 2).map((c) => c.kind).sort()).toEqual(['patch', 'patch']);
 	});
 
 	it('gives the same bytes for the same rows', async () => {

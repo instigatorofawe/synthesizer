@@ -113,7 +113,7 @@ class Bits {
 
 // True if every step reads only what is defined, writes only where section 18 of the design allows, and names real
 // resources. Whatever a chunk does not use must be zero, so a later revision can give it a meaning.
-[[nodiscard]] inline bool validate_patch(const PatchView& p, const ChunkTable& chunks) {
+[[nodiscard]] inline bool validate_patch(const PatchView& p, const ChunkTable& chunks, u32 revision) {
     using detail::Bits;
     const PatchHeader& h = p.h;
     if (h.reserved != 0 || static_cast<u32>(h.control_steps) + h.voice_steps > kMaxPatchSteps) return false;
@@ -206,7 +206,7 @@ class Bits {
     for (u32 i = 0; i < total; ++i) {
         const bool control = i < h.control_steps;
         const WireStep s = p.step(i);
-        if (!op_known(s.op)) return false;
+        if (!op_known(s.op) || op_revision(static_cast<Op>(s.op)) > revision) return false;
         const OpSignature sig = op_signature(static_cast<Op>(s.op));
         if ((control && !sig.control) || s.mode > sig.max_mode) return false;
         for (u32 a = sig.ins; a < 4; ++a) {
@@ -858,7 +858,9 @@ class Loader {
         const ChunkRef* c = table_->find(e.hash);
         if (kind == ChunkKind::Patch) {
             PatchView v;
-            if (!parse_patch({c->data, c->size}, v) || !validate_patch(v, *table_)) fail(LoadError::BadPatch);
+            if (!parse_patch({c->data, c->size}, v) || !validate_patch(v, *table_, manifest_.revision)) {
+                fail(LoadError::BadPatch);
+            }
             return c->size;
         }
         ProgramView v;

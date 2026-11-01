@@ -126,6 +126,9 @@ struct Kernels {
             case Op::Noise:
                 return sizeof(NoiseState);
             case Op::Osc:
+            case Op::Saw:
+            case Op::Pulse:
+            case Op::Triangle:
                 return sizeof(OscState);
             case Op::Biquad:
                 return sizeof(BiquadState);
@@ -172,6 +175,15 @@ struct Kernels {
                 break;
             case Op::Osc:
                 osc(s, c);
+                break;
+            case Op::Saw:
+                saw(s, c);
+                break;
+            case Op::Pulse:
+                pulse(s, c);
+                break;
+            case Op::Triangle:
+                triangle(s, c);
                 break;
             case Op::Biquad:
                 biquad(s, c);
@@ -261,11 +273,15 @@ struct Kernels {
         st.x = x;
     }
 
+    [[nodiscard]] static u32 phase_increment(const DecodedStep& s, const RunContext& c) {
+        const float freq = clamp(scalar(c, s.in[0]), 0.0f, c.rate * 0.5f);
+        return static_cast<u32>(freq * c.inverse_rate * 4294967040.0f);
+    }
+
     static void osc(const DecodedStep& s, RunContext& c) {
         const BoundTable& t = c.resources[s.resource].table;
         auto& st = state<OscState>(c, s);
-        const float freq = clamp(scalar(c, s.in[0]), 0.0f, c.rate * 0.5f);
-        const u32 inc = static_cast<u32>(freq * c.inverse_rate * 4294967040.0f);
+        const u32 inc = phase_increment(s, c);
         const u32 shift = t.shift;
         const u32 frac_mask = (1u << shift) - 1u;
         const float frac_scale = 1.0f / static_cast<float>(1u << shift);
@@ -277,6 +293,87 @@ struct Kernels {
             const float frac = static_cast<float>(phase & frac_mask) * frac_scale;
             const float a = table[idx];
             out[i] = a + (table[idx + 1] - a) * frac;
+            phase += inc;
+        }
+        st.phase = phase;
+    }
+
+    // Harmonics above half the sample rate fold back as tones out of tune with the note, and a jump has harmonics
+    // without end. This is PolyBLEP: x is how far this sample is from a jump of 2, in samples from -1 to 1, and the
+    // result is what those two samples need added to soften it. Only samples beside a jump pay for it.
+    [[nodiscard]] static float blep(float x) { return x < 0.0f ? (1.0f + x) * (1.0f + x) : -(1.0f - x) * (1.0f - x); }
+    // One sample's distance from a jump at phase 0, tested with one compare, because almost every sample is not near
+    // one.
+    [[nodiscard]] static bool near_jump(u32 from_jump, u32 inc) { return from_jump + inc < inc + inc; }
+    [[nodiscard]] static float samples_from_jump(u32 from_jump, float inverse_inc) {
+        return static_cast<float>(static_cast<std::int32_t>(from_jump)) * inverse_inc;
+    }
+    [[nodiscard]] static float inverse_of(u32 inc) { return inc == 0 ? 0.0f : 1.0f / static_cast<float>(inc); }
+
+    // Rises from 0, so a note starts without a click, and jumps from 1 to -1 at half a turn.
+    static void saw(const DecodedStep& s, RunContext& c) {
+        auto& st = state<OscState>(c, s);
+        const u32 inc = phase_increment(s, c);
+        u32 phase = st.phase;
+        float* out = buffer(c, s.out[0]);
+        const auto ramp = [](u32 p) { return static_cast<float>(static_cast<std::int32_t>(p)) * 4.656612873e-10f; };
+        if (s.mode == kNaive) {
+            for (u32 i = 0; i < N; ++i) {
+                out[i] = ramp(phase);
+                phase += inc;
+            }
+        } else {
+            const float inverse_inc = inverse_of(inc);
+            for (u32 i = 0; i < N; ++i) {
+                float v = ramp(phase);
+                const u32 jump = phase + 0x80000000u;
+                if (near_jump(jump, inc)) v -= blep(samples_from_jump(jump, inverse_inc));
+                out[i] = v;
+                phase += inc;
+            }
+        }
+        st.phase = phase;
+    }
+
+    // 1 until `width` of a turn has passed, then -1, less the mean so that moving the width doesn't move the level.
+    static void pulse(const DecodedStep& s, RunContext& c) {
+        auto& st = state<OscState>(c, s);
+        const u32 inc = phase_increment(s, c);
+        const float width = clamp(scalar(c, s.in[1]), 0.0f, 1.0f);
+        const u32 edge = static_cast<u32>(width * 4294967040.0f);
+        const float mean = width + width - 1.0f;
+        u32 phase = st.phase;
+        float* out = buffer(c, s.out[0]);
+        if (s.mode == kNaive) {
+            for (u32 i = 0; i < N; ++i) {
+                out[i] = (phase < edge ? 1.0f : -1.0f) - mean;
+                phase += inc;
+            }
+        } else {
+            const float inverse_inc = inverse_of(inc);
+            for (u32 i = 0; i < N; ++i) {
+                float v = (phase < edge ? 1.0f : -1.0f) - mean;
+                if (near_jump(phase, inc)) v += blep(samples_from_jump(phase, inverse_inc));
+                const u32 fall = phase - edge;
+                if (near_jump(fall, inc)) v -= blep(samples_from_jump(fall, inverse_inc));
+                out[i] = v;
+                phase += inc;
+            }
+        }
+        st.phase = phase;
+    }
+
+    // Rises from 0 to 1 at a quarter turn, as a sine does. It has no jump, and its harmonics fall by 1/n^2, so it
+    // aliases little and has no band-limited form: correcting it costs twice as much for about 12 dB.
+    static void triangle(const DecodedStep& s, RunContext& c) {
+        auto& st = state<OscState>(c, s);
+        const u32 inc = phase_increment(s, c);
+        u32 phase = st.phase;
+        float* out = buffer(c, s.out[0]);
+        for (u32 i = 0; i < N; ++i) {
+            const u32 p = phase + 0x40000000u;
+            const u32 folded = p ^ static_cast<u32>(static_cast<std::int32_t>(p) >> 31);
+            out[i] = static_cast<float>(static_cast<std::int32_t>(folded)) * 9.313225746e-10f - 1.0f;
             phase += inc;
         }
         st.phase = phase;

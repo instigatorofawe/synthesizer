@@ -1,10 +1,16 @@
 #pragma once
 
-// The wire format. Unstable until Milestone 2: nothing here promises to read old images.
+// The wire format, frozen at version 1. docs/Format.md is the specification, and this header must agree with it.
 //
-// Everything is little-endian, offsets are bytes, and fields are read with load<T>() because images may sit at any
-// alignment in flash. Tables and assets are the exception: chunks are 8-byte aligned so samples can be used in place.
+// What may change without a new version: new lines in Opcodes.def, a higher limit below, and a reserved field gaining a
+// meaning, each with a higher kFormatRevision. Everything else here is permanent. Every field a reader does not use
+// must be zero, and the validator refuses anything else, because a field that was ever ignored can never be given a
+// meaning.
+//
+// Everything is little-endian, offsets are bytes, and fields are read with load<T>(), so a struct's own alignment never
+// matters. Tables and assets are used in place, so an image must start on an 8-byte boundary.
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -18,6 +24,8 @@ using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using ByteSpan = std::span<const std::byte>;
 
+static_assert(std::endian::native == std::endian::little, "images are little-endian and are used in place");
+
 template <class T>
 [[nodiscard]] inline T load(const std::byte* p) {
     T value;
@@ -26,13 +34,35 @@ template <class T>
 }
 
 inline constexpr u32 kChunkMagic = 0x4B43534D;  // "MSCK"
-inline constexpr u8 kFormatVersion = 0;
+inline constexpr u8 kFormatVersion = 1;         // Changes only if an old engine must not even try to read an image
+inline constexpr u32 kFormatRevision = 0;       // The newest additions this engine understands
 inline constexpr u32 kChunkAlign = 8;
 inline constexpr u16 kNone = 0xFFFF;
 
-// Limits that keep validation free of allocation. The compiler enforces the same numbers.
-inline constexpr u32 kMaxRegisters = 256;
+// Limits, which keep validation free of allocation and bound every sum in sizing and timing. They may rise in a later
+// revision but never fall, because an image that fit once must keep fitting. The validator enforces all of them.
 inline constexpr u32 kMaxChunks = 1024;
+inline constexpr u32 kMaxRegisters = 256;  // buffers, each scalar bank, buses
+inline constexpr u32 kMaxPatchSteps = 4096;
+inline constexpr u32 kMaxPatchParams = 256;
+inline constexpr u32 kMaxPatchRefs = 256;
+inline constexpr u32 kMaxPatchDelays = 256;
+inline constexpr u32 kMaxPatchConsts = 8192;  // All of what an operand can index
+inline constexpr float kMaxDelaySeconds = 60.0f;
+inline constexpr u32 kMaxTracks = 256;
+inline constexpr u32 kMaxInserts = 256;
+inline constexpr u32 kMaxVoices = 256;  // per track
+inline constexpr u32 kMaxSlots = 1024;  // across a Program
+inline constexpr u32 kMaxTrackSlots = 256;
+inline constexpr u32 kMaxClips = 4096;
+inline constexpr u32 kMaxMixSteps = 1024;
+inline constexpr u32 kMaxTasks = 256;
+inline constexpr u32 kMaxGatherInputs = 4096;
+inline constexpr u32 kMaxMixRegisters = 8192;
+inline constexpr u32 kMaxGlobals = 256;
+inline constexpr u32 kMaxInits = 4096;
+inline constexpr u32 kMaxTicks = 0x7FFFFFFF;   // Any tick plus any duration fits a u32, and kNoTick stays unreachable
+inline constexpr u32 kMaxExpanded = 1u << 24;  // Instructions a Program runs with every repeat unrolled
 
 enum class ChunkKind : u8 { Manifest = 0, Asset = 1, Table = 2, Patch = 3, Program = 4 };
 
@@ -43,25 +73,30 @@ struct ChunkHeader {
     u16 reserved;
     u32 size;  // payload bytes, not counting padding
     u32 reserved2;
-    u64 hash;  // over the kind byte and the payload
+    u64 hash;  // over the version byte, the kind byte and the payload
 };
 static_assert(sizeof(ChunkHeader) == 24);
 
-// FNV-1a 64. Identity and corruption detection, not authentication. Milestone 2 settles the final choice.
+// FNV-1a 64, settled at the freeze. It is identity and corruption detection, not authentication: anyone can make a
+// collision, so a product that must refuse forged images signs the image bytes around this format. docs/Format.md says
+// why that was enough, and what would change the choice.
 inline constexpr u64 kHashSeed = 14695981039346656037ull;
 [[nodiscard]] inline u64 hash_bytes(u64 h, const std::byte* p, std::size_t n) {
     for (std::size_t i = 0; i < n; ++i) h = (h ^ static_cast<u8>(p[i])) * 1099511628211ull;
     return h;
 }
-[[nodiscard]] inline u64 hash_seed(ChunkKind kind) {
-    const auto k = static_cast<std::byte>(kind);
-    return hash_bytes(kHashSeed, &k, 1);
+[[nodiscard]] inline u64 hash_seed(ChunkKind kind, u8 version = kFormatVersion) {
+    const std::byte prefix[2] = {static_cast<std::byte>(version), static_cast<std::byte>(kind)};
+    return hash_bytes(kHashSeed, prefix, sizeof prefix);
 }
 
 struct ManifestHeader {
     u32 entries;
     u32 programs;
+    u32 revision;  // the oldest kFormatRevision that can read this image
+    u32 reserved;
 };
+static_assert(sizeof(ManifestHeader) == 16);
 struct ManifestEntry {
     u64 hash;
     u32 size;
@@ -83,7 +118,7 @@ struct AssetHeader {
     u8 encoding;
     u8 channels;  // 1 or 2
     u8 root_key;
-    u8 flags;  // reserved for streaming and compression
+    u8 flags;  // reserved for streaming and compression, 0 until a revision defines them
     float native_rate;
     u32 frames;
     u32 loop_start;
@@ -106,28 +141,8 @@ inline constexpr u16 kScalarGate = 2;
 inline constexpr u16 kBuiltinVoiceScalars = 3;
 
 enum class Op : u8 {
-    Fill = 1,    // out = in0
-    Noise,       // out
-    Osc,         // out, freq; resource: table
-    Biquad,      // out, in, cutoff, q; mode: BiquadMode
-    Env,         // out, attack, decay, sustain, release
-    Sample,      // left, right, ratio; resource: asset
-    Mul,         // out, a, b
-    MulS,        // out, a, scalar b
-    Add,         // out, a, b
-    AddS,        // out, a, scalar b
-    Pan,         // left, right, in, position
-    DelayWrite,  // in; resource: delay line
-    DelayRead,   // out, time; resource: delay line; mode: kReadBeforeWrite for feedback
-    Comb,        // out, in, time, feedback, damp; resource: delay line
-    Allpass,     // out, in, time, feedback; resource: delay line
-    Follow,      // out, in, release
-    KMul,        // out, a, b
-    KAdd,        // out, a, b
-    KMtoF,       // out, in
-    KRatio,      // out, in; mode: root key
-    KSnap,       // out, buffer
-    KLfo,        // out, rate, depth
+#define MODSYNTH_OP(name, id, ...) name = id,
+#include <modsynth/Opcodes.def>
     kCount
 };
 
@@ -143,56 +158,20 @@ struct OpSignature {
     u8 ins;
     Arg in[4];
     Resource resource;
-    bool control;  // writes a scalar, so it may be hoisted to the control phase
-    bool ends;     // a voice stays alive until this step reports done
+    u8 max_mode;
+    bool control;
+    bool ends;
 };
 
 [[nodiscard]] constexpr OpSignature op_signature(Op op) {
-    using A = Arg;
-    using R = Resource;
     switch (op) {
-        case Op::Fill:
-            return {1, A::Buffer, 1, {A::Scalar}, R::None, false, false};
-        case Op::Noise:
-            return {1, A::Buffer, 0, {}, R::None, false, false};
-        case Op::Osc:
-            return {1, A::Buffer, 1, {A::Scalar}, R::Table, false, false};
-        case Op::Biquad:
-            return {1, A::Buffer, 3, {A::Buffer, A::Scalar, A::Scalar}, R::None, false, false};
-        case Op::Env:
-            return {1, A::Buffer, 4, {A::Scalar, A::Scalar, A::Scalar, A::Scalar}, R::None, false, true};
-        case Op::Sample:
-            return {2, A::Buffer, 1, {A::Scalar}, R::Asset, false, true};
-        case Op::Mul:
-        case Op::Add:
-            return {1, A::Buffer, 2, {A::Buffer, A::Buffer}, R::None, false, false};
-        case Op::MulS:
-        case Op::AddS:
-            return {1, A::Buffer, 2, {A::Buffer, A::Scalar}, R::None, false, false};
-        case Op::Pan:
-            return {2, A::Buffer, 2, {A::Buffer, A::Scalar}, R::None, false, false};
-        case Op::DelayWrite:
-            return {0, A::None, 1, {A::Buffer}, R::Delay, false, false};
-        case Op::DelayRead:
-            return {1, A::Buffer, 1, {A::Scalar}, R::Delay, false, false};
-        case Op::Comb:
-            return {1, A::Buffer, 4, {A::Buffer, A::Scalar, A::Scalar, A::Scalar}, R::Delay, false, false};
-        case Op::Allpass:
-            return {1, A::Buffer, 3, {A::Buffer, A::Scalar, A::Scalar}, R::Delay, false, false};
-        case Op::Follow:
-            return {1, A::Buffer, 2, {A::Buffer, A::Scalar}, R::None, false, false};
-        case Op::KMul:
-        case Op::KAdd:
-            return {1, A::Scalar, 2, {A::Scalar, A::Scalar}, R::None, true, false};
-        case Op::KMtoF:
-        case Op::KRatio:
-            return {1, A::Scalar, 1, {A::Scalar}, R::None, true, false};
-        case Op::KSnap:
-            return {1, A::Scalar, 1, {A::Buffer}, R::None, true, false};
-        case Op::KLfo:
-            return {1, A::Scalar, 2, {A::Scalar, A::Scalar}, R::None, true, false};
+#define MODSYNTH_OP(name, id, outs, out_kind, ins, a, b, c, d, resource, max_mode, control, ends)   \
+    case Op::name:                                                                                  \
+        return {outs,     Arg::out_kind, ins, {Arg::a, Arg::b, Arg::c, Arg::d}, Resource::resource, \
+                max_mode, control,       ends};
+#include <modsynth/Opcodes.def>
         default:
-            return {0, A::None, 0, {}, R::None, false, false};
+            return {0, Arg::None, 0, {}, Resource::None, 0, false, false};
     }
 }
 [[nodiscard]] constexpr bool op_known(u8 op) { return op >= 1 && op < static_cast<u8>(Op::kCount); }
@@ -201,7 +180,7 @@ struct WireStep {
     u8 op;
     u8 mode;
     u16 resource;  // index into the patch's refs, or into its delay lines
-    u32 state_id;  // stable across edits, so state can carry over a swap. 0 if stateless.
+    u32 state_id;  // stable across edits, so state can carry over a swap. 0 for none.
     u16 out[2];
     u16 in[4];
 };
@@ -213,7 +192,7 @@ struct ParamDesc {
     u16 id;  // stable, and what Instructions address
     u8 scope;
     u8 reserved;
-    u16 reg;  // in the bank for its scope; for Global, the operand index is this desc's position
+    u16 reg;  // in the bank for its scope. 0 for Global, whose operand index is this desc's position.
     u16 smooth_ms;
     float min;
     float max;
@@ -221,8 +200,8 @@ struct ParamDesc {
 };
 static_assert(sizeof(ParamDesc) == 20);
 
-// The body after this header, in order: ParamDesc[params], u64 refs[refs], f32 consts[consts], f32 delays[delays]
-// (maximum seconds), u16 in_ports[inputs * 2], WireStep[control_steps + voice_steps].
+// The body after this header, in order: ParamDesc[params] with ids ascending, u64 refs[refs], f32 consts[consts],
+// f32 delays[delays] (maximum seconds), u16 in_ports[inputs * 2], WireStep[control_steps + voice_steps].
 struct PatchHeader {
     u16 control_steps;  // run once per track or insert, in the control phase
     u16 voice_steps;    // run per voice or insert, in the audio phase
@@ -236,22 +215,34 @@ struct PatchHeader {
     u16 inputs;  // stereo input pairs, 0 for an instrument
     u16 out_left;
     u16 out_right;
+    u32 reserved;
 };
-static_assert(sizeof(PatchHeader) == 24);
+static_assert(sizeof(PatchHeader) == 28);
 
 enum class Instr : u8 {
-    End = 0,
-    Wait,      // c: ticks
-    NoteOn,    // a: note, b: velocity 0..127, c: duration in ticks
-    SetPatch,  // a: slot
-    SetParam,  // b: param id, c: value bits
-    Ramp,      // b: param id, c: value bits, followed by RampArg
-    RampArg,   // c: ticks
-    Call,      // b: clip, c: repeats
-    Tempo,     // c: microseconds per quarter. Conductor stream only.
+#define MODSYNTH_INSTR(name, id, a, b, c) name = id,
+#include <modsynth/Opcodes.def>
     kCount
 };
 
+struct InstrFields {
+    bool a, b, c;
+};
+
+[[nodiscard]] constexpr InstrFields instr_fields(Instr instr) {
+    switch (instr) {
+#define MODSYNTH_INSTR(name, id, a, b, c) \
+    case Instr::name:                     \
+        return {a != 0, b != 0, c != 0};
+#include <modsynth/Opcodes.def>
+        default:
+            return {false, false, false};
+    }
+}
+
+// Wait: c ticks. NoteOn: a note, b velocity 0..127, c duration in ticks. SetPatch: a slot. SetParam: b param id, c
+// value bits. Ramp: b param id, c value bits, followed by RampArg. RampArg: c ticks. Call: b clip, c repeats. Tempo: c
+// microseconds per quarter, conductor stream only.
 struct Instruction {
     u8 op;
     u8 a;
@@ -274,22 +265,28 @@ struct ClipDesc {
     u32 begin;
     u32 length;
     u32 ticks;
+    u32 slots;  // one more than the highest slot its SetPatch names, so a caller needs no walk over the clip
 };
+static_assert(sizeof(ClipDesc) == 16);
 
 struct InsertDesc {
     u16 id;  // stable across edits
     u16 patch;
 };
 
-enum class MixOp : u8 { RunVoices = 1, RunInsert = 2, Gather = 3 };
+enum class MixOp : u8 {
+#define MODSYNTH_MIX(name, id) name = id,
+#include <modsynth/Opcodes.def>
+};
+
 struct MixStep {
     u8 op;
     u8 reserved;
     u16 task;  // steps sharing a task run together, in order
     u16 a;     // track, insert, or first GatherInput
     u16 dst;   // bus register
-    u16 src;   // RunInsert: input register. Gather: input count.
-    u16 key;   // RunInsert: sidechain register, or kNone
+    u16 src;   // RunInsert: input register. Gather: input count. RunVoices: 0.
+    u16 key;   // RunInsert: sidechain register, or kNone. Otherwise kNone.
 };
 static_assert(sizeof(MixStep) == 12);
 
@@ -315,8 +312,8 @@ struct GlobalDesc {
 };
 
 // The body after this header, in order: u64 patches[patches], TrackDesc[tracks], u16 slots[slots], ClipDesc[clips],
-// InsertDesc[inserts], MixStep[mix_steps], GatherInput[gather_inputs], f32 mix_init[mix_regs], GlobalDesc[globals],
-// ParamInit[inits], Instruction[code].
+// InsertDesc[inserts], MixStep[mix_steps], GatherInput[gather_inputs], f32 mix_init[mix_regs], GlobalDesc[globals] with
+// ids ascending, ParamInit[inits], Instruction[code].
 struct ProgramHeader {
     u32 ppq;
     u32 uspq;  // initial tempo
@@ -336,7 +333,8 @@ struct ProgramHeader {
     u16 globals;
     u16 inits;
     u16 master;
+    u32 reserved;
 };
-static_assert(sizeof(ProgramHeader) == 48);
+static_assert(sizeof(ProgramHeader) == 52);
 
 }  // namespace modsynth

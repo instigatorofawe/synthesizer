@@ -36,11 +36,12 @@ json one_note_timeline(const char* patch, const char* clip_note = "60") {
     })");
 }
 
-json request_with(std::initializer_list<const char*> patches, json programs) {
+// A vector, not json: whether `{one_element}` makes a json array or a copy of that element depends on the compiler.
+json request_with(std::initializer_list<const char*> patches, const std::vector<json>& programs) {
     json r;
     r["patches"] = json::object();
     for (const char* id : patches) r["patches"][id] = {{"graph", simple_graph(id)}};
-    r["programs"] = std::move(programs);
+    r["programs"] = programs;
     return r;
 }
 
@@ -189,12 +190,12 @@ TEST(CompileImage, InsertsOnADeadBusAreLeftOut) {
     request["assets"] = project["assets"];
     json timeline = one_note_timeline("lead");
     timeline["buses"] = json::parse(R"([{"id": "orphan", "inserts": [{"id": 1, "patch": "reverb"}]}])");
-    request["programs"] = {program("a", timeline)};
+    request["programs"] = json::array({program("a", timeline)});
     EXPECT_EQ(patch_ids(compile_image(request).report, 0), std::vector<std::string>{"lead"});
 
     // A bus with a send reaches it.
     timeline["tracks"][0]["sends"] = json::parse(R"([{"bus": "orphan", "gain": 0.5}])");
-    request["programs"] = {program("a", timeline)};
+    request["programs"] = json::array({program("a", timeline)});
     auto ids = patch_ids(compile_image(request).report, 0);
     std::sort(ids.begin(), ids.end());
     EXPECT_EQ(ids, (std::vector<std::string>{"lead", "reverb"}));
@@ -277,7 +278,7 @@ TEST(CompileImage, NamesATimelineThatAutomatesAMissingParameter) {
 TEST(CompileImage, RejectsAnInsertPatchOnAnInstrumentSlot) {
     json request = demo();
     json timeline = one_note_timeline("reverb");
-    request["programs"] = {program("a", timeline)};
+    request["programs"] = json::array({program("a", timeline)});
     EXPECT_THROW(compile_image(request), CompileError);
 }
 
@@ -301,7 +302,7 @@ TEST(CompileImage, RejectsARoutingCycle) {
     timeline["tracks"][0]["output"] = "bus:a";
     timeline["buses"] = json::parse(R"([{"id": "a", "output": "bus:b"}, {"id": "b", "output": "bus:a",
         "sends": [{"bus": "c"}]}, {"id": "c"}])");
-    request["programs"] = {program("a", timeline)};
+    request["programs"] = json::array({program("a", timeline)});
     EXPECT_THROW(compile_image(request), CompileError);
 }
 

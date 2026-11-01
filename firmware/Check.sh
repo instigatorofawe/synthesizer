@@ -1,13 +1,11 @@
 #!/bin/sh
-# Builds the firmware, runs it on QEMU's L475, and compares its audio with the desktop build of the same headers.
-# Expects native tools in build/tools and the arm toolchain and QEMU on PATH.
+# Builds the firmware, runs it on QEMU's L475, and compares its audio with the golden renders. Then fuzzes on a Cortex-M4.
+# Expects the arm toolchain and QEMU on PATH. FUZZ_SECONDS and FUZZ_RANDOM choose how long, and from what seed.
 set -e
 cd "$(dirname "$0")/.."
 
-mkdir -p build/firmware
-build/tools/modsynth_compile examples/Demo.json build/firmware/Demo.image
-cmake -S firmware -B build/firmware -G Ninja --toolchain "$PWD/firmware/ArmNoneEabi.cmake" \
-    -DCMAKE_BUILD_TYPE=Release -DMODSYNTH_IMAGE="$PWD/build/firmware/Demo.image"
+cmake -S firmware -B build/firmware -G Ninja --toolchain "$PWD/firmware/ArmNoneEabi.cmake" -DCMAKE_BUILD_TYPE=Release \
+    -DMODSYNTH_FUZZ_SECONDS="${FUZZ_SECONDS:-60}" -DMODSYNTH_FUZZ_RANDOM="${FUZZ_RANDOM:-1}"
 cmake --build build/firmware
 
 firmware/CheckSymbols.sh build/firmware/Stereo.elf build/firmware/Mono.elf build/firmware/StereoCmsis.elf
@@ -20,8 +18,13 @@ for name in Stereo Mono StereoCmsis; do
 done
 cd ../..
 
-build/tools/modsynth_render build/firmware/Demo.image build/firmware/NativeStereo.f32 1400 2
-build/tools/modsynth_render build/firmware/Demo.image build/firmware/NativeMono.f32 1400 1
-python3 tools/CompareAudio.py build/firmware/NativeStereo.f32 build/firmware/Stereo.f32
-python3 tools/CompareAudio.py build/firmware/NativeMono.f32 build/firmware/Mono.f32
-python3 tools/CompareAudio.py build/firmware/NativeStereo.f32 build/firmware/StereoCmsis.f32
+for image in Demo AllOps; do
+    python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/Stereo.$image.f32"
+    python3 tools/CompareAudio.py "golden/$image.mono.f32" "build/firmware/Mono.$image.f32"
+    python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/StereoCmsis.$image.f32"
+done
+
+echo "== Fuzz"
+cd build/firmware
+timeout "$((${FUZZ_SECONDS:-60} + 120))" qemu-system-arm -machine mps2-an386 -cpu cortex-m4 -nographic -monitor none \
+    -serial null -semihosting-config enable=on,target=native -kernel Fuzz.elf 2>&1

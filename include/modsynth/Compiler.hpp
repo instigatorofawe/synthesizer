@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <modsynth/Format.hpp>
+#include <modsynth/Loader.hpp>
 
 namespace modsynth::compiler {
 
@@ -419,6 +420,9 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
             info.def = p.value("default", info.min);
             info.smooth_ms = p.value("smooth_ms", static_cast<u16>(10));
             if (info.min > info.max) throw CompileError(where, "param " + std::to_string(id) + " has min above max");
+            if (info.def < info.min || info.def > info.max) {
+                throw CompileError(where, "param " + std::to_string(id) + " has its default outside min to max");
+            }
             ParamDesc d{};
             d.id = info.id;
             d.scope = static_cast<u8>(info.scope);
@@ -1136,7 +1140,11 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
             const auto cached = clip_cache.find(key_bytes.bytes);
             if (cached != clip_cache.end()) return cached->second;
             const u16 index = static_cast<u16>(clip_table.size());
-            clip_table.push_back({static_cast<u32>(code.size()), static_cast<u32>(body.size()), length});
+            u32 used_slots = 0;
+            for (const Instruction& i : body) {
+                if (i.op == static_cast<u8>(Instr::SetPatch)) used_slots = std::max<u32>(used_slots, i.a + 1u);
+            }
+            clip_table.push_back({static_cast<u32>(code.size()), static_cast<u32>(body.size()), length, used_slots});
             code.insert(code.end(), body.begin(), body.end());
             clip_cache.emplace(std::move(key_bytes.bytes), index);
             return index;
@@ -1379,6 +1387,63 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     return report;
 }
 
+namespace detail {
+
+// A manifest and then every chunk not in `omit`, in the order given.
+inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& ordered, const std::set<u64>& omit) {
+    u32 programs = 0;
+    Writer body;
+    for (const Chunk* c : ordered) programs += c->kind == ChunkKind::Program;
+    // Not kFormatRevision: an image needs only the revision of what it uses, so it keeps loading on older engines.
+    // Everything this compiler can write is in revision 0. A revision that adds an opcode raises this for images that
+    // use it.
+    constexpr u32 needs_revision = 0;
+    body.put(ManifestHeader{static_cast<u32>(ordered.size()), programs, needs_revision, 0});
+    for (const Chunk* c : ordered) {
+        const bool present = !omit.count(c->hash);
+        body.put(ManifestEntry{c->hash, static_cast<u32>(c->payload.size()), static_cast<u8>(c->kind),
+                               static_cast<u8>(present), 0});
+    }
+    const Chunk manifest = make_chunk(ChunkKind::Manifest, std::move(body.bytes));
+
+    Writer out;
+    const auto put_chunk = [&](const Chunk& c) {
+        ChunkHeader h{};
+        h.magic = kChunkMagic;
+        h.kind = static_cast<u8>(c.kind);
+        h.version = kFormatVersion;
+        h.size = static_cast<u32>(c.payload.size());
+        h.hash = c.hash;
+        out.put(h);
+        out.bytes.insert(out.bytes.end(), c.payload.begin(), c.payload.end());
+        out.align(kChunkAlign);
+    };
+    put_chunk(manifest);
+    for (const Chunk* c : ordered) {
+        if (!omit.count(c->hash)) put_chunk(*c);
+    }
+    return std::move(out.bytes);
+}
+
+// A limit or a rule the passes above did not catch is reported here, by the validator a device would run, rather than
+// on that device. Thin images are checked in full, because their omitted chunks are what the rest refer to.
+inline void check_loads(const std::vector<const Chunk*>& ordered) {
+    const std::vector<std::byte> bytes = write_image(ordered, {});
+    std::vector<u64> aligned((bytes.size() + 7) / 8);
+    std::memcpy(aligned.data(), bytes.data(), bytes.size());
+    std::vector<ChunkRef> storage(kMaxChunks);
+    ChunkTable table{std::span(storage)};
+    Loader loader(table);
+    loader.begin({reinterpret_cast<const std::byte*>(aligned.data()), bytes.size()});
+    while (loader.step(1u << 20) == LoadStatus::Working) {
+    }
+    if (loader.status() != LoadStatus::Ready) {
+        throw CompileError("image", std::string("the compiled image would not load: ") + to_string(loader.error()));
+    }
+}
+
+}  // namespace detail
+
 struct ImageResult {
     std::vector<std::byte> image;
     json report;
@@ -1424,39 +1489,15 @@ inline ImageResult compile_image(const json& request) {
     }
     for (const u64 hash : program_hashes) ordered.push_back(&context.chunks.at(hash));
 
-    Writer body;
-    body.put(ManifestHeader{static_cast<u32>(ordered.size()), static_cast<u32>(program_hashes.size())});
-    for (const Chunk* c : ordered) {
-        const bool present = !omit.count(c->hash);
-        body.put(ManifestEntry{c->hash, static_cast<u32>(c->payload.size()), static_cast<u8>(c->kind),
-                               static_cast<u8>(present), 0});
-    }
-    const Chunk manifest = make_chunk(ChunkKind::Manifest, std::move(body.bytes));
+    check_loads(ordered);
+    std::vector<std::byte> bytes = write_image(ordered, omit);
 
-    Writer out;
-    const auto put_chunk = [&](const Chunk& c) {
-        ChunkHeader h{};
-        h.magic = kChunkMagic;
-        h.kind = static_cast<u8>(c.kind);
-        h.version = kFormatVersion;
-        h.size = static_cast<u32>(c.payload.size());
-        h.hash = c.hash;
-        out.put(h);
-        out.bytes.insert(out.bytes.end(), c.payload.begin(), c.payload.end());
-        out.align(kChunkAlign);
-    };
-    put_chunk(manifest);
     json chunks = json::array();
     static constexpr const char* kind_names[] = {"manifest", "asset", "table", "patch", "program"};
     std::size_t chunk_bytes = 0, omitted_bytes = 0;
     for (const Chunk* c : ordered) {
         const bool present = !omit.count(c->hash);
-        if (present) {
-            put_chunk(*c);
-            chunk_bytes += c->payload.size();
-        } else {
-            omitted_bytes += c->payload.size();
-        }
+        (present ? chunk_bytes : omitted_bytes) += c->payload.size();
         chunks.push_back({{"kind", kind_names[static_cast<u8>(c->kind)]},
                           {"hash", hex(c->hash)},
                           {"size", c->payload.size()},
@@ -1467,13 +1508,13 @@ inline ImageResult compile_image(const json& request) {
     json report;
     report["programs"] = std::move(programs);
     report["chunks"] = std::move(chunks);
-    report["image_bytes"] = out.bytes.size();
+    report["image_bytes"] = bytes.size();
     report["chunk_bytes"] = chunk_bytes;
     report["omitted_bytes"] = omitted_bytes;
     report["ok"] = true;
     report["library_patches"] = context.patches->size();
     report["compiled_patches"] = context.compiled.size();
-    return {std::move(out.bytes), std::move(report)};
+    return {std::move(bytes), std::move(report)};
 }
 
 // Keeps JSON and compile errors in one shape for the bindings: ok, report or errors.

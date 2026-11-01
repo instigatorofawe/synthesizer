@@ -1,14 +1,13 @@
 #!/bin/sh
-# Writes the golden images and their renders, once. They are the format's contract, so this refuses to overwrite one: a change
-# to any of them is a change to what old images mean. A later revision adds its own project here and a new line below.
+# Writes the golden images and their renders, once each. They are the format's contract, so this never touches one that exists:
+# a change to any of them is a change to what old images mean. A later revision adds its own project and a new line below.
 # Expects native tools in build/tools.
 set -e
 cd "$(dirname "$0")/.."
 
 make_golden() { # name frames
     if [ -e "golden/$1.image" ]; then
-        echo "golden/$1.image exists, and golden images never change" >&2
-        exit 1
+        return
     fi
     build/tools/modsynth_compile "golden/$1.json" "golden/$1.image"
     build/tools/modsynth_render "golden/$1.image" "golden/$1.stereo.f32" "$2" 2
@@ -18,8 +17,12 @@ make_golden() { # name frames
 make_golden Minimal 8
 make_golden Demo 480
 make_golden AllOps 400
+make_golden Waves 200
 
 # What a device receives when it already has every chunk but the Programs.
+if [ -e golden/Demo.thin.image ]; then
+    exit 0
+fi
 python3 - <<'PYTHON'
 import json
 import subprocess

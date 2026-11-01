@@ -28,8 +28,8 @@ Three kinds of change are possible after this freeze, and nothing else is.
 
 Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
 can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
-damaged. A compiler writes the lowest revision that covers what it actually used, so an unchanged project keeps loading
-on old engines. This document describes revision 0.
+damaged. A compiler writes the lowest revision that covers what it actually used, so an image that uses nothing new keeps
+loading on old engines. This document describes revision 1. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
 version so far, and no such change is planned. A version above the engine's gets the same refusal.
@@ -244,30 +244,33 @@ needs there.
 frame size, `rate` is the sample rate in Hz, and `clamp(x, lo, hi)` sends NaN to `lo`. All outputs are written for all `N`
 samples.
 
-| Op | Name | Out | In | Mode | Resource | Runs in |
-|---|---|---|---|---|---|---|
-| 1 | Fill | B | S value | | | voice |
-| 2 | Noise | B | | | | voice |
-| 3 | Osc | B | S frequency | | Table | voice |
-| 4 | Biquad | B | B in, S cutoff, S q | 0 low, 1 high, 2 band | | voice |
-| 5 | Env | B | S attack, S decay, S sustain, S release | | | voice |
-| 6 | Sample | B left, B right | S ratio | | Asset | voice |
-| 7 | Mul | B | B a, B b | | | voice |
-| 8 | MulS | B | B a, S b | | | voice |
-| 9 | Add | B | B a, B b | | | voice |
-| 10 | AddS | B | B a, S b | | | voice |
-| 11 | Pan | B left, B right | B in, S position | | | voice |
-| 12 | DelayWrite | | B in | | Delay | voice |
-| 13 | DelayRead | B | S seconds | 0 after the write, 1 before it | Delay | voice |
-| 14 | Comb | B | B in, S seconds, S feedback, S damp | | Delay | voice |
-| 15 | Allpass | B | B in, S seconds, S feedback | | Delay | voice |
-| 16 | Follow | B | B in, S release | | | voice |
-| 17 | KMul | S | S a, S b | | | either |
-| 18 | KAdd | S | S a, S b | | | either |
-| 19 | KMtoF | S | S note | | | either |
-| 20 | KRatio | S | S note | root key, at most 127 | | either |
-| 21 | KSnap | S | B in | | | voice |
-| 22 | KLfo | S | S rate, S depth | | | either |
+| Op | Name | Out | In | Mode | Resource | Runs in | Since |
+|---|---|---|---|---|---|---|---|
+| 1 | Fill | B | S value | | | voice | 0 |
+| 2 | Noise | B | | | | voice | 0 |
+| 3 | Osc | B | S frequency | | Table | voice | 0 |
+| 4 | Biquad | B | B in, S cutoff, S q | 0 low, 1 high, 2 band | | voice | 0 |
+| 5 | Env | B | S attack, S decay, S sustain, S release | | | voice | 0 |
+| 6 | Sample | B left, B right | S ratio | | Asset | voice | 0 |
+| 7 | Mul | B | B a, B b | | | voice | 0 |
+| 8 | MulS | B | B a, S b | | | voice | 0 |
+| 9 | Add | B | B a, B b | | | voice | 0 |
+| 10 | AddS | B | B a, S b | | | voice | 0 |
+| 11 | Pan | B left, B right | B in, S position | | | voice | 0 |
+| 12 | DelayWrite | | B in | | Delay | voice | 0 |
+| 13 | DelayRead | B | S seconds | 0 after the write, 1 before it | Delay | voice | 0 |
+| 14 | Comb | B | B in, S seconds, S feedback, S damp | | Delay | voice | 0 |
+| 15 | Allpass | B | B in, S seconds, S feedback | | Delay | voice | 0 |
+| 16 | Follow | B | B in, S release | | | voice | 0 |
+| 17 | KMul | S | S a, S b | | | either | 0 |
+| 18 | KAdd | S | S a, S b | | | either | 0 |
+| 19 | KMtoF | S | S note | | | either | 0 |
+| 20 | KRatio | S | S note | root key, at most 127 | | either | 0 |
+| 21 | KSnap | S | B in | | | voice | 0 |
+| 22 | KLfo | S | S rate, S depth | | | either | 0 |
+| 23 | Saw | B | S frequency | 0 band-limited, 1 naive | | voice | 1 |
+| 24 | Pulse | B | S frequency, S width | 0 band-limited, 1 naive | | voice | 1 |
+| 25 | Triangle | B | S frequency | | | voice | 1 |
 
 What each one does:
 
@@ -279,6 +282,21 @@ What each one does:
 - **Osc.** A 32-bit phase, incremented per sample by `clamp(frequency, 0, rate / 2) * (1 / rate) * 4294967040`, truncated to an integer. The
   top bits index the table, and the output interpolates linearly to the next entry, which is why a table has a guard. It wraps because the
   phase does.
+- **Saw, Pulse, Triangle.** A 32-bit `phase` starting at 0, advanced per sample by `inc`, worked out as for Osc. No table, and each is
+  written for one sample below. `ramp(p)` is `p` as a signed integer times `4.656612873e-10`. Conversions to float round to nearest.
+  - `blep(x)` is `(1 + x) * (1 + x)` if `x < 0`, and otherwise `-(1 - x) * (1 - x)`. `near(p)` is `p + inc < inc + inc` in 32 bits, which holds
+    within `inc` of a jump on either side. `from(p)` is `p` as a signed integer times `iv`, where `iv` is `1 / inc`, or 0 if `inc` is 0.
+    Mode 0 of Saw and Pulse uses these, and only on samples beside a jump, so that harmonics above `rate / 2` mostly do not fold back. Mode 1 does
+    not, so the ones it leaves are audible, more so at high notes. It is about half the cost, and it is the right choice for a low note or
+    for the sound of aliasing.
+  - **Saw.** Starts at 0, rises to 1 at half a turn and jumps to −1. With `j = phase + 0x80000000`, mode 1 writes `ramp(phase)`. Mode 0 writes that,
+    less `blep(from(j))` if `near(j)`.
+  - **Pulse.** `w` is `clamp(width, 0, 1)`, read once per frame, and `edge` is `w * 4294967040` truncated to an integer. Let `v` be 1 if
+    `phase < edge` and −1 otherwise, less the mean `w + w - 1`, so moving the width does not move the level and a width of 0 or 1 is silence.
+    Mode 1 writes `v`. Mode 0 adds `blep(from(phase))` if `near(phase)`, then subtracts `blep(from(f))` if `near(f)`, where `f = phase - edge`.
+  - **Triangle.** Starts at 0, rises to 1 at a quarter turn and falls to −1 at three quarters. With `p = phase + 0x40000000`, it writes
+    `p xor (p as a signed integer >> 31)`, as a signed integer times `9.313225746e-10`, less 1. It has no mode: having no jump, it aliases
+    little.
 - **Biquad.** A transposed direct form II biquad with RBJ cookbook coefficients. Cutoff is clamped to 10 Hz to `0.45 * rate`, and q to 0.1 to
   30. With `t = cutoff / rate`, `1 - cos(w)` is `2 * sin_turns(t / 2)^2`, which keeps its bits at a low cutoff, and `alpha` is
   `sin_turns(t) / (2 * q)`. A band-pass has constant 0 dB peak gain. A coefficient is worked out again only when cutoff or q changes.
@@ -352,6 +370,7 @@ silence if it is not finite.
 - An op with two outputs names two different registers, and neither may be one of its inputs, because the outputs are written one
   after the other.
 - `out_left` and `out_right` name buffers that have been written.
+- No step uses an opcode added after the manifest's revision.
 - Each reference names a Table or an Asset that exists, and each step's resource is in range and of the right kind.
 
 ## 7. Program chunk (kind 4)
@@ -600,7 +619,8 @@ is what the per-op cost limit in the design is for.
 
 ## 10. Golden images
 
-`golden/` holds images written at this freeze, each with its render on a stereo and a mono engine. They are the contract in executable form.
+`golden/` holds images written at this freeze, and `Waves` from revision 1, each with its render on a stereo and a mono engine. They are the
+contract in executable form.
 
 - A golden image and its render never change, and CI fails a pull request that edits or removes one.
 - Every engine, on every target, must load each one and match its render within −100 dB of peak.

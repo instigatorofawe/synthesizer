@@ -59,6 +59,7 @@ for row in table_rows("### Opcodes"):
         "mode": row[4],
         "resource": row[5],
         "control": row[6] == "either",
+        "since": int(row[7]),
     }
 INSTRUCTIONS = {
     int(row[0]): {
@@ -95,6 +96,18 @@ def limit_value(text: str) -> float:
 
 def check_document() -> None:
     """Compares the tables in the document with the registry and the header."""
+    described = re.search(r"This document describes revision (\d+)", SPEC)
+    engine = re.search(r"kFormatRevision = (\d+)", HEADER)
+    require(
+        described is not None
+        and engine is not None
+        and described.group(1) == engine.group(1),
+        "the document and the header describe different revisions",
+    )
+    require(
+        max(op["since"] for op in OPS.values()) == int(engine.group(1)),
+        "no opcode was added by the newest revision",
+    )
     registered = re.findall(r"^MODSYNTH_OP\(([^)]*)\)", REGISTRY, re.MULTILINE)
     require(len(registered) == len(OPS), "document and registry list different opcodes")
     for line in registered:
@@ -373,9 +386,7 @@ def read_image(path: Path) -> dict:
     payload = image[24 : 24 + size]
     require(kind == 0 and fnv(1, 0, payload) == manifest_hash, "manifest")
     entries, programs, revision, reserved = struct.unpack_from("<4I", payload, 0)
-    require(
-        size == 16 + entries * 16 and reserved == 0 and revision == 0, "manifest header"
-    )
+    require(size == 16 + entries * 16 and reserved == 0, "manifest header")
 
     chunks, at = [], next_chunk(image, 0, size)
     previous = (0, 0)
@@ -410,6 +421,18 @@ def read_image(path: Path) -> dict:
         chunks.append(chunk)
     require(at == len(image), "bytes follow the last chunk")
     require(sum(c["kind"] == "program" for c in chunks) == programs, "program count")
+    needed = max(
+        (
+            OPS[op]["since"]
+            for c in chunks
+            if c["kind"] == "patch"
+            for op in c.get("decoded", {}).get("ops", ())
+        ),
+        default=0,
+    )
+    # A thin image can need more than what it carries.
+    whole = all(c["present"] for c in chunks)
+    require(revision == needed if whole else revision >= needed, "manifest revision")
     return {"chunks": chunks, "programs": programs}
 
 

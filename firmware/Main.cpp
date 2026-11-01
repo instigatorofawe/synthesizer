@@ -87,6 +87,7 @@ void write_output(int file, const void* data, std::size_t size) {
 
 MODSYNTH_LINK_IMAGE(g_demo, MODSYNTH_GOLDEN "/Demo.image")
 MODSYNTH_LINK_IMAGE(g_all_ops, MODSYNTH_GOLDEN "/AllOps.image")
+MODSYNTH_LINK_IMAGE(g_waves, MODSYNTH_GOLDEN "/Waves.image")
 
 namespace {
 
@@ -133,7 +134,8 @@ int main() {
     print_number(sizeof(g_bulk));
     print("\n");
     const bool ok = render(MODSYNTH_OUTPUT ".Demo.f32", g_demo, g_demo_end, 480) &&
-                    render(MODSYNTH_OUTPUT ".AllOps.f32", g_all_ops, g_all_ops_end, 400);
+                    render(MODSYNTH_OUTPUT ".AllOps.f32", g_all_ops, g_all_ops_end, 400) &&
+                    render(MODSYNTH_OUTPUT ".Waves.f32", g_waves, g_waves_end, 200);
     finish(ok);
 }
 

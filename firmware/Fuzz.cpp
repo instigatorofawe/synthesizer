@@ -32,8 +32,15 @@ __asm(
     "\"\n"
     ".global g_seed_b_end\n"
     "g_seed_b_end:\n"
+    ".balign 8\n"
+    ".global g_seed_c\n"
+    "g_seed_c:\n"
+    ".incbin \"" MODSYNTH_FUZZ_SEED_C
+    "\"\n"
+    ".global g_seed_c_end\n"
+    "g_seed_c_end:\n"
     ".text\n");
-extern const std::byte g_seed_a[], g_seed_a_end[], g_seed_b[], g_seed_b_end[];
+extern const std::byte g_seed_a[], g_seed_a_end[], g_seed_b[], g_seed_b_end[], g_seed_c[], g_seed_c_end[];
 extern "C" std::byte __arena_start[], __arena_end[];
 
 namespace {
@@ -217,7 +224,8 @@ extern std::uint32_t __bss_start, __bss_end, __stack_top;
     __asm volatile("dsb\nisb");
 
     static const ByteSpan seeds[] = {{g_seed_a, static_cast<std::size_t>(g_seed_a_end - g_seed_a)},
-                                     {g_seed_b, static_cast<std::size_t>(g_seed_b_end - g_seed_b)}};
+                                     {g_seed_b, static_cast<std::size_t>(g_seed_b_end - g_seed_b)},
+                                     {g_seed_c, static_cast<std::size_t>(g_seed_c_end - g_seed_c)}};
     // The top of the arena, out of take_memory()'s reach. As integers, because __arena_end is one past an unknown
     // array.
     const auto top = reinterpret_cast<std::uintptr_t>(__arena_end);

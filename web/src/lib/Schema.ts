@@ -3,7 +3,7 @@
 import { z } from 'zod';
 
 export const NODE_TYPES = [
-	'note', 'param', 'const', 'osc', 'noise', 'biquad', 'env', 'sample', 'mul', 'add', 'mtof', 'ratio', 'pan',
+	'note', 'param', 'const', 'osc', 'noise', 'biquad', 'env', 'sample', 'mul', 'add', 'mtof', 'snap', 'ratio', 'pan',
 	'delay', 'comb', 'allpass', 'follow', 'lfo', 'in', 'out'
 ] as const;
 

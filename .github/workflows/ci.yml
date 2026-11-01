@@ -27,7 +27,7 @@ jobs:
       - run: python3 tools/CheckAppendOnly.py "origin/$GITHUB_BASE_REF"
       - name: Read the golden images from the specification alone
         run: |
-          python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image
+          python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image golden/Tones.image
           python3 tools/ReadImage.py --example golden/Minimal.image
 
   native:
@@ -100,7 +100,7 @@ jobs:
       - run: cmake --build build --target modsynth_fuzz
       - run: >-
           ${{ matrix.binary }} 90 ${{ github.run_id }}
-          golden/AllOps.image golden/Demo.image golden/Waves.image
+          golden/AllOps.image golden/Demo.image golden/Waves.image golden/Tones.image
         env:
           ASAN_OPTIONS: detect_leaks=0
 

@@ -261,7 +261,7 @@ TEST(CompileImage, OscillatorsCompileToTheirOwnOpcodes) {
             for (u32 s = 0; s < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++s) {
                 const WireStep step = v.step(s);
                 const Op op = static_cast<Op>(step.op);
-                if (op == Op::Osc || op == Op::Saw || op == Op::Pulse || op == Op::Triangle) {
+                if (op == Op::Osc || op == Op::Saw || op == Op::Pulse || op == Op::Triangle || op == Op::Tone) {
                     return std::pair(op, step.mode);
                 }
             }
@@ -270,6 +270,7 @@ TEST(CompileImage, OscillatorsCompileToTheirOwnOpcodes) {
         return std::pair(Op::Fill, u8{0});
     };
     EXPECT_EQ(compiled("sine", ""), std::pair(Op::Osc, u8{0}));
+    EXPECT_EQ(compiled("sine", "fixed"), std::pair(Op::Tone, u8{0}));
     EXPECT_EQ(compiled("saw", ""), std::pair(Op::Saw, u8{0}));
     EXPECT_EQ(compiled("saw", "naive"), std::pair(Op::Saw, kNaive));
     EXPECT_EQ(compiled("square", ""), std::pair(Op::Pulse, u8{0}));
@@ -284,6 +285,17 @@ TEST(CompileImage, OnlySineCarriesATable) {
     };
     EXPECT_EQ(tables("sine"), 1);
     for (const char* wave : {"saw", "square", "triangle"}) EXPECT_EQ(tables(wave), 0) << wave;
+    json fixed = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+    fixed["patches"]["sine"]["graph"]["nodes"][2]["mode"] = "fixed";
+    EXPECT_EQ(count_kind(compile_image(fixed).report, "table"), 0);
+}
+
+TEST(CompileImage, OnlySineHasAFixedMode) {
+    for (const char* wave : {"saw", "square", "triangle"}) {
+        json request = request_with({wave}, {program("a", one_note_timeline(wave))});
+        request["patches"][wave]["graph"]["nodes"][2]["mode"] = "fixed";
+        EXPECT_THROW(compile_image(request), CompileError) << wave;
+    }
 }
 
 TEST(CompileImage, DeclaresOnlyTheRevisionItUses) {
@@ -295,6 +307,9 @@ TEST(CompileImage, DeclaresOnlyTheRevisionItUses) {
     };
     EXPECT_EQ(revision_of(compile("sine").image), 0u);
     for (const char* wave : {"saw", "square", "triangle"}) EXPECT_EQ(revision_of(compile(wave).image), 1u) << wave;
+    json fixed = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+    fixed["patches"]["sine"]["graph"]["nodes"][2]["mode"] = "fixed";
+    EXPECT_EQ(revision_of(compile_image(fixed).image), 2u);
 
     // A thin image omits the patch, and a receiver still has to run it.
     json request = request_with({"saw"}, {program("a", one_note_timeline("saw"))});

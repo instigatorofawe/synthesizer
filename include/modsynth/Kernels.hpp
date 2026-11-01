@@ -100,6 +100,9 @@ struct Kernels {
     struct OscState {
         u32 phase;
     };
+    struct ToneState {
+        float v, d, k;
+    };
     struct NoiseState {
         u32 x;
     };
@@ -130,6 +133,8 @@ struct Kernels {
             case Op::Pulse:
             case Op::Triangle:
                 return sizeof(OscState);
+            case Op::Tone:
+                return sizeof(ToneState);
             case Op::Biquad:
                 return sizeof(BiquadState);
             case Op::Env:
@@ -184,6 +189,9 @@ struct Kernels {
                 break;
             case Op::Triangle:
                 triangle(s, c);
+                break;
+            case Op::Tone:
+                tone(s, c);
                 break;
             case Op::Biquad:
                 biquad(s, c);
@@ -377,6 +385,37 @@ struct Kernels {
             phase += inc;
         }
         st.phase = phase;
+    }
+
+    // A sine with no table, at half the cost of Osc, from s[n+1] = (2 - k) s[n] - s[n-1]. That is held here as the step
+    // d = s[n] - s[n-1], because 2 - k has too few bits left for a low note. The level is carried by the size of that
+    // step relative to k, so changing k changes the level, and quick changes can make it grow without limit. So k is
+    // set once and never moves: state starts zeroed, and a note has this frequency until it ends. A frequency of 0
+    // leaves k at 0, which is silence, and tries again next frame. The clamp is below rate / 2 because k rounds to 4
+    // near it. It starts on the note's sample and not the frame's, so a note's phase doesn't depend on where it lands
+    // in a frame.
+    static void tone(const DecodedStep& s, RunContext& c) {
+        auto& st = state<ToneState>(c, s);
+        float* out = buffer(c, s.out[0]);
+        u32 start = 0;
+        if (st.k == 0.0f) {
+            const float turns = clamp(scalar(c, s.in[0]), 0.0f, c.rate * 0.45f) * c.inverse_rate;
+            const float half = sin_turns(turns * 0.5f);
+            st.k = 4.0f * half * half;
+            st.d = sin_turns(turns);
+            start = c.gate.on < N ? c.gate.on : 0;
+            std::fill(out, out + start, 0.0f);
+        }
+        const float k = st.k;
+        float v = st.v;
+        float d = st.d;
+        for (u32 i = start; i < N; ++i) {
+            out[i] = v;
+            d -= k * v;
+            v += d;
+        }
+        st.v = v;
+        st.d = d;
     }
 
     static void biquad(const DecodedStep& s, RunContext& c) {

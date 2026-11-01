@@ -7,7 +7,7 @@
 Each sound is a scale over six octaves, then a sweep up to the top of the keyboard. Aliasing is easiest to hear on the sweep,
 as tones that fall while the note rises. Turn your volume down before the first run.
 
-    uv run examples/Listen.py                 # everything, about 75 seconds
+    uv run examples/Listen.py                 # everything, about 95 seconds
     uv run examples/Listen.py saw square      # only these
     uv run examples/Listen.py --mode naive    # only this mode
     uv run examples/Listen.py --gain 0.05     # quieter
@@ -40,8 +40,11 @@ SWEEP_TICKS = 6720
 SWEEP_SEMITONES = 84  # from C2 up to C9, about 8.4 kHz
 TOTAL_TICKS = SWEEP_START + SWEEP_TICKS + SCALE_STEP
 
-# Triangle has one form, and pwm is a square whose width moves.
+# Sine and triangle have one form, and pwm is a square whose width moves. Tone is a sine that keeps the pitch its note
+# started with, so its sweep stays on one note.
 SOUNDS = {
+    "sine": {"wave": "sine", "modes": [None]},
+    "tone": {"wave": "sine", "modes": ["fixed"]},
     "saw": {"wave": "saw"},
     "square": {"wave": "square"},
     "pwm": {"wave": "square", "moving_width": True},

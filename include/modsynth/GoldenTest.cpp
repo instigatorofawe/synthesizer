@@ -30,10 +30,9 @@ struct Golden {
 // moved Demo and AllOps. Refusing audio at inputs read once a frame made another. It moved them again, because a snap
 // node has its own place among the steps. They render as they did.
 constexpr Golden kGoldens[] = {
-    {"Minimal", 8, 0x1b3153f13f3ea109ull},
-    {"Demo", 480, 0xbc90aab7da78bf30ull},
-    {"AllOps", 400, 0xed4a0c10d266d7aeull},
-    {"Waves", 200, 0xf4c0e84598e9134eull},
+    {"Minimal", 8, 0x1b3153f13f3ea109ull},  {"Demo", 480, 0xbc90aab7da78bf30ull},
+    {"AllOps", 400, 0xed4a0c10d266d7aeull}, {"Waves", 200, 0xf4c0e84598e9134eull},
+    {"Tones", 200, 0x6d4b1572d83c6384ull},
 };
 
 std::vector<std::byte> read_file(const std::string& path) {
@@ -188,6 +187,7 @@ TEST(Golden, EachImageDeclaresTheRevisionItNeeds) {
         EXPECT_EQ(revision(name), 0u) << name;
     }
     EXPECT_EQ(revision("Waves.image"), 1u);
+    EXPECT_EQ(revision("Tones.image"), 2u);
 }
 
 TEST(Golden, AThinImageFromTheFreezePlaysOnChunksFromTheFreeze) {

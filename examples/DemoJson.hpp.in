@@ -1,0 +1,5 @@
+#pragma once
+
+namespace modsynth_test {
+inline constexpr const char* demo_json = R"DEMOJSON(@MODSYNTH_DEMO_JSON@)DEMOJSON";
+}

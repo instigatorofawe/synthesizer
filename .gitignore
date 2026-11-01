@@ -4,3 +4,8 @@ dist/
 __pycache__/
 .cache/
 .ruff_cache/
+node_modules/
+web/.svelte-kit/
+web/data/
+web/static/wasm/
+web/src/lib/wasm/*.js

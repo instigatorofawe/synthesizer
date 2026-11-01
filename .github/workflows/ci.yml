@@ -1,9 +1,9 @@
 name: CI
 
+# Milestones reach main as squashed pull requests, and those are the only thing that runs CI.
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read

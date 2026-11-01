@@ -6,6 +6,6 @@ Style:
 # Finding Emscripten's headers also needs the editor to pass clangd --query-driver='**/em++',
 # which can't be set from this file.
 If:
-  PathMatch: bindings/wasm\.cpp
+  PathMatch: bindings/Wasm(Compiler)?\.cpp
 CompileFlags:
   CompilationDatabase: build/wasm

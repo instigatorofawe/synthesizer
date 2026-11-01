@@ -29,7 +29,7 @@ Three kinds of change are possible after this freeze, and nothing else is.
 Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
 can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
 damaged. A compiler writes the lowest revision that covers what it actually used, so an image that uses nothing new keeps
-loading on old engines. This document describes revision 1. The opcode table says which revision added each opcode.
+loading on old engines. This document describes revision 2. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
 version so far, and no such change is planned. A version above the engine's gets the same refusal.
@@ -271,6 +271,7 @@ samples.
 | 23 | Saw | B | S frequency | 0 band-limited, 1 naive | | voice | 1 |
 | 24 | Pulse | B | S frequency, S width | 0 band-limited, 1 naive | | voice | 1 |
 | 25 | Triangle | B | S frequency | | | voice | 1 |
+| 26 | Tone | B | S frequency | | | voice | 2 |
 
 What each one does:
 
@@ -297,6 +298,13 @@ What each one does:
   - **Triangle.** Starts at 0, rises to 1 at a quarter turn and falls to −1 at three quarters. With `p = phase + 0x40000000`, it writes
     `p xor (p as a signed integer >> 31)`, as a signed integer times `9.313225746e-10`, less 1. It has no mode: having no jump, it aliases
     little.
+- **Tone.** A sine with no table, at about half the cost of Osc, whose frequency is read once. `v`, `d` and `k` start at 0. At the start of a frame,
+  if `k` is 0, it sets `t = clamp(frequency, 0, 0.45 * rate) * (1 / rate)`, `h = sin_turns(t * 0.5)`, `k = 4 * h * h` and `d = sin_turns(t)`, and in
+  that frame it writes 0 before a note's sample offset and starts there. Then for each sample it writes `v`, sets `d` to `d - k * v`, and sets `v` to
+  `v + d`. So a note starts from 0 on its own sample and keeps the frequency it started with to its end, whatever the input does later, and until
+  there is a frequency above 0 it is silent. State carried across a live edit carries the
+  frequency too, so an edit reaches the next note. This is `s[n + 1] = (2 - k) * s[n] - s[n - 1]`, kept as the step `d = s[n] - s[n - 1]` because
+  `2 - k` has few bits left at a low note. Its level is in that state, so a `k` that moved would move the level, which is why it does not.
 - **Biquad.** A transposed direct form II biquad with RBJ cookbook coefficients. Cutoff is clamped to 10 Hz to `0.45 * rate`, and q to 0.1 to
   30. With `t = cutoff / rate`, `1 - cos(w)` is `2 * sin_turns(t / 2)^2`, which keeps its bits at a low cutoff, and `alpha` is
   `sin_turns(t) / (2 * q)`. A band-pass has constant 0 dB peak gain. A coefficient is worked out again only when cutoff or q changes.
@@ -619,7 +627,7 @@ is what the per-op cost limit in the design is for.
 
 ## 10. Golden images
 
-`golden/` holds images written at this freeze, and `Waves` from revision 1, each with its render on a stereo and a mono engine. They are the
+`golden/` holds images written at this freeze, `Waves` from revision 1 and `Tones` from revision 2, each with its render on a stereo and a mono engine. They are the
 contract in executable form.
 
 - A golden image and its render never change, and CI fails a pull request that edits or removes one.

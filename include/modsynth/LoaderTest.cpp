@@ -196,6 +196,17 @@ TEST(Rules, AnImageMustDeclareTheRevisionOfItsOpcodes) {
     EXPECT_EQ(load_error(with_manifest(declared, offsetof(ManifestHeader, revision), &zero, 4)), LoadError::BadPatch);
 }
 
+TEST(Rules, ARevisionCoversOnlyTheOpcodesUpToIt) {
+    Hand hand;
+    hand.patch.voice[0].op = static_cast<u8>(Op::Tone);
+    const auto declared = hand.bytes();
+    ASSERT_EQ(load<ManifestHeader>(declared.data() + sizeof(ChunkHeader)).revision, 2u);
+    EXPECT_EQ(load_error(declared), LoadError::None);
+
+    const u32 one = 1;
+    EXPECT_EQ(load_error(with_manifest(declared, offsetof(ManifestHeader, revision), &one, 4)), LoadError::BadPatch);
+}
+
 TEST(Rules, ChunksMustBeInManifestOrder) {
     HandPatch other = minimal_patch();
     other.consts = {0.25f};

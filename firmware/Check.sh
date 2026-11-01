@@ -18,7 +18,7 @@ for name in Stereo Mono StereoCmsis; do
 done
 cd ../..
 
-for image in Demo AllOps Waves; do
+for image in Demo AllOps Waves Tones; do
     python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/Stereo.$image.f32"
     python3 tools/CompareAudio.py "golden/$image.mono.f32" "build/firmware/Mono.$image.f32"
     python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/StereoCmsis.$image.f32"

@@ -1,6 +1,6 @@
 # modsynth design, revision 9
 
-Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 1. `docs/Format.md` is its specification,
+Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 2. `docs/Format.md` is its specification,
 and where this document and that one differ, that one is right. This document replaces all earlier revisions, and everything
 needed from them is included here. Sections about later milestones are still proposals.
 
@@ -299,6 +299,7 @@ pay only beside a jump, so they cost more at high notes, and the ranges run from
 | Saw, band-limited / naive | 14.0 to 15.6 / 9.4 |
 | Pulse, band-limited / naive | 19.3 to 22.7 / 10.7 |
 | Triangle | 11.4 |
+| Tone, a sine that holds one frequency | 9.2 |
 
 Cycles were not the reason for them. Saw, square and triangle used to be one table each, with 48 harmonics at every pitch. Above 500 Hz those
 fold back, and at 1760 Hz the saw's aliases were at −15 dB, about as bad as no anti-aliasing at all. Below it the table runs out, so a 110 Hz saw
@@ -307,6 +308,17 @@ stopped at 5.3 kHz. PolyBLEP gives −29 dB at 1760 Hz and keeps the top end, at
 and the format would need a table with levels [estimate]. Naive stays available as mode 1, because it is half the cost, is fine for a low note, and
 is sometimes the sound that is wanted. Triangle has only the naive form: PolyBLAMP doubled its cost and gained about 12 dB. In a graph, `"mode": "naive"` on an `osc` node
 selects it, and a square takes a `width` input.
+
+Tone is the recursive sine, for tones that need no table and do not move. A later pass priced it at 9.2 against 21.3 for the wavetable [model], and an
+image of only these holds no 8 KB table. A recursion keeps its level in the step between samples, so moving its frequency moves the level, by 1/sqrt(f)
+on a glide: −8.5 dB from 110 to 880 Hz and +20.7 dB from 4 kHz to 40 Hz, and past 1e12 within a minute when the frequency changes at random every
+frame, even below 6 kHz [measured]. The magic circle is the same oscillator with its second variable scaled. It survives the glide and not the random
+frequency. So Tone reads its frequency at the start of a note and holds it, which takes all of that away. Its tuning stays within 0.001 cents over an
+hour on every MIDI note, and its peak within 0.01% of 1 over 24 hours at both ends of its range [measured]. It also starts on the note's sample, where
+the other oscillators start on the frame's, so its phase at a note does not depend on where that note lands in a frame. It is written as the step `d`, because in `2 cos(w) * s[n] - s[n-1]` the
+coefficient rounds badly near 2, which put a 20 Hz note 6 cents flat. In a graph, `"mode": "fixed"` on a sine `osc` node selects it, and sine stays
+Osc otherwise, as only Osc can follow its input. If a table-free sine ever has to move, a rotation renormalised once a frame holds its level through
+all of the above, at 12.4 cycles [model].
 
 Whole voice (2 oscillators, noise, 2 filters, envelope), per voice with 4 held:
 
@@ -376,7 +388,7 @@ Golden audio compares within a tolerance of −100 dB relative to peak, and audi
 targets. The reference is committed: `golden/` holds images written at the freeze, with their renders, and they never change.
 
 Measured against those references, which a macOS arm64 build wrote. `Demo` is 122,880 stereo samples, `AllOps` 102,400 and `Waves`, from revision 1,
-51,200. Each mono render has half as many. Zero means exactly that: every sample's bits match.
+51,200. Each mono render has half as many. `Tones`, from revision 2, came after the table below, and CI holds it to the same comparison. Zero means exactly that: every sample's bits match.
 
 | Target | Compiler | Stereo samples that differ | Mono samples that differ |
 |---|---|---|---|

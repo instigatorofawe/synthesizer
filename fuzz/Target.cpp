@@ -52,7 +52,7 @@ void send_event(Engine& engine, Rng& r, const ProgramHeader& h) {
     };
     const auto wild_tick = [&] { return r.chance(10) ? r.next() : r.below(std::max<u32>(h.length_ticks, 1) + 2); };
     Event e;
-    e.kind = static_cast<EventKind>(r.below(11));
+    e.kind = static_cast<EventKind>(r.below(12));
     e.note = static_cast<u8>(r.below(r.chance(90) ? 128 : 256));
     e.velocity = static_cast<u8>(r.below(128));
     e.channel = static_cast<u8>(r.below(3));
@@ -62,6 +62,11 @@ void send_event(Engine& engine, Rng& r, const ProgramHeader& h) {
     e.tick = wild_tick();
     e.tick_end = r.chance(30) ? 0 : e.tick + 1 + r.below(1024);
     if (e.kind == EventKind::Stop && r.chance(80)) e.kind = EventKind::NoteOn;  // A stopped Program covers little
+    if (e.kind == EventKind::SetProbe && r.chance(90)) {  // Mostly close to real, as a wild one is refused at once
+        e.target = static_cast<u16>(r.below(std::max<u32>(h.tracks, 1)));
+        e.tick = r.below(32);
+        e.tick_end = operand(static_cast<Bank>(r.below(6)), static_cast<u16>(r.below(32)));
+    }
     (void)engine.send(e);
 }
 

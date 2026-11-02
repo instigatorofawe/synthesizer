@@ -129,7 +129,7 @@ EMSCRIPTEN_KEEPALIVE void ms_render() {
 EMSCRIPTEN_KEEPALIVE int ms_send(std::uint32_t kind, std::uint32_t note, std::uint32_t velocity, std::uint32_t channel,
                                  std::uint32_t target, std::uint32_t param, float value, std::uint32_t tick,
                                  std::uint32_t tick_end) {
-    if (kind > static_cast<u32>(EventKind::SetLoop)) return 0;
+    if (kind > static_cast<u32>(EventKind::SetProbe)) return 0;
     Event e;
     e.kind = static_cast<EventKind>(kind);
     e.note = static_cast<u8>(note);

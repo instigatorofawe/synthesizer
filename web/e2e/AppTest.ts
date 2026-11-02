@@ -171,3 +171,152 @@ test('a single timeline exports only what it reaches', async ({ page }) => {
 	await page.getByRole('button', { name: 'Export saved version' }).click();
 	expect((await download).suggestedFilename()).toBe('Ballad.msimg');
 });
+
+async function newPatch(page: Page, name: string) {
+	await page.goto('/');
+	await page.getByLabel('New patch name').fill(name);
+	await page.getByLabel('New patch name').press('Enter');
+	await page.waitForURL(/\/patches\//);
+	await expect(page.getByTestId('graph')).toBeVisible();
+}
+
+async function drag(page: Page, from: string, to: string) {
+	const start = await page.getByTestId(from).boundingBox();
+	const end = await page.getByTestId(to).boundingBox();
+	await page.mouse.move(start!.x + start!.width / 2, start!.y + start!.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(end!.x + end!.width / 2, end!.y + end!.height / 2, { steps: 5 });
+	await page.mouse.up();
+}
+
+test('the graph editor draws a patch and colours its wires by rate', async ({ page }) => {
+	await page.goto('/patches/lead');
+	await expect(page.getByTestId('graph')).toBeVisible();
+	await expect(page.locator('[data-testid^="node-"]').first()).toBeVisible();
+	await expect(page.locator('path.wire.audio').first()).toBeAttached();
+	await expect(page.locator('path.wire.control').first()).toBeAttached();
+});
+
+test('a wire drawn by hand compiles, and an error lands on its node until it is undone', async ({ page }) => {
+	await newPatch(page, 'Wired by hand');
+	await expect(page.getByTestId('wire-2-in')).toHaveClass(/control/);
+	await drag(page, 'out-4-out', 'in-2-in'); // Audio into a pitch read once a frame
+	await expect(page.getByTestId('compile-error')).toContainText('put a snap node on the wire');
+	await expect(page.getByTestId('node-2')).toHaveAttribute('data-error', 'true');
+	await page.getByRole('button', { name: 'Undo' }).click();
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	await expect(page.getByTestId('node-2')).toHaveAttribute('data-error', 'false');
+});
+
+test('a node added from the toolbar is set up from the inspector', async ({ page }) => {
+	await newPatch(page, 'Built from parts');
+	await page.getByLabel('Node type').selectOption('math');
+	await page.getByRole('button', { name: 'Add node' }).click();
+	await expect(page.getByTestId('node-7')).toHaveAttribute('data-dead', 'true');
+	await page.getByLabel('mode', { exact: true }).selectOption('clip');
+	await expect(page.getByTestId('in-7-c')).toBeAttached();
+	await page.getByLabel('source of a').selectOption('3:out');
+	await expect(page.getByTestId('wire-7-a')).toHaveClass(/audio/);
+	await page.getByLabel('source of b').selectOption('');
+	await page.getByLabel('value of b').fill('-0.5');
+	await page.getByLabel('value of b').blur();
+	await expect(page.getByLabel('Graph JSON')).toHaveValue(/"b": -0\.5/);
+});
+
+test('a moved node stays where it was put', async ({ page }) => {
+	await newPatch(page, 'Rearranged');
+	const before = await page.getByTestId('node-6').getAttribute('transform');
+	const box = await page.getByRole('button', { name: 'out 6' }).boundingBox();
+	await page.mouse.move(box!.x + 40, box!.y + 8);
+	await page.mouse.down();
+	await page.mouse.move(box!.x - 60, box!.y + 100, { steps: 4 });
+	await page.mouse.up();
+	await expect.poll(() => page.getByTestId('node-6').getAttribute('transform')).not.toBe(before);
+	const moved = await page.getByTestId('node-6').getAttribute('transform');
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.getByText('Saved.')).toBeVisible();
+	await page.reload();
+	await expect(page.getByTestId('node-6')).toHaveAttribute('transform', moved!);
+});
+
+test('a patch uses another as a subpatch, and it plays', async ({ page }) => {
+	await newPatch(page, 'Part');
+	const part = new URL(page.url()).pathname.split('/').pop();
+	await newPatch(page, 'Whole');
+	await page.getByLabel('Node type').selectOption('subpatch');
+	await page.getByRole('button', { name: 'Add node' }).click();
+	await page.getByLabel('patch', { exact: true }).selectOption(part!);
+	await expect(page.getByTestId('out-7-l')).toBeAttached();
+	await drag(page, 'out-7-l', 'in-6-r');
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	await expect(page.getByTestId('wire-6-r')).toHaveClass(/audio/);
+	await expect(page.getByTestId('node-7')).toHaveAttribute('data-dead', 'false');
+
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.getByText('Saved.')).toBeVisible();
+	await page.goto(`/patches/${part}`);
+	await page.getByRole('button', { name: 'Delete' }).click();
+	await expect(page.getByText('used by')).toBeVisible();
+});
+
+test('a probe scopes a node inside a voice', async ({ page }) => {
+	await page.goto('/patches/lead');
+	await page.getByRole('button', { name: 'Start audio' }).click();
+	await expect(page.getByTestId('engine')).toHaveAttribute('data-playing', 'true', { timeout: 10000 });
+	const node = page.locator('g.node:has(text:has-text("osc"))').first();
+	const id = (await node.getAttribute('data-testid'))!.replace('node-', '');
+	await node.locator('rect.title').click();
+	await page.getByRole('button', { name: 'Probe out' }).click();
+	const label = page.locator('span').filter({ hasText: new RegExp(`^${id} osc\\.out$`) });
+	await expect(label).toBeVisible();
+	const key = page.getByRole('button', { name: '60', exact: true });
+	await key.dispatchEvent('pointerdown');
+	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.5).length, { timeout: 8000 }).toBeGreaterThan(0);
+	await key.dispatchEvent('pointerup');
+	await page.getByRole('button', { name: 'Stop probing out' }).click();
+	await expect(label).toHaveCount(0);
+});
+
+test('a recipe plays from the catalogue without touching the library', async ({ page }) => {
+	const problems: string[] = [];
+	page.on('pageerror', (e) => problems.push(e.message));
+	await page.goto('/');
+	await page.getByRole('link', { name: 'Recipes' }).click();
+	await expect(page.getByRole('heading', { name: 'drums' })).toBeVisible();
+	await page.getByRole('link', { name: 'Kick808' }).click();
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	await expect.poll(async () => Math.max(0, ...(await peaks(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
+	await page.goto('/');
+	await expect(page.getByRole('link', { name: 'Kick808' })).toHaveCount(0);
+	expect(problems).toEqual([]);
+});
+
+test('a recipe added to the library is an ordinary timeline and patch', async ({ page }) => {
+	await page.goto('/recipes/PluckedString');
+	await page.getByRole('button', { name: 'Add to library' }).click();
+	await page.waitForURL('**/timelines/recipe-PluckedString');
+	await expect(page.getByLabel('Timeline name')).toHaveValue('PluckedString');
+	await page.getByRole('button', { name: 'Start audio' }).click();
+	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+
+	await page.goto('/patches/recipe-PluckedString-p');
+	await expect(page.locator('path.wire.audio').first()).toBeAttached();
+
+	await page.goto('/recipes/PluckedString');
+	await expect(page.getByRole('button', { name: 'Add to library' })).toHaveCount(0);
+	await expect(page.getByRole('link', { name: 'Open in the library' })).toBeVisible();
+});
+
+test('a recipe with recordings keeps them when it is added', async ({ page }) => {
+	await page.goto('/recipes/OneShotSample');
+	await page.getByRole('button', { name: 'Add to library' }).click();
+	await page.waitForURL('**/timelines/recipe-OneShotSample');
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	await page.getByRole('button', { name: 'Start audio' }).click();
+	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+});
+
+test('an unknown recipe is a 404', async ({ page }) => {
+	expect((await page.goto('/recipes/Nothing'))?.status()).toBe(404);
+});

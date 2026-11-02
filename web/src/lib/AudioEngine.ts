@@ -1,6 +1,6 @@
 // The main thread's handle on the worklet.
 import { LiveReports } from '#lib/LiveReports.ts';
-import type { CompileReport, ProgramReport } from '#lib/Request.ts';
+import type { CompileReport, NodesReport, ProgramReport } from '#lib/Request.ts';
 
 // Matches EventKind in Synth.hpp.
 const EventKind = {
@@ -13,8 +13,12 @@ const EventKind = {
 	Play: 6,
 	Stop: 7,
 	Locate: 8,
-	SetLoop: 9
+	SetLoop: 9,
+	SetProbe: 10
 } as const;
+
+const TAP_SLOTS = 8;
+const NO_TARGET = 0xffff; // Out of range for any step, so the engine turns the slot off
 
 export interface EngineState {
 	tick: number;
@@ -40,6 +44,21 @@ export interface TapTarget {
 	step: number;
 	bus: number;
 	channel: number;
+}
+
+// A node output someone asked to watch. Registers change with every compile, so this names the node, and each image's
+// sidecar says where that is now.
+export interface Probe {
+	node: number;
+	port: string;
+	label: string;
+}
+
+export interface ProbeTarget {
+	slot: number;
+	label: string;
+	step: number;
+	operand: number;
 }
 
 export const LOAD_ERRORS = [
@@ -74,6 +93,20 @@ export function tapTargets(program: ProgramReport): TapTarget[] {
 	return targets;
 }
 
+// Probes from `first` up, as far as the slots go. A probe whose node compiled away, or that has nothing to read, is left out,
+// and comes back by itself if a later image has it.
+export function probeTargets(nodes: NodesReport | undefined, probes: Probe[], first: number): ProbeTarget[] {
+	const targets: ProbeTarget[] = [];
+	for (const probe of probes) {
+		const slot = first + targets.length;
+		if (slot >= TAP_SLOTS) break;
+		const port = nodes?.[probe.node]?.ports[probe.port];
+		if (port?.operand === undefined || port.step === undefined || port.step < 0) continue;
+		targets.push({ slot, label: probe.label, step: port.step, operand: port.operand });
+	}
+	return targets;
+}
+
 export class AudioEngine {
 	state: EngineState = {
 		tick: 0,
@@ -93,6 +126,9 @@ export class AudioEngine {
 	private node: AudioWorkletNode | null = null;
 	private ready: Promise<void> | null = null;
 	private reports = new LiveReports();
+	private live: CompileReport | null = null;
+	private probes: Probe[] = [];
+	private probed = ''; // The patch whose nodes those are
 
 	// Must be called from a user gesture, because browsers keep an AudioContext suspended until then.
 	start(): Promise<void> {
@@ -136,13 +172,34 @@ export class AudioEngine {
 
 	// After a swap the new program's registers differ, so taps are re-sent from the report for the image now live.
 	private applyTargets() {
-		const program = this.reports.take(this.state.liveId)?.programs[0];
+		const report = this.reports.take(this.state.liveId);
+		if (!report) return;
+		this.live = report;
+		this.sendTargets();
+	}
+
+	private sendTargets() {
+		const program = this.live?.programs[0];
 		if (!program) return;
-		const targets = tapTargets(program);
-		for (const t of targets) {
+		const buses = tapTargets(program);
+		const probes = probeTargets(this.live?.sidecar?.[this.probed], this.probes, buses.length);
+		for (const t of buses) {
 			this.send({ kind: EventKind.SetTap, param: t.slot, target: t.step, note: t.bus, channel: t.channel });
 		}
-		this.onTargets(targets);
+		// Track 0's first patch slot, because this watches a patch on the page that plays it alone.
+		for (const t of probes) {
+			this.send({ kind: EventKind.SetProbe, param: t.slot, target: 0, channel: 0, tick: t.step, tickEnd: t.operand });
+		}
+		for (let slot = buses.length + probes.length; slot < TAP_SLOTS; ++slot) {
+			this.send({ kind: EventKind.SetTap, param: slot, target: NO_TARGET });
+		}
+		this.onTargets([...buses, ...probes.map(({ slot, label }) => ({ slot, label, step: 0, bus: 0, channel: 0 }))]);
+	}
+
+	setProbes(patch: string, probes: Probe[]) {
+		this.probed = patch;
+		this.probes = probes;
+		this.sendTargets();
 	}
 
 	load(image: Uint8Array, report: CompileReport, program = 0) {

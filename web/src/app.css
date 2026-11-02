@@ -21,6 +21,7 @@ nav {
 nav a {
 	color: var(--text);
 	text-decoration: none;
+	margin-right: 1rem;
 }
 main {
 	padding: 1rem 1.2rem 3rem;

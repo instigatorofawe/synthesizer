@@ -1649,3 +1649,159 @@ TEST(Lfo, ASwapWhilePlayingLeavesItMoving) {
     (void)first_samples(rig, kFadeFrames);
     EXPECT_EQ(first_samples(rig, 100), slice(ahead, faded, 100));
 }
+
+namespace {
+
+// A sine, muted by a mul before it reaches the output, so what a probe sees can't be the output.
+compiler::json probed_request() {
+    return compiler::json::parse(R"({
+      "patches": {"p": {"name": "p", "graph": {
+        "nodes": [
+          {"id": 1, "type": "note"}, {"id": 2, "type": "mtof"}, {"id": 3, "type": "osc"},
+          {"id": 4, "type": "mul", "inputs": {"b": 0.0}}, {"id": 5, "type": "noise"},
+          {"id": 6, "type": "mul", "inputs": {"b": 0.25}}, {"id": 7, "type": "add"}, {"id": 8, "type": "out"}
+        ],
+        "edges": [
+          {"from": 1, "port": "pitch", "to": 2, "input": "in"}, {"from": 2, "to": 3, "input": "freq"},
+          {"from": 3, "to": 4, "input": "a"}, {"from": 5, "to": 6, "input": "a"},
+          {"from": 4, "to": 7, "input": "a"}, {"from": 6, "to": 7, "input": "b"}, {"from": 7, "to": 8, "input": "l"}
+        ]}}},
+      "programs": [{"id": "p", "name": "p", "timeline": {"tracks": [{"id": 1, "voices": 4, "slots": ["p"]}]}}],
+      "live": true})");
+}
+
+template <class R>
+void set_probe(R& rig, const compiler::json& port, u16 slot = 0) {
+    Event probe{.kind = EventKind::SetProbe, .target = 0, .param = slot};
+    probe.tick = port.at("step").get<u32>();
+    probe.tick_end = port.at("operand").get<u32>();
+    EXPECT_TRUE(rig.engine.send(probe));
+}
+
+template <class R>
+std::vector<float> next_block(R& rig, u32 slot = 0) {
+    std::vector<float> left(kFrame), right(kFrame);
+    for (u32 frame = 0; frame < 4 * R::Engine::tap_block / kFrame; ++frame) {
+        rig.engine.render({left.data(), right.data()});
+        TapBlock block;
+        if (rig.engine.tap_take(slot, block)) return {block.data, block.data + block.length};
+    }
+    return {};
+}
+
+}  // namespace
+
+TEST(Probes, SeeANodeWhoseSignalNeverReachesTheOutput) {
+    const auto result = compiler::compile_image(probed_request());
+    Rig<kStereo> rig(result.image);
+    set_probe(rig, result.report.at("sidecar").at("p").at("3").at("ports").at("out"));
+    rig.engine.send({.kind = EventKind::NoteOn, .note = 69, .velocity = 100, .target = 0});
+    (void)next_block(rig);
+    const auto block = next_block(rig);
+    ASSERT_FALSE(block.empty());
+    float peak = 0.0f;
+    for (const float sample : block) peak = std::max(peak, std::fabs(sample));
+    EXPECT_NEAR(peak, 1.0f, 0.01f);  // A full sine, which the output has none of
+}
+
+TEST(Probes, ReadAScalarAsAFlatLine) {
+    const auto result = compiler::compile_image(probed_request());
+    Rig<kStereo> rig(result.image);
+    set_probe(rig, result.report.at("sidecar").at("p").at("1").at("ports").at("pitch"));
+    rig.engine.send({.kind = EventKind::NoteOn, .note = 69, .velocity = 100, .target = 0});
+    (void)next_block(rig);
+    for (const float sample : next_block(rig)) EXPECT_EQ(sample, 69.0f);
+}
+
+TEST(Probes, FollowTheNewestVoice) {
+    const auto result = compiler::compile_image(probed_request());
+    Rig<kStereo> rig(result.image);
+    set_probe(rig, result.report.at("sidecar").at("p").at("1").at("ports").at("pitch"));
+    rig.engine.send({.kind = EventKind::NoteOn, .note = 60, .velocity = 100, .target = 0});
+    (void)next_block(rig);
+    const auto last_of = [&] {
+        const auto block = next_block(rig);
+        EXPECT_FALSE(block.empty());
+        return block.empty() ? 0.0f : block.back();
+    };
+    EXPECT_EQ(last_of(), 60.0f);
+    rig.engine.send({.kind = EventKind::NoteOn, .note = 72, .velocity = 100, .target = 0});
+    (void)next_block(rig);
+    EXPECT_EQ(last_of(), 72.0f);
+    rig.engine.send({.kind = EventKind::NoteOff, .note = 72, .target = 0});
+    (void)next_block(rig);
+    EXPECT_EQ(last_of(), 60.0f);
+}
+
+TEST(Probes, ReadSilenceWithNoVoiceAndKeepCounting) {
+    const auto result = compiler::compile_image(probed_request());
+    Rig<kStereo> rig(result.image);
+    set_probe(rig, result.report.at("sidecar").at("p").at("3").at("ports").at("out"));
+    const auto block = next_block(rig);
+    ASSERT_EQ(block.size(), Rig<kStereo>::Engine::tap_block);
+    for (const float sample : block) EXPECT_EQ(sample, 0.0f);
+}
+
+TEST(Probes, LeaveTheSoundAlone) {
+    const auto result = compiler::compile_image(probed_request());
+    const auto play = [&](bool probed) {
+        Rig<kStereo> rig(result.image);
+        if (probed) {
+            set_probe(rig, result.report.at("sidecar").at("p").at("3").at("ports").at("out"));
+            set_probe(rig, result.report.at("sidecar").at("p").at("1").at("ports").at("pitch"), 1);
+        }
+        rig.engine.send({.kind = EventKind::NoteOn, .note = 69, .velocity = 100, .target = 0});
+        return render_stereo(rig, 64);
+    };
+    EXPECT_EQ(play(true), play(false));
+}
+
+TEST(Probes, AWrongTargetIsRefusedAndDeliversNothing) {
+    const auto result = compiler::compile_image(probed_request());
+    const compiler::json port = result.report.at("sidecar").at("p").at("3").at("ports").at("out");
+    const u32 step = port.at("step"), operand_value = port.at("operand");
+    const Event bad[] = {
+        {.kind = EventKind::SetProbe, .target = 9, .param = 0, .tick = step, .tick_end = operand_value},
+        {.kind = EventKind::SetProbe, .channel = 9, .target = 0, .param = 0, .tick = step, .tick_end = operand_value},
+        {.kind = EventKind::SetProbe, .target = 0, .param = 0, .tick = 9999, .tick_end = operand_value},
+        {.kind = EventKind::SetProbe, .target = 0, .param = 0, .tick = step, .tick_end = 0x10000},
+        {.kind = EventKind::SetProbe, .target = 0, .param = 0, .tick = step, .tick_end = operand(Bank::Buffer, 200)},
+        {.kind = EventKind::SetProbe, .target = 0, .param = 0, .tick = step, .tick_end = operand(Bank::Voice, 200)},
+        {.kind = EventKind::SetProbe, .target = 0, .param = 0, .tick = step, .tick_end = operand(Bank::Track, 200)},
+        {.kind = EventKind::SetProbe, .target = 0, .param = 0, .tick = step, .tick_end = operand(Bank::Global, 0)},
+        {.kind = EventKind::SetProbe, .target = 0, .param = 0, .tick = step, .tick_end = operand(Bank::Const, 0)},
+        {.kind = EventKind::SetProbe, .target = 0, .param = 99, .tick = step, .tick_end = operand_value},
+    };
+    for (const Event& e : bad) {
+        Rig<kStereo> rig(result.image);
+        rig.engine.send({.kind = EventKind::NoteOn, .note = 69, .velocity = 100, .target = 0});
+        EXPECT_TRUE(rig.engine.send(e));
+        EXPECT_TRUE(next_block(rig).empty());
+    }
+}
+
+TEST(Probes, EndWithTheProgramTheyNamed) {
+    const auto result = compiler::compile_image(probed_request());
+    Rig<kStereo> rig(result.image);
+    set_probe(rig, result.report.at("sidecar").at("p").at("3").at("ports").at("out"));
+    EXPECT_FALSE(next_block(rig).empty());
+    compiler::json louder = probed_request();
+    louder["patches"]["p"]["graph"]["nodes"][5]["inputs"]["b"] = 0.5;
+    rig.swap_to(compiler::compile_image(louder).image);
+    std::vector<float> left(kFrame), right(kFrame);
+    for (u32 frame = 0; frame < 512; ++frame) rig.engine.render({left.data(), right.data()});
+    (void)next_block(rig);
+    EXPECT_TRUE(next_block(rig).empty());
+}
+
+TEST(Probes, ABusTapReplacesOne) {
+    const auto result = compiler::compile_image(probed_request());
+    const compiler::json master = result.report.at("programs").at(0).at("master");
+    Rig<kStereo> rig(result.image);
+    set_probe(rig, result.report.at("sidecar").at("p").at("1").at("ports").at("pitch"));
+    Event tap{.kind = EventKind::SetTap, .note = master.at("bus").get<u8>(), .target = master.at("step").get<u16>()};
+    rig.engine.send(tap);
+    rig.engine.send({.kind = EventKind::NoteOn, .note = 69, .velocity = 100, .target = 0});
+    (void)next_block(rig);
+    for (const float sample : next_block(rig)) EXPECT_NE(sample, 69.0f);
+}

@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 export const NODE_TYPES = [
 	'note', 'param', 'const', 'osc', 'noise', 'biquad', 'env', 'sample', 'mul', 'add', 'mtof', 'snap', 'ratio', 'pan',
-	'delay', 'comb', 'allpass', 'follow', 'lfo', 'in', 'out'
+	'delay', 'comb', 'allpass', 'follow', 'lfo', 'math', 'shape', 'in', 'out', 'inlet', 'outlet', 'subpatch'
 ] as const;
 
 const id16 = z.number().int().min(0).max(65535);
@@ -170,6 +170,15 @@ export function referencedPatches(doc: Timeline): string[] {
 		for (const insert of bus.inserts) ids.add(insert.patch);
 	}
 	for (const insert of doc.master.inserts) ids.add(insert.patch);
+	return [...ids].sort();
+}
+
+// The library patches a graph expands, as subpatches. Those it reaches through them are theirs to name.
+export function referencedSubpatches(graph: Graph): string[] {
+	const ids = new Set<string>();
+	for (const node of graph.nodes) {
+		if (node.type === 'subpatch' && typeof node.patch === 'string') ids.add(node.patch);
+	}
 	return [...ids].sort();
 }
 

@@ -84,8 +84,18 @@ export interface ProgramReport {
 	patches: { id: string; hash: string }[];
 }
 
+// The debug sidecar: what each graph node's outputs became. A node that compiled away isn't in it.
+export interface PortReport {
+	rate: 'audio' | 'control';
+	step?: number;
+	operand?: number;
+}
+
+export type NodesReport = Record<string, { ports: Record<string, PortReport> }>;
+
 export interface CompileReport {
 	ok: boolean;
+	sidecar?: Record<string, NodesReport>;
 	errors?: { where: string; message: string }[];
 	programs: ProgramReport[];
 	chunks: ChunkReport[];

@@ -18,8 +18,10 @@
 namespace modsynth::fuzz {
 namespace {
 
-constexpr SynthConfig kStereo{.frame_size = 64, .channels = 2, .tap_slots = 2, .generations = 2};
-constexpr SynthConfig kMono{.frame_size = 32, .channels = 1, .tap_slots = 0, .generations = 1};
+template <u32 Frame>
+constexpr SynthConfig kStereo{.frame_size = Frame, .channels = 2, .tap_slots = 2, .generations = 2};
+template <u32 Frame>
+constexpr SynthConfig kMono{.frame_size = Frame, .channels = 1, .tap_slots = 0, .generations = 1};
 constexpr u64 kMemoryLimit = 12u << 20;  // A Program over this is refused here, not by the engine
 constexpr u32 kFrameLimit = 256;
 constexpr u32 kPrograms = 2;  // Per image, to keep an execution short
@@ -195,6 +197,45 @@ u64 play(ChunkTable& table, u64 program, ChunkTable* from, u64 from_program, flo
     return hash;
 }
 
+// Every oracle, for one frame size. An engine refuses any other size, so the image chooses which of these it reaches.
+template <u32 Frame>
+void check_programs(ChunkTable& table, const Loader& loader, ChunkTable& intact, const Loader& base, Rng& r,
+                    Stats& stats) {
+    const u32 programs = std::min(loader.programs(), kPrograms);
+    for (u32 p = 0; p < programs; ++p) {
+        const u64 program = loader.program_hash(p);
+        const float rate = kRates[r.below(std::size(kRates))];
+        const u32 script = r.next();
+        const bool swap = r.chance(50) && base.frame_size() == Frame;  // An engine plays one size
+        ChunkTable* from = swap ? &intact : nullptr;
+        const u64 from_program = swap ? base.program_hash(0) : 0;
+        bool refused = false;
+
+        // Two different fills of memory, so anything read before it was written changes the output.
+        const u64 first = play<kStereo<Frame>, SerialExecutor>(table, program, from, from_program, rate,
+                                                               std::byte{0x00}, script, false, stats, refused);
+        if (refused) {
+            ++stats.refused_memory;
+            continue;
+        }
+        const u64 second = play<kStereo<Frame>, SerialExecutor>(table, program, from, from_program, rate,
+                                                                std::byte{0xFF}, script, false, stats, refused);
+        if (first != second) fail("a Program's output depends on old memory");
+
+        // Any order the Plan allows must give identical bits, which is what section 18's rules exist to guarantee.
+        const u64 shuffled = play<kStereo<Frame>, ShuffledExecutor>(table, program, from, from_program, rate,
+                                                                    std::byte{0x5A}, script, false, stats, refused);
+        if (first != shuffled) fail("a Program's output depends on task order");
+
+        // A mono build folds everything differently, so it goes through its own code. Then too little memory.
+        (void)play<kMono<Frame>, SerialExecutor>(table, program, nullptr, 0, rate, std::byte{0xCD}, script, false,
+                                                 stats, refused);
+        (void)play<kMono<Frame>, SerialExecutor>(table, program, nullptr, 0, rate, std::byte{0xCD}, script, true, stats,
+                                                 refused);
+        ++stats.programs;
+    }
+}
+
 }  // namespace
 
 void run_target(ByteSpan image, ByteSpan base, u32 seed, Stats& stats) {
@@ -228,38 +269,15 @@ void run_target(ByteSpan image, ByteSpan base, u32 seed, Stats& stats) {
     }
     if (base_loader.status() != LoadStatus::Ready) fail("the intact image did not load");
 
-    const u32 programs = std::min(loader.programs(), kPrograms);
-    for (u32 p = 0; p < programs; ++p) {
-        const u64 program = loader.program_hash(p);
-        const float rate = kRates[r.below(std::size(kRates))];
-        const u32 script = r.next();
-        const bool swap = r.chance(50);
-        ChunkTable* from = swap ? &intact->table : nullptr;
-        const u64 from_program = swap ? base_loader.program_hash(0) : 0;
-        bool refused = false;
-
-        // Two different fills of memory, so anything read before it was written changes the output.
-        const u64 first = play<kStereo, SerialExecutor>(loaded->table, program, from, from_program, rate,
-                                                        std::byte{0x00}, script, false, stats, refused);
-        if (refused) {
-            ++stats.refused_memory;
-            continue;
-        }
-        const u64 second = play<kStereo, SerialExecutor>(loaded->table, program, from, from_program, rate,
-                                                         std::byte{0xFF}, script, false, stats, refused);
-        if (first != second) fail("a Program's output depends on old memory");
-
-        // Any order the Plan allows must give identical bits, which is what section 18's rules exist to guarantee.
-        const u64 shuffled = play<kStereo, ShuffledExecutor>(loaded->table, program, from, from_program, rate,
-                                                             std::byte{0x5A}, script, false, stats, refused);
-        if (first != shuffled) fail("a Program's output depends on task order");
-
-        // A mono build folds everything differently, so it goes through its own code. Then too little memory.
-        (void)play<kMono, SerialExecutor>(loaded->table, program, nullptr, 0, rate, std::byte{0xCD}, script, false,
-                                          stats, refused);
-        (void)play<kMono, SerialExecutor>(loaded->table, program, nullptr, 0, rate, std::byte{0xCD}, script, true,
-                                          stats, refused);
-        ++stats.programs;
+    switch (loader.frame_size()) {
+        case 32:
+            check_programs<32>(loaded->table, loader, intact->table, base_loader, r, stats);
+            break;
+        case 128:
+            check_programs<128>(loaded->table, loader, intact->table, base_loader, r, stats);
+            break;
+        default:
+            ++stats.other_frames;  // A legal size, but no engine here was built for it
     }
 }
 

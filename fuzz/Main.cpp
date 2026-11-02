@@ -165,5 +165,7 @@ int main(int argc, char** argv) {
                  static_cast<unsigned long long>(s.programs), static_cast<unsigned long long>(s.finished),
                  static_cast<unsigned long long>(s.refused_memory), static_cast<unsigned long long>(s.swaps),
                  static_cast<unsigned long long>(s.frames), static_cast<unsigned long long>(s.guard_trips));
+    std::fprintf(stderr, "not played, frame size unsupported here %llu\n",
+                 static_cast<unsigned long long>(s.other_frames));
     return 0;
 }

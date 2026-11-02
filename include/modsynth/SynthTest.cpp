@@ -92,20 +92,20 @@ TEST(Synth, AOneTickNoteStillSounds) {
     play(rig);
     const auto audio = render_stereo(rig, 760);
     for (u32 i = 0; i < 40; ++i) {
-        const u32 frame = i * 2400 / 128;  // 48 ticks at 50 samples each
-        EXPECT_GT(peak({audio.data() + frame * 256, 256 * 8}), 1e-4f) << "note " << i;
+        const u32 block = i * 2400 / 128;  // 48 ticks at 50 samples each
+        EXPECT_GT(peak({audio.data() + block * 256, 256 * 8}), 1e-4f) << "note " << i;
     }
 }
 
 TEST(Synth, EventsLandOnTheirSampleOffset) {
-    // At 120 bpm and 480 ppq a tick is 50 samples at 48 kHz, so tick 9 is sample 450: frame 3, offset 66.
+    // At 120 bpm and 480 ppq a tick is 50 samples at 48 kHz, so tick 9 is sample 450: frame 14, offset 2.
     const json notes = json::array({{{"tick", 9}, {"note", 69}, {"vel", 127}, {"dur", 960}}});
     Rig<kStereo> rig(compile_image(single_track(notes)).image);
     play(rig);
     const auto audio = render_stereo(rig, 8);
     std::size_t first = 0;
     for (std::size_t sample = 0; sample < 8 * 128 && first == 0; ++sample) {
-        if (audio[sample / 128 * 256 + sample % 128] != 0.0f) first = sample;
+        if (audio[sample / kFrame * 2 * kFrame + sample % kFrame] != 0.0f) first = sample;
     }
     EXPECT_GE(first, 450u);
     EXPECT_LE(first, 451u);
@@ -116,10 +116,10 @@ TEST(Synth, TempoDoesNotDriftOverALongRun) {
     request["programs"][0]["timeline"]["tempo"] = json::array({{{"tick", 0}, {"bpm", 137}}});
     Rig<kStereo> rig(compile_image(request).image);
     play(rig);
-    float l[128], r[128];
-    constexpr u32 frames = 20000;  // about 53 seconds
+    float l[kFrame], r[kFrame];
+    constexpr u32 frames = 20000 * kFramesPerBlock;  // about 53 seconds
     for (u32 f = 0; f < frames; ++f) rig.engine.render({l, r});
-    const double seconds = frames * 128.0 / 48000.0;
+    const double seconds = frames * static_cast<double>(kFrame) / 48000.0;
     const u32 uspq = static_cast<u32>(60000000.0f / 137.0f);
     const double expected = seconds * 1e6 / uspq * 480.0;
     EXPECT_NEAR(rig.engine.tick(), expected, 1.0);
@@ -274,6 +274,40 @@ TEST(Synth, ASecondProgramBindsFromTheSameBundle) {
     EXPECT_NE(render_stereo(song, 100), render_stereo(ballad, 100));
 }
 
+// Binding reaches no manifest, so the table has to carry the rule, or a Program could play at the wrong frame size.
+TEST(Synth, BindRefusesATableOfAnotherFrameSize) {
+    constexpr SynthConfig other{.frame_size = 128, .channels = 2, .tap_slots = 0, .generations = 1};
+    LoadedImage loaded(compile_demo());
+    ASSERT_EQ(loaded.table.frame_size(), kFrame);
+    const u64 program = loaded.loader.program_hash(0);
+    std::vector<std::byte> fast(8 << 20), bulk(8 << 20);
+
+    Synth<other> wrong({fast, bulk, kRate});
+    wrong.bind(loaded.table, program);
+    EXPECT_EQ(wrong.load_error(), LoadError::WrongFrameSize);
+    EXPECT_FALSE(wrong.loading());
+
+    Synth<kStereo> right({fast, bulk, kRate});
+    right.bind(loaded.table, program);
+    while (right.pump(1 << 16)) {
+    }
+    EXPECT_EQ(right.load_error(), LoadError::None);
+}
+
+TEST(Synth, BindRefusesATableNoLoaderFilled) {
+    const LoadedImage loaded(compile_demo());
+    std::vector<ChunkRef> storage(kMaxChunks);
+    ChunkTable bare(storage);
+    for (u32 i = 0; i < loaded.table.size(); ++i) ASSERT_TRUE(bare.add(loaded.storage[i]));
+    ASSERT_NE(bare.find(loaded.loader.program_hash(0)), nullptr);
+
+    std::vector<std::byte> fast(8 << 20), bulk(8 << 20);
+    Synth<kStereo> engine({fast, bulk, kRate});
+    engine.bind(bare, loaded.loader.program_hash(0));
+    EXPECT_EQ(engine.load_error(), LoadError::WrongFrameSize);
+    EXPECT_FALSE(engine.loading());
+}
+
 TEST(Synth, ABadUploadLeavesTheOldImagePlaying) {
     const auto image = compile_demo();
     Rig<kStereo> rig(image), reference(image);
@@ -322,16 +356,16 @@ TEST(Synth, AnEditDuringPlaybackIsNoisyOnlyInTheWayItShouldBe) {
     rig.swap_to(edited);
     float previous = 0;
     float largest_step = 0;
-    float left[128], right[128];
+    float left[kFrame], right[kFrame];
     u32 frames = 0;
-    while (rig.engine.generation() < 2 && frames < 2000) {
+    while (rig.engine.generation() < 2 && frames < 2000 * kFramesPerBlock) {
         rig.engine.render({left, right});
         ++frames;
     }
     ASSERT_EQ(rig.engine.generation(), 2u);
     EXPECT_GE(rig.engine.active_voices(), voices > 0 ? 1u : 0u);
     EXPECT_GE(rig.engine.tick(), tick);
-    for (u32 f = 0; f < 60; ++f) {
+    for (u32 f = 0; f < 60 * kFramesPerBlock; ++f) {
         rig.engine.render({left, right});
         for (const float s : left) {
             largest_step = std::max(largest_step, std::fabs(s - previous));
@@ -365,11 +399,11 @@ TEST(Synth, TapsDeliverBlocksAndCountDrops) {
     rig.engine.send(tap);
     play(rig);
 
-    float left[128], right[128];
+    float left[kFrame], right[kFrame];
     std::vector<float> rendered, captured;
-    for (u32 f = 0; f < 80; ++f) {
+    for (u32 f = 0; f < 80 * kFramesPerBlock; ++f) {
         rig.engine.render({left, right});
-        rendered.insert(rendered.end(), left, left + 128);
+        rendered.insert(rendered.end(), left, left + kFrame);
         TapBlock block;
         if (rig.engine.tap_take(0, block)) {
             EXPECT_EQ(block.length, 1024u);
@@ -381,15 +415,15 @@ TEST(Synth, TapsDeliverBlocksAndCountDrops) {
     ASSERT_GT(captured.size(), 8000u);
     for (std::size_t i = 0; i < captured.size(); ++i) ASSERT_EQ(captured[i], rendered[i]) << i;
 
-    for (u32 f = 0; f < 40; ++f) rig.engine.render({left, right});  // Nobody reads, so blocks drop
+    for (u32 f = 0; f < 40 * kFramesPerBlock; ++f) rig.engine.render({left, right});  // Nobody reads, so blocks drop
     TapBlock block;
     ASSERT_TRUE(rig.engine.tap_take(0, block));
     EXPECT_GT(block.dropped, 0u);
 }
 
 TEST(Synth, EnginesWithoutTapsCarryNoTapStorage) {
-    constexpr SynthConfig tapped{.frame_size = 128, .channels = 2, .tap_slots = 8, .generations = 1};
-    constexpr SynthConfig plain{.frame_size = 128, .channels = 2, .tap_slots = 0, .generations = 1};
+    constexpr SynthConfig tapped{.frame_size = kFrame, .channels = 2, .tap_slots = 8, .generations = 1};
+    constexpr SynthConfig plain{.frame_size = kFrame, .channels = 2, .tap_slots = 0, .generations = 1};
     EXPECT_GT(sizeof(Synth<tapped>), sizeof(Synth<plain>));
     EXPECT_EQ(Synth<plain>::tap_bytes(), 0u);
 }
@@ -405,14 +439,16 @@ TEST(SynthMono, FoldsACentredStereoProjectToTheSameSignal) {
     play(stereo);
     play(mono);
     const auto both = render_stereo(stereo, 400);
-    std::vector<float> folded(400 * 128);
-    for (u32 f = 0; f < 400; ++f) mono.engine.render({folded.data() + f * 128});
+    constexpr u32 frames = 400 * kFramesPerBlock;
+    std::vector<float> folded(frames * kFrame);
+    for (u32 f = 0; f < frames; ++f) mono.engine.render({folded.data() + f * kFrame});
 
     float worst = 0, loudest = 0;
-    for (u32 f = 0; f < 400; ++f) {
-        for (u32 i = 0; i < 128; ++i) {
-            const float expected = (both[f * 256 + i] + both[f * 256 + 128 + i]) * 0.5f;
-            worst = std::max(worst, std::fabs(expected - folded[f * 128 + i]));
+    for (u32 f = 0; f < frames; ++f) {
+        for (u32 i = 0; i < kFrame; ++i) {
+            const float* left = both.data() + f * 2 * kFrame;
+            const float expected = (left[i] + left[kFrame + i]) * 0.5f;
+            worst = std::max(worst, std::fabs(expected - folded[f * kFrame + i]));
             loudest = std::max(loudest, std::fabs(expected));
         }
     }
@@ -441,8 +477,9 @@ TEST(SynthMono, PanMovesNothingButStereoDoes) {
     const auto mono_render = [](const std::vector<std::byte>& image) {
         Rig<kMono> rig(image);
         play(rig);
-        std::vector<float> out(100 * 128);
-        for (u32 f = 0; f < 100; ++f) rig.engine.render({out.data() + f * 128});
+        constexpr u32 frames = 100 * kFramesPerBlock;
+        std::vector<float> out(frames * kFrame);
+        for (u32 f = 0; f < frames; ++f) rig.engine.render({out.data() + f * kFrame});
         return out;
     };
     const auto left = image_at(-1.0f), right = image_at(1.0f);

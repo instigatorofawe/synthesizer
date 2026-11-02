@@ -1,0 +1,1093 @@
+{
+ "patches": {
+  "kitchen": {
+   "name": "Every kernel",
+   "graph": {
+    "params": [
+     {
+      "id": 1,
+      "name": "cutoff",
+      "scope": "track",
+      "min": 80,
+      "max": 12000,
+      "default": 1500,
+      "smooth_ms": 5
+     },
+     {
+      "id": 2,
+      "name": "bright",
+      "scope": "voice",
+      "min": 0,
+      "max": 1,
+      "default": 0.5
+     },
+     {
+      "id": 3,
+      "name": "drift",
+      "scope": "global",
+      "min": 0,
+      "max": 1,
+      "default": 0.25
+     }
+    ],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 4,
+      "type": "param",
+      "param": 2
+     },
+     {
+      "id": 5,
+      "type": "param",
+      "param": 3
+     },
+     {
+      "id": 6,
+      "type": "lfo",
+      "inputs": {
+       "rate": 3.0
+      }
+     },
+     {
+      "id": 7,
+      "type": "add"
+     },
+     {
+      "id": 8,
+      "type": "mul",
+      "inputs": {
+       "b": 40.0
+      }
+     },
+     {
+      "id": 9,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 10,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 11,
+      "type": "noise"
+     },
+     {
+      "id": 12,
+      "type": "mul"
+     },
+     {
+      "id": 13,
+      "type": "mul"
+     },
+     {
+      "id": 14,
+      "type": "add"
+     },
+     {
+      "id": 15,
+      "type": "add",
+      "inputs": {
+       "b": 0.05
+      }
+     },
+     {
+      "id": 16,
+      "type": "env",
+      "inputs": {
+       "attack": 0.004,
+       "decay": 0.08,
+       "sustain": 0.6,
+       "release": 0.05
+      }
+     },
+     {
+      "id": 17,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "q": 3.0
+      }
+     },
+     {
+      "id": 18,
+      "type": "biquad",
+      "mode": "highpass",
+      "inputs": {
+       "cutoff": 2000.0,
+       "q": 0.8
+      }
+     },
+     {
+      "id": 19,
+      "type": "mul",
+      "inputs": {
+       "b": 3000.0
+      }
+     },
+     {
+      "id": 20,
+      "type": "biquad",
+      "mode": "bandpass",
+      "inputs": {
+       "q": 1.5
+      }
+     },
+     {
+      "id": 21,
+      "type": "ratio",
+      "root": 60
+     },
+     {
+      "id": 22,
+      "type": "sample",
+      "asset": "loop-i16-mono"
+     },
+     {
+      "id": 23,
+      "type": "delay",
+      "max": 0.012,
+      "inputs": {
+       "time": 0.01
+      }
+     },
+     {
+      "id": 24,
+      "type": "add"
+     },
+     {
+      "id": 25,
+      "type": "delay",
+      "max": 0.032,
+      "inputs": {
+       "time": 0.03
+      }
+     },
+     {
+      "id": 26,
+      "type": "mul",
+      "inputs": {
+       "b": 0.4
+      }
+     },
+     {
+      "id": 27,
+      "type": "comb",
+      "max": 0.022,
+      "inputs": {
+       "time": 0.02
+      }
+     },
+     {
+      "id": 28,
+      "type": "allpass",
+      "max": 0.008,
+      "inputs": {
+       "time": 0.007
+      }
+     },
+     {
+      "id": 29,
+      "type": "follow",
+      "inputs": {
+       "release": 0.05
+      }
+     },
+     {
+      "id": 30,
+      "type": "mul"
+     },
+     {
+      "id": 31,
+      "type": "add"
+     },
+     {
+      "id": 32,
+      "type": "pan"
+     },
+     {
+      "id": 33,
+      "type": "mul"
+     },
+     {
+      "id": 34,
+      "type": "add"
+     },
+     {
+      "id": 35,
+      "type": "add"
+     },
+     {
+      "id": 36,
+      "type": "out"
+     },
+     {
+      "id": 37,
+      "type": "snap"
+     },
+     {
+      "id": 38,
+      "type": "snap"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 21,
+      "input": "in"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "depth"
+     },
+     {
+      "from": 3,
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "to": 9,
+      "input": "freq"
+     },
+     {
+      "from": 2,
+      "to": 10,
+      "input": "freq"
+     },
+     {
+      "from": 9,
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "to": 12,
+      "input": "b"
+     },
+     {
+      "from": 10,
+      "to": 13,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 13,
+      "input": "b"
+     },
+     {
+      "from": 12,
+      "to": 14,
+      "input": "a"
+     },
+     {
+      "from": 13,
+      "to": 14,
+      "input": "b"
+     },
+     {
+      "from": 14,
+      "to": 15,
+      "input": "a"
+     },
+     {
+      "from": 15,
+      "to": 17,
+      "input": "in"
+     },
+     {
+      "from": 37,
+      "to": 17,
+      "input": "cutoff"
+     },
+     {
+      "from": 11,
+      "to": 18,
+      "input": "in"
+     },
+     {
+      "from": 16,
+      "to": 19,
+      "input": "a"
+     },
+     {
+      "from": 18,
+      "to": 20,
+      "input": "in"
+     },
+     {
+      "from": 38,
+      "to": 20,
+      "input": "cutoff"
+     },
+     {
+      "from": 21,
+      "to": 22,
+      "input": "ratio"
+     },
+     {
+      "from": 20,
+      "to": 23,
+      "input": "in"
+     },
+     {
+      "from": 23,
+      "to": 24,
+      "input": "a"
+     },
+     {
+      "from": 26,
+      "to": 24,
+      "input": "b"
+     },
+     {
+      "from": 24,
+      "to": 25,
+      "input": "in"
+     },
+     {
+      "from": 25,
+      "to": 26,
+      "input": "a"
+     },
+     {
+      "from": 24,
+      "to": 27,
+      "input": "in"
+     },
+     {
+      "from": 27,
+      "to": 28,
+      "input": "in"
+     },
+     {
+      "from": 17,
+      "to": 29,
+      "input": "in"
+     },
+     {
+      "from": 28,
+      "to": 30,
+      "input": "a"
+     },
+     {
+      "from": 29,
+      "to": 30,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "to": 32,
+      "input": "position"
+     },
+     {
+      "from": 4,
+      "to": 32,
+      "input": "in"
+     },
+     {
+      "from": 32,
+      "port": "l",
+      "to": 33,
+      "input": "a"
+     },
+     {
+      "from": 16,
+      "to": 33,
+      "input": "b"
+     },
+     {
+      "from": 17,
+      "to": 31,
+      "input": "a"
+     },
+     {
+      "from": 30,
+      "to": 31,
+      "input": "b"
+     },
+     {
+      "from": 31,
+      "to": 34,
+      "input": "a"
+     },
+     {
+      "from": 33,
+      "to": 34,
+      "input": "b"
+     },
+     {
+      "from": 22,
+      "port": "l",
+      "to": 35,
+      "input": "a"
+     },
+     {
+      "from": 34,
+      "to": 35,
+      "input": "b"
+     },
+     {
+      "from": 35,
+      "to": 36,
+      "input": "l"
+     },
+     {
+      "from": 34,
+      "to": 36,
+      "input": "r"
+     },
+     {
+      "from": 7,
+      "to": 37,
+      "input": "in"
+     },
+     {
+      "from": 19,
+      "to": 38,
+      "input": "in"
+     }
+    ]
+   }
+  },
+  "stereo-f32": {
+   "name": "One-shot, f32 stereo",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "ratio",
+      "root": 60
+     },
+     {
+      "id": 3,
+      "type": "sample",
+      "asset": "hit-f32-stereo"
+     },
+     {
+      "id": 4,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "ratio"
+     },
+     {
+      "from": 3,
+      "port": "l",
+      "to": 4,
+      "input": "l"
+     },
+     {
+      "from": 3,
+      "port": "r",
+      "to": 4,
+      "input": "r"
+     }
+    ]
+   }
+  },
+  "stereo-i16": {
+   "name": "Loop, i16 stereo",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "ratio",
+      "root": 60
+     },
+     {
+      "id": 3,
+      "type": "sample",
+      "asset": "loop-i16-stereo"
+     },
+     {
+      "id": 4,
+      "type": "param",
+      "param": 3
+     },
+     {
+      "id": 5,
+      "type": "mul"
+     },
+     {
+      "id": 6,
+      "type": "mul"
+     },
+     {
+      "id": 7,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "ratio"
+     },
+     {
+      "from": 3,
+      "port": "l",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "r",
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "b"
+     },
+     {
+      "from": 4,
+      "to": 6,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "to": 7,
+      "input": "l"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "r"
+     }
+    ],
+    "params": [
+     {
+      "id": 3,
+      "name": "drift",
+      "scope": "global",
+      "min": 0,
+      "max": 1,
+      "default": 0.25
+     }
+    ]
+   }
+  },
+  "short-f32": {
+   "name": "Tiny loop, f32 mono",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "ratio",
+      "root": 60
+     },
+     {
+      "id": 3,
+      "type": "sample",
+      "asset": "tiny-f32-mono"
+     },
+     {
+      "id": 4,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "ratio"
+     },
+     {
+      "from": 3,
+      "port": "l",
+      "to": 4,
+      "input": "l"
+     },
+     {
+      "from": 3,
+      "port": "r",
+      "to": 4,
+      "input": "r"
+     }
+    ]
+   }
+  },
+  "space": {
+   "name": "Two allpasses",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in"
+     },
+     {
+      "id": 2,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.011
+      }
+     },
+     {
+      "id": 3,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.013
+      }
+     },
+     {
+      "id": 4,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "l",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 4,
+      "input": "l"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "r"
+     }
+    ]
+   }
+  },
+  "ducker": {
+   "name": "Sidechain ducker",
+   "graph": {
+    "params": [
+     {
+      "id": 1,
+      "name": "depth",
+      "scope": "track",
+      "default": 0.6
+     }
+    ],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in",
+      "index": 0
+     },
+     {
+      "id": 2,
+      "type": "in",
+      "index": 1
+     },
+     {
+      "id": 3,
+      "type": "follow",
+      "inputs": {
+       "release": 0.1
+      }
+     },
+     {
+      "id": 4,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 5,
+      "type": "mul"
+     },
+     {
+      "id": 6,
+      "type": "mul",
+      "inputs": {
+       "b": -1.0
+      }
+     },
+     {
+      "id": 7,
+      "type": "add",
+      "inputs": {
+       "b": 1.0
+      }
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "mul"
+     },
+     {
+      "id": 10,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "l",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "l",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "to": 9,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "to": 10,
+      "input": "l"
+     },
+     {
+      "from": 9,
+      "to": 10,
+      "input": "r"
+     }
+    ]
+   }
+  }
+ },
+ "assets": {
+  "loop-i16-mono": {
+   "name": "Loop, i16 mono",
+   "encoding": "i16",
+   "channels": 1,
+   "rate": 24000,
+   "frames": 400,
+   "root_key": 60,
+   "loop_start": 100,
+   "loop_end": 300,
+   "data": "AAA0CywWvCC7KgE0ajzUQyNKP08VU5dVvVaEVu5UBFLUTW9I7kFsOggy5igrHwAVjgoAAID1OetT4ffXSc9rx33Al7rStT6y6a/arhOvkrBPsz23S7xjwmrJQ9HN2eTiZOwl9gAAzAljE50cViVsLb80MzuuQB1FbkiXSo9LVkvuSV1HskP6Pk05wTJzK4EjDBs3EicJAADn9gLuc+Vc3d7VFs8eyQzE9L/lvOm6B7pBupK79r1gwcDFBMsU0djXMt8E5y3vjfcAAGUImhB9GPEf1yYVLZIyOTf6Osc9lj9iQClA7T63PI85hjWsMBYr3SQbHuwWbg/ABwAAT/jL8JLpwuJ03MHWv9GBzRfKjMfqxTXFbsWTxp3Igss1z6XTv9ht3pfkI+v28fT4AAD+BtENXhSMGkIgaiXwKcUt2DAhM5Y0NTX7NO0zEDJtLxEsCihsI0gethjNEqUMWAYAALb5lPOy7SfoCeNr3mDa9tY51DPS6tBi0JvQk9FD06TVqthG3GrgAuX96UPvv/Rb+gAAlgUICz4QJhWsGb8dTyFQJLYmeiiWKQcqzintKGknSyWcImkfwRuzF1ETrQ7cCfEEAAAd+1320fGM7Z7pFuYB42vgW97a3OrbkNvJ25Pc6t3G3x7i5+QU6JjrYu9i84j3w/sAAC8EPwgfDMEPFxMUFq4Y2xqUHNMdlR7aHqAe7B3CHCkbJxnIFhYUHhHsDY4KEweKAwAAhfwm+fH18fIz8MHtouvf6X3ogOfr5r3m9uaU55Ho6emT64jtv+8t8sf0gvdR+ir9AADIAnYFAAhcCoIMag4NEGYRchIsE5UTrBNzE+wSHBIGEbMPJw5sDIgKhghvBkoEIgIAAOz97/sQ+lf4yfZs9UT0VPOg8ify6/Hr8STylPI48wv0CPUq9mr3wvgs+qH7Gv2R/gAAYAGtAuAD9wTtBb8GbAfxB08IhQiVCH8IRQjsB3UH5AY+BoYFwQTzAyEDTwKBAbsAAABU/7j+MP68/V79Fv3l/Mn8wvzO/Ov8GP1R/ZT93/0t/n3+y/4U/1f/kv/B/+P/+f8="
+  },
+  "hit-f32-stereo": {
+   "name": "One-shot, f32 stereo",
+   "encoding": "f32",
+   "channels": 2,
+   "rate": 48000,
+   "frames": 600,
+   "root_key": 60,
+   "loop_start": 0,
+   "loop_end": 0,
+   "data": "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"
+  },
+  "loop-i16-stereo": {
+   "name": "Loop, i16 stereo",
+   "encoding": "i16",
+   "channels": 2,
+   "rate": 44100,
+   "frames": 300,
+   "root_key": 60,
+   "loop_start": 0,
+   "loop_end": 300,
+   "data": "AAAAADELNRYiFuAqpyC4PJcqpErJM8tTGzyiV21D9VWiSehOo073Ql9S6TLJVMYf2FXICoxVQvXnU47g9FD4zb9Mpb5dR4az5UBFrXM5PqwnMXiwJCiluZAeKseTFCXYVQqA6wAAAAC+9VoUuetHJxjinDcC2VZEmtCxTAHJLlBUwp9OrLwnSB64Nj27tIUujbIGHZyx2AnosTH2brNO4ya2XNICumbE8b5IutzEm7Spy7KzPNOSt3Tb878v5EbMSO2+25v2XO0AAAAAUgl+EmsSryMoG38yZSMIPgIrl0XiMbtI6zdKRwY9ZkEgQXU3K0QiKh1GRxrxRukIpEYh9zxFDubAQr/WPD8nysE6CcFjNfC7Oi8lu2AorL7zIEHGERlj0dwQV992CDfvAAAAAJ73oxBw7xYgmOdjLTTgujdh2X0+OtNHQdXN9D9IyaQ6ocW1Me7CviU4wYcXg8D5B8/AEfgZws3oWsQj24XH6M+Ny8vHXtBGw+LVmcID3MbFpuKPzK7pf9b/8PDievgS8QAAAABzB8gOtQ59HKkVRygzHG0xOyJjN6on0zlqLJ84ajDjM50z9Cv4NVshcjfHFAk4Cge9NwD5kTaN64w0ht+5MajVJS6MzuIpm8oBJQ3KmR/fzMEZ3dKSE5zbJQ2J5pcG7vIAAAAAffnsDCfz5BgX7SojZucfKyjiSTBz3WAyV9lJMePVIS0k0zMmItH3HOPPCBJqzxoGt8/w+cXQTe6O0urjCNVp2yjYTtXf2/HRG+CA0crk+dPY6SvZLu+44Lb0IepZ+sn0AAAAAJQFEQv+CksVKRAOHgIV0SR0GTApcR3sKugg9CnPI2AmGiZyIMQnlBjHKEgPIikqBdYo3/rmJwzxWCZN6DYkKuGKIQ/cYB5H2cga9NjSFhPbjxJ53xMO1eVvCbrttwSk9gAAAABc+zYJ3fayEZby8RiX7oMe7+oWIqzneCPZ5J4if+KeH6fgshpW3zAUjt6JDFHeOwSe3s/7cN/M88HgseyL4uvmxOTR4mHnnOBU6mjgke0t4gnxxuWt9PHqbfhT8Tj8gPgAAAAAtQNaB0cHGg6qCtUT0A01GK0Q/Bo4EwUcZxVIGzMX3RiXGPEUkBnNDxwayQk7GksD7xm+/DsZi/YlGBTxsxas7O4UkunfEvLnjxDb5wsOR+leCxTskwgO8LgF7PTYAlv6AAAAADv9fwWU+oEKFvi4Dsn15xG28+IT5fGRFFrw8xMb7xsSKu4wD4rtaQs57QkHOe1cAoXtrv0b7kv59e549Q7wbPJg8VTw4vJH7430T+9Y9mHwO/hi8iz6KvUj/IX4F/42/AAAAADWAaQDkQPoBisFnAmeBpkL5gfIDP8IHQ3lCZ0MlwpaCxQLbwldCwYHcQtKBFQLbAEHC53+kAoL/PEJ2/kwCS34UggV910HnfZWBsP2RAV79ywEsPgUA0f6AQIe/PkAEv4AAAAAGv/IAUv+TwOV/X8E+/xMBX38rgUe/KoF3PtIBbf7mASt+68DvfuiAuX7igEg/H0AbPyN/8b8yv4p/T/+kf3u/fz91/1k/vL9xv42/h//lP5t//7+rP9j/9r/tv/2/+3/"
+  },
+  "tiny-f32-mono": {
+   "name": "Tiny loop, f32 mono",
+   "encoding": "f32",
+   "channels": 1,
+   "rate": 48000,
+   "frames": 32,
+   "root_key": 60,
+   "loop_start": 8,
+   "loop_end": 24,
+   "data": "AAAAAIF4Bz7mlIA+AHO0Pqq/3T65b/s+UYQGP1hPCT9mZgY/eab8Ptik4z7Ij8M+VWSePmBzbD5HTBo+r5SUPUWrRSTHGYO94ATwvTXIIb7/ET6+xt9MvvPyTr7wuUW+MzMzvoHJGb69Vvi9yz+6vVRtfb1YVhW9XCeJvDvXi7s="
+  }
+ },
+ "programs": [
+  {
+   "id": "all",
+   "name": "All ops",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 240
+     },
+     {
+      "tick": 720,
+      "bpm": 300
+     }
+    ],
+    "globals": {
+     "3": 0.5
+    },
+    "clips": [
+     {
+      "id": "two-slots",
+      "length": 480,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 57,
+        "vel": 110,
+        "dur": 200
+       },
+       {
+        "tick": 120,
+        "note": 72,
+        "vel": 90,
+        "dur": 60,
+        "slot": 1
+       },
+       {
+        "tick": 240,
+        "note": 64,
+        "vel": 100,
+        "dur": 200
+       }
+      ],
+      "automation": [
+       {
+        "param": 1,
+        "tick": 0,
+        "value": 600
+       },
+       {
+        "param": 1,
+        "tick": 60,
+        "value": 3000,
+        "ramp": 300
+       }
+      ]
+     },
+     {
+      "id": "held",
+      "length": 960,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 60,
+        "vel": 100,
+        "dur": 800
+       }
+      ]
+     },
+     {
+      "id": "ticks",
+      "length": 240,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 67,
+        "vel": 120,
+        "dur": 40
+       },
+       {
+        "tick": 120,
+        "note": 55,
+        "vel": 100,
+        "dur": 40
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "name": "Kitchen",
+      "voices": 2,
+      "slots": [
+       "kitchen",
+       "stereo-f32"
+      ],
+      "params": {
+       "1": 900
+      },
+      "gain": 0.7,
+      "pan": -0.3,
+      "placements": [
+       {
+        "clip": "two-slots",
+        "tick": 0,
+        "repeat": 2
+       },
+       {
+        "clip": "two-slots",
+        "tick": 1200
+       }
+      ],
+      "sends": [
+       {
+        "bus": "room",
+        "gain": 0.4
+       }
+      ],
+      "inserts": [
+       {
+        "id": 1,
+        "patch": "ducker",
+        "key": "track:3"
+       }
+      ]
+     },
+     {
+      "id": 2,
+      "name": "Loop",
+      "voices": 2,
+      "slots": [
+       "stereo-i16"
+      ],
+      "gain": 0.5,
+      "pan": 0.4,
+      "placements": [
+       {
+        "clip": "held",
+        "tick": 0,
+        "repeat": 2
+       }
+      ],
+      "sends": [
+       {
+        "bus": "room",
+        "gain": 0.3
+       }
+      ]
+     },
+     {
+      "id": 3,
+      "name": "Short",
+      "voices": 2,
+      "slots": [
+       "short-f32"
+      ],
+      "gain": 0.6,
+      "placements": [
+       {
+        "clip": "ticks",
+        "tick": 0,
+        "repeat": 8
+       }
+      ]
+     }
+    ],
+    "buses": [
+     {
+      "id": "room",
+      "inserts": [
+       {
+        "id": 2,
+        "patch": "space"
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.8
+    }
+   }
+  }
+ ],
+ "frame_size": 32
+}

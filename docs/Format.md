@@ -1,7 +1,7 @@
 # modsynth image format, version 1
 
 This is the specification of the bytes a compiler writes and an engine loads. An image written to this document plays on
-every engine that claims to read it, forever. `include/modsynth/Format.hpp` and `Opcodes.def` must agree with it, and
+every engine of its frame size that claims to read it, forever. An engine plays an image exactly or refuses it, and no target plays one differently. `include/modsynth/Format.hpp` and `Opcodes.def` must agree with it, and
 `tools/ReadImage.py`, written from this document alone, checks that they do.
 
 Words: **must** is a rule that a reader enforces by refusing the image. Everything refused is listed in the sections
@@ -29,7 +29,7 @@ Three kinds of change are possible after this freeze, and nothing else is.
 Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
 can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
 damaged. A compiler writes the lowest revision that covers what it actually used, so an image that uses nothing new keeps
-loading on old engines. This document describes revision 2. The opcode table says which revision added each opcode.
+loading on old engines. This document describes revision 3. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
 version so far, and no such change is planned. A version above the engine's gets the same refusal.
@@ -97,7 +97,13 @@ never has padding.
 | 0 | u32 | `entries` | |
 | 4 | u32 | `programs` | how many entries are Programs |
 | 8 | u32 | `revision` | the lowest engine revision that can read this image |
-| 12 | u32 | `reserved` | |
+| 12 | u32 | `frame_size` | samples per frame this image was compiled for, with 0 meaning 128 |
+
+`frame_size` is part of how an image sounds. It sets how often scalars are read, so it decides what a KSnap can follow, how fast a KLfo can
+run and how short a feedback loop can be. So an engine plays only images of its own frame size, and refuses any other with "image was
+compiled for another frame size". A host that wants to play several builds an engine for each. It is 0 or a power of two from 8 to 1024,
+never 128, which has the one encoding 0, and anything but 0 needs a `revision` of at least 3, so that an engine from before this field
+says it needs updating and not that the image is damaged. Chunks loaded together must agree, so one chunk store holds one frame size.
 
 Each entry:
 
@@ -627,11 +633,12 @@ is what the per-op cost limit in the design is for.
 
 ## 10. Golden images
 
-`golden/` holds images written at this freeze, `Waves` from revision 1 and `Tones` from revision 2, each with its render on a stereo and a mono engine. They are the
+`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2 and frame 32 forms of four of them from revision 3, each with its render on a stereo and a mono engine. They are the
 contract in executable form.
 
 - A golden image and its render never change, and CI fails a pull request that edits or removes one.
-- Every engine, on every target, must load each one and match its render within −100 dB of peak.
+- Every engine of an image's frame size, on every target, must load it and match its render within −100 dB of peak. An engine of another
+  frame size must refuse it.
 - Between them they must use every opcode, instruction and mixer step, and `GoldenTest` fails if a new one lacks a golden. A new
   revision adds new files alongside the old.
 - A kernel may change only within that tolerance. A larger change is a different op with a new number.

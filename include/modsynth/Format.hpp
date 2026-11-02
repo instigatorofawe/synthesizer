@@ -35,7 +35,7 @@ template <class T>
 
 inline constexpr u32 kChunkMagic = 0x4B43534D;  // "MSCK"
 inline constexpr u8 kFormatVersion = 1;         // Changes only if an old engine must not even try to read an image
-inline constexpr u32 kFormatRevision = 2;       // The newest additions this engine understands
+inline constexpr u32 kFormatRevision = 3;       // The newest additions this engine understands
 inline constexpr u32 kChunkAlign = 8;
 inline constexpr u16 kNone = 0xFFFF;
 
@@ -93,10 +93,21 @@ inline constexpr u64 kHashSeed = 14695981039346656037ull;
 struct ManifestHeader {
     u32 entries;
     u32 programs;
-    u32 revision;  // the oldest kFormatRevision that can read this image
-    u32 reserved;
+    u32 revision;    // the oldest kFormatRevision that can read this image
+    u32 frame_size;  // samples per frame this image was compiled for, with 0 meaning kOriginalFrameSize
 };
 static_assert(sizeof(ManifestHeader) == 16);
+
+// Frame size is part of how an image sounds: it sets the control rate, what a snap can follow and how short a feedback
+// loop can be. So an image states it, and an engine of another size refuses the image rather than playing it
+// differently. Every image before revision 3 was written at 128, which is why 0 means that and 128 is never written.
+inline constexpr u32 kOriginalFrameSize = 128;
+inline constexpr u32 kFrameSizeRevision = 3;
+inline constexpr u32 kMinFrameSize = 8;
+inline constexpr u32 kMaxFrameSize = 1024;
+[[nodiscard]] constexpr u32 frame_size_of(const ManifestHeader& h) {
+    return h.frame_size == 0 ? kOriginalFrameSize : h.frame_size;
+}
 struct ManifestEntry {
     u64 hash;
     u32 size;

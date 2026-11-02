@@ -1,0 +1,1075 @@
+{
+ "patches": {
+  "lead": {
+   "name": "Stereo lead",
+   "graph": {
+    "params": [
+     {
+      "id": 1,
+      "name": "cutoff",
+      "scope": "track",
+      "min": 80,
+      "max": 12000,
+      "default": 900,
+      "smooth_ms": 15
+     },
+     {
+      "id": 2,
+      "name": "env amount",
+      "scope": "track",
+      "min": 0,
+      "max": 8000,
+      "default": 2600,
+      "smooth_ms": 15
+     },
+     {
+      "id": 3,
+      "name": "detune",
+      "scope": "track",
+      "min": 0,
+      "max": 0.5,
+      "default": 0.12,
+      "smooth_ms": 0
+     }
+    ],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "add"
+     },
+     {
+      "id": 4,
+      "type": "mtof"
+     },
+     {
+      "id": 5,
+      "type": "param",
+      "param": 3
+     },
+     {
+      "id": 6,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 7,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 8,
+      "type": "env",
+      "inputs": {
+       "attack": 0.004,
+       "decay": 0.25,
+       "sustain": 0.25,
+       "release": 0.18
+      }
+     },
+     {
+      "id": 9,
+      "type": "mul"
+     },
+     {
+      "id": 10,
+      "type": "param",
+      "param": 2
+     },
+     {
+      "id": 11,
+      "type": "add"
+     },
+     {
+      "id": 12,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 13,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "q": 2.2
+      }
+     },
+     {
+      "id": 14,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "q": 2.2
+      }
+     },
+     {
+      "id": 15,
+      "type": "env",
+      "inputs": {
+       "attack": 0.002,
+       "decay": 0.4,
+       "sustain": 0.6,
+       "release": 0.2
+      }
+     },
+     {
+      "id": 16,
+      "type": "mul"
+     },
+     {
+      "id": 17,
+      "type": "mul"
+     },
+     {
+      "id": 18,
+      "type": "mul",
+      "inputs": {
+       "b": 0.3
+      }
+     },
+     {
+      "id": 19,
+      "type": "mul"
+     },
+     {
+      "id": 20,
+      "type": "mul"
+     },
+     {
+      "id": 21,
+      "type": "out"
+     },
+     {
+      "id": 22,
+      "type": "snap"
+     },
+     {
+      "id": 23,
+      "type": "snap"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "to": 3,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 6,
+      "input": "freq"
+     },
+     {
+      "from": 4,
+      "to": 7,
+      "input": "freq"
+     },
+     {
+      "from": 8,
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "to": 9,
+      "input": "b"
+     },
+     {
+      "from": 9,
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 12,
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 6,
+      "to": 13,
+      "input": "in"
+     },
+     {
+      "from": 7,
+      "to": 14,
+      "input": "in"
+     },
+     {
+      "from": 22,
+      "to": 13,
+      "input": "cutoff"
+     },
+     {
+      "from": 23,
+      "to": 14,
+      "input": "cutoff"
+     },
+     {
+      "from": 13,
+      "to": 16,
+      "input": "a"
+     },
+     {
+      "from": 15,
+      "to": 16,
+      "input": "b"
+     },
+     {
+      "from": 14,
+      "to": 17,
+      "input": "a"
+     },
+     {
+      "from": 15,
+      "to": 17,
+      "input": "b"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 18,
+      "input": "a"
+     },
+     {
+      "from": 16,
+      "to": 19,
+      "input": "a"
+     },
+     {
+      "from": 18,
+      "to": 19,
+      "input": "b"
+     },
+     {
+      "from": 17,
+      "to": 20,
+      "input": "a"
+     },
+     {
+      "from": 18,
+      "to": 20,
+      "input": "b"
+     },
+     {
+      "from": 19,
+      "to": 21,
+      "input": "l"
+     },
+     {
+      "from": 20,
+      "to": 21,
+      "input": "r"
+     },
+     {
+      "from": 11,
+      "to": 22,
+      "input": "in"
+     },
+     {
+      "from": 11,
+      "to": 23,
+      "input": "in"
+     }
+    ]
+   }
+  },
+  "pluck": {
+   "name": "Sampled pluck",
+   "graph": {
+    "params": [
+     {
+      "id": 1,
+      "name": "level",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.7,
+      "smooth_ms": 10
+     }
+    ],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "ratio",
+      "root": 60
+     },
+     {
+      "id": 3,
+      "type": "sample",
+      "asset": "pluck"
+     },
+     {
+      "id": 4,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 5,
+      "type": "mul"
+     },
+     {
+      "id": 6,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "ratio"
+     },
+     {
+      "from": 3,
+      "port": "l",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "reverb": {
+   "name": "Room",
+   "graph": {
+    "params": [
+     {
+      "id": 1,
+      "name": "room",
+      "scope": "track",
+      "min": 0,
+      "max": 0.95,
+      "default": 0.82,
+      "smooth_ms": 20
+     },
+     {
+      "id": 2,
+      "name": "damp",
+      "scope": "track",
+      "min": 0,
+      "max": 0.9,
+      "default": 0.3,
+      "smooth_ms": 20
+     }
+    ],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in"
+     },
+     {
+      "id": 2,
+      "type": "add"
+     },
+     {
+      "id": 3,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 4,
+      "type": "param",
+      "param": 2
+     },
+     {
+      "id": 10,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0253
+      }
+     },
+     {
+      "id": 11,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0269
+      }
+     },
+     {
+      "id": 12,
+      "type": "add"
+     },
+     {
+      "id": 13,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.029
+      }
+     },
+     {
+      "id": 14,
+      "type": "add"
+     },
+     {
+      "id": 15,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0307
+      }
+     },
+     {
+      "id": 16,
+      "type": "add"
+     },
+     {
+      "id": 17,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.0126
+      }
+     },
+     {
+      "id": 18,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.01
+      }
+     },
+     {
+      "id": 19,
+      "type": "mul",
+      "inputs": {
+       "b": 0.12
+      }
+     },
+     {
+      "id": 20,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "l",
+      "to": 2,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 2,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "to": 10,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "to": 10,
+      "input": "feedback"
+     },
+     {
+      "from": 4,
+      "to": 10,
+      "input": "damp"
+     },
+     {
+      "from": 2,
+      "to": 11,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "to": 11,
+      "input": "feedback"
+     },
+     {
+      "from": 4,
+      "to": 11,
+      "input": "damp"
+     },
+     {
+      "from": 10,
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 11,
+      "to": 12,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "to": 13,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "to": 13,
+      "input": "feedback"
+     },
+     {
+      "from": 4,
+      "to": 13,
+      "input": "damp"
+     },
+     {
+      "from": 12,
+      "to": 14,
+      "input": "a"
+     },
+     {
+      "from": 13,
+      "to": 14,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "to": 15,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "to": 15,
+      "input": "feedback"
+     },
+     {
+      "from": 4,
+      "to": 15,
+      "input": "damp"
+     },
+     {
+      "from": 14,
+      "to": 16,
+      "input": "a"
+     },
+     {
+      "from": 15,
+      "to": 16,
+      "input": "b"
+     },
+     {
+      "from": 16,
+      "to": 17,
+      "input": "in"
+     },
+     {
+      "from": 17,
+      "to": 18,
+      "input": "in"
+     },
+     {
+      "from": 18,
+      "to": 19,
+      "input": "a"
+     },
+     {
+      "from": 19,
+      "to": 20,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "ducker": {
+   "name": "Sidechain ducker",
+   "graph": {
+    "params": [
+     {
+      "id": 1,
+      "name": "depth",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.7,
+      "smooth_ms": 20
+     }
+    ],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in",
+      "index": 0
+     },
+     {
+      "id": 2,
+      "type": "in",
+      "index": 1
+     },
+     {
+      "id": 3,
+      "type": "follow",
+      "inputs": {
+       "release": 0.18
+      }
+     },
+     {
+      "id": 4,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 5,
+      "type": "mul"
+     },
+     {
+      "id": 6,
+      "type": "mul",
+      "inputs": {
+       "b": -1.0
+      }
+     },
+     {
+      "id": 7,
+      "type": "add",
+      "inputs": {
+       "b": 1.0
+      }
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "mul"
+     },
+     {
+      "id": 10,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "l",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "l",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "to": 9,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "to": 10,
+      "input": "l"
+     },
+     {
+      "from": 9,
+      "to": 10,
+      "input": "r"
+     }
+    ]
+   }
+  },
+  "unused": {
+   "name": "Square, in the library but on no timeline",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "square"
+     },
+     {
+      "id": 4,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "assets": {
+  "pluck": {
+   "name": "Pluck",
+   "encoding": "i16",
+   "channels": 1,
+   "rate": 24000,
+   "frames": 2000,
+   "root_key": 60,
+   "loop_start": 0,
+   "loop_end": 0,
+   "data": "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"
+  }
+ },
+ "programs": [
+  {
+   "id": "song",
+   "name": "Song",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 140
+     }
+    ],
+    "clips": [
+     {
+      "id": "lead-a",
+      "length": 1920,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 57,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 240,
+        "note": 60,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 480,
+        "note": 64,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 720,
+        "note": 67,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 960,
+        "note": 69,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 1200,
+        "note": 67,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 1440,
+        "note": 64,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 1680,
+        "note": 60,
+        "vel": 100,
+        "dur": 200
+       }
+      ],
+      "automation": [
+       {
+        "param": 1,
+        "tick": 0,
+        "value": 500
+       },
+       {
+        "param": 1,
+        "tick": 0,
+        "value": 2400,
+        "ramp": 1800
+       }
+      ]
+     },
+     {
+      "id": "pluck-a",
+      "length": 1920,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 48,
+        "vel": 120,
+        "dur": 400
+       },
+       {
+        "tick": 480,
+        "note": 55,
+        "vel": 100,
+        "dur": 400
+       },
+       {
+        "tick": 960,
+        "note": 48,
+        "vel": 120,
+        "dur": 400
+       },
+       {
+        "tick": 1440,
+        "note": 60,
+        "vel": 100,
+        "dur": 400
+       }
+      ]
+     },
+     {
+      "id": "never-placed",
+      "length": 480,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 60,
+        "vel": 100,
+        "dur": 100
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "name": "Lead",
+      "voices": 4,
+      "slots": [
+       "lead"
+      ],
+      "params": {
+       "1": 1200
+      },
+      "gain": 0.8,
+      "pan": -0.2,
+      "placements": [
+       {
+        "clip": "lead-a",
+        "tick": 0,
+        "repeat": 4
+       }
+      ],
+      "sends": [
+       {
+        "bus": "room",
+        "gain": 0.35
+       }
+      ],
+      "inserts": [
+       {
+        "id": 1,
+        "patch": "ducker",
+        "key": "track:2"
+       }
+      ]
+     },
+     {
+      "id": 2,
+      "name": "Pluck",
+      "voices": 3,
+      "slots": [
+       "pluck"
+      ],
+      "gain": 0.9,
+      "pan": 0.2,
+      "placements": [
+       {
+        "clip": "pluck-a",
+        "tick": 0,
+        "repeat": 4
+       }
+      ],
+      "sends": [
+       {
+        "bus": "room",
+        "gain": 0.2
+       }
+      ]
+     }
+    ],
+    "buses": [
+     {
+      "id": "room",
+      "inserts": [
+       {
+        "id": 2,
+        "patch": "reverb"
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.9
+    }
+   }
+  },
+  {
+   "id": "ballad",
+   "name": "Ballad",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 84
+     }
+    ],
+    "clips": [
+     {
+      "id": "pad",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 52,
+        "vel": 80,
+        "dur": 3600
+       },
+       {
+        "tick": 0,
+        "note": 59,
+        "vel": 80,
+        "dur": 3600
+       },
+       {
+        "tick": 0,
+        "note": 64,
+        "vel": 80,
+        "dur": 3600
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "name": "Pad",
+      "voices": 4,
+      "slots": [
+       "lead"
+      ],
+      "gain": 0.7,
+      "placements": [
+       {
+        "clip": "pad",
+        "tick": 0,
+        "repeat": 2
+       }
+      ],
+      "sends": [
+       {
+        "bus": "room",
+        "gain": 0.5
+       }
+      ]
+     }
+    ],
+    "buses": [
+     {
+      "id": "room",
+      "inserts": [
+       {
+        "id": 2,
+        "patch": "reverb"
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.9
+    }
+   }
+  }
+ ],
+ "frame_size": 32
+}

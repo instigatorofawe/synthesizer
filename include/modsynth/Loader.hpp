@@ -44,11 +44,19 @@ class ChunkTable {
     }
     [[nodiscard]] u32 size() const { return count_; }
     void truncate(u32 count) { count_ = std::min(count, count_); }
-    void clear() { count_ = 0; }
+    void clear() {
+        count_ = 0;
+        frame_size_ = 0;
+    }
+    // What the images loaded here were compiled for, or 0 if none has been. One table holds one frame size, so a
+    // Program bound from it later is held to the same rule as an image.
+    [[nodiscard]] u32 frame_size() const { return frame_size_; }
+    void set_frame_size(u32 frame_size) { frame_size_ = frame_size; }
 
    private:
     std::span<ChunkRef> storage_;
     u32 count_ = 0;
+    u32 frame_size_ = 0;
 };
 
 // A patch chunk with its sections located. Parsing checks only that the sections fit.
@@ -536,6 +544,7 @@ enum class LoadError : u8 {
     BadProgram,
     OutOfMemory,
     TooNew,
+    WrongFrameSize,
 };
 
 [[nodiscard]] inline const char* to_string(LoadError e) {
@@ -564,8 +573,17 @@ enum class LoadError : u8 {
             return "not enough memory for this program";
         case LoadError::TooNew:
             return "image needs a newer engine";
+        case LoadError::WrongFrameSize:
+            return "image was compiled for another frame size";
     }
     return "unknown";
+}
+
+// The frame size an image says it was compiled for, or 0 if it is too short to say. A host with engines at several
+// sizes uses this to pick one. It proves nothing about the image, which the chosen engine then validates.
+[[nodiscard]] inline u32 image_frame_size(ByteSpan image) {
+    if (image.size() < sizeof(ChunkHeader) + sizeof(ManifestHeader)) return 0;
+    return frame_size_of(load<ManifestHeader>(image.data() + sizeof(ChunkHeader)));
 }
 
 // Validates an image in slices. Chunks join the table as they verify, and all of them leave again if anything fails,
@@ -575,8 +593,11 @@ class Loader {
     Loader() = default;
     explicit Loader(ChunkTable& table) : table_(&table) {}
 
-    void begin(ByteSpan image) {
+    // With a non-zero `frame_size`, an image compiled for another size fails with WrongFrameSize. Zero is for tools
+    // that read any image. The table's frame size applies either way.
+    void begin(ByteSpan image, u32 frame_size = 0) {
         image_ = image;
+        expected_frame_size_ = frame_size;
         status_ = LoadStatus::Working;
         error_ = LoadError::None;
         phase_ = Phase::Manifest;
@@ -616,6 +637,7 @@ class Loader {
     [[nodiscard]] LoadStatus status() const { return status_; }
     [[nodiscard]] LoadError error() const { return error_; }
     [[nodiscard]] u32 programs() const { return programs_; }
+    [[nodiscard]] u32 frame_size() const { return frame_size_of(manifest_); }
 
     // The hash of the nth Program in the manifest. Valid once Ready.
     [[nodiscard]] u64 program_hash(u32 index) const {
@@ -680,6 +702,13 @@ class Loader {
         return programs == manifest_.programs;
     }
 
+    // One encoding for each size, and a size other than the original needs an engine that knows to look at this field.
+    [[nodiscard]] bool frame_size_ok() const {
+        const u32 size = manifest_.frame_size;
+        return size == 0 || (size != kOriginalFrameSize && std::has_single_bit(size) && size >= kMinFrameSize &&
+                             size <= kMaxFrameSize && manifest_.revision >= kFrameSizeRevision);
+    }
+
     u32 parse_manifest() {
         if (reinterpret_cast<std::uintptr_t>(image_.data()) % kChunkAlign != 0) {
             fail(LoadError::BadManifest);  // samples are used in place, so they must be aligned
@@ -714,8 +743,14 @@ class Loader {
         const bool sized = manifest_.entries <= kMaxChunks &&
                            (ch.size - sizeof(ManifestHeader)) / sizeof(ManifestEntry) == manifest_.entries &&
                            (ch.size - sizeof(ManifestHeader)) % sizeof(ManifestEntry) == 0;
-        if (manifest_.reserved != 0 || !sized || !entries_ok()) {
+        if (!frame_size_ok() || !sized || !entries_ok()) {
             fail(LoadError::BadManifest);
+            return 1;
+        }
+        const u32 frame_size = frame_size_of(manifest_);
+        if ((expected_frame_size_ != 0 && frame_size != expected_frame_size_) ||
+            (table_->size() != 0 && frame_size != table_->frame_size())) {
+            fail(LoadError::WrongFrameSize);
             return 1;
         }
         programs_ = manifest_.programs;
@@ -850,6 +885,7 @@ class Loader {
             } else {
                 status_ = LoadStatus::Ready;
                 committed_ = table_->size();
+                table_->set_frame_size(frame_size_of(manifest_));
             }
             return 1;
         }
@@ -876,6 +912,7 @@ class Loader {
     LoadError error_ = LoadError::None;
     Phase phase_ = Phase::Manifest;
     u32 committed_ = 0;
+    u32 expected_frame_size_ = 0;
     u32 entry_ = 0;
     u32 programs_ = 0;
     u32 scan_ = 0;

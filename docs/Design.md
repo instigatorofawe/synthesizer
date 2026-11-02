@@ -1,6 +1,6 @@
 # modsynth design, revision 9
 
-Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 2. `docs/Format.md` is its specification,
+Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 3. `docs/Format.md` is its specification,
 and where this document and that one differ, that one is right. This document replaces all earlier revisions, and everything
 needed from them is included here. Sections about later milestones are still proposals.
 
@@ -96,8 +96,8 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
 - Delay time is in seconds with a declared maximum, sized at bind time. Only feedback needs a delay of at least one frame.
   Feed-forward delays are ordered write-first, so short Haas and flanger delays work. Sub-frame feedback, a step range run at a
   smaller n, will arrive as new opcodes, which an older engine refuses cleanly. Nothing needed to be reserved for it.
-- An input read once a frame refuses audio, and that is a compile error. Reading one sample in 128 is right for an envelope and silently
-  wrong for anything above half the frame rate, 187.5 Hz at frame 128: a 1 kHz modulator on a cutoff gave sidebands at +-125 Hz. Only a
+- An input read once a frame refuses audio, and that is a compile error. Reading one sample in a frame is right for an envelope and silently
+  wrong for anything above half the frame rate, 187.5 Hz at frame 128 and 375 Hz at 32: a 1 kHz modulator on a cutoff gave sidebands at +-125 Hz. Only a
   patch's author knows which case this is, so a `snap` node says so, and every wire has one rate. Env is audio, so a filter or pitch
   envelope goes through one. `Demo` and `AllOps` predate the rule, so `GoldenTest` adds their snaps to the JSON it compiles. A snap has its
   own place among the steps, which moved their bytes, and they render bit for bit as they did [measured]. It can also move a Noise step, whose seed
@@ -183,12 +183,24 @@ Delay lengths, phase increments, envelope and filter coefficients, and tick conv
 rate change is a rebind through the same path as a generation swap, and it can fail on a device if the result no longer
 fits.
 
-Frame size stays compile-time. Desktop devices can use varying block sizes, so a host adapter reblocks through a FIFO.
+Frame size stays compile-time in an engine, and an image declares the size it was compiled for, because frame size changes sound: every
+golden with sound missed the −100 dB contract when rendered at 32 instead of 128 [measured]. An engine refuses an image of another size,
+so a project sounds the same wherever it plays. The default is 32. That is a 750 Hz control rate, a shortest graph feedback loop of 1500 Hz,
+at most 31 samples of parameter timing error, about 10% more CPU than 128 [model], and a quarter of the buffer RAM. Images from before
+revision 3 declare nothing and mean 128, so they keep their sound and an engine at 128 still plays them. Desktop devices can use
+varying block sizes, so a host adapter reblocks through a FIFO. The browser's render quantum stays 128, so there 32 gains control rate
+but no latency, and the binding runs one engine at each size and renders whole quanta. Moving between them stops the sound, with no fade.
 
 ## 10. Hardware path
 
 Hardware never talks to the GUI. That removes capability negotiation, the live device protocol, and live editing on
 embedded. It adds one requirement.
+
+**Behaviour is never conditioned on target.** An engine plays an image exactly or refuses it. Not every program has to run on a device: a
+feature a target lacks is unavailable when compiling for it, so the compile fails, and the loader refusing is the backstop, because
+delivery is one-way. Cheaper, less precise features exist, such as `Tone` or `"mode": "naive"`, but an author picks them and they sound the
+same everywhere. Nothing is rounded, substituted or lowered by target. A mono build folds at run time, which is the one exception, and
+it is treated as an output format.
 
 **Target profile.** Revision 3 had devices report their state sizes, which cannot work without a link. Instead the
 firmware build generates a profile: sample rate, frame size, memory regions, supported opcodes, per-backend state sizes,
@@ -349,7 +361,7 @@ Findings to apply in Milestone 7:
   been measured.
 - Per-frame filter modulation is affordable: a coefficient update costs 245 to 285 cycles, about 2% of a voice per filter
   at frame 64.
-- Frame 32 costs about 10% more than frame 128, so frame size can be chosen for latency and RAM.
+- Frame 32 costs about 10% more than frame 128, and is the default for its control rate. Section 9 has why the size is part of the image.
 - Wavetables in flash add about 9 to 12% to a voice at 80 MHz if every read misses.
 
 Voices, at 48 kHz with 30% of the core held back for I/O and error in this estimate, at 160 to 200 cycles per voice:

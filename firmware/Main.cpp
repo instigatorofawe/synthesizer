@@ -21,7 +21,8 @@ using Dsp = ScalarBackend;
 
 namespace {
 
-constexpr SynthConfig kConfig{.frame_size = 128, .channels = MODSYNTH_CHANNELS, .tap_slots = 0, .generations = 1};
+constexpr SynthConfig kConfig{
+    .frame_size = MODSYNTH_FRAME, .channels = MODSYNTH_CHANNELS, .tap_slots = 0, .generations = 1};
 using Engine = Synth<kConfig, Dsp>;
 
 [[gnu::section(".sram2")]] alignas(16) std::byte g_fast[28 * 1024];
@@ -85,12 +86,20 @@ void write_output(int file, const void* data, std::size_t size) {
     extern const std::byte name[];       \
     extern const std::byte name##_end[];
 
-MODSYNTH_LINK_IMAGE(g_demo, MODSYNTH_GOLDEN "/Demo.image")
-MODSYNTH_LINK_IMAGE(g_all_ops, MODSYNTH_GOLDEN "/AllOps.image")
-MODSYNTH_LINK_IMAGE(g_waves, MODSYNTH_GOLDEN "/Waves.image")
-MODSYNTH_LINK_IMAGE(g_tones, MODSYNTH_GOLDEN "/Tones.image")
+#if MODSYNTH_FRAME == 128
+#define MODSYNTH_GOLDEN_IMAGE(name) MODSYNTH_GOLDEN "/" name ".image"
+#else
+#define MODSYNTH_GOLDEN_IMAGE(name) MODSYNTH_GOLDEN "/" name "32.image"
+#endif
+
+MODSYNTH_LINK_IMAGE(g_demo, MODSYNTH_GOLDEN_IMAGE("Demo"))
+MODSYNTH_LINK_IMAGE(g_all_ops, MODSYNTH_GOLDEN_IMAGE("AllOps"))
+MODSYNTH_LINK_IMAGE(g_waves, MODSYNTH_GOLDEN_IMAGE("Waves"))
+MODSYNTH_LINK_IMAGE(g_tones, MODSYNTH_GOLDEN_IMAGE("Tones"))
 
 namespace {
+
+constexpr u32 kPerOriginalFrame = kOriginalFrameSize / kConfig.frame_size;  // So every length stays the same in samples
 
 // Each engine starts from nothing, in the same memory.
 bool render(const char* path, const std::byte* begin, const std::byte* end, u32 frames) {
@@ -134,10 +143,10 @@ int main() {
     print(", bulk ");
     print_number(sizeof(g_bulk));
     print("\n");
-    const bool ok = render(MODSYNTH_OUTPUT ".Demo.f32", g_demo, g_demo_end, 480) &&
-                    render(MODSYNTH_OUTPUT ".AllOps.f32", g_all_ops, g_all_ops_end, 400) &&
-                    render(MODSYNTH_OUTPUT ".Waves.f32", g_waves, g_waves_end, 200) &&
-                    render(MODSYNTH_OUTPUT ".Tones.f32", g_tones, g_tones_end, 200);
+    const bool ok = render(MODSYNTH_OUTPUT ".Demo.f32", g_demo, g_demo_end, 480 * kPerOriginalFrame) &&
+                    render(MODSYNTH_OUTPUT ".AllOps.f32", g_all_ops, g_all_ops_end, 400 * kPerOriginalFrame) &&
+                    render(MODSYNTH_OUTPUT ".Waves.f32", g_waves, g_waves_end, 200 * kPerOriginalFrame) &&
+                    render(MODSYNTH_OUTPUT ".Tones.f32", g_tones, g_tones_end, 200 * kPerOriginalFrame);
     finish(ok);
 }
 

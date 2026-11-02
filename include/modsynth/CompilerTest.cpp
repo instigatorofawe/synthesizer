@@ -363,6 +363,34 @@ TEST(CompileImage, DeclaresOnlyTheRevisionItUses) {
     EXPECT_EQ(revision_of(compile_image(request).image), 1u);
 }
 
+TEST(CompileImage, OnlyASharedLfoIsAKLfo2) {
+    const auto check = [](bool per_voice, Op op, u32 revision) {
+        json graph =
+            json::parse(R"({"nodes": [{"id": 1, "type": "note"}, {"id": 2, "type": "lfo"}, {"id": 3, "type": "out"}],
+            "edges": [{"from": 2, "to": 3, "input": "l"}]})");
+        if (per_voice) graph["edges"].push_back({{"from", 1}, {"port", "velocity"}, {"to", 2}, {"input", "depth"}});
+        json request = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+        request["frame_size"] = kOriginalFrameSize;  // Any other size needs a revision of its own
+        request["patches"]["sine"]["graph"] = graph;
+        const auto image = compile_image(request).image;
+        EXPECT_EQ(load<ManifestHeader>(image.data() + sizeof(ChunkHeader)).revision, revision);
+        bool found = false;
+        for (const auto& chunk : disassemble(image)) {
+            if (chunk.kind != ChunkKind::Patch) continue;
+            PatchView v;
+            ASSERT_TRUE(parse_patch(chunk.payload, v));
+            for (u32 s = 0; s < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++s) {
+                if (v.step(s).op != static_cast<u8>(op)) continue;
+                found = true;
+                EXPECT_EQ(s < v.h.control_steps, !per_voice);
+            }
+        }
+        EXPECT_TRUE(found);
+    };
+    check(false, Op::KLfo2, 5);
+    check(true, Op::KLfo, 0);
+}
+
 TEST(CompileImage, HoldsOnlyPatchesTheProgramReaches) {
     const auto result =
         compile_image(request_with({"saw", "sine", "square"}, {program("a", one_note_timeline("saw"))}));

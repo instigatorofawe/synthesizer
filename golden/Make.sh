@@ -30,6 +30,9 @@ make_golden Tones32 800
 make_golden Lanes 1920
 make_golden Zones 1920
 
+# Revision 5.
+make_golden Hold 1920
+
 # What a device receives when it already has every chunk but the Programs.
 if [ -e golden/Demo.thin.image ]; then
     exit 0

@@ -314,7 +314,7 @@ class Workspace {
 
     // A step that could be valid, so a change of op reaches its kernel and not only the operand checks.
     [[nodiscard]] static WireStep plausible_step(Rng& r, const PatchView& v, bool control, u32 state_id) {
-        static constexpr Op scalar_ops[] = {Op::KMul, Op::KAdd, Op::KMtoF, Op::KRatio, Op::KLfo};
+        static constexpr Op scalar_ops[] = {Op::KMul, Op::KAdd, Op::KMtoF, Op::KRatio, Op::KLfo, Op::KLfo2};
         WireStep s{};
         const Op op = control ? scalar_ops[r.below(std::size(scalar_ops))]
                               : static_cast<Op>(1 + r.below(static_cast<u32>(Op::kCount) - 1));

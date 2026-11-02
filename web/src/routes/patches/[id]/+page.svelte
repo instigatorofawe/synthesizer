@@ -74,7 +74,12 @@
 
 	onMount(() => {
 		compiler = new Compiler();
-		engine.onState = (s) => (engineState = s);
+		engine.onState = (s) => {
+			engineState = s;
+			// A shared LFO waits for the transport, and nothing else on this page starts it. A new engine, which an image of
+			// another frame size needs, starts stopped, so this has to go on watching.
+			if (s.generation !== 0 && !s.playing) engine.play();
+		};
 		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start);
 		engine.onTargets = (t) => (targets = t);
 		compile();
@@ -137,7 +142,7 @@
 			>
 		{/each}
 		{#if engineState}
-			<span class="muted">{engineState.voices} voices{LOAD_ERRORS[engineState.error] ? `, ${LOAD_ERRORS[engineState.error]}` : ''}</span>
+			<span class="muted" data-testid="engine" data-playing={engineState.playing}>{engineState.voices} voices{LOAD_ERRORS[engineState.error] ? `, ${LOAD_ERRORS[engineState.error]}` : ''}</span>
 		{/if}
 	</div>
 	{#each params as param}

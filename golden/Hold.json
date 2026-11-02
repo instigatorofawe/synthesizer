@@ -1,0 +1,293 @@
+{
+ "frame_size": 32,
+ "patches": {
+  "pad": {
+   "name": "Pad",
+   "graph": {
+    "params": [],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "lfo",
+      "inputs": {
+       "rate": 5.5,
+       "depth": 0.4
+      }
+     },
+     {
+      "id": 3,
+      "type": "add"
+     },
+     {
+      "id": 4,
+      "type": "mtof"
+     },
+     {
+      "id": 5,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 6,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "cutoff": 2400.0,
+       "q": 0.9
+      }
+     },
+     {
+      "id": 7,
+      "type": "lfo",
+      "inputs": {
+       "rate": 3.7
+      }
+     },
+     {
+      "id": 8,
+      "type": "add",
+      "inputs": {
+       "b": 0.5
+      }
+     },
+     {
+      "id": 9,
+      "type": "mul"
+     },
+     {
+      "id": 10,
+      "type": "env",
+      "inputs": {
+       "attack": 0.01,
+       "decay": 0.1,
+       "sustain": 0.8,
+       "release": 0.2
+      }
+     },
+     {
+      "id": 11,
+      "type": "mul"
+     },
+     {
+      "id": 12,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "in"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "freq"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "in"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 7,
+      "input": "depth"
+     },
+     {
+      "from": 7,
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "to": 9,
+      "input": "b"
+     },
+     {
+      "from": 9,
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 11,
+      "to": 12,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "swell": {
+   "name": "Swell",
+   "graph": {
+    "params": [],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in"
+     },
+     {
+      "id": 2,
+      "type": "lfo",
+      "inputs": {
+       "rate": 2.3,
+       "depth": 0.3
+      }
+     },
+     {
+      "id": 3,
+      "type": "add",
+      "inputs": {
+       "b": 0.7
+      }
+     },
+     {
+      "id": 4,
+      "type": "mul"
+     },
+     {
+      "id": 5,
+      "type": "mul"
+     },
+     {
+      "id": 6,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "l",
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "b"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "to": 5,
+      "input": "b"
+     },
+     {
+      "from": 4,
+      "to": 6,
+      "input": "l"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "r"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "hold",
+   "name": "Hold",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 150
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 1920,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 48,
+        "vel": 100,
+        "dur": 900
+       },
+       {
+        "tick": 480,
+        "note": 60,
+        "vel": 70,
+        "dur": 1200
+       },
+       {
+        "tick": 1200,
+        "note": 67,
+        "vel": 120,
+        "dur": 600
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "name": "Pad",
+      "voices": 3,
+      "slots": [
+       "pad"
+      ],
+      "gain": 0.5,
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0,
+        "repeat": 2
+       }
+      ],
+      "inserts": [
+       {
+        "id": 1,
+        "patch": "swell"
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.7
+    }
+   }
+  }
+ ]
+}

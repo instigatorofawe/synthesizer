@@ -32,14 +32,15 @@ struct Golden {
 // from a new compiler no longer matches chunks a device got from an old one. That can be fine, and it must be a
 // decision. Revision 1 made one: saw, square and triangle left their tables for opcodes that fix their aliasing, which
 // moved Demo and AllOps. Refusing audio at inputs read once a frame made another. It moved them again, because a snap
-// node has its own place among the steps. They render as they did.
+// node has its own place among the steps. They render as they did. Revision 5 made a third: a shared LFO became KLfo2,
+// which moved every project that has one, and those now need revision 5.
 constexpr Golden kGoldens[] = {
     {"Minimal", 8, 0x1b3153f13f3ea109ull},         {"Demo", 480, 0xbc90aab7da78bf30ull},
-    {"AllOps", 400, 0xed4a0c10d266d7aeull},        {"Waves", 200, 0xf4c0e84598e9134eull},
-    {"Tones", 200, 0x6d4b1572d83c6384ull},         {"Demo32", 1920, 0x0cd1b564c1f05560ull, 32},
-    {"AllOps32", 1600, 0x598b8f72a660fe6dull, 32}, {"Waves32", 800, 0x00bf5c924ba84056ull, 32},
-    {"Tones32", 800, 0x2226e9059cc63fb0ull, 32},   {"Lanes", 1920, 0x60d243046489eb9eull, 32},
-    {"Zones", 1920, 0xed2b4ca7c30b9bb3ull, 32},
+    {"AllOps", 400, 0xebbd17e22a3a5a90ull},        {"Waves", 200, 0xe37a8aae4c59c4e1ull},
+    {"Tones", 200, 0x4c4f7b21767ecfeaull},         {"Demo32", 1920, 0x0cd1b564c1f05560ull, 32},
+    {"AllOps32", 1600, 0x3d10ba76abc6ad78ull, 32}, {"Waves32", 800, 0xe6016cf15bab3260ull, 32},
+    {"Tones32", 800, 0x76ac201dd55fe56bull, 32},   {"Lanes", 1920, 0x60d243046489eb9eull, 32},
+    {"Zones", 1920, 0xed2b4ca7c30b9bb3ull, 32},    {"Hold", 1920, 0xfb0025e9e989fe1full, 32},
 };
 
 std::vector<std::byte> read_file(const std::string& path) {
@@ -71,13 +72,16 @@ double difference_db(const std::vector<float>& reference, const std::vector<floa
     return worst == 0.0f ? -300.0 : 20.0 * std::log10(static_cast<double>(worst / peak));
 }
 
+// `waited` is how many frames the engine renders before Play.
 template <SynthConfig C>
-std::vector<float> render(const std::vector<std::byte>& image, u32 frames) {
+std::vector<float> render(const std::vector<std::byte>& image, u32 frames, u32 waited = 0) {
     Rig<C> rig(image);
     EXPECT_EQ(rig.engine.load_error(), LoadError::None);
-    EXPECT_TRUE(rig.engine.send({.kind = EventKind::Play}));
     std::vector<float> out(frames * C.frame_size * C.channels);
     std::array<float*, C.channels> outputs;
+    for (u32 ch = 0; ch < C.channels; ++ch) outputs[ch] = out.data() + ch * C.frame_size;
+    for (u32 f = 0; f < waited; ++f) rig.engine.render(outputs);
+    EXPECT_TRUE(rig.engine.send({.kind = EventKind::Play}));
     for (u32 f = 0; f < frames; ++f) {
         for (u32 ch = 0; ch < C.channels; ++ch) outputs[ch] = out.data() + (f * C.channels + ch) * C.frame_size;
         rig.engine.render(outputs);
@@ -101,6 +105,19 @@ TEST(Golden, EveryImageSoundsAsItDidAtTheFreeze) {
         EXPECT_LE(difference_db(read_audio(base + ".stereo.f32"), stereo), -100.0);
         EXPECT_LE(difference_db(read_audio(base + ".mono.f32"), mono), -100.0);
     }
+}
+
+TEST(Golden, AKLfo2SoundsTheSameHoweverLongTheEngineWaitedForPlay) {
+    const auto image = read_file(golden_path("Hold.image"));
+    const auto prompt = render<kGoldenStereo<32>>(image, 1920);
+    for (const u32 waited : {1u, 37u, 1001u})
+        EXPECT_TRUE(render<kGoldenStereo<32>>(image, 1920, waited) == prompt) << waited;
+}
+
+// Revision 5 didn't change what an older image means, and in one a shared KLfo runs from load.
+TEST(Golden, AnOlderImageKeepsItsFreeRunningKLfo) {
+    const auto image = read_file(golden_path("Tones32.image"));
+    EXPECT_FALSE(render<kGoldenStereo<32>>(image, 800, 37) == render<kGoldenStereo<32>>(image, 800));
 }
 
 // Demo and AllOps predate the rule that audio cannot reach an input read once a frame, and golden JSON never changes,
@@ -209,6 +226,7 @@ TEST(Golden, EachImageDeclaresTheRevisionItNeeds) {
         EXPECT_EQ(revision(name), 3u) << name;
     }
     for (const char* name : {"Lanes.image", "Zones.image"}) EXPECT_EQ(revision(name), 4u) << name;
+    EXPECT_EQ(revision("Hold.image"), 5u);
 }
 
 // A frozen image must never quietly change its sound by landing on an engine of another size.

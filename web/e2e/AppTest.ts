@@ -140,6 +140,8 @@ test('a patch in use cannot be deleted, and says what an edit would change', asy
 test('a patch previews from the keyboard', async ({ page }) => {
 	await page.goto('/patches/lead');
 	await page.getByRole('button', { name: 'Start audio' }).click();
+	// A shared LFO waits for the transport, and this page has no Play button.
+	await expect(page.getByTestId('engine')).toHaveAttribute('data-playing', 'true', { timeout: 10000 });
 	const key = page.getByRole('button', { name: '60', exact: true });
 	await expect(key).toBeVisible();
 	await page.waitForTimeout(500);

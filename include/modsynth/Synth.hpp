@@ -1074,6 +1074,7 @@ class Synth {
         if (v.h.control_steps == 0) return;
         RunContext c = context(g, *slot.binding, slot, nullptr, g.scratch);
         c.state = slot.state;
+        c.stopped = !g.clock.playing;
         K::run(slot.binding->control, v.h.control_steps, c);
     }
 

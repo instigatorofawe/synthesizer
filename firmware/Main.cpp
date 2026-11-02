@@ -99,6 +99,7 @@ MODSYNTH_LINK_IMAGE(g_tones, MODSYNTH_GOLDEN_IMAGE("Tones"))
 #if MODSYNTH_FRAME == 32  // Written at the default size, so they have no frozen form
 MODSYNTH_LINK_IMAGE(g_lanes, MODSYNTH_GOLDEN "/Lanes.image")
 MODSYNTH_LINK_IMAGE(g_zones, MODSYNTH_GOLDEN "/Zones.image")
+MODSYNTH_LINK_IMAGE(g_hold, MODSYNTH_GOLDEN "/Hold.image")
 #endif
 
 namespace {
@@ -153,7 +154,8 @@ int main() {
               render(MODSYNTH_OUTPUT ".Tones.f32", g_tones, g_tones_end, 200 * kPerOriginalFrame);
 #if MODSYNTH_FRAME == 32
     ok = ok && render(MODSYNTH_OUTPUT ".Lanes.f32", g_lanes, g_lanes_end, 1920) &&
-         render(MODSYNTH_OUTPUT ".Zones.f32", g_zones, g_zones_end, 1920);
+         render(MODSYNTH_OUTPUT ".Zones.f32", g_zones, g_zones_end, 1920) &&
+         render(MODSYNTH_OUTPUT ".Hold.f32", g_hold, g_hold_end, 1920);
 #endif
     finish(ok);
 }

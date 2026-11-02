@@ -187,7 +187,8 @@ if(MODSYNTH_BUILD_TESTS)
         endif()
         target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
         target_compile_definitions(${name} PRIVATE MODSYNTH_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/golden"
-            MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes")
+            MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes"
+            MODSYNTH_PROFILES="${CMAKE_CURRENT_SOURCE_DIR}/firmware/Profiles")
         if(EMSCRIPTEN)
             add_test(NAME ${name} COMMAND ${name})
         else()

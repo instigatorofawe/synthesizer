@@ -975,15 +975,118 @@ TEST(Lanes, WhatALaneCannotReachIsAnError) {
     }
 }
 
-TEST(Lanes, TwoControlsInOneRegisterCannotBothMove) {
-    const std::string error = lane_error(lane_project(json::parse(R"([
+namespace {
+
+// A Program's tables and code, copied out of its image.
+struct Decoded {
+    ProgramHeader h{};
+    std::vector<ClipDesc> clips;
+    std::vector<TrackDesc> tracks;
+    std::vector<Instruction> code;
+    std::vector<float> mix;
+    [[nodiscard]] std::vector<Instruction> clip(u32 i) const {
+        return {code.begin() + clips[i].begin, code.begin() + clips[i].begin + clips[i].length};
+    }
+    [[nodiscard]] std::vector<Instruction> stream(u32 t) const {
+        return {code.begin() + tracks[t].stream_begin, code.begin() + tracks[t].stream_begin + tracks[t].stream_length};
+    }
+};
+
+Decoded decode(const std::vector<std::byte>& image) {
+    const LoadedImage loaded(image);
+    EXPECT_EQ(loaded.loader.status(), LoadStatus::Ready);
+    ProgramView v;
+    const ChunkRef* c = loaded.table.find(loaded.loader.program_hash(0));
+    EXPECT_TRUE(parse_program({c->data, c->size}, v));
+    Decoded d;
+    d.h = v.h;
+    for (u32 i = 0; i < v.h.clips; ++i) d.clips.push_back(v.clip(i));
+    for (u32 i = 0; i < v.h.tracks; ++i) d.tracks.push_back(v.track(i));
+    for (u32 i = 0; i < v.h.code; ++i) d.code.push_back(v.instruction(i));
+    for (u32 i = 0; i < v.h.mix_regs; ++i) d.mix.push_back(v.mix_value(i));
+    return d;
+}
+
+const json& reported_track(const json& report, int id) {
+    for (const json& t : report.at("programs")[0].at("tracks")) {
+        if (t.at("id") == id) return t;
+    }
+    throw std::runtime_error("no track " + std::to_string(id));
+}
+
+std::vector<json> stage_factors(const json& chain) {
+    std::vector<json> out;
+    for (const json& s : chain.at("stages")) out.push_back(s.at("of"));
+    return out;
+}
+
+}  // namespace
+
+TEST(Stages, NothingMovesToAStageUntilTwoMovingControlsWouldShareARegister) {
+    const json report = compile_image(lane_project(json::parse(R"([
         {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1},
-        {"target": {"mix": "pan", "track": 1}, "tick": 10, "value": 0}])")));
-    EXPECT_NE(error.find("share a mix register"), std::string::npos) << error;
-    const std::string master = lane_error(lane_project(json::parse(R"([
+        {"target": {"mix": "fader", "track": 2}, "tick": 10, "value": 0},
+        {"target": {"mix": "fader", "bus": "wet"}, "tick": 10, "value": 0}])")))
+                            .report;
+    EXPECT_TRUE(reported_track(report, 1).at("stages").empty());
+    EXPECT_TRUE(report.at("programs")[0].at("master").at("stages").empty());
+    for (const json& route : reported_track(report, 1).at("mix")) {
+        const bool to_master = route.at("to") == "master";
+        EXPECT_EQ(route.at("of"), to_master ? json::parse(R"(["fader", "pan", "master"])")
+                                            : json::parse(R"(["fader", "pan", "send"])"));
+    }
+}
+
+TEST(Stages, AFaderThatSharesWithAPanThatMovesTakesAStepOfItsOwn) {
+    const json report = compile_image(lane_project(json::parse(R"([
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1},
+        {"target": {"mix": "pan", "track": 1}, "tick": 10, "value": 0}])")))
+                            .report;
+    const json& track = reported_track(report, 1);
+    EXPECT_EQ(stage_factors(track), (std::vector<json>{json::parse(R"(["fader"])")}));
+    for (const json& route : track.at("mix")) {
+        EXPECT_EQ(std::count(route.at("of").begin(), route.at("of").end(), "fader"), 0) << route;
+    }
+}
+
+TEST(Stages, TheMasterFaderTakesAStepWhenAFaderIntoItMovesToo) {
+    const json report = compile_image(lane_project(json::parse(R"([
         {"target": {"mix": "fader", "track": 2}, "tick": 0, "value": 1},
-        {"target": {"mix": "fader", "master": true}, "tick": 10, "value": 0}])")));
-    EXPECT_NE(master.find("share a mix register"), std::string::npos) << master;
+        {"target": {"mix": "fader", "master": true}, "tick": 10, "value": 0}])")))
+                            .report;
+    EXPECT_EQ(stage_factors(report.at("programs")[0].at("master")), (std::vector<json>{json::parse(R"(["master"])")}));
+    EXPECT_TRUE(reported_track(report, 2).at("stages").empty());
+    EXPECT_EQ(reported_track(report, 2).at("mix")[0].at("of"), json::parse(R"(["fader", "pan"])"));
+}
+
+TEST(Stages, EveryControlCanMoveAtOnce) {
+    const json report = compile_image(lane_project(json::parse(R"([
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1},
+        {"target": {"mix": "pan", "track": 1}, "tick": 10, "value": 0},
+        {"target": {"mix": "send", "track": 1, "to": "wet"}, "tick": 20, "value": 0},
+        {"target": {"mix": "fader", "bus": "wet"}, "tick": 30, "value": 0.5},
+        {"target": {"mix": "pan", "bus": "wet"}, "tick": 40, "value": 0.5},
+        {"target": {"mix": "fader", "master": true}, "tick": 50, "value": 0.5}])")))
+                            .report;
+    EXPECT_EQ(stage_factors(reported_track(report, 1)),
+              (std::vector<json>{json::parse(R"(["fader"])"), json::parse(R"(["pan"])")}));
+    EXPECT_EQ(stage_factors(report.at("programs")[0].at("master")), (std::vector<json>{json::parse(R"(["master"])")}));
+}
+
+TEST(Stages, APreFaderSendReadsTheChainBeforeItsFaderAndPan) {
+    json request = lane_project(json::array());
+    request["programs"][0]["timeline"]["tracks"][0]["sends"][0]["pre"] = true;
+    const json report = compile_image(request).report;
+    const json& track = reported_track(report, 1);
+    EXPECT_EQ(stage_factors(track), (std::vector<json>{json::parse(R"(["fader", "pan"])")}));
+    for (const json& route : track.at("mix")) {
+        if (route.at("to") == "bus:wet") {
+            EXPECT_TRUE(route.value("pre", false));
+            EXPECT_EQ(route.at("of"), json::parse(R"(["mute", "send"])"));
+        } else {
+            EXPECT_EQ(route.at("of"), json::parse(R"(["master"])"));
+        }
+    }
 }
 
 TEST(Lanes, OneTrackOwnsATarget) {
@@ -1182,6 +1285,266 @@ TEST(Play, TheDefaultWritesNothing) {
     json stated = plain;
     stated["programs"][0]["timeline"]["tracks"][0]["play"] = json::parse(R"({"mode": "poly"})");
     EXPECT_EQ(compile_image(plain).image, compile_image(stated).image);
+}
+
+TEST(Timeline, AFieldTheCompilerDoesNotKnowIsRefused) {
+    const std::pair<const char*, const char*> cases[] = {
+        {"/swing", "a timeline has no 'swing'"},
+        {"/tempo/0/curve", "a tempo change has no 'curve'"},
+        {"/clips/0/colour", "a clip has no 'colour'"},
+        {"/clips/0/notes/0/velocity", "a note has no 'velocity'"},
+        {"/clips/0/notes/0/legato", "a note has no 'legato'"},
+        {"/clips/0/automation/0/shape", "a lane has no 'shape'"},
+        {"/tracks/0/transpose", "a track has no 'transpose'"},
+        {"/tracks/0/placements/0/loop_start", "a placement has no 'loop_start'"},
+        {"/tracks/0/sends/0/post", "a send has no 'post'"},
+        {"/tracks/0/inserts/0/bypass", "an insert has no 'bypass'"},
+        {"/buses/0/name", "a bus has no 'name'"},
+        {"/master/pan", "master has no 'pan'"},
+        {"/tracks/0/params/cutoff", "by parameter id, and 'cutoff' isn't one"},
+        {"/globals/70000", "by parameter id"},
+    };
+    for (const auto& [pointer, wanted] : cases) {
+        SCOPED_TRACE(pointer);
+        json request = lane_project(json::parse(R"([{"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5}])"));
+        json& timeline = request["programs"][0]["timeline"];
+        timeline["tempo"] = json::parse(R"([{"tick": 0, "bpm": 120}])");
+        timeline["globals"] = json::object();
+        EXPECT_EQ(lane_error(request), "");
+        timeline[json::json_pointer(pointer)] = 30;
+        EXPECT_NE(lane_error(request).find(wanted), std::string::npos) << lane_error(request);
+    }
+}
+
+namespace {
+
+// One track playing one clip through a placement the test describes.
+json placed_project(const json& placement, const json& clip_extra = json::object()) {
+    json request = lane_project(json::array());
+    json& timeline = request["programs"][0]["timeline"];
+    timeline["clips"][0] = json::parse(R"({"id": "c", "length": 960, "notes": [
+        {"tick": 0, "note": 60, "vel": 101, "dur": 100}, {"tick": 480, "note": 64, "vel": 127, "dur": 100},
+        {"tick": 720, "note": 67, "vel": 1, "dur": 100}]})");
+    timeline["clips"][0].update(clip_extra);
+    json placed = {{"clip", "c"}, {"tick", 0}};
+    placed.update(placement);
+    timeline["tracks"][0]["placements"] = json::array({placed});
+    timeline["tracks"][0].erase("sends");
+    timeline["tracks"][0].erase("inserts");
+    timeline["tracks"].erase(1);
+    return request;
+}
+
+struct Played {
+    u32 tick, note, velocity;
+    bool operator==(const Played&) const = default;
+};
+
+std::vector<Played> notes_of(const std::vector<Instruction>& code) {
+    std::vector<Played> out;
+    u32 tick = 0;
+    for (const Instruction& i : code) {
+        if (i.op == static_cast<u8>(Instr::Wait)) tick += i.c;
+        if (i.op == static_cast<u8>(Instr::NoteOn)) out.push_back({tick, i.a, i.b});
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST(Placement, TransposesAndScalesWhatItPlays) {
+    const Decoded d = decode(compile_image(placed_project({{"transpose", -12}, {"velocity", 0.5}})).image);
+    ASSERT_EQ(d.clips.size(), 1u);
+    // 101 / 2 rounds up, and 1 / 2 rounds to 1.
+    EXPECT_EQ(notes_of(d.clip(0)), (std::vector<Played>{{0, 48, 51}, {480, 52, 64}, {720, 55, 1}}));
+    const Decoded loud = decode(compile_image(placed_project({{"velocity", 2}})).image);
+    EXPECT_EQ(notes_of(loud.clip(0)), (std::vector<Played>{{0, 60, 127}, {480, 64, 127}, {720, 67, 2}}));
+}
+
+TEST(Placement, PlaysAWindowOfItsClip) {
+    const Decoded d = decode(compile_image(placed_project({{"start", 480}, {"length", 200}, {"repeat", 3}})).image);
+    ASSERT_EQ(d.clips.size(), 1u);
+    EXPECT_EQ(d.clips[0].ticks, 200u);
+    EXPECT_EQ(notes_of(d.clip(0)), (std::vector<Played>{{0, 64, 127}}));  // The note at 720 is past the window
+    EXPECT_EQ(d.h.length_ticks, 600u);
+    const std::vector<Instruction> stream = d.stream(0);
+    ASSERT_EQ(stream.size(), 2u);
+    EXPECT_EQ(stream[0].op, static_cast<u8>(Instr::Call));
+    EXPECT_EQ(stream[0].c, 3u);
+
+    // Longer than what is left of the clip, it plays silence to its end.
+    const Decoded longer = decode(compile_image(placed_project({{"start", 480}, {"length", 960}})).image);
+    EXPECT_EQ(longer.clips[0].ticks, 960u);
+    EXPECT_EQ(notes_of(longer.clip(0)), (std::vector<Played>{{0, 64, 127}, {240, 67, 1}}));
+}
+
+TEST(Placement, AnUntransformedPlacementIsTheSameBytes) {
+    EXPECT_EQ(compile_image(placed_project(json::object())).image,
+              compile_image(placed_project({{"transpose", 0}, {"velocity", 1}, {"start", 0}, {"length", 960}})).image);
+}
+
+TEST(Placement, WhatAPlacementRefuses) {
+    const std::pair<json, const char*> cases[] = {
+        {{{"transpose", 64}}, "transposes a note out of 0 to 127"},
+        {{{"transpose", 200}}, "-127 to 127"},
+        {{{"velocity", 100}}, "scales each note's, from 0 to 4"},
+        {{{"start", 960}}, "starts after its clip ends"},
+        {{{"length", 0}}, "has no length"},
+        {{{"repeat", 0}}, "repeats 0 times"},
+    };
+    for (const auto& [placement, wanted] : cases) {
+        SCOPED_TRACE(placement.dump());
+        EXPECT_NE(lane_error(placed_project(placement)).find(wanted), std::string::npos)
+            << lane_error(placed_project(placement));
+    }
+}
+
+TEST(Placement, AWindowStartsWithEveryTargetWhereItsClipHadItThere) {
+    const json lanes = json::parse(R"({"automation": [
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 0},
+        {"target": {"mix": "fader", "track": 1}, "tick": 240, "value": 1, "ramp": 480},
+        {"target": {"mix": "pan", "track": 1}, "tick": 100, "value": 0.5}],
+        "play": [{"tick": 100, "mode": "mono"}]})");
+    const json request = placed_project({{"start", 480}}, lanes);
+    const Decoded d = decode(compile_image(request).image);
+    const json report = compile_image(request).report;
+    const json& track = reported_track(report, 1);
+    const u16 fader = track.at("stages")[0].at("left"), pan = track.at("mix")[0].at("left");
+    const std::vector<Instruction> body = d.clip(0);
+    // The play change, then the fader halfway up its ramp and the rest of the ramp, then the pan where it stood.
+    const auto op = [](Instr i) { return static_cast<u8>(i); };
+    ASSERT_GE(body.size(), 9u);
+    EXPECT_EQ(body[0].op, op(Instr::PlayMode));
+    EXPECT_EQ(std::tie(body[1].op, body[1].b), std::make_tuple(op(Instr::SetMix), fader));
+    EXPECT_EQ(std::bit_cast<float>(body[1].c), 0.5f);
+    EXPECT_EQ(std::tie(body[3].op, body[3].b), std::make_tuple(op(Instr::RampMix), fader));
+    EXPECT_EQ(std::bit_cast<float>(body[3].c), 1.0f);
+    EXPECT_EQ(body[4].op, op(Instr::RampArg));
+    EXPECT_EQ(body[4].c, 240u);
+    EXPECT_EQ(std::tie(body[7].op, body[7].b), std::make_tuple(op(Instr::SetMix), pan));
+    EXPECT_EQ(std::bit_cast<float>(body[7].c), compiler::detail::pan_left(0.5f));
+}
+
+TEST(Curve, ExactLogAndExpAgreeWithLibm) {
+    for (const double x : {1e-6, 0.001, 0.37, 0.5, 0.70710678, 1.0, 1.5, 2.0, 10.0, 1234.5, 1e9}) {
+        EXPECT_NEAR(compiler::detail::exact_log(x), std::log(x), 1e-14 * std::max(1.0, std::abs(std::log(x)))) << x;
+    }
+    for (const double y : {-20.0, -6.9, -1.0, -0.3, 0.0, 0.3, 1.0, 5.5, 20.0}) {
+        EXPECT_NEAR(compiler::detail::exact_exp(y), std::exp(y), 1e-14 * std::exp(y)) << y;
+    }
+}
+
+namespace {
+
+// The values a lane's register on track 1, left, is ramped through, with the tick each segment starts at.
+std::vector<std::pair<u32, float>> ramps_of(const std::vector<Instruction>& body, u16 reg) {
+    std::vector<std::pair<u32, float>> out;
+    u32 tick = 0;
+    for (const Instruction& i : body) {
+        if (i.op == static_cast<u8>(Instr::Wait)) tick += i.c;
+        if ((i.op == static_cast<u8>(Instr::RampMix) || i.op == static_cast<u8>(Instr::SetMix)) && i.b == reg) {
+            out.emplace_back(tick, std::bit_cast<float>(i.c));
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST(Curve, AnExpRampIsASegmentPerDecibelThatLandsOnItsValue) {
+    // 1 to 0.001 is 60 dB, so 60 segments, each 1 dB down from the last, after the point that sets 1.
+    json request = placed_project(json::object(), json::parse(R"({"length": 3840, "automation": [
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1},
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 0.001, "ramp": 1920, "curve": "exp"}]})"));
+    const Decoded d = decode(compile_image(request).image);
+    const json report = compile_image(request).report;
+    const u16 reg = reported_track(report, 1).at("mix")[0].at("left");
+    const auto ramps = ramps_of(d.clip(0), reg);
+    ASSERT_EQ(ramps.size(), 61u);
+    const float pan = compiler::detail::pan_left(0.0f);
+    for (std::size_t k = 1; k < ramps.size(); ++k) {
+        EXPECT_EQ(ramps[k].first, 1920 * (k - 1) / 60);
+        EXPECT_NEAR(ramps[k].second / pan, std::pow(10.0, -static_cast<double>(k) / 20.0), 1e-6) << k;
+    }
+    EXPECT_EQ(ramps.back().second, 0.001f * pan);
+}
+
+TEST(Curve, ACurveToZeroFallsSixtyDecibelsAndLandsOnZero) {
+    json request = placed_project(json::object(), json::parse(R"({"length": 3840, "automation": [
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 0, "ramp": 1920, "curve": "exp"}]})"));
+    const Decoded d = decode(compile_image(request).image);
+    const u16 reg = reported_track(compile_image(request).report, 1).at("mix")[0].at("left");
+    const auto ramps = ramps_of(d.clip(0), reg);
+    ASSERT_EQ(ramps.size(), 60u);  // From the track's fader of 1, which nothing set in the clip
+    EXPECT_NEAR(ramps[29].second / compiler::detail::pan_left(0.0f), 0.001 * std::pow(10.0, 30.0 / 20.0), 1e-6);
+    EXPECT_EQ(ramps.back().second, 0.0f);
+}
+
+TEST(Curve, ACurveStopsAtTheNextPointAndFinishesStraightPastItsClip) {
+    json stopped = placed_project(json::object(), json::parse(R"({"length": 3840, "automation": [
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 0.001, "ramp": 1920, "curve": "exp"},
+        {"target": {"mix": "fader", "track": 1}, "tick": 960, "value": 1}]})"));
+    const u16 reg = reported_track(compile_image(stopped).report, 1).at("mix")[0].at("left");
+    const auto heard = ramps_of(decode(compile_image(stopped).image).clip(0), reg);
+    ASSERT_EQ(heard.size(), 31u);  // 30 segments start before 960, then the point there
+    EXPECT_EQ(heard.back().first, 960u);
+
+    json past = placed_project(json::object(), json::parse(R"({"length": 960, "automation": [
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 0.001, "ramp": 1920, "curve": "exp"}]})"));
+    const auto body = decode(compile_image(past).image).clip(0);
+    const auto ramps = ramps_of(body, reg);
+    ASSERT_EQ(ramps.size(), 30u);
+    EXPECT_EQ(ramps.back().first, 928u);
+    EXPECT_EQ(ramps.back().second, 0.001f * compiler::detail::pan_left(0.0f));  // the last runs straight there
+}
+
+TEST(Curve, IsTheSameBitsOnEveryHost) {
+    // libm differs between hosts, and these values enter a Program's hash, so wasm has to get these bits too.
+    u64 hash = 14695981039346656037ull;
+    for (const double from : {1.0, 0.0, 0.25, 3.0}) {
+        for (const double to : {0.0, 0.001, 0.5, 2.0}) {
+            for (const double t : {0.1, 0.37, 0.5, 0.9}) {
+                const float value = static_cast<float>(compiler::detail::curve_at(from, to, t));
+                hash = (hash ^ std::bit_cast<u32>(value)) * 1099511628211ull;
+            }
+            hash = (hash ^ compiler::detail::curve_steps(from, to)) * 1099511628211ull;
+        }
+    }
+    EXPECT_EQ(hash, 5005548298328956064ull);
+}
+
+TEST(Curve, WhatACurveRefuses) {
+    const auto error = [](const char* lane) {
+        return lane_error(placed_project(json::object(), {{"automation", json::array({json::parse(lane)})}}));
+    };
+    EXPECT_NE(error(R"({"target": {"mix": "pan", "track": 1}, "tick": 0, "value": -1, "ramp": 9, "curve": "exp"})")
+                  .find("needs values of 0 or more"),
+              std::string::npos);
+    EXPECT_NE(
+        error(R"({"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1, "curve": "s"})").find("linear or exp"),
+        std::string::npos);
+    EXPECT_EQ(error(R"({"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1, "ramp": 9, "curve": "exp"})"),
+              "");
+}
+
+TEST(Voices, AReportSaysHowManyNotesATrackHoldsAndWarnsWhenItHasTooFewVoices) {
+    json request = placed_project(json::object(), json::parse(R"({"notes": [
+        {"tick": 0, "note": 60, "dur": 480}, {"tick": 0, "note": 64, "dur": 480}, {"tick": 100, "note": 67, "dur": 480},
+        {"tick": 480, "note": 72, "dur": 100}]})"));
+    json& track = request["programs"][0]["timeline"]["tracks"][0];
+    track["voices"] = 2;
+    const json report = compile_image(request).report;
+    EXPECT_EQ(reported_track(report, 1).at("notes_at_once"), 3);
+    const json& warnings = report.at("programs")[0].at("warnings");
+    ASSERT_EQ(warnings.size(), 1u);
+    EXPECT_EQ(warnings[0].at("tick"), 100);
+    EXPECT_NE(warnings[0].at("message").get<std::string>().find("3 notes at once with 2 voices"), std::string::npos);
+
+    track["voices"] = 3;  // A note ending at 480 makes room for the one that starts there
+    EXPECT_TRUE(compile_image(request).report.at("programs")[0].at("warnings").empty());
+    track["voices"] = 1;
+    track["play"] = {{"mode", "mono"}};
+    EXPECT_TRUE(compile_image(request).report.at("programs")[0].at("warnings").empty());
 }
 
 namespace {

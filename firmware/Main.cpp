@@ -101,6 +101,7 @@ MODSYNTH_LINK_IMAGE(g_lanes, MODSYNTH_GOLDEN "/Lanes.image")
 MODSYNTH_LINK_IMAGE(g_zones, MODSYNTH_GOLDEN "/Zones.image")
 MODSYNTH_LINK_IMAGE(g_hold, MODSYNTH_GOLDEN "/Hold.image")
 MODSYNTH_LINK_IMAGE(g_mods, MODSYNTH_GOLDEN "/Mods.image")
+MODSYNTH_LINK_IMAGE(g_steals, MODSYNTH_GOLDEN "/Steals.image")
 #endif
 
 namespace {
@@ -157,7 +158,8 @@ int main() {
     ok = ok && render(MODSYNTH_OUTPUT ".Lanes.f32", g_lanes, g_lanes_end, 1920) &&
          render(MODSYNTH_OUTPUT ".Zones.f32", g_zones, g_zones_end, 1920) &&
          render(MODSYNTH_OUTPUT ".Hold.f32", g_hold, g_hold_end, 1920) &&
-         render(MODSYNTH_OUTPUT ".Mods.f32", g_mods, g_mods_end, 1920);
+         render(MODSYNTH_OUTPUT ".Mods.f32", g_mods, g_mods_end, 1920) &&
+         render(MODSYNTH_OUTPUT ".Steals.f32", g_steals, g_steals_end, 1920);
 #endif
     finish(ok);
 }

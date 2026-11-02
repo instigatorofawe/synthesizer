@@ -57,6 +57,7 @@
 	const TOP = RULER + LOOP;
 	const HANDLE = 7;
 	const MOST_REPEATS_DRAWN = 32; // A placement can repeat 100,000 times, and past this it's only a texture
+	const MOST_BARS_DRAWN = 1000; // Each bar is a line and a number, so a song that long would stop the page
 
 	type Gesture =
 		| { kind: 'move'; track: number; index: number; grab: number; tick: number; row: number; copy: boolean }
@@ -67,7 +68,7 @@
 	let gesture = $state.raw<Gesture | null>(null);
 
 	const perTick = $derived(barWidth / ticksPerBar(doc));
-	const bars = $derived(Math.max(16, Math.ceil(songLength(doc) / ticksPerBar(doc)) + 8));
+	const bars = $derived(Math.min(MOST_BARS_DRAWN, Math.max(16, Math.ceil(songLength(doc) / ticksPerBar(doc)) + 8)));
 	const width = $derived(bars * barWidth);
 	const height = $derived(TOP + Math.max(doc.tracks.length, 1) * ROW);
 	const ticksAt = (x: number) => x / perTick;

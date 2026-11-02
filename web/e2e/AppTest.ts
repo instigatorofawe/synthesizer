@@ -974,6 +974,28 @@ test('an image too large for the engine says so instead of going quiet', async (
 	await expect(page.getByTestId('load-rejected')).toContainText('larger than the image slot', { timeout: 20000 });
 });
 
+test('a probe stops when another patch is chosen, even one that can\'t be probed', async ({ page }) => {
+	await page.goto('/recipes/SidechainDucking');
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	await page.getByRole('group', { name: 'Patches in this recipe' }).getByRole('button', { name: 'pad' }).click();
+	await page.locator('g.node:has(text:has-text("env"))').first().locator('rect.title').click();
+	await page.getByRole('button', { name: 'Probe out' }).click();
+	const label = page.locator('span').filter({ hasText: /env\.out$/ });
+	await expect(label).toBeVisible();
+	await page.getByRole('group', { name: 'Patches in this recipe' }).getByRole('button', { name: 'duck' }).click();
+	await expect(label).toHaveCount(0);
+	await expect(page.getByTestId('patch-use')).toContainText("can't be probed");
+});
+
+test('a clip repeated as far as a document allows leaves the page working', async ({ page }) => {
+	await trackWithClip(page, 'Very long');
+	const editor = await timelineJson(page);
+	await editor.fill((await editor.inputValue()).replace('"repeat": 1', '"repeat": 100000'));
+	await expect(page.getByTestId('placement-1-0')).toHaveAttribute('data-repeat', '100000', { timeout: 8000 });
+	await page.getByRole('button', { name: 'Add track' }).click();
+	await expect(page.getByTestId('row-2')).toBeAttached();
+});
+
 test('an unknown recipe is a 404', async ({ page }) => {
 	expect((await page.goto('/recipes/Nothing'))?.status()).toBe(404);
 });

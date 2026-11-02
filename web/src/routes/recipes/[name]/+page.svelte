@@ -62,7 +62,7 @@
 
 	function probesChanged(next: Probe[]) {
 		probes = next;
-		if (voice) engine.setProbes(patch.id, next, voice);
+		engine.setProbes(patch.id, next, voice ?? undefined);
 	}
 
 	function choose(index: number) {

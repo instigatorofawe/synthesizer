@@ -27,10 +27,11 @@ struct Golden {
 // A change here means a project compiles to different chunks than it used to. Old images still play, but a thin image
 // from a new compiler no longer matches chunks a device got from an old one. That can be fine, and it must be a
 // decision. Revision 1 made one: saw, square and triangle left their tables for opcodes that fix their aliasing, which
-// moved Demo and AllOps.
+// moved Demo and AllOps. Refusing audio at inputs read once a frame made another. It moved them again, because a snap
+// node has its own place among the steps. They render as they did.
 constexpr Golden kGoldens[] = {
-    {"Minimal", 8, 0x1b3153f13f3ea109ull},  {"Demo", 480, 0xf694720f988ffd99ull},
-    {"AllOps", 400, 0x29497ab1023f14d3ull}, {"Waves", 200, 0xf4c0e84598e9134eull},
+    {"Minimal", 8, 0x1b3153f13f3ea109ull},  {"Demo", 480, 0xbc90aab7da78bf30ull},
+    {"AllOps", 400, 0xed4a0c10d266d7aeull}, {"Waves", 200, 0xf4c0e84598e9134eull},
     {"Tones", 200, 0x6d4b1572d83c6384ull},
 };
 
@@ -90,12 +91,37 @@ TEST(Golden, EveryImageSoundsAsItDidAtTheFreeze) {
     }
 }
 
+// Demo and AllOps predate the rule that audio cannot reach an input read once a frame, and golden JSON never changes,
+// so the snap nodes they would need now go in here. On a wire that is already frame-rate, a snap does nothing.
+void add_snaps(json& request) {
+    if (!request.contains("patches")) return;
+    json& patches = request["patches"];
+    for (auto& [id, patch] : patches.items()) {
+        json& graph = patch["graph"];
+        int next = 0;
+        for (const json& node : graph["nodes"]) next = std::max(next, node.at("id").get<int>());
+        json added = json::array();
+        for (json& edge : graph["edges"]) {
+            if (edge.at("input") != "cutoff") continue;
+            ++next;
+            graph["nodes"].push_back({{"id", next}, {"type", "snap"}});
+            json into = edge;
+            into["to"] = next;
+            into["input"] = "in";
+            added.push_back(into);
+            edge = json{{"from", next}, {"to", edge.at("to")}, {"input", "cutoff"}};
+        }
+        for (json& edge : added) graph["edges"].push_back(edge);
+    }
+}
+
 TEST(Golden, TheCompilerStillWritesTheseBytes) {
     for (const Golden& g : kGoldens) {
         SCOPED_TRACE(g.name);
         const auto bytes = read_file(golden_path(std::string(g.name) + ".json"));
-        const json request = json::parse(reinterpret_cast<const char*>(bytes.data()),
-                                         reinterpret_cast<const char*>(bytes.data()) + bytes.size());
+        json request = json::parse(reinterpret_cast<const char*>(bytes.data()),
+                                   reinterpret_cast<const char*>(bytes.data()) + bytes.size());
+        add_snaps(request);
         const auto image = compile_image(request).image;
         EXPECT_EQ(hash_bytes(kHashSeed, image.data(), image.size()), g.compiled);
     }

@@ -57,6 +57,34 @@ struct MemorySizes {
     u64 bulk = 0;
 };
 
+// The sizes an engine lays its memory out with. They differ between targets, as pointers do, so a target's profile
+// carries its own, and bytes_required() given those sizes a Program as that target would. Profile.hpp writes them.
+struct Layout {
+    struct Size {
+        u32 size = 0;
+        u32 align = 0;
+        constexpr bool operator==(const Size&) const = default;
+    };
+    u32 frame_size = 0;
+    u32 channels = 0;
+    u32 workers = 0;     // scratch is per worker
+    bool edges = false;  // whether a parallel plan is stored
+    u32 align = 0;       // every array is aligned to at least this
+    u32 region_align = 0;
+    u32 generation = 0;  // a Generation, rounded to `align`
+    u32 delay_line = 0;
+    u32 state_align = 0;
+    Size binding, track, insert, decoded_step, bound_resource, param_state, slot, voice, held, glide, fade, mix_ramp,
+        task;
+    std::array<u32, static_cast<u32>(Op::kCount)> state_size{};  // per op, and 0 where an op holds no state
+    constexpr bool operator==(const Layout&) const = default;
+};
+
+template <class T>
+[[nodiscard]] constexpr Layout::Size size_of() {
+    return {static_cast<u32>(sizeof(T)), static_cast<u32>(alignof(T))};
+}
+
 struct TapBlock {
     const float* data = nullptr;
     u32 length = 0;
@@ -113,19 +141,48 @@ class Synth {
     Synth& operator=(const Synth&) = delete;
 
     // What one generation of this Program needs, at this rate. Multiply by C.generations for what the constructor must
-    // be given, and add tap_bytes() to fast.
-    [[nodiscard]] static MemorySizes bytes_required(const ChunkTable& chunks, u64 program, float rate) {
+    // be given, and add tap_bytes() to fast. Given another target's layout, what that target's engine would need.
+    [[nodiscard]] static MemorySizes bytes_required(const ChunkTable& chunks, u64 program, float rate,
+                                                    const Layout& layout = Synth::layout()) {
         const ChunkRef* c = chunks.find(program, ChunkKind::Program);
         ProgramView p;
         if (!c || !parse_program({c->data, c->size}, p)) return {};
-        Bump fast(nullptr), bulk(nullptr);
+        Bump fast(nullptr, layout), bulk(nullptr, layout);
         Generation g;
         g.program = p;
-        reserve<true>(g, chunks, fast, bulk, rate);
-        const auto rounded = [](u64 n) {
-            return (n + kRegionAlign - 1) / kRegionAlign * kRegionAlign;
-        };  // As the constructor splits
-        return {rounded(kGenerationBytes + fast.used()), rounded(bulk.used())};
+        reserve<true>(g, chunks, fast, bulk, rate, layout);
+        const u64 align = layout.region_align;
+        const auto rounded = [align](u64 n) { return (n + align - 1) / align * align; };  // As the constructor splits
+        return {rounded(layout.generation + fast.used()), rounded(bulk.used())};
+    }
+
+    // This engine's own sizes.
+    [[nodiscard]] static constexpr Layout layout() {
+        Layout l;
+        l.frame_size = N;
+        l.channels = Ch;
+        l.workers = E::max_workers;
+        l.edges = E::uses_edges;
+        l.align = kAlign;
+        l.region_align = kRegionAlign;
+        l.generation = kGenerationBytes;
+        l.delay_line = sizeof(DelayLine);
+        l.state_align = K::state_align;
+        l.binding = size_of<Binding>();
+        l.track = size_of<Track>();
+        l.insert = size_of<Insert>();
+        l.decoded_step = size_of<DecodedStep>();
+        l.bound_resource = size_of<BoundResource>();
+        l.param_state = size_of<ParamState>();
+        l.slot = size_of<Slot>();
+        l.voice = size_of<Voice>();
+        l.held = size_of<Held>();
+        l.glide = size_of<Glide>();
+        l.fade = size_of<Fade>();
+        l.mix_ramp = size_of<MixRamp>();
+        l.task = size_of<Task>();
+        for (u32 op = 0; op < l.state_size.size(); ++op) l.state_size[op] = K::state_size(static_cast<Op>(op));
+        return l;
     }
     [[nodiscard]] static constexpr std::size_t tap_bytes() { return sizeof(float) * tap_block * C.tap_slots; }
 
@@ -294,20 +351,58 @@ class Synth {
     // Counts in 64 bits on every target. Format limits keep the largest possible total far below 2^64, so it cannot
     // wrap even on the dry run that decides whether a Program fits. Only a total that fit is ever turned into a
     // pointer.
+    // The engine's own types take their sizes from a layout. Floats and integers are the same on every target.
+    template <class T>
+    [[nodiscard]] static constexpr Layout::Size size_in(const Layout& l) {
+        if constexpr (std::is_same_v<T, Binding>)
+            return l.binding;
+        else if constexpr (std::is_same_v<T, Track>)
+            return l.track;
+        else if constexpr (std::is_same_v<T, Insert>)
+            return l.insert;
+        else if constexpr (std::is_same_v<T, DecodedStep>)
+            return l.decoded_step;
+        else if constexpr (std::is_same_v<T, BoundResource>)
+            return l.bound_resource;
+        else if constexpr (std::is_same_v<T, ParamState>)
+            return l.param_state;
+        else if constexpr (std::is_same_v<T, Slot>)
+            return l.slot;
+        else if constexpr (std::is_same_v<T, Voice>)
+            return l.voice;
+        else if constexpr (std::is_same_v<T, Held>)
+            return l.held;
+        else if constexpr (std::is_same_v<T, Glide>)
+            return l.glide;
+        else if constexpr (std::is_same_v<T, Fade>)
+            return l.fade;
+        else if constexpr (std::is_same_v<T, MixRamp>)
+            return l.mix_ramp;
+        else if constexpr (std::is_same_v<T, Task>)
+            return l.task;
+        else {
+            static_assert(std::is_arithmetic_v<T> || std::is_same_v<T, std::byte>, "a type the layout must carry");
+            return size_of<T>();
+        }
+    }
+
+    // Places arrays, at the sizes a layout gives. Only a count, with no base, may use another target's layout.
     class Bump {
        public:
-        explicit Bump(std::byte* base) : base_(base) {}
+        Bump(std::byte* base, const Layout& layout) : base_(base), layout_(layout) {}
         template <class T>
         [[nodiscard]] T* array(u64 count) {
-            const u64 align = std::max<u64>(alignof(T), kAlign);
+            const Layout::Size s = size_in<T>(layout_);
+            const u64 align = std::max<u64>(s.align, layout_.align);
             const u64 start = (used_ + align - 1) / align * align;
-            used_ = start + count * sizeof(T);
+            used_ = start + count * s.size;
             return base_ ? reinterpret_cast<T*>(base_ + static_cast<std::size_t>(start)) : nullptr;
         }
         [[nodiscard]] u64 used() const { return used_; }
 
        private:
         std::byte* base_;
+        const Layout& layout_;
         u64 used_ = 0;
     };
 
@@ -497,17 +592,18 @@ class Synth {
 
     // Sizing ------------------------------------------------------------------------------------------------------
 
-    [[nodiscard]] static u32 line_length(float seconds, float rate) { return static_cast<u32>(seconds * rate) + N + 4; }
+    [[nodiscard]] static u32 line_length(float seconds, float rate, u32 frame = N) {
+        return static_cast<u32>(seconds * rate) + frame + 4;
+    }
 
-    [[nodiscard]] static PatchSizes measure_patch(const PatchView& v, float rate) {
+    [[nodiscard]] static PatchSizes measure_patch(const PatchView& v, float rate, const Layout& l) {
         PatchSizes s;
-        const auto aligned = [](u32 n) { return (n + K::state_align - 1) / K::state_align * K::state_align; };
-        s.voice_state = aligned(v.h.delays * sizeof(DelayLine));
-        for (u32 i = 0; i < v.h.control_steps; ++i) s.control_state += aligned(K::state_size(Op(v.step(i).op)));
-        for (u32 i = 0; i < v.h.voice_steps; ++i) {
-            s.voice_state += aligned(K::state_size(Op(v.step(v.h.control_steps + i).op)));
-        }
-        for (u32 i = 0; i < v.h.delays; ++i) s.bulk_floats += line_length(v.delay(i), rate);
+        const auto aligned = [&l](u32 n) { return (n + l.state_align - 1) / l.state_align * l.state_align; };
+        const auto state = [&l](u8 op) { return op < l.state_size.size() ? l.state_size[op] : 0; };
+        s.voice_state = aligned(v.h.delays * l.delay_line);
+        for (u32 i = 0; i < v.h.control_steps; ++i) s.control_state += aligned(state(v.step(i).op));
+        for (u32 i = 0; i < v.h.voice_steps; ++i) s.voice_state += aligned(state(v.step(v.h.control_steps + i).op));
+        for (u32 i = 0; i < v.h.delays; ++i) s.bulk_floats += line_length(v.delay(i), rate, l.frame_size);
         return s;
     }
 
@@ -520,7 +616,7 @@ class Synth {
 
     // The one place that decides layout. With Dry it only counts, so bytes_required() cannot disagree with bind.
     template <bool Dry>
-    static void reserve(Generation& g, const ChunkTable& chunks, Bump& fast, Bump& bulk, float rate) {
+    static void reserve(Generation& g, const ChunkTable& chunks, Bump& fast, Bump& bulk, float rate, const Layout& l) {
         const ProgramView& p = g.program;
         const ProgramHeader& h = p.h;
         auto* bindings = fast.template array<Binding>(h.patches);
@@ -551,7 +647,7 @@ class Synth {
 
         const auto reserve_slot = [&](u32 patch, Slot* slot) {
             const PatchView v = patch_view(chunks, p.patch(patch));
-            const PatchSizes sizes = measure_patch(v, rate);
+            const PatchSizes sizes = measure_patch(v, rate, l);
             auto* track = fast.template array<float>(v.h.track_scalars);
             auto* state = fast.template array<std::byte>(sizes.control_state);
             auto* params = fast.template array<ParamState>(v.h.params);
@@ -598,7 +694,7 @@ class Synth {
             for (u32 s = 0; s < d.slot_count; ++s) {
                 const u32 patch = p.slot(d.slot_begin + s);
                 const PatchView v = patch_view(chunks, p.patch(patch));
-                const PatchSizes sizes = measure_patch(v, rate);
+                const PatchSizes sizes = measure_patch(v, rate, l);
                 scalars = std::max<u32>(scalars, v.h.voice_scalars);
                 state = std::max(state, sizes.voice_state);
                 floats = std::max(floats, sizes.bulk_floats);
@@ -610,19 +706,19 @@ class Synth {
         for (u32 i = 0; i < h.inserts; ++i) {
             const InsertDesc d = p.insert(i);
             const PatchView v = patch_view(chunks, p.patch(d.patch));
-            const PatchSizes sizes = measure_patch(v, rate);
+            const PatchSizes sizes = measure_patch(v, rate, l);
             if constexpr (!Dry) inserts[i].desc = d;
             reserve_slot(d.patch, Dry ? nullptr : &inserts[i].slot);
             reserve_voice(Dry ? nullptr : &inserts[i].instance, v.h.voice_scalars, sizes.voice_state,
                           sizes.bulk_floats);
         }
 
-        auto* buses = fast.template array<float>(static_cast<u64>(h.buses) * Ch * N);
+        auto* buses = fast.template array<float>(static_cast<u64>(h.buses) * l.channels * l.frame_size);
         auto* mix = fast.template array<float>(h.mix_regs);
         const bool mix_ramps = (h.features & kFeatureMixRamps) != 0;
         auto* ramps = fast.template array<MixRamp>(mix_ramps ? h.mix_regs : 0);
         auto* globals = fast.template array<float>(h.globals);
-        auto* scratch = fast.template array<float>(static_cast<u64>(max_buffers) * N * E::max_workers);
+        auto* scratch = fast.template array<float>(static_cast<u64>(max_buffers) * l.frame_size * l.workers);
         u32 task_count = 0;
         for (u32 i = 0; i < h.mix_steps; ++i) {
             if (i == 0 || p.mix_step(i).task != p.mix_step(i - 1).task) ++task_count;
@@ -637,20 +733,18 @@ class Synth {
             g.tasks = tasks;
             g.task_count = task_count;
         }
-        if constexpr (E::uses_edges) {
+        if (l.edges) {
             // Worst case, every pair of tasks conflicts.
             auto* deps = fast.template array<u16>(task_count);
             auto* begin = fast.template array<u16>(task_count + 1);
             auto* succ = fast.template array<u16>(static_cast<u64>(task_count) * task_count);
-            if constexpr (!Dry) {
-                g.plan.count = task_count;
+            if constexpr (!Dry && E::uses_edges) {
                 g.plan.deps = deps;
                 g.plan.succ_begin = begin;
                 g.plan.succ = succ;
             }
-        } else if constexpr (!Dry) {
-            g.plan.count = task_count;
         }
+        if constexpr (!Dry) g.plan.count = task_count;
     }
 
     // Binding ---------------------------------------------------------------------------------------------------
@@ -682,8 +776,9 @@ class Synth {
         g->program = p;
         g->chunks = chunks_;
         g->region = region;
-        Bump fast(r.fast + kGenerationBytes), bulk(r.bulk);
-        reserve<false>(*g, *chunks_, fast, bulk, rate_);
+        static constexpr Layout own = layout();
+        Bump fast(r.fast + kGenerationBytes, own), bulk(r.bulk, own);
+        reserve<false>(*g, *chunks_, fast, bulk, rate_, own);
         pending_ = g;
         bind_phase_ = BindPhase::Patches;
         bind_index_ = 0;

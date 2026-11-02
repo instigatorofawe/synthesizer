@@ -13,7 +13,7 @@ checked against committed renders in [golden](golden).
 |---|---|
 | `include/modsynth` | The header-only engine and, in `Compiler.hpp`, the authoring compiler. Tests sit beside what they test, as `FooTest.cpp`. |
 | `bindings` | wasm and Python bindings, and the Python tests in `PythonTest.py` |
-| `firmware` | Cortex-M4 firmware, run on QEMU's STM32L475 model |
+| `firmware` | Cortex-M4 firmware, run on QEMU's STM32L475 model, and on a NUCLEO-L476RG as [docs/Board.md](docs/Board.md) describes |
 | `fuzz` | The coverage-guided fuzzer, one source on desktop, wasm32 and Cortex-M4 |
 | `golden` | Images from the freeze and their renders. They never change. |
 | `web` | The SvelteKit app, with Drizzle over SQLite |
@@ -78,7 +78,17 @@ container.
     firmware/Check.sh
 
 That builds stereo, mono and CMSIS-DSP firmware at frames 32 and 128, runs each on QEMU's L475 model, compares its audio with the golden renders,
-and then fuzzes on a Cortex-M4. `FUZZ_SECONDS` and `FUZZ_RANDOM` set how long, and from what seed.
+and then fuzzes on a Cortex-M4. `FUZZ_SECONDS` and `FUZZ_RANDOM` set how long, and from what seed. It also builds the NUCLEO-L476RG's
+firmware, and checks that the profile in `firmware/Profiles` is the one that build writes.
+
+With the board plugged in, flash it and talk to it with `tools/Board.py`:
+
+    probe-rs download --chip STM32L476RGTx --connect-under-reset build/firmware/Nucleo.elf
+    uv run --with dist/modsynth-*.whl tools/Board.py send examples/Recipes/Arpeggio.json --play
+    uv run tools/Board.py check      # every golden image, rendered on the board
+
+A request is compiled against the board's profile, so one that won't fit fails before it is sent. [docs/Board.md](docs/Board.md) has
+the protocol, the audio pin, and what was measured, including which recipes fit.
 
 ## Fuzzing
 

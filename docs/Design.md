@@ -1,6 +1,7 @@
-# modsynth design, revision 17
+# modsynth design, revision 18
 
-Status: Milestones 1 to 4 and 6 are implemented, along with the harnesses of Milestone 7. Milestone 5 waits for the board.
+Status: Milestones 1 to 6 are implemented, along with the harnesses of Milestone 7. Of Milestone 5, BLE and showing a target's fit in the
+editor are not built.
 The wire format is frozen at version 1, now at revision 7. `docs/Format.md` is its specification, and where this document and that one differ, that
 one is right. This document replaces all earlier revisions, and everything needed from them is included here. Sections about later milestones are
 still proposals. Section 24 lists what is agreed but not built, and what is still undecided.
@@ -9,6 +10,7 @@ Evidence tags:
 - [measured]: run in a throwaway prototype, numbers quoted.
 - [model]: instruction counts are exact, but the cycles are those counts priced with a Cortex-M4 timing table.
 - [not prototyped]: reasoned, never run.
+- [board]: measured on the NUCLEO-L476RG. `docs/Board.md` has how.
 
 ## 1. Requirements
 
@@ -280,14 +282,28 @@ delivery is one-way. Cheaper, less precise features exist, such as `Tone` or `"m
 same everywhere. Nothing is rounded, substituted or lowered by target. A mono build folds at run time, which is the one exception, and
 it is treated as an output format, a position open 20 still has to confirm.
 
-**Target profile.** Revision 3 had devices report their state sizes, which cannot work without a link. Instead the
-firmware build generates a profile: sample rate, frame size, memory regions, supported opcodes, per-backend state sizes,
-and a per-op cost table. The sizes come from the cross-compiled binary, so they are correct for that target. The
-compiler uses the profile to check a project against that device while offline. The GUI shows fit and CPU, and previews
-with the device's voice limit, so stealing sounds the same as on hardware.
+**Target profile.** Revision 3 had devices report their state sizes, which cannot work without a link. Instead the firmware build writes
+a profile:
+- the format revision it reads, its frame size, channels and sample rate;
+- its memory for one generation, the largest image it stores, and how many chunks its table holds;
+- the opcodes it runs;
+- the sizes and alignments its engine lays memory out with, including each opcode's state size.
 
-**Delivery.** A device receives the whole image over BLE or a serial link, and a small host tool sends an exported image file. The format needs no
-change for this. It uses byte offsets and no pointers, its manifest comes first, so a wrong revision or frame size can be refused from the first
+The firmware writes the profile in a constant expression, into a section of its ELF that never reaches the device, and the build extracts it.
+The sizes come from the cross-compiled code, so they are that target's: a voice is 36 bytes on the L476 and more on a 64-bit host. The engine
+sizes memory through `Layout` in `reserve()`, still the one place that decides layout, so `bytes_required()` given another target's layout
+answers for that target. The NUCLEO-L476RG's sizes computed on a Mac match what the board reported for itself [board].
+
+A request names a profile as `"target"`, and then the compile fails, with `where` set to `target`, if the device would refuse the image: a newer
+revision than it reads, an opcode it lacks, another frame size, too many bytes or chunks, or a Program that needs more memory than it has. The
+frame size comes from the profile unless the request gives one. Otherwise the report's `target` says how much of each the image uses.
+`firmware/Profiles` holds the board's profiles, which `firmware/Check.sh` holds to what the build writes, and `tools/Board.py` compiles every
+request against the profile of the board it is talking to.
+
+Not built yet: a cost table, which needs Milestone 7, and showing fit in the editor.
+
+**Delivery.** A device receives the whole image over BLE or a serial link, and a small host tool sends an exported image file. Serial is
+built: `tools/Board.py` sends over the ST-LINK's USB serial port, and `docs/Board.md` has the protocol. The format needs no change for this. It uses byte offsets and no pointers, its manifest comes first, so a wrong revision or frame size can be refused from the first
 packet, and each chunk's hash and the image's exact size catch damage. Framing, retransmission and acknowledgement belong to the transport, because
 a hash only finds damage once a whole chunk has arrived. They stay inside the transport, so a sender still learns nothing about a device, and delivery
 is one-way as far as the image goes.
@@ -296,11 +312,14 @@ is one-way as far as the image goes.
 there. Its bytes are used in place, so they have to outlive every generation that plays them. A `Loader::feed(span)` taking bytes as they arrive was
 proposed here earlier and doesn't exist. Only a store that places chunks separately would need it.
 
-**Storage.** How a device stores what it receives is open 22. Whatever it stores, a failed transfer or a loss of power must leave the previous image
-playable. Because bytes are used in place, writing over the only copy would break that. The L476's two read-while-write flash banks could allow writing
-while running, but at first audio stops for an update.
+**Storage.** A failed transfer or a loss of power must leave the previous image playable. Because bytes are used in place, writing over the
+only copy would break that. So the board has two flash slots, one in each bank, and a transfer writes the one that isn't playing. The board
+loads the new image from flash exactly as it will play it, and only then writes the slot's header, whose last double-word is what commits it.
+At start the committed slot with the higher sequence number plays. A transfer cut by a reset, a damaged image and one that doesn't fit all
+leave the old image playing [board]. A slot is 384 KB, which holds the largest recipe at 263 KB. Audio stops for an update, because flash
+writes stall reads from their bank.
 
-Milestone 1 needs none of this, because the image is linked into the firmware.
+The QEMU firmware still links its images in, since it has nothing to receive them over.
 
 ## 11. Live editing, desktop and browser only
 
@@ -382,7 +401,18 @@ its replacement.
 
 ## 15. Embedded performance
 
-These figures are early estimates. Measurement and tuning wait for Milestone 7.
+These figures are early estimates. Tuning waits for Milestone 7.
+
+**On the board.** Milestone 5 measured cycles on a NUCLEO-L476RG at 80 MHz, with images in flash behind 4 wait states and the ART caches
+[board]. `docs/Board.md` has the detail.
+- **Recipes:** 59 of the 61 load. The other two need more bulk memory than its 64 KB. Of the 59:
+  - 56 fit a 32-sample frame on average and 53 in their worst frame.
+  - The median takes 26% of the core.
+- **One voice:** a patch playing one voice costs 203 to 400 cycles a sample, mixer included. The model's 160 to 200 is for the voice alone.
+- **The demo:** it runs at 106% of the core on average, so it doesn't play in real time.
+- **The pieces:** none of them fits. Their stereo reverb needs 188 KB of bulk memory.
+
+Calibrating the model against these is still Milestone 7's.
 
 Target floor: the STM32L476 class, a Cortex-M4F at 80 MHz with 128 KB SRAM and 1 MB flash. It has no double-precision FPU
 and no float SIMD, so `double` is banned from the run path.
@@ -501,8 +531,8 @@ Use it for:
 - From Milestone 7, an instruction-count gate. Counts are exact, so CI can fail on a small regression with no timing noise.
 - From Milestone 7, generating the op cost table for the target profile.
 
-It cannot tell you about real time: wait states, caches, DMA, I2S output, or bus contention. The author has a board for
-that, and any promise about voice counts waits for it.
+It cannot tell you about real time: wait states, caches, DMA, I2S output, or bus contention. The board can, and section 15 and
+`docs/Board.md` have what it measured.
 
 Golden audio compares within a tolerance of −100 dB relative to peak, and audio is not required to be bit-identical across
 targets. The reference is committed: `golden/` holds images written at the freeze, with their renders, and they never change.
@@ -519,6 +549,8 @@ revision 5 came after the table below, and CI holds them to the same comparison.
 | wasm32 under Node | Emscripten 6.0 | 0 of all | within −100 dB, per `GoldenTest` |
 | Cortex-M4 on the L475 model, scalar | arm-none-eabi-gcc 14.2 | 0 of all | 0 of all |
 | Cortex-M4 on the L475 model, CMSIS-DSP | arm-none-eabi-gcc 14.2 | Demo at most −123.9 dB, AllOps at most −108.0 dB, Waves 0 | no mono build |
+| A NUCLEO-L476RG, scalar, the frame 32 images | arm-none-eabi-gcc 14.2 | no stereo build | 0 of all [board] |
+| A NUCLEO-L476RG, CMSIS-DSP, the frame 32 images | arm-none-eabi-gcc 14.2 | no stereo build | AllOps at most −109.0 dB, Hold −120.9, Demo −128.8, Mods −138.2, the rest 0 [board] |
 
 The scalar results come from `Math.hpp` and `-ffp-contract=off`: nothing in the signal path reaches libm or merges a multiply into an add. The
 CMSIS kernels trade that for speed, which is why the tolerance exists and why they are the one row that needs it.
@@ -830,7 +862,8 @@ requests run CI, so checks run locally before a push. One that changes only Mark
 4. **DAW views.** Timeline, piano roll, mixer with per-track scopes, full Program compiler, asset import. Asset import writes only `Sample2`
    zones, so a saved instrument has one shape and never needs migrating. Recipes are shown in these views, read only.
 5. **Device delivery.** Board bring-up with real audio output, target profile generation, receiving a whole image over BLE or serial into flash,
-   storage per open 22, host send tool. The board is a NUCLEO-L476RG, and serial comes first.
+   storage per open 22, host send tool. The board is a NUCLEO-L476RG, and serial comes first. Built, apart from BLE, which needs a radio the
+   board doesn't have, and showing a target's fit in the editor. `docs/Board.md` describes the board's firmware.
 6. **Python engine binding and offline render.** `PoolExecutor`, `MODSYNTH_PARALLEL`, and a ThreadSanitizer CI job. The module compiles a request
    and plays any image, at every frame size from 8 to 1024, mono or stereo, either frame by frame with live events or to the end of its Program
    and its tail. `PythonTest.py` holds it to the golden renders and to the same bits on any number of workers, and `Listen.py` now uses it.
@@ -904,7 +937,18 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 **Agreed, not built.**
 
 - Events off the frame boundary, section 6.
-- Whole-image delivery to a device, section 10.
+- Delivery over BLE, and showing a target's fit in the editor, section 10.
+
+**Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
+- **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.
+- **Serial protocol:**
+  - COBS frames with a CRC-32, and one command in flight at a time. So nothing arrives while flash is written.
+  - 921,600 baud, the fastest rate tried, which ran without an error.
+- **Mono audio:** the DAC's other channel is the LED's pin.
+- **Sample rate:** 47,990.4 Hz, the nearest whole timer period at 80 MHz, and the engine is told that rate. Running the core at 72 MHz
+  would give exactly 48 kHz, for 10% of the core.
+- **Startup:** the board plays its image when it starts, and its blue button plays it again.
+- **The target check:** a request with a target that doesn't fit fails to compile, rather than compiling with a warning.
 
 **Built from the second review of the pieces** (revision 17). Each of these was a gap a review of the four pieces found, and section 6 or 7
 describes what it became: a placement's window, transposition and velocity scale; stages, so any mix controls can move at once, and
@@ -925,16 +969,16 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 | 14 | Envelope curves and looping envelopes? | Recommended later, as an `Env2` with a Table, because curves don't fit in 4 inputs. |
 | 15 | A live arpeggiator? | Recommended: leave it to the host, so the engine holds no keys. |
 | 16 | Clap, wavetable scanning, granular and shared LFO shapes? | Recommended: keep the workarounds until a real patch needs more. |
-| 19 | When does the compiler check a target profile, and what is unavailable on embedded? | Nothing is unavailable today. Recommended: add the check in Milestone 5, and keep planned ops on embedded unless a measured budget fails. |
+| 19 | What is unavailable on embedded? | Nothing today: both board builds run every opcode. The check is built, section 10, so a build that leaves an opcode out makes it unavailable to requests that target it. Recommended: keep planned ops on embedded unless a measured budget fails. |
 | 20 | Are mono builds an exception to the target rule? | Recommended yes, as section 10 has it, with channel count as an output format. Folding was chosen before the rule existed and hasn't been confirmed since. |
 | 21 | Does sample rate need the same treatment as frame size? | Recommended no: leave it at run time and document it. Frequencies stay correct, and only frame-timed behaviour shifts, such as control rate and the shortest feedback loop. |
-| 22 | How does a device store what it receives? | Recommended: two flash slots. Write the inactive one, verify and load it, then switch. That halves the roughly 900 KB spare on an L476, which still holds the largest recipe at 263 KB. The log-structured chunk store proposed earlier, with a commit record written last, is only needed for thin images, and 56 of the 61 recipes are 10.4 KB or less. |
 | 23 | What authenticates an image over BLE? | A hash doesn't, and anyone in range can connect. Validation protects memory, but a valid image can still be very loud or overload the CPU. Recommended: BLE bonding, or signed images. |
-| 24 | Is a set of embedded-friendly recipes wanted? | Floated, not decided. 8 of the 61 recipes don't fit an L476 today, per `docs/Benchmarks.md`. `Tone` alone doesn't rescue them, so a set would also need fewer voices or partials. |
-| 25 | Does CMSIS-DSP save enough on this chip? | Section 15 models 10.8% for one voice. Measured over whole recipes the median saving at peak is under 1% of instructions. It stays a supported backend, and the answer needs cycles on a board. |
+| 24 | Is a set of embedded-friendly recipes wanted? | Floated, not decided. On the board, 2 of the 61 recipes don't load and 6 more run over a frame's budget somewhere, and none of the four pieces fits [board]. `Tone` alone doesn't rescue them, so a set would also need fewer voices or partials, and open 32's reverb. |
+| 25 | Does CMSIS-DSP save enough on this chip? | No [board]. Over 60 programs the median change in mean cycles is 0.0%, with Vocoder 9.9% slower and PhaseModElectricPiano 8.4% faster. Section 15's model had 10.8% for one voice. Recommended: keep it as a supported backend, since it passes the same checks, and don't make it any target's default. |
 | 26 | Time signatures and pickups? | The editor draws every timeline in 4/4 from tick 0. Für Elise, in 3/8 after an eighth's pickup, is in its third bar where the ruler shows bar 2, and the chorale's pickup puts every bar line a beat early. Recommended: a meter map and a pickup in the timeline document, which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change. |
 | 27 | A sustain pedal? | A timeline has none, so `MakePieces.py` writes Für Elise's pedalling into how long its notes are. The piano roll then shows the pedal's notes rather than the player's, and moving a pedal change means rewriting durations. Recommended: a pedal lane per track that the compiler applies to note lengths, as it writes a tempo ramp as steps, so the format and engine stay as they are. A key played live under the pedal would still need the engine to hold its voice. |
 | 28 | Importing MIDI files? | Every piece began as a MIDI file or LilyPond source, and the app imports only WAV. A Standard MIDI File reader is 45 lines of `MakePieces.py`. Recommended: import a file as a new timeline, a track for each of its tracks, with its tempo map, and its pedal once open 27 gives it somewhere to go. |
 | 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks open 21's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
 | 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
-| 31 | Should the benchmarks cover the pieces? | They aren't measured on Cortex-M4, so whether they fit an L476 is unknown. On a host they render 41 to 168 times faster than real time, from images of 10.6 to 93.3 KB [measured: Apple M4 Pro, Python binding]. Recommended: measure a window of each, such as its loudest 20 seconds, rather than all of it. |
+| 31 | Should the benchmarks cover the pieces? | They don't fit an L476, for memory alone, open 32 [board], so their cycles there are unknown. On a host they render 41 to 168 times faster than real time, from images of 10.6 to 93.3 KB [measured: Apple M4 Pro, Python binding]. Recommended: measure a window of each, such as its loudest 20 seconds, rather than all of it. |
+| 32 | Should there be a reverb an L476 can hold? | Every piece sends to a stereo reverb that needs 188 KB of bulk memory, and the board has 64 KB, so none of them plays there [board]. The demo's reverb fits, at 47 KB. Section 15 has the arithmetic: mono i16 lines take 27 KB. Recommended: a mono reverb mode, or i16 lines as a new op, chosen by an author like any other cheaper feature, and the pieces left as they are. |

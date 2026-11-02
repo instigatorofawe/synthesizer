@@ -27,6 +27,7 @@
 #include <modsynth/Config.hpp>
 #include <modsynth/Format.hpp>
 #include <modsynth/Loader.hpp>
+#include <modsynth/Synth.hpp>
 
 namespace modsynth::compiler {
 
@@ -3078,6 +3079,179 @@ inline void check_loads(const std::vector<const Chunk*>& ordered, u32 frame_size
     }
 }
 
+// A target's profile, read strictly: a missing or mistyped field fails, since a check against half a profile would pass
+// what the device refuses.
+struct Target {
+    std::string name;
+    u32 revision = 0, frame_size = 0, channels = 0, chunks = 0;
+    float rate = 0.0f;
+    u64 fast = 0, bulk = 0, image_bytes = 0;
+    std::set<u8> opcodes;
+    Layout layout;
+};
+
+inline bool is_natural(const json& v) {
+    return v.is_number_unsigned() || (v.is_number_integer() && v.get<std::int64_t>() >= 0);
+}
+
+inline Target read_target(const json& profile) {
+    const auto field = [](const json& object, const char* key) -> const json& {
+        if (!object.is_object() || !object.contains(key)) {
+            throw CompileError("target", std::string("a profile needs \"") + key + "\"");
+        }
+        return object.at(key);
+    };
+    const auto whole = [&](const json& object, const char* key) -> u64 {
+        const json& v = field(object, key);
+        if (!is_natural(v)) throw CompileError("target", std::string("\"") + key + "\" must be a whole number");
+        return v.get<u64>();
+    };
+    const auto small = [&](const json& object, const char* key) -> u32 {
+        const u64 v = whole(object, key);
+        if (v > 0xFFFFFFFFu) throw CompileError("target", std::string("\"") + key + "\" is too large");
+        return static_cast<u32>(v);
+    };
+    Target t;
+    const json& name = field(profile, "name");
+    if (!name.is_string()) throw CompileError("target", "\"name\" must be a string");
+    t.name = name.get<std::string>();
+    t.revision = small(profile, "revision");
+    t.frame_size = small(profile, "frame_size");
+    t.channels = small(profile, "channels");
+    t.chunks = small(profile, "chunks");
+    t.image_bytes = whole(profile, "image_bytes");
+    const json& rate = field(profile, "rate");
+    if (!rate.is_number() || !(rate.get<double>() >= 1000.0 && rate.get<double>() <= 384000.0)) {
+        throw CompileError("target", "\"rate\" must be from 1000 to 384000");
+    }
+    t.rate = rate.get<float>();
+    const json& memory = field(profile, "memory");
+    t.fast = whole(memory, "fast");
+    t.bulk = whole(memory, "bulk");
+    for (const json& op : field(profile, "opcodes")) {
+        if (!is_natural(op) || op.get<u64>() > 255) throw CompileError("target", "an opcode must be 0 to 255");
+        t.opcodes.insert(op.get<u8>());
+    }
+
+    const json& l = field(profile, "layout");
+    Layout& out = t.layout;
+    out.frame_size = t.frame_size;
+    out.channels = t.channels;
+    out.workers = small(l, "workers");
+    const json& edges = field(l, "edges");
+    if (!edges.is_boolean()) throw CompileError("target", "\"edges\" must be true or false");
+    out.edges = edges.get<bool>();
+    out.align = small(l, "align");
+    out.region_align = small(l, "region_align");
+    out.generation = small(l, "generation");
+    out.delay_line = small(l, "delay_line");
+    out.state_align = small(l, "state_align");
+    const auto pow2 = [](u32 v) { return v != 0 && std::has_single_bit(v); };
+    if (!pow2(out.align) || !pow2(out.region_align) || !pow2(out.state_align) || out.workers == 0) {
+        throw CompileError("target", "a layout's alignments must be powers of two, and it needs a worker");
+    }
+    const auto size = [&](const char* key) {
+        const json& v = field(l, key);
+        if (!v.is_array() || v.size() != 2 || !is_natural(v[0]) || !is_natural(v[1]) || v[0].get<u64>() > 0xFFFFFFFFu ||
+            v[1].get<u64>() > 0xFFFFFFFFu || !pow2(v[1].get<u32>())) {
+            throw CompileError("target", std::string("\"") + key + "\" must be a size and a power-of-two alignment");
+        }
+        return Layout::Size{v[0].get<u32>(), v[1].get<u32>()};
+    };
+    out.binding = size("binding");
+    out.track = size("track");
+    out.insert = size("insert");
+    out.decoded_step = size("decoded_step");
+    out.bound_resource = size("bound_resource");
+    out.param_state = size("param_state");
+    out.slot = size("slot");
+    out.voice = size("voice");
+    out.held = size("held");
+    out.glide = size("glide");
+    out.fade = size("fade");
+    out.mix_ramp = size("mix_ramp");
+    out.task = size("task");
+    const json& states = field(l, "state_size");
+    if (!states.is_array()) throw CompileError("target", "\"state_size\" must be a list");
+    for (std::size_t i = 0; i < states.size() && i < out.state_size.size(); ++i) {
+        if (!is_natural(states[i]) || states[i].get<u64>() > 0xFFFFFFFFu) {
+            throw CompileError("target", "a state size must be a whole number");
+        }
+        out.state_size[i] = states[i].get<u32>();
+    }
+    for (const u8 op : t.opcodes) {
+        if (op >= states.size() && op < out.state_size.size()) {
+            throw CompileError("target", "\"state_size\" has no size for an opcode the target runs");
+        }
+    }
+    return t;
+}
+
+// Fails what a device would refuse, checked as it would load the image, and otherwise says how much of it the image
+// takes. `names` names each Program, in the order a bank selects them.
+inline json check_target(const Target& t, const std::vector<std::byte>& bytes, const std::vector<std::string>& names) {
+    const auto fail = [&](const std::string& why) { throw CompileError("target", t.name + ": " + why); };
+    const auto bytes_text = [](u64 n) { return std::to_string(n) + " bytes"; };
+    if (bytes.size() >= sizeof(ChunkHeader) + sizeof(ManifestHeader)) {
+        const ManifestHeader m = load<ManifestHeader>(bytes.data() + sizeof(ChunkHeader));
+        if (m.revision > t.revision) {
+            fail("the image needs format revision " + std::to_string(m.revision) + ", and this target reads up to " +
+                 std::to_string(t.revision));
+        }
+    }
+    if (bytes.size() > t.image_bytes) {
+        fail("the image is " + bytes_text(bytes.size()) + ", and this target stores up to " +
+             bytes_text(t.image_bytes));
+    }
+
+    std::vector<u64> aligned((bytes.size() + 7) / 8);
+    std::memcpy(aligned.data(), bytes.data(), bytes.size());
+    std::vector<ChunkRef> storage(kMaxChunks);
+    ChunkTable table{std::span(storage)};
+    Loader loader(table);
+    loader.begin({reinterpret_cast<const std::byte*>(aligned.data()), bytes.size()}, t.frame_size);
+    while (loader.step(1u << 20) == LoadStatus::Working) {
+    }
+    if (loader.status() != LoadStatus::Ready)
+        fail(std::string("the image would not load: ") + to_string(loader.error()));
+    if (table.size() > t.chunks) {
+        fail("the image has " + std::to_string(table.size()) + " chunks, and this target holds " +
+             std::to_string(t.chunks));
+    }
+    for (u32 i = 0; i < table.size(); ++i) {
+        const ChunkRef& c = storage[i];
+        if (c.kind != static_cast<u8>(ChunkKind::Patch)) continue;
+        PatchView v;
+        (void)parse_patch({c.data, c.size}, v);  // the loader checked it
+        for (u32 s = 0; s < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++s) {
+            const u8 op = v.step(s).op;
+            if (!t.opcodes.count(op)) fail("a patch uses opcode " + std::to_string(op) + ", which this target lacks");
+        }
+    }
+
+    MemorySizes most;
+    json programs = json::array();
+    for (u32 i = 0; i < loader.programs(); ++i) {
+        const MemorySizes need = Synth<>::bytes_required(table, loader.program_hash(i), t.rate, t.layout);
+        const std::string name =
+            i < names.size() && !names[i].empty() ? "Program \"" + names[i] + "\"" : "Program " + std::to_string(i);
+        if (need.fast > t.fast || need.bulk > t.bulk) {
+            const bool fast = need.fast > t.fast;
+            fail(name + " needs " + bytes_text(fast ? need.fast : need.bulk) + " of " + (fast ? "fast" : "bulk") +
+                 " memory, and this target has " + bytes_text(fast ? t.fast : t.bulk));
+        }
+        programs.push_back({{"fast", need.fast}, {"bulk", need.bulk}});
+        most.fast = std::max(most.fast, need.fast);
+        most.bulk = std::max(most.bulk, need.bulk);
+    }
+    return {{"name", t.name},
+            {"image_bytes", {bytes.size(), t.image_bytes}},
+            {"chunks", {table.size(), t.chunks}},
+            {"fast", {most.fast, t.fast}},
+            {"bulk", {most.bulk, t.bulk}},
+            {"programs", std::move(programs)}};
+}
+
 }  // namespace detail
 
 struct ImageResult {
@@ -3087,7 +3261,7 @@ struct ImageResult {
 
 // The one entry point: a single Program, a bundle, or a thin image are all this function.
 //   { "patches": { id: { "name", "graph" } }, "assets": { id: { ... } }, "programs": [ { "id", "name", "timeline" } ],
-//     "omit": [ "hex hash" ], "live": false }
+//     "omit": [ "hex hash" ], "live": false, "target": { a profile, see Profile.hpp } }
 inline ImageResult compile_image(const json& request) {
     using namespace detail;
     static const json no_entries = json::object();
@@ -3095,11 +3269,18 @@ inline ImageResult compile_image(const json& request) {
     context.patches = request.contains("patches") ? &request.at("patches") : &no_entries;
     context.assets = request.contains("assets") ? &request.at("assets") : nullptr;
     const bool keep_unused = request.value("live", false);
-    const json requested_frame = request.value("frame_size", json(SynthConfig{}.frame_size));
+    std::optional<Target> target;
+    if (request.contains("target")) target = read_target(request.at("target"));
+    const json requested_frame =
+        request.value("frame_size", json(target ? target->frame_size : SynthConfig{}.frame_size));
     const std::int64_t requested_size = requested_frame.is_number_integer() ? requested_frame.get<std::int64_t>() : 0;
     const u32 frame_size = static_cast<u32>(std::clamp<std::int64_t>(requested_size, 0, kMaxFrameSize + 1));
     if (!std::has_single_bit(frame_size) || frame_size < kMinFrameSize || frame_size > kMaxFrameSize) {
         throw CompileError("request", "frame_size must be a power of two from 8 to 1024");
+    }
+    if (target && frame_size != target->frame_size) {
+        throw CompileError("target", target->name + " plays frames of " + std::to_string(target->frame_size) +
+                                         ", and the request asks for " + std::to_string(frame_size));
     }
 
     json programs = json::array();
@@ -3122,13 +3303,17 @@ inline ImageResult compile_image(const json& request) {
         if (context.chunks.empty()) throw CompileError("request", "an image needs a program or a patch");
     }
     std::vector<u64> program_hashes;
+    std::vector<std::string> program_names;
     for (std::size_t i = 0; i < entries.size(); ++i) {
         json report = compile_program(context, entries[i], i, keep_unused);
         const u64 hash = std::stoull(report.at("hash").get<std::string>(), nullptr, 16);
         const auto found = std::find(program_hashes.begin(), program_hashes.end(), hash);
         report["index"] = found == program_hashes.end() ? program_hashes.size()
                                                         : static_cast<std::size_t>(found - program_hashes.begin());
-        if (found == program_hashes.end()) program_hashes.push_back(hash);
+        if (found == program_hashes.end()) {
+            program_hashes.push_back(hash);
+            program_names.push_back(entries[i].value("name", std::string{}));
+        }
         programs.push_back(std::move(report));
     }
 
@@ -3136,6 +3321,7 @@ inline ImageResult compile_image(const json& request) {
     for (const json& h : request.value("omit", json::array())) {
         omit.insert(std::stoull(h.get<std::string>(), nullptr, 16));
     }
+    if (target && !omit.empty()) throw CompileError("target", "a target is checked with a whole image, not a thin one");
 
     // Assets, tables and patches sort by hash, so a set in any order gives identical bytes. Programs keep request
     // order, because their position is how a bank selects them.
@@ -3175,6 +3361,7 @@ inline ImageResult compile_image(const json& request) {
     json sidecar = json::object();
     for (const auto& [id, patch] : context.compiled) sidecar[id] = patch.nodes;
     report["sidecar"] = std::move(sidecar);
+    if (target) report["target"] = check_target(*target, bytes, program_names);
     return {std::move(bytes), std::move(report)};
 }
 

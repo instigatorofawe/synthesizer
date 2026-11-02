@@ -19,7 +19,14 @@ FetchContent_Declare(cmsis_core
     GIT_SHALLOW TRUE
     SOURCE_SUBDIR none
 )
-FetchContent_MakeAvailable(cmsis_dsp cmsis_core)
+# Register definitions for the NUCLEO-L476RG's microcontroller.
+FetchContent_Declare(cmsis_device_l4
+    GIT_REPOSITORY https://github.com/STMicroelectronics/cmsis-device-l4.git
+    GIT_TAG v1.7.5
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR none
+)
+FetchContent_MakeAvailable(cmsis_dsp cmsis_core cmsis_device_l4)
 
 set(ARCH -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb)
 set(CMSIS_DEFINES ARM_MATH_CM4 __FPU_PRESENT=1 ARM_MATH_LOOPUNROLL)
@@ -78,6 +85,29 @@ add_firmware(StereoCmsis 2 cmsis 32)
 add_firmware(Stereo128 2 scalar 128)
 add_firmware(Mono128 1 scalar 128)
 add_firmware(StereoCmsis128 2 cmsis 128)
+
+# The NUCLEO-L476RG: mono, since the DAC has one free channel. tools/Board.py talks to it. Each image slot is this big,
+# and slot A ends bank 1, so what is left of bank 1 below it holds the firmware.
+set(MODSYNTH_SLOT_KB 384)
+math(EXPR MODSYNTH_SLOT_A "0x08080000 - ${MODSYNTH_SLOT_KB} * 1024" OUTPUT_FORMAT HEXADECIMAL)
+foreach(build "Nucleo scalar" "NucleoCmsis cmsis")
+    separate_arguments(build)
+    list(GET build 0 name)
+    list(GET build 1 backend)
+    add_executable(${name} Nucleo.cpp)
+    configure_firmware(${name} 1 ${backend} Nucleo.ld)
+    target_compile_definitions(${name} PRIVATE STM32L476xx MODSYNTH_FRAME=32 MODSYNTH_SLOT_KB=${MODSYNTH_SLOT_KB}
+        MODSYNTH_BULK_KB=64)
+    target_link_options(${name} PRIVATE -Wl,--defsym=__slot_a=${MODSYNTH_SLOT_A})
+    target_include_directories(${name} SYSTEM PRIVATE ${cmsis_device_l4_SOURCE_DIR}/Include
+        ${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include)
+    # The profile the compiler checks requests against. Check.sh compares it with the one in firmware/Profiles.
+    add_custom_command(TARGET ${name} POST_BUILD
+        COMMAND arm-none-eabi-objcopy --dump-section .profile=${name}.profile.bin $<TARGET_FILE:${name}>
+        COMMAND sh -c "tr -d '\\000' < ${name}.profile.bin > ${name}.json"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        VERBATIM)
+endforeach()
 
 # Instruction counts for tools/Bench.py, which compiles the recipes these link. On the mps2-an386 as they need the room.
 set(MODSYNTH_BENCH_RECIPES "" CACHE FILEPATH "The list of recipes tools/Bench.py wrote")

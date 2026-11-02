@@ -74,8 +74,8 @@
 	function added(event: MouseEvent) {
 		if (readonly) return;
 		const { tick, value } = pointer(event);
+		chosen = clip.automation.length; // Taken first, because the parent's change reaches `clip` at once
 		onchange(addPoint(clip, lane, tick, value));
-		chosen = clip.automation.length;
 	}
 
 	function removed(index: number) {

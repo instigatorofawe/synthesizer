@@ -14,6 +14,7 @@ const program = (tracks: number, buses: number): ProgramReport => ({
 	tracks: Array.from({ length: tracks }, (_, i) => chain(i + 1, i)),
 	buses: Array.from({ length: buses }, (_, i) => chain(`b${i}`, 100 + i)),
 	master: { step: 200, bus: 201 },
+	inserts: [],
 	patches: []
 });
 
@@ -29,6 +30,17 @@ describe('what the scopes read', () => {
 		expect(targets).toHaveLength(8);
 		expect(targets.at(-1)?.chain).toBe('bus:b0');
 		expect(tapTargets(program(9, 1)).at(-1)?.chain).toBe('track:7');
+	});
+});
+
+describe('a load the worklet refuses', () => {
+	it('reaches the page, where it can be explained', () => {
+		const engine = new AudioEngine();
+		const reasons: string[] = [];
+		engine.onRejected = (reason) => reasons.push(reason);
+		const inside = engine as unknown as { receive: (message: Record<string, unknown>) => void };
+		inside.receive({ type: 'load-rejected', reason: 'image is larger than the image slot' });
+		expect(reasons).toEqual(['image is larger than the image slot']);
 	});
 });
 

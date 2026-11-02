@@ -121,17 +121,24 @@ const trackSchema = z.object({
 
 const busSchema = z.object({ id: z.string().min(1), ...routing });
 
-export const timelineSchema = z.object({
-	ppq: z.number().int().min(1).max(65535).default(480),
-	tempo: z.array(z.object({ tick, bpm: z.number().min(1).max(1000) })).default([{ tick: 0, bpm: 120 }]),
-	clips: z.array(clipSchema).default([]),
-	tracks: z.array(trackSchema).default([]),
-	buses: z.array(busSchema).default([]),
-	master: z
-		.object({ gain: z.number().min(0).max(4).default(1), inserts: z.array(insertSchema).default([]) })
-		.default({ gain: 1, inserts: [] }),
-	globals: z.record(z.string(), z.number()).default({})
-});
+const distinct = (ids: unknown[]) => new Set(ids).size === ids.length;
+
+export const timelineSchema = z
+	.object({
+		ppq: z.number().int().min(1).max(65535).default(480),
+		tempo: z.array(z.object({ tick, bpm: z.number().min(1).max(1000) })).default([{ tick: 0, bpm: 120 }]),
+		clips: z.array(clipSchema).default([]),
+		tracks: z.array(trackSchema).default([]),
+		buses: z.array(busSchema).default([]),
+		master: z
+			.object({ gain: z.number().min(0).max(4).default(1), inserts: z.array(insertSchema).default([]) })
+			.default({ gain: 1, inserts: [] }),
+		globals: z.record(z.string(), z.number()).default({})
+	})
+	// The editors key what they draw on these, and every reference to one of them means only one thing if it names only one.
+	.refine((doc) => distinct(doc.tracks.map((track) => track.id)), 'two tracks have the same id')
+	.refine((doc) => distinct(doc.buses.map((bus) => bus.id)), 'two buses have the same id')
+	.refine((doc) => distinct(doc.clips.map((clip) => clip.id)), 'two clips have the same id');
 
 export type Graph = z.infer<typeof graphSchema>;
 export type Param = z.infer<typeof paramSchema>;

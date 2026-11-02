@@ -96,6 +96,18 @@
 		if (index !== undefined) engine.setParam(index, param.id, value);
 	}
 
+	function liveInsert(insert: Insert, param: Param, value: number) {
+		const index = program?.inserts.find((known) => known.id === insert.id)?.index;
+		if (index !== undefined) engine.setInsertParam(index, param.id, value);
+	}
+
+	// A global belongs to the Program, and reaches it through any track that plays a patch declaring it.
+	function liveGlobal(param: Param, value: number) {
+		const owner = doc.tracks.find((track) => track.slots.some((slot) => patchOf(slot)?.graph.params.some((p) => p.id === param.id)));
+		const index = program?.tracks.find((t) => t.id === owner?.id)?.index;
+		if (index !== undefined) engine.setParam(index, param.id, value);
+	}
+
 	function addNamedBus() {
 		const next = addBus(doc, newBus.trim());
 		if (next !== doc) {
@@ -182,6 +194,7 @@
 						max={param.max}
 						step={(param.max - param.min) / 500}
 						value={insert.params?.[String(param.id)] ?? param.default}
+						oninput={(e) => liveInsert(insert, param, number(e))}
 						onchange={(e) =>
 							onchange(setInsert(doc, key, index, { params: { ...insert.params, [String(param.id)]: number(e) } }))}
 					/>
@@ -338,6 +351,7 @@
 						max={param.max}
 						step={(param.max - param.min) / 500}
 						value={doc.globals[String(param.id)] ?? param.default}
+						oninput={(e) => liveGlobal(param, number(e))}
 						onchange={(e) => onchange(setGlobal(doc, param.id, number(e)))}
 					/>
 				</label>

@@ -97,6 +97,7 @@ export interface ProgramReport {
 	tracks: ChainReport[];
 	buses: ChainReport[];
 	master: { step: number; bus: number };
+	inserts: { id: number; index: number }[]; // Where each insert id sits in the image, which a live change addresses
 	patches: { id: string; hash: string }[];
 }
 

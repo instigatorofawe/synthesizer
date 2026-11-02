@@ -2195,6 +2195,10 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     report["length_ticks"] = length_ticks;
     report["tracks"] = report_tracks;
     report["buses"] = report_buses;
+    report["inserts"] = json::array();
+    for (const auto& [id, insert] : compiled_inserts) {
+        report["inserts"].push_back({{"id", id}, {"index", insert.index}});
+    }
     report["master"] = {{"step", chains.at("master").step}, {"bus", chains.at("master").reg}};
     json used_patches = json::array();
     for (std::size_t i = 0; i < patch_ids.size(); ++i) {

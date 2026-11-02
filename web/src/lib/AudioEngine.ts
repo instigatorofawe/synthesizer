@@ -125,6 +125,8 @@ export class AudioEngine {
 	onState: (state: EngineState) => void = () => {};
 	onTap: (slot: number, block: TapBlock) => void = () => {};
 	onTargets: (targets: TapTarget[]) => void = () => {};
+	onRejected: (reason: string) => void = () => {}; // An image the engine would not take, so the old one is still playing
+	onLive: (report: CompileReport) => void = () => {}; // An image has just become the one playing
 
 	private context: AudioContext | null = null;
 	private node: AudioWorkletNode | null = null;
@@ -162,6 +164,8 @@ export class AudioEngine {
 			this.state = message as unknown as EngineState;
 			this.applyTargets();
 			this.onState(this.state);
+		} else if (message.type === 'load-rejected') {
+			this.onRejected(message.reason as string);
 		} else if (message.type === 'tap') {
 			const buffer = message.buffer as ArrayBuffer;
 			const samples = new Float32Array(buffer);
@@ -181,6 +185,7 @@ export class AudioEngine {
 		if (!report) return;
 		this.live = report;
 		this.sendTargets();
+		this.onLive(report);
 	}
 
 	private sendTargets() {
@@ -237,6 +242,9 @@ export class AudioEngine {
 	}
 	setParam(track: number, param: number, value: number) {
 		this.send({ kind: EventKind.SetParam, target: track, param, value });
+	}
+	setInsertParam(insert: number, param: number, value: number) {
+		this.send({ kind: EventKind.SetInsertParam, target: insert, param, value });
 	}
 	setMix(register: number, value: number) {
 		this.send({ kind: EventKind.SetMix, param: register, value });

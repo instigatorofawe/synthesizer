@@ -22,6 +22,7 @@
 	let started = $state(false);
 	let engineState = $state<EngineState | null>(null);
 	let targets = $state<TapTarget[]>([]);
+	let rejected = $state('');
 	let parseError = $state('');
 	let nodes = $state<NodesReport | undefined>(undefined); // From the last compile that worked
 	let probes = $state<Probe[]>([]);
@@ -78,7 +79,10 @@
 		if (!result) return;
 		report = result.report;
 		if (result.report.ok) nodes = result.report.sidecar?.[data.patch.id];
-		if (result.report.ok && started) engine.load(result.image, result.report);
+		if (result.report.ok && started) {
+			rejected = '';
+			engine.load(result.image, result.report);
+		}
 	}
 
 	function drawn(next: Graph) {
@@ -112,6 +116,7 @@
 		};
 		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start);
 		engine.onTargets = (t) => (targets = t);
+		engine.onRejected = (reason) => (rejected = reason);
 		compile();
 	});
 
@@ -126,6 +131,7 @@
 
 {#if form?.message}<p class="problem">{form.message}</p>{/if}
 {#if form?.saved}<p class="muted">Saved.</p>{/if}
+{#if rejected}<p class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</p>{/if}
 {#if parseError}<p class="problem">{parseError}</p>{/if}
 {#if report && !report.ok}
 	{#each report.errors ?? [] as problem}

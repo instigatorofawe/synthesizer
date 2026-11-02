@@ -222,6 +222,11 @@
 		}
 	}
 
+	// A loop can be drawn before there is an engine to tell, and a new image can arrive in a new engine.
+	$effect(() => {
+		if (targets.length && looping && loop) engine.setLoop(loop.start, loop.end);
+	});
+
 	function keydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
 		if (readonly || target.closest('input, textarea, select')) return;
@@ -283,7 +288,7 @@
 			<fieldset disabled={readonly}>
 				<details>
 					<summary>Tempo, {doc.tempo[0]?.bpm} BPM</summary>
-					{#each doc.tempo as change, index (change.tick)}
+					{#each doc.tempo as change, index}
 						<div class="line">
 							<span class="muted">bar {barOf(change.tick, doc.ppq)}</span>
 							<input

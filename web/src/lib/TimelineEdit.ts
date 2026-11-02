@@ -628,6 +628,72 @@ export function removeTempo(doc: Timeline, index: number): Timeline {
 	return doc.tempo.length > 1 ? { ...doc, tempo: doc.tempo.filter((_, i) => i !== index) } : doc;
 }
 
+export interface Settling {
+	mix: { register: number; value: number }[];
+	params: { track: number; param: number; value: number }[]; // `track` is its place in the image
+	inserts: { insert: number; param: number; value: number }[];
+}
+
+interface ReportedProgram {
+	tracks: (ReportedChain & { index?: number })[];
+	buses: ReportedChain[];
+	inserts: { id: number; index: number }[];
+}
+
+// What to write after a swap so that the sound is the document. A swap carries live values across, because a fader moved by
+// hand should survive an edit somewhere else, and the engine can't tell a value moved by hand from one left by a lane. So
+// without this, a deleted lane's last value stays for as long as the page does, and a value changed in the document is ignored
+// because the old one carried over it. A lane still in the document owns what it moves, so those are left alone.
+export function settlingWrites(doc: Timeline, program: ReportedProgram, patches: PatchLike[]): Settling {
+	const placed = (track: Track) => track.placements.flatMap((p) => clipOf(doc, p.clip)?.automation ?? []);
+	const lanes = doc.tracks.flatMap(placed);
+	const moved = (key: ChainKey) =>
+		lanes.some(({ target: t }) => t && 'mix' in t && (('track' in t && trackKey(t.track) === key) || ('bus' in t && busKey(t.bus) === key)));
+	const masterMoved = lanes.some(({ target: t }) => t && 'mix' in t && 'master' in t);
+
+	const settling: Settling = { mix: [], params: [], inserts: [] };
+	const route = (chain: Track | Bus | undefined, key: ChainKey, reported: ReportedChain) => {
+		if (!chain || moved(key)) return;
+		for (const { to, left, right } of reported.mix) {
+			if (to === MASTER && masterMoved) continue;
+			const gains = routeGains(doc, chain, to);
+			settling.mix.push({ register: left, value: gains.left }, { register: right, value: gains.right });
+		}
+	};
+	for (const reported of program.buses) {
+		route(doc.buses.find((b) => b.id === reported.id), busKey(String(reported.id)), reported);
+	}
+
+	const globalsDone = new Set<number>();
+	for (const reported of program.tracks) {
+		const track = doc.tracks.find((t) => t.id === reported.id);
+		route(track, trackKey(reported.id as number), reported);
+		if (!track || reported.index === undefined) continue;
+		const own = placed(track);
+		const done = new Set<number>();
+		for (const param of track.slots.flatMap((slot) => paramsOf(patches.find((p) => p.id === slot)))) {
+			if (done.has(param.id)) continue;
+			done.add(param.id);
+			const global = param.scope === 'global';
+			if (global && globalsDone.has(param.id)) continue;
+			if ((global ? lanes : own).some((p) => p.param === param.id && !p.target)) continue;
+			if (global) globalsDone.add(param.id);
+			const value = (global ? doc.globals : track.params)[String(param.id)] ?? param.default;
+			settling.params.push({ track: reported.index, param: param.id, value });
+		}
+	}
+
+	for (const insert of eachChain(doc).flatMap((chain) => chain.inserts)) {
+		const index = program.inserts.find((known) => known.id === insert.id)?.index;
+		if (index === undefined) continue;
+		for (const param of paramsOf(patches.find((p) => p.id === insert.patch))) {
+			if (lanes.some((p) => p.param === param.id && p.target && 'insert' in p.target && p.target.insert === insert.id)) continue;
+			settling.inserts.push({ insert: index, param: param.id, value: insert.params?.[String(param.id)] ?? param.default });
+		}
+	}
+	return settling;
+}
+
 // ---------------------------------------------------------------------------------------------------------- play modes
 
 // Poly plays every held note, so it has no priority to choose, and the compiler refuses one. A track with nothing to say

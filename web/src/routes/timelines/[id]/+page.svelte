@@ -8,6 +8,7 @@
 	import { buildRequest, reachable, type CompileReport } from '#lib/Request.ts';
 	import { referencedPatches, timelineSchema, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
+	import { settlingWrites } from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
 
 	let { data, form } = $props();
@@ -21,11 +22,13 @@
 	let started = $state(false);
 	let engineState = $state<EngineState | null>(null);
 	let targets = $state<TapTarget[]>([]);
+	let rejected = $state('');
 	// What the editors draw, which is the text as long as that makes a document. Text that doesn't leaves the last drawing alone.
 	let doc = $state.raw(untrack(() => timelineSchema.parse(data.timeline.doc)));
 
 	const engine = new AudioEngine();
 	const rings = Array.from({ length: 8 }, () => new Ring(48000));
+	const compiledFrom = new WeakMap<CompileReport, Timeline>(); // Which document each report came from
 	let compiler: Compiler | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -54,7 +57,21 @@
 		const result = await compiler.compile(request);
 		if (!result) return;
 		report = result.report;
-		if (result.report.ok && started) engine.load(result.image, result.report);
+		if (checked.success) compiledFrom.set(result.report, checked.data);
+		if (result.report.ok && started) {
+			rejected = '';
+			engine.load(result.image, result.report);
+		}
+	}
+
+	function settle(live: CompileReport) {
+		const settled = compiledFrom.get(live);
+		const live_program = live.programs[0];
+		if (!settled || !live_program) return;
+		const { mix, params, inserts } = settlingWrites(settled, live_program, data.patches);
+		for (const { register, value } of mix) engine.setMix(register, value);
+		for (const { track, param, value } of params) engine.setParam(track, param, value);
+		for (const { insert, param, value } of inserts) engine.setInsertParam(insert, param, value);
 	}
 
 	function edited() {
@@ -85,6 +102,8 @@
 		engine.onState = (s) => (engineState = s);
 		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start);
 		engine.onTargets = (t) => (targets = t);
+		engine.onRejected = (reason) => (rejected = reason);
+		engine.onLive = settle;
 		compile();
 	});
 
@@ -103,6 +122,7 @@
 
 {#if form?.message}<p class="problem">{form.message}</p>{/if}
 {#if form?.saved}<p class="muted">Saved.</p>{/if}
+{#if rejected}<p class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</p>{/if}
 {#if parsed.error}<p class="problem">{parsed.error}</p>{/if}
 {#if report && !report.ok}
 	{#each report.errors ?? [] as problem}

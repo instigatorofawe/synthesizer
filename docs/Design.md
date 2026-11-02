@@ -1,6 +1,6 @@
-# modsynth design, revision 11
+# modsynth design, revision 12
 
-Status: Milestones 1 to 3 are implemented, along with the compiler side of Milestone 4 and the harnesses of Milestone 7.
+Status: Milestones 1 to 4 are implemented, along with the harnesses of Milestone 7.
 The wire format is frozen at version 1, now at revision 6. `docs/Format.md` is its specification, and where this document and that one differ, that
 one is right. This document replaces all earlier revisions, and everything needed from them is included here. Sections about later milestones are
 still proposals. Section 24 lists what is agreed but not built, and what is still undecided.
@@ -178,8 +178,8 @@ An Asset is a new chunk kind, separate from power-of-two wavetables.
 - On a device, assets go straight to flash and are not staged in RAM. They stay unreferenced until their
   hash checks out, so a bad upload is still harmless. Hashing costs about 12 cycles per byte, or roughly 160 ms per MB at
   80 MHz [model]. It runs on receipt, not at every boot.
-- On wasm the fixed heap must hold assets, because memory growth stays off. Its size becomes a start-up setting. What a
-  large heap costs in the browser is measured in Milestone 7.
+- On wasm the fixed heap must hold assets, because memory growth stays off. An image slot is 16 MiB, about 2.9 minutes of mono i16 at 48 kHz, and an image over it is refused on load with the reason
+  shown on the page. Its size becomes a start-up setting. What a large heap costs in the browser is measured in Milestone 7.
 - `Sample2`, from revision 4, is the op asset import writes. A Table of zones maps key and velocity ranges to recordings, each with its own root
   key, and the note picks one at its start. It takes `note` rather than a ratio, because the root is only known then, and that is what lets a
   glide or a legato change slide one recording. It adds a start offset, reverse, and a tail, where a loop runs while the note is held and plays
@@ -278,6 +278,10 @@ Parameters carry by id, clamped to the new patch's range, and a global to the ra
 carry only between Programs with the same mixer, down to its tracks and inserts, and a register whose starting value the edit changed takes the new value.
 Any other edit to the mixer returns its registers to the document's values. Inserts crossfade. Embedded builds use a limit of 1, with no separate code path.
 
+The engine can't tell a value moved by hand from one a lane left behind, and carrying is right for both while a lane is still there: a fader automated down would otherwise jump back up on every edit.
+So the timeline page settles after each swap, writing the document's value to every mix register, parameter and global that no placed lane moves. Without that, a deleted lane's last value stays until
+the page reloads, even across a locate, and a value changed in the document is ignored because the old one carries over it. The engine's rule stays as it is, and only an editor that holds a document can do this.
+
 ## 12. Browser load path
 
 The wasm build deliberately has no SharedArrayBuffer and no memory growth. The compiler runs in a separate wasm instance
@@ -289,8 +293,8 @@ Milestone 7.
 
 The browser shows live waveforms during playback, starting with the master and track buses and later any graph node.
 This is engine and host state only. Nothing about it enters the image, so it does not affect hashes or the format freeze.
-Scopes on the master and track buses and probes on graph nodes are built, and tested in a browser. A probe reaches a voice, not an insert, because the page that sets one
-plays a patch alone, and that page refuses a patch with an `in` node.
+Scopes on the master, track and mixer buses and probes on graph nodes are built, and tested in a browser. There are eight tap slots, so the master comes first, then tracks, then buses, and a probe takes what
+is left. A probe follows a voice, on whichever track and patch slot plays it, so it can't reach an insert.
 
 **Tap.** The engine has a fixed number of tap slots, set by `SynthConfig`. Hardware builds use 0, which compiles the
 feature out. `set_tap(slot, target)` arrives through the event queue and is validated there like any live event.
@@ -602,8 +606,7 @@ and hardware still only ever sees image bytes.
 
 **Who does what.**
 
-- Server actions own persistence: create, save, rename and delete patches and timelines, and validate every document on the way in. Assets are only
-  seeded so far, and asset import in Milestone 4 adds the rest. Pages load through `load` functions.
+- Server actions own persistence: create, save, rename and delete patches, timelines and assets, and validate every document on the way in. Pages load through `load` functions.
 - Audio never touches the server. Playback, the worklet and the oscilloscope are browser-only, as sections 12 and 13 say.
 - The compiler is one wasm module with two hosts. In a browser worker it compiles the open document on each edit, including
   edits not yet saved, so preview needs no round trip. In a server action it compiles exports from saved rows. Both give
@@ -646,8 +649,23 @@ changes no hash. It takes its node table from the compiler's catalog, the table 
 from section 13, which colours wires by rate, dims nodes that compiled away and places probes. An error's `where` names its node, and an error inside a subpatch lands on
 the subpatch. The compiler stops at the first error, so an editor shows one at a time. The JSON stays on the page, and text that doesn't parse leaves the last drawing alone.
 
-**Recipes.** `examples/Recipes` ships with the app as a read-only catalogue at `/recipes`, where any of them plays as it is. Adding one copies its patches, assets and
-timeline into the library under ids made from its name, and they are then ordinary rows. They are copies so that an edit can't change what ships. A recipe isn't seeded,
+**The timeline editor.** Arrangement, piano roll, lanes and mixer are views of one document, which stays on the page as JSON. Every edit is a pure function from a document to a document, so undo is a list of
+old ones, and as in the graph editor these decide little about what is legal: overlapping clips can be drawn, and the compiler says what is wrong and marks the track. What an edit does take care of is references, so
+deleting a bus takes its sends, outputs, sidechains and lanes with it. Placements stay in tick order, because the compiler takes one that goes backwards for an overlap. The grid is 4/4, and nothing stores that:
+a document holds ticks, so a time signature would change how it is drawn and not how it plays.
+
+A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. A register holds fader, mute, pan, send and, on
+the way into master, the master fader multiplied together, and the page works that product out the way the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip.
+
+Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the image and its keys are silent until it has one. `live` keeps unused tracks, so it could pass a document
+that an export refuses, and an editor that previews one thing and exports another is worse than a silent key. The page says so when it happens.
+
+**Asset import.** WAV files become one instrument: an asset for each file and a patch with a `sample` node in zones mode, whose inspector edits zones, roots and ranges. 16-bit and narrower stay i16, and anything wider stays exact in f32.
+A file's sampler chunk gives its root and loop, and failing that a name like `Piano_C4.wav` gives the root, and failing that it is 60. Keys split halfway between recordings, and several at one key become velocity layers, quietest first by peak, because
+only their levels say which is which. A bad file refuses the whole import, and one larger than an image can hold is refused there rather than failing on load. An asset can't be deleted while a patch names it.
+
+**Recipes.** `examples/Recipes` ships with the app as a read-only catalogue at `/recipes`, where any of them plays as it is and shows how it is made, in the same editors with nothing that changes anything: its arrangement, notes, lanes, mix and each patch's graph, which
+a probe can look inside. Adding one copies its patches, assets and timeline into the library under ids made from its name, and they are then ordinary rows. They are copies so that an edit can't change what ships. A recipe isn't seeded,
 because together they hold about 600 KB of samples and every patch page loads the library. Adding one twice changes nothing, so an edited copy survives. A test holds every
 recipe to compiling to the same bytes from the library as from its file, which is what shows the schema dropped nothing.
 
@@ -723,7 +741,7 @@ requests run CI, so checks run locally before a push. One that changes only Mark
 3. **Browser graph editor and full compiler.** Subpatches, rate conversion, which `snap` settled, errors shown on nodes, oscilloscope probes on
    graph nodes, and the ops section 5 lists.
 4. **DAW views.** Timeline, piano roll, mixer with per-track scopes, full Program compiler, asset import. Asset import writes only `Sample2`
-   zones, so a saved instrument has one shape and never needs migrating.
+   zones, so a saved instrument has one shape and never needs migrating. Recipes are shown in these views, read only.
 5. **Device delivery.** Board bring-up with real audio output, target profile generation, receiving a whole image over BLE or serial into flash,
    storage per open 22, host send tool.
 6. **Python engine binding and offline render.** `PoolExecutor`, `MODSYNTH_PARALLEL`, and a ThreadSanitizer CI job.

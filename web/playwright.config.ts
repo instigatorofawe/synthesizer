@@ -15,6 +15,6 @@ export default defineConfig({
 		command: 'rm -rf .e2e && node build/index.js',
 		port,
 		reuseExistingServer: false,
-		env: { HOST: '127.0.0.1', PORT: String(port), DATABASE_PATH: '.e2e/Test.sqlite' }
+		env: { HOST: '127.0.0.1', PORT: String(port), DATABASE_PATH: '.e2e/Test.sqlite', BODY_SIZE_LIMIT: '64M' }
 	}
 });

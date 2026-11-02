@@ -49,6 +49,7 @@ import {
 	setPlay,
 	setPlayChange,
 	setPoint,
+	settlingWrites,
 	setTempo,
 	snapTick,
 	songLength,
@@ -432,6 +433,105 @@ describe('the mixer', () => {
 		const { doc, id } = addTrack(song(), 'lead');
 		expect(id).toBe(3);
 		expect(doc.tracks[2]).toMatchObject({ id: 3, name: 'Track 3', slots: ['lead'], output: 'master' });
+	});
+});
+
+describe('settling after a swap', () => {
+	const param = (id: number, scope: 'track' | 'voice' | 'global', value = 0.5) => ({
+		id,
+		name: '',
+		scope,
+		min: 0,
+		max: 1,
+		default: value,
+		smooth_ms: 10
+	});
+	const patch = (id: string, ...params: ReturnType<typeof param>[]): PatchLike => ({
+		id,
+		name: id,
+		graph: { nodes: [], edges: [], params }
+	});
+	const patches = [patch('lead', param(1, 'track'), param(9, 'global', 0.25)), patch('pluck', param(9, 'global', 0.25)), patch('duck', param(4, 'track', 0.75))];
+	const program = {
+		tracks: [
+			{ id: 1, index: 0, mix: [{ to: 'master', left: 0, right: 1 }] },
+			{ id: 2, index: 1, mix: [{ to: 'bus:room', left: 2, right: 3 }] }
+		],
+		buses: [{ id: 'room', mix: [{ to: 'master', left: 4, right: 5 }] }],
+		inserts: [
+			{ id: 1, index: 0 },
+			{ id: 2, index: 1 }
+		]
+	};
+	const withLane = (doc: Timeline, lane: { param?: number; target?: LaneTarget }) => ({
+		...doc,
+		clips: doc.clips.map((clip) => (clip.id === 'a' ? addPoint(clip, lane, 0, 0) : clip))
+	});
+	const registers = (doc: Timeline) => settlingWrites(doc, program, patches).mix.map((w) => w.register);
+
+	it('writes every value the document holds when nothing moves them', () => {
+		const doc = song();
+		doc.tracks[0] = { ...doc.tracks[0], params: { '1': 0.9 } };
+		doc.globals = { '9': 0.125 };
+		const { mix, params, inserts } = settlingWrites(doc, program, patches);
+		expect(mix.map((w) => w.register)).toEqual([4, 5, 0, 1, 2, 3]);
+		expect(params).toEqual([
+			{ track: 0, param: 1, value: 0.9 },
+			{ track: 0, param: 9, value: 0.125 }
+		]);
+		expect(inserts).toEqual([{ insert: 0, param: 4, value: 0.75 }]);
+	});
+
+	it('uses the same gains the mixer would', () => {
+		const doc = song();
+		const { left } = routeGains(doc, doc.tracks[0], MASTER);
+		expect(settlingWrites(doc, program, patches).mix.find((w) => w.register === 0)?.value).toBe(left);
+	});
+
+	it('leaves alone a chain a lane is moving, all of whose routes share its fader', () => {
+		const doc = withLane(song(), { target: { mix: 'fader', track: 1 } });
+		expect(registers(doc)).toEqual([4, 5, 2, 3]);
+		const panned = withLane(song(), { target: { mix: 'pan', bus: 'room' } });
+		expect(registers(panned)).toEqual([0, 1, 2, 3]);
+	});
+
+	it('leaves every route into master to a master lane', () => {
+		expect(registers(withLane(song(), { target: { mix: 'fader', master: true } }))).toEqual([2, 3]);
+	});
+
+	it('leaves a parameter to its lane, on the track that plays it', () => {
+		const doc = withLane(song(), { param: 1 });
+		expect(settlingWrites(doc, program, patches).params.map((p) => p.param)).toEqual([9]);
+	});
+
+	it('leaves a global to a lane on any track', () => {
+		const doc = withLane(song(), { param: 9 });
+		expect(settlingWrites(doc, program, patches).params.map((p) => p.param)).toEqual([1]);
+	});
+
+	it('leaves an insert parameter to its lane, and no other insert\'s', () => {
+		const own = withLane(song(), { param: 4, target: { insert: 1 } });
+		expect(settlingWrites(own, program, patches).inserts).toEqual([]);
+		const other = withLane(song(), { param: 4, target: { insert: 2 } });
+		expect(settlingWrites(other, program, patches).inserts).toHaveLength(1);
+	});
+
+	it('takes back what a lane left, the moment the lane goes', () => {
+		const doc = withLane(song(), { target: { mix: 'fader', track: 1 } });
+		const gone = { ...doc, clips: doc.clips.map((clip) => ({ ...clip, automation: [] })) };
+		expect(registers(doc)).not.toContain(0);
+		expect(registers(gone)).toContain(0);
+	});
+
+	it('ignores a lane in a clip nothing plays', () => {
+		const doc = song();
+		doc.clips.push(addPoint(clipNamed('unused'), { param: 1 }, 0, 0));
+		expect(settlingWrites(doc, program, patches).params.map((p) => p.param)).toContain(1);
+	});
+
+	it('says nothing about a track or insert the image has no room for', () => {
+		const empty = { tracks: [], buses: [], inserts: [] };
+		expect(settlingWrites(song(), empty, patches)).toEqual({ mix: [], params: [], inserts: [] });
 	});
 });
 

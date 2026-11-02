@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import {
 		addNode,
+		addZone,
 		connect,
 		detailOf,
 		disconnect,
@@ -17,8 +18,12 @@
 		placed,
 		PORT_SPACING,
 		removeNode,
+		removeZone,
+		setField,
 		setLiteral,
 		setOption,
+		setZone,
+		zonesOf,
 		type CatalogEntry,
 		type GraphNode,
 		type LibraryPatch
@@ -300,9 +305,16 @@
 		commit({ ...laid, params: [...laid.params, param] });
 	}
 
+	// Twice the drawn size is about as small as a node can be and still be read.
+	const READABLE_WIDTH = 2000;
+
 	$effect(() => {
-		// The first view of a graph is all of it. Only once, or each edit would move the canvas.
-		untrack(fit);
+		// The first view of a graph is all of it, if that can be read, and otherwise where its signals start. Only once, or each
+		// edit would move the canvas.
+		untrack(() => {
+			fit();
+			if (view.width > READABLE_WIDTH) view = { ...view, width: READABLE_WIDTH, height: (READABLE_WIDTH * 560) / 1000 };
+		});
 	});
 </script>
 
@@ -319,7 +331,8 @@
 	{/if}
 	<button type="button" onclick={fit}>Fit</button>
 	<span class="muted">
-		{readonly ? '' : 'Drag from an output to an input to wire them.'} Green wires are audio, blue are read once a frame.
+		{readonly ? 'Drag the background to move around, and scroll to zoom.' : 'Drag from an output to an input to wire them.'}
+		Green wires are audio, blue are read once a frame.
 	</span>
 </div>
 
@@ -425,7 +438,47 @@
 					/>
 				</label>
 			{/if}
-			{#each optionsOf(chosen, catalog) as option (option.name)}
+			{#if chosen.type === 'sample' && chosen.mode === 'zones'}
+				<h4>Zones</h4>
+				{#each zonesOf(chosen) as zone, index}
+					{@const keys = zone.keys ?? [0, 127]}
+					{@const velocities = zone.velocities ?? [0, 127]}
+					<div class="zone" data-testid={`zone-${index}`}>
+						<select aria-label={`Zone ${index + 1} asset`} value={zone.asset} onchange={(e) => commit(setZone(laid, chosen.id, index, { asset: e.currentTarget.value }))}>
+							{#each assets as asset}<option value={asset.id}>{asset.name}</option>{/each}
+						</select>
+						<label>
+							keys
+							<input type="number" min="0" max="127" aria-label={`Zone ${index + 1} lowest key`} value={keys[0]} onchange={(e) => commit(setZone(laid, chosen.id, index, { keys: [Number(e.currentTarget.value), keys[1]] }))} />
+							<input type="number" min="0" max="127" aria-label={`Zone ${index + 1} highest key`} value={keys[1]} onchange={(e) => commit(setZone(laid, chosen.id, index, { keys: [keys[0], Number(e.currentTarget.value)] }))} />
+						</label>
+						<label>
+							velocity
+							<input type="number" min="0" max="127" aria-label={`Zone ${index + 1} lowest velocity`} value={velocities[0]} onchange={(e) => commit(setZone(laid, chosen.id, index, { velocities: [Number(e.currentTarget.value), velocities[1]] }))} />
+							<input type="number" min="0" max="127" aria-label={`Zone ${index + 1} highest velocity`} value={velocities[1]} onchange={(e) => commit(setZone(laid, chosen.id, index, { velocities: [velocities[0], Number(e.currentTarget.value)] }))} />
+						</label>
+						<label>
+							root
+							<input type="number" min="0" max="127" step="any" placeholder="asset's" aria-label={`Zone ${index + 1} root`} value={zone.root ?? ''} onchange={(e) => commit(setZone(laid, chosen.id, index, { root: e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value) }))} />
+						</label>
+						{#if !readonly}
+							<button type="button" onclick={() => commit(removeZone(laid, chosen.id, index))}>Remove zone</button>
+						{/if}
+					</div>
+				{/each}
+				{#if !readonly && assets.length}
+					<button type="button" onclick={() => commit(addZone(laid, chosen.id, assets[0].id))}>Add zone</button>
+				{/if}
+				<label>
+					reverse
+					<input type="checkbox" aria-label="reverse" checked={chosen.reverse === true} onchange={(e) => commit(setField(laid, chosen.id, 'reverse', e.currentTarget.checked || undefined))} />
+				</label>
+				<label>
+					tail
+					<input type="checkbox" aria-label="tail" checked={chosen.tail === true} onchange={(e) => commit(setField(laid, chosen.id, 'tail', e.currentTarget.checked || undefined))} />
+				</label>
+			{/if}
+			{#each optionsOf(chosen, catalog).filter((option) => !(chosen.mode === 'zones' && option.name === 'asset')) as option (option.name)}
 				<label>
 					{option.name}
 					{#if option.choices.length}
@@ -692,6 +745,23 @@
 		margin: 0 0 0.4rem;
 		padding: 0.3rem 0.4rem;
 		min-width: 0;
+	}
+	.zone {
+		border-left: 2px solid var(--line);
+		padding-left: 0.3rem;
+		margin-bottom: 0.4rem;
+	}
+	.zone select {
+		width: 100%;
+	}
+	.zone input {
+		width: 3.2rem;
+	}
+	.zone label {
+		justify-content: flex-start;
+	}
+	.inspector input[type='checkbox'] {
+		width: auto;
 	}
 	fieldset.bare {
 		border: 0;

@@ -249,6 +249,8 @@
 	}
 
 	onMount(() => {
+		// A whole clip if it fits, up to a size where a short one doesn't turn into a few very long notes.
+		beatWidth = Math.min(96, Math.max(16, (scroller.clientWidth - KEYS) / (clip.length / ppq + 1)));
 		const pitches = clip.notes.map((note) => note.note);
 		const middle = pitches.length ? (Math.min(...pitches) + Math.max(...pitches)) / 2 : 60;
 		scroller.scrollTop = rowOf(middle) - scroller.clientHeight / 2;
@@ -313,6 +315,7 @@
 			aria-label="Piano roll"
 			tabindex="0"
 			data-testid="roll"
+			data-per-tick={perTick}
 			onkeydown={keydown}
 		>
 			{#each { length: 128 }, row}

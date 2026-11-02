@@ -1,8 +1,9 @@
-# modsynth design, revision 9
+# modsynth design, revision 10
 
-Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 5. `docs/Format.md` is its specification,
-and where this document and that one differ, that one is right. This document replaces all earlier revisions, and everything
-needed from them is included here. Sections about later milestones are still proposals.
+Status: Milestones 1 and 2 are implemented, along with `snap` from Milestone 3, the compiler side of Milestone 4 and the harnesses of Milestone 7.
+The wire format is frozen at version 1, now at revision 5. `docs/Format.md` is its specification, and where this document and that one differ, that
+one is right. This document replaces all earlier revisions, and everything needed from them is included here. Sections about later milestones are
+still proposals. Section 24 lists what is agreed but not built, and what is still undecided.
 
 Evidence tags:
 - [measured]: run in a throwaway prototype, numbers quoted.
@@ -34,6 +35,10 @@ From the author:
 19. Patches are globally available. A compiled Program contains only the patches it actually uses.
 20. A set of Programs can be compiled together with one shared set of patches.
 21. Stereo is a compile-time feature. A mono-only embedded build excludes it.
+22. Behaviour is never conditioned on target. An engine plays an image exactly or refuses it, and not every program has to run on a device.
+    Cheaper, less precise features exist for embedded, and the full versions for desktop, but an author picks between them.
+23. Events are not tied to frame boundaries. Embedded can opt out, and this costs nothing at run time where it isn't used.
+24. A device receives the whole image over BLE or a serial link.
 
 ## 2. Pipeline
 
@@ -41,7 +46,7 @@ From the author:
         | compiler (C++, wasm in a browser worker for preview, wasm in Node for exports)
         | reads a target profile when compiling for hardware
     Image: Asset, Table, Patch and Program chunks, portable read-only bytes
-        | AudioWorklet message, file, or any byte stream to a device
+        | AudioWorklet message, file, or a BLE or serial link to a device
     Loader and validator: runs on every target, the trust boundary
         | binds the image to target-specific runtime memory at the run-time sample rate
     Engine: Synth<Config, Backend, Executor>: tracks, voices, interpreter, compiled mixer
@@ -94,10 +99,10 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
 - A Step writes only scalars of its own instance, and instances share no mutable state. Section 18 explains why, and the
   validator enforces it on every target.
 - Delay time is in seconds with a declared maximum, sized at bind time. Only feedback needs a delay of at least one frame.
-  Feed-forward delays are ordered write-first, so short Haas and flanger delays work. Sub-frame feedback, a step range run at a
-  smaller n, will arrive as new opcodes, which an older engine refuses cleanly. Nothing needed to be reserved for it.
+  Feed-forward delays are ordered write-first, so short Haas and flanger delays work. Sub-frame feedback, if it is wanted (open 10), would be a step
+  range run at a smaller n, arriving as new opcodes, which an older engine refuses cleanly. Nothing needed to be reserved for it.
 - An input read once a frame refuses audio, and that is a compile error. Reading one sample in a frame is right for an envelope and silently
-  wrong for anything above half the frame rate, 187.5 Hz at frame 128 and 375 Hz at 32: a 1 kHz modulator on a cutoff gave sidebands at +-125 Hz. Only a
+  wrong for anything above half the frame rate, 187.5 Hz at frame 128 and 750 Hz at 32: a 1 kHz modulator on a cutoff gave sidebands at +-125 Hz. Only a
   patch's author knows which case this is, so a `snap` node says so, and every wire has one rate. Env is audio, so a filter or pitch
   envelope goes through one. `Demo` and `AllOps` predate the rule, so `GoldenTest` adds their snaps to the JSON it compiles. A snap has its
   own place among the steps, which moved their bytes, and they render bit for bit as they did [measured]. It can also move a Noise step, whose seed
@@ -105,6 +110,11 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
   snaps, 2 did, and with noise taken out they too matched to the bit [measured].
 - The loader lowers wire Steps into a private decoded array, so run time never re-reads validated bytes.
 - Kernels are total: safe for every input value. Wrapped oscillators use u32 phase and power-of-two tables.
+- New ops are agreed and not built. One `Arg` kind takes audio or a scalar on a single input, for new ops only, rather than a twin op for each rate.
+  `OscMod` takes frequency, phase and sync, and its fourth input is feedback on a sine and width on a pulse, because a step has 4 inputs. `Math` has
+  min, max, abs, clip, floor, divide, compare and select. Table waveshaping is its own op, because it needs a table resource. An op's mode list can't
+  grow once it is on `main`, since `max_mode` sits in an append-only line, so its modes are settled before it merges. A graph selects a new op with an
+  explicit `"mode"`, as `Tone` and `Sample2` do, so a saved graph keeps its meaning.
 
 ## 6. Programs and timelines
 
@@ -136,6 +146,11 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
   in the frame it happens, so a tick-to-offset index will replace it when a real Program makes it too slow.
 - Events carry a sample offset, and Env honours gate changes at that offset. [measured: without this, 122 of 200 one-tick
   notes made no sound.]
+- Events are not tied to frame boundaries. A Program's notes already land on their samples, and `Tone` starts on its note's sample. Live notes and the
+  other oscillators do not yet, and a parameter changes only at the start of a frame. The finer forms must cost an embedded build nothing, so like
+  `channels` they are a compile-time choice, and a build without them has none of their code. The target rule means such a build can't round to the
+  frame instead: an image that needs them declares it, and a build without them refuses it. On the one kernel tried, writing it over a range fixed at
+  compile time to a whole frame gave identical Cortex-M4 assembly to today's [measured]. How far this goes is open 11.
 
 ## 7. Sample and asset playback
 
@@ -149,7 +164,7 @@ An Asset is a new chunk kind, separate from power-of-two wavetables.
   22 [model].
 - Native rate over engine rate enters the increment at run time, so an asset plays correctly at any engine rate.
 - A one-shot reaching its end marks that source done. A voice is free when its envelopes and sources are all done.
-- On a device, assets go straight into the chunk store and are not staged in RAM. They stay unreferenced until their
+- On a device, assets go straight to flash and are not staged in RAM. They stay unreferenced until their
   hash checks out, so a bad upload is still harmless. Hashing costs about 12 cycles per byte, or roughly 160 ms per MB at
   80 MHz [model]. It runs on receipt, not at every boot.
 - On wasm the fixed heap must hold assets, because memory growth stays off. Its size becomes a start-up setting. What a
@@ -203,8 +218,9 @@ fits.
 
 Frame size stays compile-time in an engine, and an image declares the size it was compiled for, because frame size changes sound: every
 golden with sound missed the −100 dB contract when rendered at 32 instead of 128 [measured]. An engine refuses an image of another size,
-so a project sounds the same wherever it plays. The default is 32. That is a 750 Hz control rate, a shortest graph feedback loop of 1500 Hz,
-at most 31 samples of parameter timing error, about 10% more CPU than 128 [model], and a quarter of the buffer RAM. Images from before
+so a project sounds the same wherever it plays. The default is 32, on firmware too. At 48 kHz that is a 1500 Hz control rate, which carries modulation
+up to 750 Hz, a shortest graph feedback loop of 1500 Hz, at most 31 samples of parameter timing error, about 10% more CPU than 128 [model], and a
+quarter of the buffer RAM. Images from before
 revision 3 declare nothing and mean 128, so they keep their sound and an engine at 128 still plays them. Desktop devices can use
 varying block sizes, so a host adapter reblocks through a FIFO. The browser's render quantum stays 128, so there 32 gains control rate
 but no latency, and the binding runs one engine at each size and renders whole quanta. Moving between them stops the sound, with no fade.
@@ -218,7 +234,7 @@ embedded. It adds one requirement.
 feature a target lacks is unavailable when compiling for it, so the compile fails, and the loader refusing is the backstop, because
 delivery is one-way. Cheaper, less precise features exist, such as `Tone` or `"mode": "naive"`, but an author picks them and they sound the
 same everywhere. Nothing is rounded, substituted or lowered by target. A mono build folds at run time, which is the one exception, and
-it is treated as an output format.
+it is treated as an output format, a position open 20 still has to confirm.
 
 **Target profile.** Revision 3 had devices report their state sizes, which cannot work without a link. Instead the
 firmware build generates a profile: sample rate, frame size, memory regions, supported opcodes, per-backend state sizes,
@@ -226,12 +242,19 @@ and a per-op cost table. The sizes come from the cross-compiled binary, so they 
 compiler uses the profile to check a project against that device while offline. The GUI shows fit and CPU, and previews
 with the device's voice limit, so stealing sounds the same as on hardware.
 
-**Delivery.** The library exposes `Loader::feed(span)`, and any byte stream can call it: UART, USB, SD or file. Framing
-and retransmission belong to the transport. A small host tool sends an exported image file.
+**Delivery.** A device receives the whole image over BLE or a serial link, and a small host tool sends an exported image file. The format needs no
+change for this. It uses byte offsets and no pointers, its manifest comes first, so a wrong revision or frame size can be refused from the first
+packet, and each chunk's hash and the image's exact size catch damage. Framing, retransmission and acknowledgement belong to the transport, because
+a hash only finds damage once a whole chunk has arrived. They stay inside the transport, so a sender still learns nothing about a device, and delivery
+is one-way as far as the image goes.
 
-**Storage.** A device keeps chunks in a log-structured store with a commit record written last, so losing power leaves
-the previous set valid. The L476's two read-while-write flash banks could allow writing while running, but at first
-audio stops for an update. Compaction starts as "erase and re-send".
+`Loader::begin` takes a complete image as one 8-aligned span, which suits this: the receiver writes the image to memory-mapped flash, then loads it from
+there. Its bytes are used in place, so they have to outlive every generation that plays them. A `Loader::feed(span)` taking bytes as they arrive was
+proposed here earlier and doesn't exist. Only a store that places chunks separately would need it.
+
+**Storage.** How a device stores what it receives is open 22. Whatever it stores, a failed transfer or a loss of power must leave the previous image
+playable. Because bytes are used in place, writing over the only copy would break that. The L476's two read-while-write flash banks could allow writing
+while running, but at first audio stops for an update.
 
 Milestone 1 needs none of this, because the image is linked into the firmware.
 
@@ -295,7 +318,8 @@ index. One path serves every case.
 - Scalars are zeroed at voice start and def-use is validated. [measured: one image gave 0.0 or 0.75 by old memory.]
 - Live events are validated at queue ingress and fuzzed. [measured: `note_on(200, ...)` crashed.]
 - Table contents are checked for non-finite values, sliced.
-- Each voice has an output guard, because about 14% of accepted fuzz images produced NaN or infinity [measured].
+- Each voice has an output guard, because about 14% of accepted fuzz images produced NaN or infinity [measured]. A guard trips only on values that
+  aren't finite, so a finite blow-up still reaches the output. Open 9 covers that.
 - Delay lines clear lazily, because a hostile image took 5.8 ms of a 2.67 ms frame [measured]. A per-op cost table sets a
   compile-time and load-time limit alongside the memory limit.
 - Denormals: FTZ on native, explicit state flushing on wasm, and FZ left to measurement on Cortex-M.
@@ -394,7 +418,8 @@ Cortex-M7 parts are not modelled, because the M4 table does not apply to a dual-
 
 RAM limits reverb before CPU does. Voice state is about 270 bytes per voice, but Freeverb-sized lines take 55 KB mono at
 48 kHz in f32. Stereo f32 will not fit an L476 alongside anything else. Mono i16 takes 27 KB, or mono f32 at 32 kHz takes
-37 KB. Delay-line sample type is therefore backend state, not part of the format.
+37 KB. Lines are f32 today. An i16 line sounds different, so by section 10's rule it can't be a backend's choice: it would be an author's, through a new
+op or mode.
 
 ## 16. Testing without a board
 
@@ -662,8 +687,8 @@ requests run CI, so checks run locally before a push.
    graph nodes.
 4. **DAW views.** Timeline, piano roll, mixer with per-track scopes, full Program compiler, asset import. Asset import writes only `Sample2`
    zones, so a saved instrument has one shape and never needs migrating.
-5. **Device delivery.** Board bring-up with real audio output, target profile generation, chunk store on flash,
-   `Loader::feed`, host send tool.
+5. **Device delivery.** Board bring-up with real audio output, target profile generation, receiving a whole image over BLE or serial into flash,
+   storage per open 22, host send tool.
 6. **Python engine binding and offline render.** `PoolExecutor`, `MODSYNTH_PARALLEL`, and a ThreadSanitizer CI job.
 7. **Measurement and optimization.** Board calibration of the cost model, voice counts, op cost table and limits,
    instruction-count CI gate, size budget, kernel tuning from section 15, browser load and heap costs, audio-thread
@@ -726,3 +751,42 @@ aimed at forbidden banks, a size mutator, and an independent recomputation of de
 size. A recipe found on Cortex-M4, `0:3219687050,256226439`, failed the same way when replayed on wasm32.
 
 CI runs each target for a short time on a new seed. That is a smoke test, and the soak figures in the pull request are what a long run found.
+
+## 24. Agreed work and open decisions
+
+Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in section 5, 5 and 6 in section 6, 7 in section 7 and 8 in section 9. Opens
+17 and 18 went with the target rule, so there is no per-tier golden contract and no patch form chosen by target.
+
+**Agreed, not built.**
+
+- `Arg`, `OscMod`, `Math` and table waveshaping, section 5.
+- Events off the frame boundary, section 6.
+- Whole-image delivery to a device, section 10.
+
+**Where the code falls short of this document.** The document is right in each case, and the code hasn't caught up.
+
+| Section | This document says | The code today |
+|---|---|---|
+| 6 | The stream head restores everything a lane moved | Only lanes with a target. A lane with none keeps its last value on a loop or locate. 6 of the 59 recipes have one that starts after tick 0 or ramps at it |
+| 6 | One track owns a target | Also only lanes with a target, so two tracks can both automate a global parameter |
+| 11 | Parameters carry by id | Track and voice values do. A live global or mix register returns to its initial value at a swap |
+
+**Still undecided.** A recommendation here is only that.
+
+| # | Question | Position so far |
+|---|---|---|
+| 9 | What stops a finite blow-up reaching speakers? | A direction, not final: a volume limiter on desktop, and on embedded a render that validates the image when it is built on a desktop. To keep the target rule, the limiter would sit in the host after the engine, the validation ceiling at or below its threshold, and the NaN guards stay on every target. |
+| 10 | Should graphs get feedback shorter than a frame? | Recommended no. Keep it inside ops such as `OscMod`. Frame 32 already raises the limit to 1500 Hz. |
+| 11 | How far do events go off the frame boundary? | Recommended: live notes on their sample, and new ops that start on it. Changing a parameter within a frame would mean splitting frames, and frame 32 may make that unnecessary. |
+| 12 | MPE, polyphonic aftertouch and per-note bend? | Nothing prevents them. A voice would remember its NoteOn's channel, and events would address that. Held voices would need per-voice smoothing. Recommended: leave out unless MPE is a goal. |
+| 13 | Microtuning? | Recommended later. It needs a key-map Table and a new op. |
+| 14 | Envelope curves and looping envelopes? | Recommended later, as an `Env2` with a Table, because curves don't fit in 4 inputs. |
+| 15 | A live arpeggiator? | Recommended: leave it to the host, so the engine holds no keys. |
+| 16 | Clap, wavetable scanning, granular and shared LFO shapes? | Recommended: keep the workarounds until a real patch needs more. |
+| 19 | When does the compiler check a target profile, and what is unavailable on embedded? | Nothing is unavailable today. Recommended: add the check in Milestone 5, and keep planned ops on embedded unless a measured budget fails. |
+| 20 | Are mono builds an exception to the target rule? | Recommended yes, as section 10 has it, with channel count as an output format. Folding was chosen before the rule existed and hasn't been confirmed since. |
+| 21 | Does sample rate need the same treatment as frame size? | Recommended no: leave it at run time and document it. Frequencies stay correct, and only frame-timed behaviour shifts, such as control rate and the shortest feedback loop. |
+| 22 | How does a device store what it receives? | Recommended: two flash slots. Write the inactive one, verify and load it, then switch. That halves the roughly 900 KB spare on an L476, which still holds the largest recipe at 263 KB. The log-structured chunk store proposed earlier, with a commit record written last, is only needed for thin images, and 54 of the 59 recipes are 10.4 KB or less. |
+| 23 | What authenticates an image over BLE? | A hash doesn't, and anyone in range can connect. Validation protects memory, but a valid image can still be very loud or overload the CPU. Recommended: BLE bonding, or signed images. |
+| 24 | Is a set of embedded-friendly recipes wanted? | Floated, not decided. 8 of the 59 recipes don't fit an L476 today, per `docs/Benchmarks.md`. `Tone` alone doesn't rescue them, so a set would also need fewer voices or partials. |
+| 25 | Does CMSIS-DSP save enough on this chip? | Section 15 models 10.8% for one voice. Measured over whole recipes the median saving at peak is under 1% of instructions. It stays a supported backend, and the answer needs cycles on a board. |

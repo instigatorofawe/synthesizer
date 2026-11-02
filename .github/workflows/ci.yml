@@ -154,8 +154,26 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3
       - run: uv build
-      - name: Import the abi3 wheel on the oldest and newest supported Python
+      - name: Test the abi3 wheel on the oldest and newest supported Python
         run: |
           for python in 3.12 3.15; do
-            uv run --isolated --no-project --python "$python" --with dist/*.whl python -c "import modsynth"
+            uv run --isolated --no-project --python "$python" --with dist/*.whl --with pytest pytest -q bindings/PythonTest.py
           done
+
+  # Section 18's PoolExecutor on real threads, under ThreadSanitizer. The native jobs run the same tests without it.
+  tsan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # A broken barrier hangs rather than fails
+    env:
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v7
+      # Newer kernels randomise mappings more than older ThreadSanitizer runtimes can place their shadow around
+      - run: sudo sysctl vm.mmap_rnd_bits=28
+      - run: >-
+          cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_FLAGS=-fsanitize=thread
+          -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread -DMODSYNTH_INSTALL=OFF
+      - run: cmake --build build --target ParallelTest
+      - run: build/ParallelTest
+        env:
+          TSAN_OPTIONS: halt_on_error=1

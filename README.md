@@ -12,7 +12,7 @@ checked against committed renders in [golden](golden).
 | Path | What it is |
 |---|---|
 | `include/modsynth` | The header-only engine and, in `Compiler.hpp`, the authoring compiler. Tests sit beside what they test, as `FooTest.cpp`. |
-| `bindings` | wasm and Python bindings |
+| `bindings` | wasm and Python bindings, and the Python tests in `PythonTest.py` |
 | `firmware` | Cortex-M4 firmware, run on QEMU's STM32L475 model |
 | `fuzz` | The coverage-guided fuzzer, one source on desktop, wasm32 and Cortex-M4 |
 | `golden` | Images from the freeze and their renders. They never change. |
@@ -27,7 +27,26 @@ checked against committed renders in [golden](golden).
     cmake --build build/native
     ctest --test-dir build/native
 
-Every `*Test.cpp` is found by a glob and becomes its own GoogleTest target.
+Every `*Test.cpp` is found by a glob and becomes its own GoogleTest target. Native builds also have `modsynth::parallel`, which
+renders a frame's tracks on a thread pool with the same output, and `ParallelTest` holds it to that. To run it under ThreadSanitizer, as CI does:
+
+    cmake -B build/tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_FLAGS=-fsanitize=thread -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
+    cmake --build build/tsan --target ParallelTest && build/tsan/ParallelTest
+
+## Python
+
+    uv build
+    uv run --isolated --no-project --with dist/*.whl --with pytest pytest bindings/PythonTest.py
+
+The module compiles a request and renders it offline to NumPy:
+
+    import json, modsynth
+    image = modsynth.compile_image(json.load(open("examples/Recipes/DrumLoop.json")))
+    audio = modsynth.render(image)                      # float32, (frames, channels), 48 kHz, to the end and its tail
+    audio = modsynth.render(image, 30.0, workers=4)     # the same bits, with the tracks on four threads
+
+`modsynth.Engine` plays a Program frame by frame and takes notes, parameters and transport events, as the browser does. A render releases
+the GIL, so engines on separate threads render at once.
 
 ## Web
 

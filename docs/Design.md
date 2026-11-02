@@ -1,6 +1,6 @@
-# modsynth design, revision 12
+# modsynth design, revision 13
 
-Status: Milestones 1 to 4 are implemented, along with the harnesses of Milestone 7.
+Status: Milestones 1 to 4 and 6 are implemented, along with the harnesses of Milestone 7. Milestone 5 waits for the board.
 The wire format is frozen at version 1, now at revision 6. `docs/Format.md` is its specification, and where this document and that one differ, that
 one is right. This document replaces all earlier revisions, and everything needed from them is included here. Sections about later milestones are
 still proposals. Section 24 lists what is agreed but not built, and what is still undecided.
@@ -529,7 +529,8 @@ or synchronisation is compiled.
 **What the executor owns.** `E::max_workers` sizes per-worker scratch, so serial builds have one array. `E::Plan` is
 whatever it needs to schedule: a task count for serial, and dependency tables for the pool. Those tables and their setup
 exist only when `E::uses_edges` is true, and they are built during the sliced load, so `bytes_required()` charges for them
-only on parallel builds. Parallel builds also align instance state to a cache line, while serial builds stay packed.
+only on parallel builds. Parallel builds also start every array on its own cache line, while serial builds stay packed. That holds only if
+the host's memory is aligned to 64 bytes, which the Python binding's is.
 
 **A frame has two phases.**
 
@@ -539,8 +540,17 @@ only on parallel builds. Parallel builds also align instance state to a cache li
    the mixer's sort.
 
 Serial builds run the same two phases, so splitting the frame is not a parallel-only code path. With `PoolExecutor`, the
-calling thread also works rather than only waiting, tasks are claimed with atomic counters and no locks, and no worker changes its floating-point
-state. Flush-to-zero is per-thread, so a mismatch would change the output depending on which thread ran a task, and section 14 has no need for it.
+calling thread also works rather than only waiting, and tasks are claimed with atomic counters and no locks. Flush-to-zero and rounding are
+per thread, so a worker in another mode than the caller would change the output depending on which thread ran a task. Each worker therefore
+takes the caller's floating-point environment for every frame. Nothing sets flush-to-zero, as section 14 says, so this only matters to a host
+that set it itself.
+
+**The pool.** `ThreadPool` holds the threads, and `PoolExecutor<MaxWorkers>` points at one, so two engines can share a pool and their frames
+take turns. `MaxWorkers`, 16 by default, sizes per-worker scratch. Each frame publishes the tasks with no dependencies, a worker claims ready
+slots in order and runs them, and the task that ends a dependency publishes the task waiting on it. The frame counter and how many threads take
+part share one atomic word, so a thread late to one frame can't take another's count, and the frame ends when every thread taking part has checked
+in. Threads spin for 200 µs between frames and then sleep. A Schedule that is one chain, as a one-track Program is, runs on the calling thread,
+because nothing in it can run alongside anything else, and so do frames for which a pool has one worker.
 
 **Rules the format keeps, enforced since the Milestone 2 freeze.** They cost nothing on embedded, but relaxing them later would
 be impossible, because images relying on the looser rules would then exist.
@@ -555,9 +565,11 @@ be impossible, because images relying on the looser rules would then exist.
   this structural: every mixer step overwrites its destination, so the only sums are inside one step.
 - Output guards and counters are per instance, and the control phase collects them.
 
-**Bus registers.** Allocating registers by last use saves serial RAM but hides parallelism: two tracks that reuse one
-register look dependent, and all tracks form a chain. Parallel builds therefore rename bus registers at load, following true
-data flow, as part of building the Plan. The image and serial builds do not change. This paragraph is [not prototyped].
+**Bus registers.** Allocating registers by last use saves serial RAM and can hide parallelism, since two tasks that reuse a register look
+dependent. Renaming them at load was proposed here, and measured before it was built: on all 61 recipes the longest chain of tasks is the same
+with and without it [measured]. The compiler places tracks before buses, so tracks get registers before any is freed, unless a sidechain from
+a bus makes a track wait for it. Reuse falls on buses that could have run side by side, and no recipe has two with inserts. It isn't built, and waits for a Program it would help. A hostile image
+can also give two Gathers one range of inputs, so a renaming has to be kept per step and not per input.
 
 **Output does not depend on worker count.** A given build produces identical bits with any number of workers, and with
 `SerialExecutor`. Across targets, the tolerance in section 16 still applies.
@@ -574,7 +586,18 @@ data flow, as part of building the Plan. The image and serial builds do not chan
 - With a Step deliberately writing a shared global scalar, the shuffled executor changed the output on one thread, and
   pool output varied with thread count, with ThreadSanitizer reporting the race. This is what the first rule above prevents.
 
-No speedup or worst-frame figure has been measured. Those wait for Milestone 7.
+First figures from the real engine [measured], on an M4 Pro with 8 performance cores, through the Python binding, which is the first user:
+
+| Program | Frame | 2 workers | 4 workers | 8 workers |
+|---|---|---|---|---|
+| 8 tracks, each the `AdditiveBell` recipe | 32 | 1.80x | 1.91x | 2.42x |
+| The same | 128 | 1.90x | 2.80x | 3.20x |
+| 12 tracks from the demo, into 2 reverb buses | 32 | 1.40x | 1.12x | 1.03x |
+| The same | 128 | 1.54x | 1.71x | 1.98x |
+
+The pool costs about 1.3 µs a frame with 8 workers and 15 tasks that do nothing, and 0.3 µs with 2, so it pays only where tasks are long. The
+12-track case shows that limit. Serially its frame at 32 takes 8.0 µs, of which the reverbs take 0.55 µs, so each track is about 0.6 µs, and
+at that size more workers add more cost than they save. Worst frames and real-time use still wait for Milestone 7.
 
 **Checks in CI.**
 
@@ -590,7 +613,9 @@ No speedup or worst-frame figure has been measured. Those wait for Milestone 7.
 - The browser stays serial. Wasm threads need SharedArrayBuffer and cross-origin isolation, which section 12 rejects, so
   GUI playback does not gain from this work.
 - The first user is offline render through Python, in Milestone 6. It has no deadline, so throughput is the only goal. The
-  binding releases the GIL during render, and workers never touch Python objects.
+  binding releases the GIL during render, and workers never touch Python objects. Separate songs on separate Python threads scale further
+  than workers in one engine, because a song splits only as far as its tracks do: `AdditiveBell` looped on 2, 4 and 8 threads gave 1.92, 3.79
+  and 7.35 times the throughput of one [measured, same machine].
 - Real-time use is not covered. No milestone builds a native audio host, and it needs worker priority (on macOS, joining the
   audio workgroup) and worst-frame measurement. A worker preempted mid-task stalls the calling thread until it resumes, so
   nothing is promised until that is measured.
@@ -743,8 +768,10 @@ requests run CI, so checks run locally before a push. One that changes only Mark
 4. **DAW views.** Timeline, piano roll, mixer with per-track scopes, full Program compiler, asset import. Asset import writes only `Sample2`
    zones, so a saved instrument has one shape and never needs migrating. Recipes are shown in these views, read only.
 5. **Device delivery.** Board bring-up with real audio output, target profile generation, receiving a whole image over BLE or serial into flash,
-   storage per open 22, host send tool.
-6. **Python engine binding and offline render.** `PoolExecutor`, `MODSYNTH_PARALLEL`, and a ThreadSanitizer CI job.
+   storage per open 22, host send tool. The board is a NUCLEO-L476RG, and serial comes first.
+6. **Python engine binding and offline render.** `PoolExecutor`, `MODSYNTH_PARALLEL`, and a ThreadSanitizer CI job. The module compiles a request
+   and plays any image, at every frame size from 8 to 1024, mono or stereo, either frame by frame with live events or to the end of its Program
+   and its tail. `PythonTest.py` holds it to the golden renders and to the same bits on any number of workers, and `Listen.py` now uses it.
 7. **Measurement and optimization.** Board calibration of the cost model, voice counts, op cost table and limits,
    instruction-count CI gate, size budget, kernel tuning from section 15, browser load and heap costs, audio-thread
    allocation from the scope, and parallel speedup. Accelerate and Highway follow only if a measured budget fails.

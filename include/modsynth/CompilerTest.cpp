@@ -131,6 +131,172 @@ TEST(CompilePatch, ASnapNodeLetsAudioThrough) {
     }
 }
 
+namespace {
+
+json voice_of(json extra_nodes, json extra_edges) {
+    json graph = json::parse(R"({
+      "nodes": [{"id": 1, "type": "note"}, {"id": 2, "type": "out"}, {"id": 3, "type": "noise"}],
+      "edges": [{"from": 3, "to": 2, "input": "l"}]})");
+    for (const json& n : extra_nodes) graph["nodes"].push_back(n);
+    for (const json& e : extra_edges) graph["edges"].push_back(e);
+    return graph;
+}
+
+std::vector<u8> ops_of(const json& graph, const char* where = "p") {
+    const auto patch = compile_patch(graph, where);
+    PatchView v;
+    EXPECT_TRUE(parse_patch({patch.chunk.payload.data(), patch.chunk.payload.size()}, v));
+    std::vector<u8> ops;
+    for (u32 i = 0; i < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++i) ops.push_back(v.step(i).op);
+    return ops;
+}
+
+bool has_op(const std::vector<u8>& ops, Op op) {
+    return std::find(ops.begin(), ops.end(), static_cast<u8>(op)) != ops.end();
+}
+
+std::string error_of(const json& graph) {
+    try {
+        compile_patch(graph, "p");
+    } catch (const CompileError& e) {
+        return e.what();
+    }
+    return "";
+}
+
+}  // namespace
+
+TEST(CompilePatch, AnOscInModModeTakesAudioOnEveryInput) {
+    for (const char* input : {"freq", "phase", "sync", "feedback"}) {
+        SCOPED_TRACE(input);
+        const json graph = voice_of(
+            json::array({{{"id", 4}, {"type", "osc"}, {"mode", "mod"}}}),
+            json::array({{{"from", 3}, {"to", 4}, {"input", input}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+        EXPECT_TRUE(has_op(ops_of(graph), Op::OscMod));
+    }
+    const json pulse =
+        voice_of(json::array({{{"id", 4}, {"type", "osc"}, {"wave", "square"}, {"mode", "mod"}}}),
+                 json::array({{{"from", 3}, {"to", 4}, {"input", "width"}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+    EXPECT_TRUE(has_op(ops_of(pulse), Op::OscMod));
+}
+
+TEST(CompilePatch, EveryWaveAndFormReachesItsMode) {
+    const struct {
+        const char* wave;
+        const char* mode;
+        OscModMode expected;
+    } forms[] = {
+        {"sine", "mod", OscModMode::Sine},
+        {"triangle", "mod", OscModMode::Triangle},
+        {"saw", "mod", OscModMode::Saw},
+        {"square", "mod", OscModMode::Pulse},
+        {"saw", "mod-naive", OscModMode::NaiveSaw},
+        {"square", "mod-naive", OscModMode::NaivePulse},
+    };
+    for (const auto& f : forms) {
+        SCOPED_TRACE(std::string(f.wave) + " " + f.mode);
+        const json graph = voice_of(json::array({{{"id", 4}, {"type", "osc"}, {"wave", f.wave}, {"mode", f.mode}}}),
+                                    json::array({{{"from", 4}, {"to", 2}, {"input", "r"}}}));
+        const auto patch = compile_patch(graph, "p");
+        PatchView v;
+        ASSERT_TRUE(parse_patch({patch.chunk.payload.data(), patch.chunk.payload.size()}, v));
+        bool found = false;
+        for (u32 i = 0; i < v.h.voice_steps; ++i) {
+            const WireStep s = v.step(v.h.control_steps + i);
+            if (s.op == static_cast<u8>(Op::OscMod)) {
+                found = true;
+                EXPECT_EQ(s.mode, static_cast<u8>(f.expected));
+            }
+        }
+        EXPECT_TRUE(found);
+    }
+}
+
+TEST(CompilePatch, AnOscNotInModModeRefusesItsInputs) {
+    for (const char* input : {"phase", "sync", "feedback"}) {
+        SCOPED_TRACE(input);
+        const json graph = voice_of(
+            json::array({{{"id", 4}, {"type", "osc"}}}),
+            json::array({{{"from", 3}, {"to", 4}, {"input", input}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+        EXPECT_EQ(error_of(graph), std::string("only an osc in mod mode has ") + input);
+    }
+}
+
+TEST(CompilePatch, AnOscInModModeRefusesWhatItsWaveLacks) {
+    const auto with = [](const char* wave, const char* mode, const char* input) {
+        json edges = json::array({{{"from", 4}, {"to", 2}, {"input", "r"}}});
+        if (input[0] != 0) edges.push_back({{"from", 3}, {"to", 4}, {"input", input}});
+        return voice_of(json::array({{{"id", 4}, {"type", "osc"}, {"wave", wave}, {"mode", mode}}}), edges);
+    };
+    EXPECT_EQ(error_of(with("saw", "mod", "feedback")), "only sine has feedback");
+    EXPECT_EQ(error_of(with("saw", "mod", "width")), "only square has a width");
+    EXPECT_EQ(error_of(with("sine", "mod-naive", "")), "only saw and square have a naive form");
+    EXPECT_EQ(error_of(with("triangle", "mod-naive", "")), "only saw and square have a naive form");
+    EXPECT_EQ(error_of(with("sine", "fm", "")), "unknown osc mode 'fm'");
+    EXPECT_EQ(error_of(with("noise", "mod", "")), "unknown wave 'noise'");
+}
+
+TEST(CompilePatch, MathRunsAtTheRateOfItsInputs) {
+    const json control =
+        voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", "max"}}, {{"id", 5}, {"type", "osc"}}}),
+                 json::array({{{"from", 1}, {"port", "velocity"}, {"to", 4}, {"input", "a"}},
+                              {{"from", 4}, {"to", 5}, {"input", "freq"}},
+                              {{"from", 5}, {"to", 2}, {"input", "r"}}}));
+    const auto scalar = ops_of(control);
+    EXPECT_TRUE(has_op(scalar, Op::KMath));  // So it can drive an input read once a frame with no snap
+    EXPECT_FALSE(has_op(scalar, Op::Math));
+
+    const json audio =
+        voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", "max"}}, {{"id", 5}, {"type", "osc"}}}),
+                 json::array({{{"from", 3}, {"to", 4}, {"input", "a"}},
+                              {{"from", 4}, {"to", 5}, {"input", "freq"}},
+                              {{"from", 5}, {"to", 2}, {"input", "r"}}}));
+    EXPECT_NE(error_of(audio).find("put a snap node on the wire"), std::string::npos);
+}
+
+TEST(CompilePatch, MathRefusesAWireOnAnInputItsModeDoesNotRead) {
+    for (const char* mode : {"abs", "floor"}) {
+        const json graph =
+            voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", mode}}}),
+                     json::array({{{"from", 3}, {"to", 4}, {"input", "b"}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+        EXPECT_EQ(error_of(graph), std::string(mode) + " has no input 'b'");
+    }
+    const json graph =
+        voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", "min"}}}),
+                 json::array({{{"from", 3}, {"to", 4}, {"input", "c"}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+    EXPECT_EQ(error_of(graph), "min has no input 'c'");
+}
+
+TEST(CompilePatch, MathRefusesAModeItDoesNotHave) {
+    const json graph = voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", "tanh"}}}),
+                                json::array({{{"from", 4}, {"to", 2}, {"input", "r"}}}));
+    EXPECT_EQ(error_of(graph), "unknown math mode 'tanh'");
+}
+
+TEST(CompilePatch, ACurveIsAPowerOfTwoPlusOnePoints) {
+    const auto with = [](json curve) {
+        return voice_of(json::array({{{"id", 4}, {"type", "shape"}, {"curve", std::move(curve)}}}),
+                        json::array({{{"from", 3}, {"to", 4}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+    };
+    EXPECT_TRUE(has_op(ops_of(with(json::array({-1.0, 0.0, 1.0}))), Op::Shape));
+    EXPECT_TRUE(has_op(ops_of(with(json::array({-1.0, -0.5, 0.0, 0.5, 1.0}))), Op::Shape));
+    for (const json& bad : {json::array(), json::array({1.0, 2.0}), json::array({1.0, 2.0, 3.0, 4.0})}) {
+        EXPECT_NE(error_of(with(bad)).find("power of two plus one"), std::string::npos) << bad;
+    }
+}
+
+TEST(CompilePatch, ACurvesPointsReachTheHash) {
+    const auto hash = [](double middle) {
+        return compile_patch(
+                   voice_of(json::array({{{"id", 4}, {"type", "shape"}, {"curve", {-1.0, middle, 1.0}}}}),
+                            json::array({{{"from", 3}, {"to", 4}}, {{"from", 4}, {"to", 2}, {"input", "r"}}})),
+                   "p")
+            .resources.at(0)
+            .hash;
+    };
+    EXPECT_NE(hash(0.0), hash(0.1));
+}
+
 TEST(CompilePatch, AnEnvelopeIsAudio) {
     const json direct = json::parse(R"({
       "nodes": [{"id": 1, "type": "env"}, {"id": 2, "type": "biquad"}, {"id": 3, "type": "out"}],
@@ -983,4 +1149,364 @@ TEST(Sample2, ARootDefaultsToTheAssetsAndRowsPadToAPowerOfTwo) {
         EXPECT_EQ(field(3, kZoneHighKey), 0.0f);
     }
     EXPECT_TRUE(found);
+}
+
+namespace {
+
+// A saw through a filter: what a subpatch is for. Its inlet cutoff sets the filter, and it has an outlet as well as
+// out.
+json filter_voice() {
+    return json::parse(R"({
+      "nodes": [
+        {"id": 1, "type": "inlet", "name": "pitch", "default": 440},
+        {"id": 2, "type": "inlet", "name": "cutoff", "default": 800},
+        {"id": 3, "type": "osc", "wave": "saw"},
+        {"id": 4, "type": "biquad"},
+        {"id": 5, "type": "out"},
+        {"id": 6, "type": "outlet", "name": "raw"}
+      ],
+      "edges": [
+        {"from": 1, "to": 3, "input": "freq"},
+        {"from": 3, "to": 4, "input": "in"},
+        {"from": 2, "to": 4, "input": "cutoff"},
+        {"from": 4, "to": 5, "input": "l"},
+        {"from": 3, "to": 6, "input": "in"}
+      ]})");
+}
+
+// The same voice by hand, so a subpatch can be heard against what it should have been.
+json filter_voice_inline() {
+    return json::parse(R"({
+      "nodes": [
+        {"id": 1, "type": "note"}, {"id": 2, "type": "mtof"}, {"id": 3, "type": "env"},
+        {"id": 4, "type": "osc", "wave": "saw"}, {"id": 5, "type": "biquad", "inputs": {"cutoff": 1200}},
+        {"id": 6, "type": "mul"}, {"id": 7, "type": "out"}
+      ],
+      "edges": [
+        {"from": 1, "port": "pitch", "to": 2, "input": "in"},
+        {"from": 2, "to": 4, "input": "freq"},
+        {"from": 4, "to": 5, "input": "in"},
+        {"from": 5, "to": 6, "input": "a"},
+        {"from": 3, "to": 6, "input": "b"},
+        {"from": 6, "to": 7, "input": "l"}
+      ]})");
+}
+
+json filter_voice_user() {
+    return json::parse(R"({
+      "nodes": [
+        {"id": 1, "type": "note"}, {"id": 2, "type": "mtof"}, {"id": 3, "type": "env"},
+        {"id": 4, "type": "subpatch", "patch": "voice", "inputs": {"cutoff": 1200}},
+        {"id": 6, "type": "mul"}, {"id": 7, "type": "out"}
+      ],
+      "edges": [
+        {"from": 1, "port": "pitch", "to": 2, "input": "in"},
+        {"from": 2, "to": 4, "input": "pitch"},
+        {"from": 4, "port": "l", "to": 6, "input": "a"},
+        {"from": 3, "to": 6, "input": "b"},
+        {"from": 6, "to": 7, "input": "l"}
+      ]})");
+}
+
+json library_request(json patches, const char* played = "user") {
+    json r;
+    r["patches"] = json::object();
+    for (auto& [id, graph] : patches.items()) r["patches"][id] = {{"name", id}, {"graph", graph}};
+    r["programs"] = json::array({program("p", one_note_timeline(played))});
+    return r;
+}
+
+std::string subpatch_error(json patches, const char* played = "user") {
+    try {
+        (void)compile_image(library_request(std::move(patches), played));
+    } catch (const CompileError& e) {
+        return e.what();
+    }
+    return "";
+}
+
+std::vector<float> heard(const json& request) {
+    Rig<kStereo> rig(compile_image(request).image);
+    Event play{};
+    play.kind = EventKind::Play;
+    EXPECT_TRUE(rig.engine.send(play));
+    return render_stereo(rig, 40);
+}
+
+}  // namespace
+
+TEST(Subpatch, SoundsLikeTheSameNodesInline) {
+    const auto by_hand = heard(library_request({{"user", filter_voice_inline()}}));
+    const auto expanded = heard(library_request({{"user", filter_voice_user()}, {"voice", filter_voice()}}));
+    ASSERT_GT(*std::max_element(by_hand.begin(), by_hand.end()), 0.01f);
+    EXPECT_EQ(by_hand, expanded);
+}
+
+TEST(Subpatch, EntersAnImageOnlyInsideWhatUsesIt) {
+    const auto result = compile_image(library_request({{"user", filter_voice_user()}, {"voice", filter_voice()}}));
+    EXPECT_EQ(count_kind(result.report, "patch"), 1);
+    EXPECT_EQ(result.report.at("compiled_patches"), 1);
+}
+
+TEST(Subpatch, IsTheSameBytesInAnyNodeOrder) {
+    const json request = library_request({{"user", filter_voice_user()}, {"voice", filter_voice()}});
+    const auto base = compile_image(request).image;
+    std::mt19937 random(7);
+    for (int i = 0; i < 20; ++i) {
+        json shuffled = request;
+        for (const char* id : {"user", "voice"}) {
+            auto& nodes = shuffled["patches"][id]["graph"]["nodes"];
+            auto& edges = shuffled["patches"][id]["graph"]["edges"];
+            std::shuffle(nodes.begin(), nodes.end(), random);
+            std::shuffle(edges.begin(), edges.end(), random);
+        }
+        EXPECT_EQ(compile_image(shuffled).image, base);
+    }
+}
+
+// A state id carries a voice across a live swap, so it mustn't move because something else in the graph did.
+TEST(Subpatch, AnEditElsewhereLeavesItsStateIdsAlone) {
+    const auto state_ids = [](const json& request) {
+        const auto result = compile_image(request);
+        std::map<u8, std::set<u32>> ids;
+        LoadedImage loaded(result.image);
+        for (u32 i = 0; i < loaded.table.size(); ++i) {
+            const ChunkRef& c = loaded.storage[i];
+            if (c.kind != static_cast<u8>(ChunkKind::Patch)) continue;
+            PatchView v;
+            EXPECT_TRUE(parse_patch({c.data, c.size}, v));
+            for (u32 s = 0; s < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++s) {
+                if (v.step(s).state_id != 0) ids[v.step(s).op].insert(v.step(s).state_id);
+            }
+        }
+        return ids;
+    };
+    json request = library_request({{"user", filter_voice_user()}, {"voice", filter_voice()}});
+    const auto before = state_ids(request);
+    request["patches"]["user"]["graph"]["nodes"].push_back({{"id", 50}, {"type", "noise"}});
+    request["patches"]["user"]["graph"]["nodes"].push_back({{"id", 51}, {"type", "add"}});
+    auto& edges = request["patches"]["user"]["graph"]["edges"];
+    edges.back()["from"] = 51;
+    edges.push_back({{"from", 50}, {"to", 51}, {"input", "a"}});
+    edges.push_back({{"from", 6}, {"to", 51}, {"input", "b"}});
+    const auto after = state_ids(request);
+    EXPECT_EQ(before.at(static_cast<u8>(Op::Saw)), after.at(static_cast<u8>(Op::Saw)));
+    EXPECT_EQ(before.at(static_cast<u8>(Op::Biquad)), after.at(static_cast<u8>(Op::Biquad)));
+}
+
+TEST(Subpatch, TwoOfThemKeepTheirOwnState) {
+    json user = filter_voice_user();
+    user["nodes"].push_back({{"id", 8}, {"type", "subpatch"}, {"patch", "voice"}, {"inputs", {{"cutoff", 300}}}});
+    user["nodes"].push_back({{"id", 9}, {"type", "add"}});
+    user["edges"].push_back({{"from", 2}, {"to", 8}, {"input", "pitch"}});
+    user["edges"].push_back({{"from", 4}, {"port", "l"}, {"to", 9}, {"input", "a"}});
+    user["edges"].push_back({{"from", 8}, {"port", "l"}, {"to", 9}, {"input", "b"}});
+    user["edges"][3]["from"] = 9;
+    user["edges"][3].erase("port");
+    const auto ops = compile_image(library_request({{"user", user}, {"voice", filter_voice()}}));
+    LoadedImage loaded(ops.image);
+    std::set<u32> saws;
+    for (u32 i = 0; i < loaded.table.size(); ++i) {
+        const ChunkRef& c = loaded.storage[i];
+        if (c.kind != static_cast<u8>(ChunkKind::Patch)) continue;
+        PatchView v;
+        ASSERT_TRUE(parse_patch({c.data, c.size}, v));
+        for (u32 s = 0; s < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++s) {
+            if (v.step(s).op == static_cast<u8>(Op::Saw)) saws.insert(v.step(s).state_id);
+        }
+    }
+    EXPECT_EQ(saws.size(), 2u);
+}
+
+TEST(Subpatch, CanReachAnOutletAndARightOutputThatMirrorsALeftOne) {
+    json user = filter_voice_user();
+    user["edges"][2]["port"] = "raw";
+    EXPECT_EQ(subpatch_error({{"user", user}, {"voice", filter_voice()}}), "");
+    user["edges"][2]["port"] = "r";
+    const auto right = heard(library_request({{"user", user}, {"voice", filter_voice()}}));
+    const auto left = heard(library_request({{"user", filter_voice_user()}, {"voice", filter_voice()}}));
+    EXPECT_EQ(left, right);
+}
+
+TEST(Subpatch, InAndOutMakeAnInsertAFilterInAVoice) {
+    const json effect = json::parse(R"({
+      "nodes": [{"id": 1, "type": "in"}, {"id": 2, "type": "mul", "inputs": {"b": 0.5}}, {"id": 3, "type": "out"}],
+      "edges": [{"from": 1, "port": "l", "to": 2, "input": "a"}, {"from": 2, "to": 3, "input": "l"}]})");
+    const json user = json::parse(R"({
+      "nodes": [{"id": 1, "type": "noise"}, {"id": 2, "type": "env"}, {"id": 3, "type": "mul"},
+                {"id": 4, "type": "subpatch", "patch": "half"}, {"id": 5, "type": "out"}],
+      "edges": [{"from": 1, "to": 3, "input": "a"}, {"from": 2, "to": 3, "input": "b"},
+                {"from": 3, "to": 4, "input": "l"}, {"from": 4, "port": "l", "to": 5, "input": "l"}]})");
+    const auto result = compile_image(library_request({{"user", user}, {"half", effect}}));
+    EXPECT_FALSE(result.image.empty());
+    const auto audio = heard(library_request({{"user", user}, {"half", effect}}));
+    EXPECT_GT(*std::max_element(audio.begin(), audio.end()), 0.01f);
+}
+
+TEST(Subpatch, AudioThroughAnInletStillCannotReachAnInputReadOnceAFrame) {
+    json user = filter_voice_user();
+    user["nodes"].push_back({{"id", 8}, {"type", "noise"}});
+    user["edges"].push_back({{"from", 8}, {"to", 4}, {"input", "cutoff"}});
+    user["nodes"][3]["inputs"].erase("cutoff");
+    try {
+        (void)compile_image(library_request({{"user", user}, {"voice", filter_voice()}}));
+        FAIL() << "compiled";
+    } catch (const CompileError& e) {
+        EXPECT_NE(std::string(e.what()).find("put a snap node on the wire"), std::string::npos) << e.what();
+        EXPECT_EQ(e.where.rfind("patch:user/node:4/node:", 0), 0u) << e.where;
+    }
+}
+
+TEST(Subpatch, RefusesWhatItCannotBe) {
+    const json voice = filter_voice();
+    EXPECT_EQ(subpatch_error({{"user", json::parse(R"({"nodes": [{"id": 1, "type": "subpatch", "patch": "user"},
+        {"id": 2, "type": "out"}], "edges": [{"from": 1, "port": "l", "to": 2, "input": "l"}]})")}}),
+              "patch 'user' contains itself");
+    json missing = filter_voice_user();
+    missing["nodes"][3]["patch"] = "nothing";
+    EXPECT_EQ(subpatch_error({{"user", missing}}), "no patch 'nothing' in the library");
+    json unnamed = filter_voice_user();
+    unnamed["nodes"][3].erase("patch");
+    EXPECT_EQ(subpatch_error({{"user", unnamed}}), "a subpatch needs a patch");
+    json no_input = filter_voice_user();
+    no_input["edges"][1]["input"] = "volume";
+    EXPECT_EQ(subpatch_error({{"user", no_input}, {"voice", voice}}), "no input 'volume'");
+    json no_output = filter_voice_user();
+    no_output["edges"][2]["port"] = "wet";
+    EXPECT_EQ(subpatch_error({{"user", no_output}, {"voice", voice}}), "no output 'wet'");
+    json no_literal = filter_voice_user();
+    no_literal["nodes"][3]["inputs"]["volume"] = 1;
+    EXPECT_EQ(subpatch_error({{"user", no_literal}, {"voice", voice}}), "no input 'volume'");
+    json twins = voice;
+    twins["nodes"][1]["name"] = "pitch";
+    EXPECT_EQ(subpatch_error({{"user", filter_voice_user()}, {"voice", twins}}), "two inputs are named 'pitch'");
+    json nameless = voice;
+    nameless["nodes"][1].erase("name");
+    EXPECT_EQ(subpatch_error({{"user", filter_voice_user()}, {"voice", nameless}}), "an inlet needs a name");
+}
+
+TEST(Subpatch, RefusesACycleThroughTwoPatches) {
+    const auto wrapping = [](const char* inner) {
+        json g = json::parse(R"({"nodes": [{"id": 1, "type": "subpatch"}, {"id": 2, "type": "out"}],
+                                 "edges": [{"from": 1, "port": "l", "to": 2, "input": "l"}]})");
+        g["nodes"][0]["patch"] = inner;
+        return g;
+    };
+    EXPECT_NE(subpatch_error({{"a", wrapping("b")}, {"b", wrapping("a")}}, "a").find("contains itself"),
+              std::string::npos);
+}
+
+TEST(Subpatch, RefusesNestingPastTheLimit) {
+    json patches = json::object();
+    for (int i = 0; i < 12; ++i) {
+        json g = json::parse(R"({"nodes": [{"id": 1, "type": "subpatch"}, {"id": 2, "type": "out"}],
+                                 "edges": [{"from": 1, "port": "l", "to": 2, "input": "l"}]})");
+        g["nodes"][0]["patch"] = "p" + std::to_string(i + 1);
+        patches["p" + std::to_string(i)] = g;
+    }
+    patches["p12"] = filter_voice();
+    EXPECT_EQ(subpatch_error(patches, "p0"), "subpatches nest too deeply");
+}
+
+TEST(Subpatch, ACycleThroughOneNeedsADelayLikeAnyOther) {
+    const json through = json::parse(R"({
+      "nodes": [{"id": 1, "type": "inlet", "name": "in"}, {"id": 2, "type": "outlet", "name": "out"}],
+      "edges": [{"from": 1, "to": 2, "input": "in"}]})");
+    const json loop = json::parse(R"({
+      "nodes": [{"id": 1, "type": "subpatch", "patch": "through"}, {"id": 2, "type": "add"}, {"id": 3, "type": "out"}],
+      "edges": [{"from": 1, "port": "out", "to": 2, "input": "a"}, {"from": 2, "to": 1, "input": "in"},
+                {"from": 2, "to": 3, "input": "l"}]})");
+    EXPECT_NE(subpatch_error({{"user", loop}, {"through", through}}).find("in a cycle with no delay"),
+              std::string::npos);
+    json delayed = loop;
+    delayed["nodes"].push_back({{"id", 4}, {"type", "delay"}, {"max", 0.5}});
+    delayed["edges"][1] = {{"from", 2}, {"to", 4}, {"input", "in"}};
+    delayed["edges"].push_back({{"from", 4}, {"to", 1}, {"input", "in"}});
+    EXPECT_EQ(subpatch_error({{"user", delayed}, {"through", through}}), "");
+}
+
+TEST(Subpatch, ParametersMergeByIdAndTheGraphAboveSettlesAClash) {
+    const auto with_param = [](double max) {
+        json g = json::parse(R"({
+          "params": [{"id": 3, "name": "drive", "min": 0}],
+          "nodes": [{"id": 1, "type": "param", "param": 3}, {"id": 2, "type": "outlet", "name": "out"}],
+          "edges": [{"from": 1, "to": 2, "input": "in"}]})");
+        g["params"][0]["max"] = max;
+        return g;
+    };
+    json user = json::parse(R"({
+      "nodes": [{"id": 1, "type": "subpatch", "patch": "a"}, {"id": 2, "type": "subpatch", "patch": "b"},
+                {"id": 3, "type": "noise"}, {"id": 4, "type": "mul"}, {"id": 5, "type": "mul"}, {"id": 6, "type": "out"}],
+      "edges": [{"from": 3, "to": 4, "input": "a"}, {"from": 1, "port": "out", "to": 4, "input": "b"},
+                {"from": 4, "to": 5, "input": "a"}, {"from": 2, "port": "out", "to": 5, "input": "b"},
+                {"from": 5, "to": 6, "input": "l"}]})");
+    EXPECT_EQ(subpatch_error({{"user", user}, {"a", with_param(2)}, {"b", with_param(2)}}), "");
+    EXPECT_NE(subpatch_error({{"user", user}, {"a", with_param(2)}, {"b", with_param(9)}})
+                  .find("declare param 3 differently"),
+              std::string::npos);
+    user["params"] = json::array({{{"id", 3}, {"name", "drive"}, {"min", 0}, {"max", 5}, {"default", 1}}});
+    EXPECT_EQ(subpatch_error({{"user", user}, {"a", with_param(2)}, {"b", with_param(9)}}), "");
+}
+
+TEST(Subpatch, ALibraryKeepsOutWhatCanOnlyBePartOfAnother) {
+    const json part = json::parse(R"({"nodes": [{"id": 1, "type": "noise"}, {"id": 2, "type": "outlet", "name": "out"}],
+                                      "edges": [{"from": 1, "to": 2, "input": "in"}]})");
+    json request = library_request({{"part", part}, {"user", simple_graph("saw")}});
+    request["programs"] = json::array();
+    EXPECT_EQ(count_kind(compile_image(request).report, "patch"), 1);
+}
+
+TEST(Sidecar, SaysWhatEachNodeOutputBecame) {
+    const auto result = compile_image(library_request({{"user", filter_voice_inline()}}));
+    const json& nodes = result.report.at("sidecar").at("user");
+    EXPECT_EQ(nodes.at("1").at("ports").at("pitch").at("rate"), "control");
+    EXPECT_EQ(nodes.at("2").at("ports").at("out").at("rate"), "control");
+    EXPECT_EQ(nodes.at("4").at("ports").at("out").at("rate"), "audio");
+    EXPECT_TRUE(nodes.contains("7"));  // The out node, which has no ports but is alive
+
+    LoadedImage loaded(result.image);
+    for (u32 i = 0; i < loaded.table.size(); ++i) {
+        const ChunkRef& c = loaded.storage[i];
+        if (c.kind != static_cast<u8>(ChunkKind::Patch)) continue;
+        PatchView v;
+        ASSERT_TRUE(parse_patch({c.data, c.size}, v));
+        const json& saw = nodes.at("4").at("ports").at("out");
+        const WireStep step = v.step(v.h.control_steps + saw.at("step").get<u32>());
+        EXPECT_EQ(step.op, static_cast<u8>(Op::Saw));
+        EXPECT_EQ(step.out[0], saw.at("operand").get<u16>());
+    }
+}
+
+TEST(Sidecar, LeavesOutDeadNodes) {
+    json graph = filter_voice_inline();
+    graph["nodes"].push_back({{"id", 20}, {"type", "noise"}});
+    const auto result = compile_image(library_request({{"user", graph}}));
+    EXPECT_FALSE(result.report.at("sidecar").at("user").contains("20"));
+}
+
+TEST(Sidecar, ShowsASubpatchAsTheNodeTheAuthorPlaced) {
+    const auto result = compile_image(library_request({{"user", filter_voice_user()}, {"voice", filter_voice()}}));
+    const json& nodes = result.report.at("sidecar").at("user");
+    EXPECT_EQ(nodes.at("4").at("ports").at("l").at("rate"), "audio");
+    for (const auto& [id, node] : nodes.items()) EXPECT_LT(std::stoi(id), 100) << "an inner node leaked: " << id;
+}
+
+TEST(Sidecar, NeverReachesTheImage) {
+    const json request = library_request({{"user", filter_voice_inline()}});
+    json renamed = request;
+    renamed["patches"]["user"]["graph"]["nodes"][0]["x"] = 40;
+    EXPECT_EQ(compile_image(request).image, compile_image(renamed).image);
+}
+
+TEST(Catalog, ListsEveryNodeAnAuthorCanPlaceAndNoOthers) {
+    const json catalog = compiler::node_catalog();
+    std::set<std::string> types;
+    for (const json& entry : catalog) types.insert(entry.at("type"));
+    EXPECT_TRUE(types.count("osc") && types.count("math") && types.count("shape") && types.count("subpatch"));
+    EXPECT_TRUE(types.count("inlet") && types.count("outlet"));
+    EXPECT_FALSE(types.count("wire"));
+    for (const json& entry : catalog) {
+        if (entry.at("type") != "math") continue;
+        EXPECT_EQ(entry.at("options").at(0).at("choices").size(), 8u);
+    }
 }

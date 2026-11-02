@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { onDestroy, onMount, untrack } from 'svelte';
-	import { AudioEngine, LOAD_ERRORS, type EngineState, type TapTarget } from '#lib/AudioEngine.ts';
+	import { AudioEngine, LOAD_ERRORS, type EngineState, type Probe, type TapTarget } from '#lib/AudioEngine.ts';
 	import { Compiler } from '#lib/Compiler.ts';
+	import { nodeOfError } from '#lib/GraphEdit.ts';
+	import GraphEditor from '#lib/GraphEditor.svelte';
 	import ReportPanel from '#lib/ReportPanel.svelte';
-	import { buildRequest, type CompileReport } from '#lib/Request.ts';
+	import { buildRequest, reachable, type CompileReport, type NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
 	import { Ring } from '#lib/ScopeMath.ts';
@@ -21,27 +23,42 @@
 	let engineState = $state<EngineState | null>(null);
 	let targets = $state<TapTarget[]>([]);
 	let parseError = $state('');
+	let nodes = $state<NodesReport | undefined>(undefined); // From the last compile that worked
+	let probes = $state<Probe[]>([]);
 
 	const engine = new AudioEngine();
 	const rings = Array.from({ length: 8 }, () => new Ring(48000));
 	let compiler: Compiler | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
-	const params = $derived.by((): Param[] => {
+	const graph = $derived.by((): Graph | null => {
 		try {
-			return (JSON.parse(text) as Graph).params ?? [];
+			const parsed = JSON.parse(text) as Graph;
+			return Array.isArray(parsed.nodes) ? { ...parsed, params: parsed.params ?? [], edges: parsed.edges ?? [] } : null;
 		} catch {
-			return [];
+			return null;
 		}
 	});
-	const isInsert = $derived(text.includes('"type": "in"'));
+	const params = $derived<Param[]>(graph?.params ?? []);
+	const isInsert = $derived(graph?.nodes.some((node) => node.type === 'in') ?? false);
 	const keys = [60, 62, 64, 65, 67, 69, 71, 72];
+	const MAX_PROBES = 6; // Eight tap slots, less the master and this patch's track
+
+	// An error with no node here stays in the list at the top. One with a node goes there too, and on the node.
+	const errors = $derived.by(() => {
+		const found = new Map<number, string>();
+		for (const problem of report?.ok === false ? (report.errors ?? []) : []) {
+			const node = nodeOfError(problem.where, data.patch.id);
+			if (node !== null) found.set(node, problem.message);
+		}
+		return found;
+	});
 
 	async function compile() {
 		if (!compiler) return;
-		let graph: Graph;
+		let parsed: Graph;
 		try {
-			graph = JSON.parse(text);
+			parsed = JSON.parse(text);
 			parseError = '';
 		} catch (e) {
 			parseError = (e as Error).message;
@@ -49,16 +66,29 @@
 		}
 		// A track with no notes, kept alive by `live`, so the keys below can play it.
 		const timeline = { tracks: [{ id: 1, name: name, voices: 8, slots: [data.patch.id] }] };
+		const library = data.library.map((patch) => (patch.id === data.patch.id ? { id: patch.id, name, graph: parsed } : patch));
+		const reached = reachable([data.patch.id], library, data.assets);
 		const request = buildRequest(
-			[{ id: data.patch.id, name, graph }],
-			data.assets,
+			reached.patches,
+			reached.assets,
 			[{ id: 'preview', name: 'Preview', timeline: timeline as never }],
 			{ live: true }
 		);
 		const result = await compiler.compile(request);
 		if (!result) return;
 		report = result.report;
+		if (result.report.ok) nodes = result.report.sidecar?.[data.patch.id];
 		if (result.report.ok && started) engine.load(result.image, result.report);
+	}
+
+	function drawn(next: Graph) {
+		text = JSON.stringify(next, null, 1);
+		edited();
+	}
+
+	function probesChanged(next: Probe[]) {
+		probes = next;
+		engine.setProbes(data.patch.id, next);
 	}
 
 	function edited() {
@@ -167,7 +197,25 @@
 {/if}
 
 <h2>Graph</h2>
-<p class="muted">Milestone 3 replaces this with a graph editor. Edits compile as you type, and audio crossfades to them.</p>
-<textarea rows="24" bind:value={text} oninput={edited} aria-label="Graph JSON" spellcheck="false"></textarea>
+{#if graph}
+	<GraphEditor
+		{graph}
+		self={data.patch.id}
+		catalog={data.catalog}
+		library={data.library}
+		assets={data.assets}
+		{nodes}
+		failed={report?.ok === false}
+		{errors}
+		{probes}
+		maxProbes={MAX_PROBES}
+		onchange={drawn}
+		onprobes={probesChanged}
+	/>
+{/if}
+<details open={graph === null}>
+	<summary>Graph as JSON</summary>
+	<textarea rows="24" bind:value={text} oninput={edited} aria-label="Graph JSON" spellcheck="false"></textarea>
+</details>
 
 {#if report?.ok}<ReportPanel {report} />{/if}

@@ -29,7 +29,7 @@ Three kinds of change are possible after this freeze, and nothing else is.
 Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
 can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
 damaged. A compiler writes the lowest revision that covers what it actually used, so an image that uses nothing new keeps
-loading on old engines. This document describes revision 5. The opcode table says which revision added each opcode.
+loading on old engines. This document describes revision 6. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
 version so far, and no such change is planned. A version above the engine's in the manifest, which comes first, gets the same refusal. In any later chunk
@@ -268,7 +268,8 @@ way. A value already inside the range is carried exactly.
 
 ### Opcodes
 
-`B` is an operand naming a buffer. `S` is one naming a scalar, in any bank that can be read. In the formulas below, `N` is the
+`B` is an operand naming a buffer. `S` is one naming a scalar, in any bank that can be read. `E` takes either, and a scalar is then the same for
+every sample of the frame. In the formulas below, `N` is the
 frame size, `rate` is the sample rate in Hz, and `clamp(x, lo, hi)` sends NaN to `lo`. All outputs are written for all `N`
 samples.
 
@@ -302,6 +303,10 @@ samples.
 | 26 | Tone | B | S frequency | | | voice | 2 |
 | 27 | Sample2 | B left, B right | S note, S start | bit 0 reverse, bit 1 tail | Table | voice | 4 |
 | 28 | KLfo2 | S | S rate, S depth | | | either | 5 |
+| 29 | OscMod | B | E frequency, E phase, E sync, E fourth | 0 sine, 1 triangle, 2 saw, 3 pulse, 4 naive saw, 5 naive pulse | | voice | 6 |
+| 30 | Math | B | E a, E b, E c | 0 min, 1 max, 2 abs, 3 clip, 4 floor, 5 divide, 6 compare, 7 select | | voice | 6 |
+| 31 | KMath | S | S a, S b, S c | 0 min, 1 max, 2 abs, 3 clip, 4 floor, 5 divide, 6 compare, 7 select | | either | 6 |
+| 32 | Shape | B | B in | | Table | voice | 6 |
 
 What each one does:
 
@@ -382,6 +387,38 @@ What each one does:
   the output, so a change of `depth` is heard, and Play carries on from the same phase. A control step runs whether or not a note does, so
   without this every frame rendered before Play would move what follows. As a voice step it is a KLfo, since a voice has its own start and
   outlives a Stop in its release. A compiler writes KLfo2 for a control step and KLfo for a voice step.
+- **OscMod.** An oscillator all of whose inputs can move per sample. Each sample `n`, in this order:
+  - `step` is `clamp(frequency / rate, -0.5, 0.5) * 4294967040`, truncated to a signed integer, or 0 if that division gives NaN. A negative
+    `step` runs the wave backwards.
+  - `offset` is `turns_to_phase(phase)`.
+  - On a pulse, `width` is `fourth` clamped to 0 to 1, `edge` is `width * 4294967040` truncated to an integer, and `mean` is `2 * width - 1`.
+  - On a sine, `push` is `turns_to_phase(clamp(fourth, -1, 1) * (y[n-1] + y[n-2]) / 2)`, where `y` is the sine this step has made, starting at 0.
+    Otherwise `push` is 0, and `fourth` isn't read.
+  - If the last sync sample was at most 0 and this one is above 0, a sync edge has passed. `since` is `sync[n] / (sync[n] - sync[n-1])`, clamped
+    to 0 to 1, how far back it was. `reach` is `step` as a float. `phase` becomes `reach * since`, and the wave was caught at
+    `read[n-1] + reach * (1 - since)`, each of those products truncated to a signed integer.
+  - `read` is `phase + offset`, in 32 bits, and the sample is `value(read + push)`, then `phase` advances by `step`.
+
+  `value(p)` reads `p` as a 32-bit phase. A sine is `sin_turns(p as signed * 2.32830644e-10)`. A triangle and a saw are as Triangle and Saw read
+  it. A pulse is `(p < edge ? 1 : -1) - mean`. A naive wave is that sample, and that is all.
+
+  The others are one sample late, because a jump between samples `n - 1` and `n` corrects both. The output is
+  `y'[n-1] + before`, then `y'[n]` is `value + after`, starting from `y'` of 0, with `before` and `after` summing every jump that sample crossed:
+  for a jump of `height`, `since` of a sample ago, `before` gains `height * since^2 / 2` and `after` loses `height * (1 - since)^2 / 2`.
+
+  A sync edge is one jump, of `value(offset + push) - value(caught + push)`, in place of any other that sample. Otherwise a saw has one
+  of -2 at phase 0x80000000. A pulse has one of 2 at 0 and one of -2 at `edge`, and the place it fell from is last sample's `edge`. A sine
+  and a triangle have none. A jump at `place` is crossed when `from = read[n-1] - place` and `to = read - place`, each as a signed integer,
+  have different signs, and `to` has the sign of `to - from`, in 32 bits. Then `since` is `to / (to - from)`, and `height` is negated if `to - from` is
+  negative. `sync[n-1]` and `read[n-1]` before a voice's first sample are its `sync` and `offset - step`.
+
+  It starts on the note's sample, and the samples before that in its first frame are 0.
+- **Math, KMath.** One operation for each sample, or once. Min is `a < b ? a : b`, and max `a > b ? a : b`. Abs is `a < 0 ? -a : a`. Clip is `clamp(a, b, c)`.
+  Floor is the next whole number down, and a value at or beyond 2^23 either way, or NaN, is itself. Divide is `a / b`, and 0 if `b` is 0. Compare is
+  `a > b ? 1 : 0`. Select is `a > 0 ? b : c`. Inputs a mode doesn't name are read and not used. A compiler writes KMath when no input is a buffer.
+- **Shape.** A curve, in a Table whose `length + 1` points run evenly from -1 to 1, so that the guard is the point at 1. `place` is
+  `(clamp(in, -1, 1) + 1) * length / 2`, `index` is `place` truncated to an integer, and at most `length - 1`. The output is
+  `t[index] + (t[index + 1] - t[index]) * (place - index)`.
 
 ### Arithmetic
 
@@ -389,6 +426,7 @@ A kernel uses only IEEE 754 `+`, `-`, `*`, `/` and conversions, in binary32, wit
 The three functions a C library would normally supply are defined here instead, in binary32, because each library rounds differently, and in a
 filter coefficient that alone reaches −90 dB. `round(x)` is `x + 0.5`, or `x - 0.5` if `x` is negative, truncated towards zero.
 
+    turns_to_phase(x):          (clamp(x, -64, 64) * 16777216, truncated to a signed integer) << 8, in 32 bits
     pow2(x):                    x clamped to -126 to 127
         n = round(x), f = x - n
         p = 1.52527338e-5
@@ -728,7 +766,7 @@ is what the per-op cost limit in the design is for.
 
 ## 10. Golden images
 
-`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, `Lanes` and `Zones` from revision 4, and `Hold` from revision 5, each with its render on a stereo and a mono engine. They are the
+`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, `Lanes` and `Zones` from revision 4, `Hold` from revision 5, and `Mods` from revision 6, each with its render on a stereo and a mono engine. They are the
 contract in executable form.
 
 - A golden image and its render never change, and CI fails a pull request that edits or removes one.

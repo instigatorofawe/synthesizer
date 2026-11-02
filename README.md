@@ -39,7 +39,8 @@ Every `*Test.cpp` is found by a glob and becomes its own GoogleTest target.
     pnpm build
     pnpm start     # http://127.0.0.1:5321
 
-An empty database fills itself with the demo project on first start. `pnpm test` runs the unit tests and `pnpm e2e` drives
+A patch's page draws its graph, with wires dragged between nodes, errors on the nodes they belong to, and scopes on any node. `/recipes` plays the recipes as they are, and adding one
+copies it into the library. An empty database fills itself with the demo project on first start. `pnpm test` runs the unit tests and `pnpm e2e` drives
 the built app in Chromium. There is no authentication, so keep it on loopback.
 
 ## Firmware

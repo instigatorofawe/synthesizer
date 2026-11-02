@@ -1,7 +1,7 @@
-# modsynth design, revision 10
+# modsynth design, revision 11
 
-Status: Milestones 1 and 2 are implemented, along with `snap` from Milestone 3, the compiler side of Milestone 4 and the harnesses of Milestone 7.
-The wire format is frozen at version 1, now at revision 5. `docs/Format.md` is its specification, and where this document and that one differ, that
+Status: Milestones 1 to 3 are implemented, along with the compiler side of Milestone 4 and the harnesses of Milestone 7.
+The wire format is frozen at version 1, now at revision 6. `docs/Format.md` is its specification, and where this document and that one differ, that
 one is right. This document replaces all earlier revisions, and everything needed from them is included here. Sections about later milestones are
 still proposals. Section 24 lists what is agreed but not built, and what is still undecided.
 
@@ -110,11 +110,19 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
   snaps, 2 did, and with noise taken out they too matched to the bit [measured].
 - The loader lowers wire Steps into a private decoded array, so run time never re-reads validated bytes.
 - Kernels are total: safe for every input value. Wrapped oscillators use u32 phase and power-of-two tables.
-- New ops are agreed and not built. One `Arg` kind takes audio or a scalar on a single input, for new ops only, rather than a twin op for each rate.
-  `OscMod` takes frequency, phase and sync, and its fourth input is feedback on a sine and width on a pulse, because a step has 4 inputs. `Math` has
-  min, max, abs, clip, floor, divide, compare and select. Table waveshaping is its own op, because it needs a table resource. An op's mode list can't
+- An `Either` operand takes audio or a scalar on a single input, for new ops only, rather than a twin op for each rate. `OscMod` takes frequency, phase and
+  sync, and its fourth input is feedback on a sine and width on a pulse, because a step has 4 inputs. Sync's jump is smoothed the way a saw's own is, on every wave,
+  which costs a sample of delay. Its sine comes from `sin_turns`, which is more accurate than the table and needs none, so an image using only `OscMod` carries no
+  8 KB table [measured: -134 dB against -118 dB]. All that costs far more than `Osc` on a Cortex-M4, 128 instructions a sample against 17 for a sine and 64 against
+  13 for a saw [measured], so it's for a voice that needs the modulation. `Math` has min, max, abs, clip, floor, divide, compare and select, and is `KMath` when no input is audio, so its result
+  can drive an input read once a frame with no snap. `Shape` reads a curve from a Table, because it needs a table resource. An op's mode list can't
   grow once it is on `main`, since `max_mode` sits in an append-only line, so its modes are settled before it merges. A graph selects a new op with an
   explicit `"mode"`, as `Tone` and `Sample2` do, so a saved graph keeps its meaning.
+- A subpatch node names another library patch and expands into its parent before any other pass runs, so ordering, dead-node removal and the rate rule work through
+  one with nothing added. Its ports are the inner graph's `inlet` and `outlet` nodes, and `l` and `r` if it has `in` or `out`. An inlet compiled alone is its default. Inner
+  parameters merge into the parent by id, because a timeline can address only one, and two that disagree are an error unless the parent declares that id. An
+  inner node's id comes from its own id and its subpatch's, so editing something else in either graph moves no state id, and a live swap carries its state. A
+  patch used only as a subpatch never becomes a chunk, and nesting stops at 8.
 
 ## 6. Programs and timelines
 
@@ -149,7 +157,7 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
   in the frame it happens, so a tick-to-offset index will replace it when a real Program makes it too slow.
 - Events carry a sample offset, and Env honours gate changes at that offset. [measured: without this, 122 of 200 one-tick
   notes made no sound.]
-- Events are not tied to frame boundaries. A Program's notes already land on their samples, and `Tone` starts on its note's sample. Live notes and the
+- Events are not tied to frame boundaries. A Program's notes already land on their samples, and `Tone` and `OscMod` start on their note's sample. Live notes and the
   other oscillators do not yet, and a parameter changes only at the start of a frame. The finer forms must cost an embedded build nothing, so like
   `channels` they are a compile-time choice, and a build without them has none of their code. The target rule means such a build can't round to the
   frame instead: an image that needs them declares it, and a build without them refuses it. On the one kernel tried, writing it over a range fixed at
@@ -281,8 +289,8 @@ Milestone 7.
 
 The browser shows live waveforms during playback, starting with the master and track buses and later any graph node.
 This is engine and host state only. Nothing about it enters the image, so it does not affect hashes or the format freeze.
-Scopes on the master and track buses are built, and tested in a browser. Taps on graph nodes wait for Milestone 3, so what this section says about them
-is [not prototyped].
+Scopes on the master and track buses and probes on graph nodes are built, and tested in a browser. A probe reaches a voice, not an insert, because the page that sets one
+plays a patch alone, and that page refuses a patch with an `in` node.
 
 **Tap.** The engine has a fixed number of tap slots, set by `SynthConfig`. Hardware builds use 0, which compiles the
 feature out. `set_tap(slot, target)` arrives through the event queue and is validated there like any live event.
@@ -292,7 +300,8 @@ only just after its step runs, so the copy happens at that point. The compiler w
 and buses to steps and registers. The sidecar stays with the GUI, never enters the image, and also supplies "errors shown
 on nodes". A tap inside a Patch follows the newest active voice on that track.
 
-Tapped builds pay one integer compare per step, plus the copy.
+Only the voice being watched runs a step at a time, and every other voice runs as usual, so a build with taps pays a scan of its tap slots per track and the copy.
+A build with no tap slots has none of this code.
 
 **Transport.** Taps use the existing path, with no SharedArrayBuffer:
 
@@ -607,6 +616,7 @@ and hardware still only ever sees image bytes.
     patches(id, name, graph JSON, revision, created_at, updated_at)
     timelines(id, name, doc JSON, revision, created_at, updated_at)
     timeline_patches(timeline_id, patch_id)      -- ON DELETE RESTRICT on patch_id
+    patch_subpatches(patch_id, subpatch_id)      -- ON DELETE RESTRICT on subpatch_id
     assets(id, name, encoding, channels, rate, frames, root_key, loop_start, loop_end, bytes BLOB)
     patch_assets(patch_id, asset_id)             -- ON DELETE RESTRICT on asset_id
     bundles(id, name, revision, created_at, updated_at)
@@ -617,6 +627,9 @@ and hardware still only ever sees image bytes.
 - `timeline_patches` is derived from the document on every save, inside the same transaction. It exists so that the
   database can refuse to delete a patch that is in use, and so that the patch page can say which timelines an edit
   affects. It is never the source of truth for compilation: section 20 walks the document.
+- `patch_subpatches` is derived the same way, from a graph on every save. It stops a patch being deleted while another expands it, tells a patch's page about timelines
+  that reach it through another patch, and tells an export what to carry along. A graph can name itself, which only the compiler refuses, so walking these links
+  keeps track of what it has seen.
 - `revision` is optimistic concurrency. A save names the revision it started from, and a stale save is refused rather
   than overwriting another tab.
 - A timeline refers to a patch by `id` and follows its latest graph. Editing a shared patch therefore changes every
@@ -627,6 +640,16 @@ and hardware still only ever sees image bytes.
   `adapter-node` assumes HTTPS unless a proxy says otherwise, so a loopback server would fail SvelteKit's same-origin check
   on every form. The config trusts exactly the two loopback origins on that port, and a form posted from any other site is
   still refused. Serving it anywhere else needs authentication and a proxy that sets `PROTOCOL_HEADER`.
+
+**The graph editor.** A graph's document is still what is saved and compiled. The editor adds `x` and `y` to its nodes, which the compiler ignores, so moving a node
+changes no hash. It takes its node table from the compiler's catalog, the table the compiler reads, so the two can't disagree. The compiler's report carries the debug sidecar
+from section 13, which colours wires by rate, dims nodes that compiled away and places probes. An error's `where` names its node, and an error inside a subpatch lands on
+the subpatch. The compiler stops at the first error, so an editor shows one at a time. The JSON stays on the page, and text that doesn't parse leaves the last drawing alone.
+
+**Recipes.** `examples/Recipes` ships with the app as a read-only catalogue at `/recipes`, where any of them plays as it is. Adding one copies its patches, assets and
+timeline into the library under ids made from its name, and they are then ordinary rows. They are copies so that an edit can't change what ships. A recipe isn't seeded,
+because together they hold about 600 KB of samples and every patch page loads the library. Adding one twice changes nothing, so an edited copy survives. A test holds every
+recipe to compiling to the same bytes from the library as from its file, which is what shows the schema dropped nothing.
 
 ## 20. Choosing what goes into an image
 
@@ -646,7 +669,7 @@ shared LFO waits for it and that page has no Play button. Exports never set it.
 
 Unused library patches cannot affect an image: changing them leaves its bytes identical, and CI asserts this.
 
-**A Patch's bytes depend only on its graph.** Voice count, track number, initial values and the target stay out of the Patch
+**A Patch's bytes depend only on its graph**, and on the graphs of its subpatches. Voice count, track number, initial values and the target stay out of the Patch
 chunk. This is what makes sharing work: two Programs using one library patch reach one hash, and two library patches with
 the same compiled bytes merge into one chunk. A patch chunk that embedded anything from a timeline would quietly defeat
 both.
@@ -697,8 +720,8 @@ requests run CI, so checks run locally before a push. One that changes only Mark
    schema and server actions, and the patch selection, bundles and thin images from section 20.
 2. **Format freeze.** Written spec, golden images, append-only opcodes, coverage-guided fuzzing on wasm32 and 32-bit ARM,
    and validator enforcement of the rules in section 18. Hash choice is settled here: FNV-1a 64, for the reasons in `docs/Format.md`.
-3. **Browser graph editor and full compiler.** Subpatches, rate conversion, errors shown on nodes, oscilloscope probes on
-   graph nodes.
+3. **Browser graph editor and full compiler.** Subpatches, rate conversion, which `snap` settled, errors shown on nodes, oscilloscope probes on
+   graph nodes, and the ops section 5 lists.
 4. **DAW views.** Timeline, piano roll, mixer with per-track scopes, full Program compiler, asset import. Asset import writes only `Sample2`
    zones, so a saved instrument has one shape and never needs migrating.
 5. **Device delivery.** Board bring-up with real audio output, target profile generation, receiving a whole image over BLE or serial into flash,
@@ -773,7 +796,6 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 
 **Agreed, not built.**
 
-- `Arg`, `OscMod`, `Math` and table waveshaping, section 5.
 - Events off the frame boundary, section 6.
 - Whole-image delivery to a device, section 10.
 

@@ -34,6 +34,9 @@ enum class EventKind : u8 {
     Stop,
     Locate,   // tick
     SetLoop,  // tick, tick_end. tick_end of 0 clears the loop.
+    // A tap on a graph node: param: tap slot, target: track, channel: its patch slot, tick: voice step, tick_end:
+    // operand
+    SetProbe,
 };
 
 struct Event {
@@ -188,7 +191,7 @@ class Synth {
     // Events are checked here, because a host can send anything. Whatever depends on the bound image is checked again
     // when the event is applied.
     bool send(const Event& e) {
-        if (static_cast<u8>(e.kind) > static_cast<u8>(EventKind::SetLoop)) return false;
+        if (static_cast<u8>(e.kind) > static_cast<u8>(EventKind::SetProbe)) return false;
         if ((e.kind == EventKind::NoteOn || e.kind == EventKind::NoteOff) && (e.note > 127 || e.velocity > 127)) {
             return false;
         }
@@ -450,6 +453,12 @@ class Synth {
         u16 reg = 0;
         u8 channel = 0;
         bool ready = false;
+        // A probe watches the newest voice on a track rather than a bus, so these replace step, reg and channel.
+        u16 track = kNone;
+        u16 voice_step = 0;
+        u16 operand = 0;
+        u8 slot = 0;
+        bool caught = false;
     };
 
     // The Generation itself lives at the start of its region.
@@ -884,6 +893,7 @@ class Synth {
         if constexpr (C.tap_slots > 0) {
             for (Tap& t : taps_) {
                 t.step = kNone;  // The next program's registers differ, so the host re-sends targets
+                t.track = kNone;
                 t.filled = 0;
                 t.ready = false;
             }
@@ -1191,7 +1201,22 @@ class Synth {
                         t.step = valid ? e.target : kNone;
                         t.reg = e.note;
                         t.channel = e.channel;
+                        t.track = kNone;
                         t.filled = 0;
+                    }
+                }
+                break;
+            case EventKind::SetProbe:
+                if constexpr (C.tap_slots > 0) {
+                    if (e.param < C.tap_slots) {
+                        Tap& t = taps_[e.param];
+                        t.step = kNone;
+                        t.track = probe_valid(g, e) ? e.target : kNone;
+                        t.slot = e.channel;
+                        t.voice_step = static_cast<u16>(e.tick);
+                        t.operand = static_cast<u16>(e.tick_end);
+                        t.filled = 0;
+                        t.caught = false;
                     }
                 }
                 break;
@@ -1715,7 +1740,7 @@ class Synth {
             const MixStep m = g.program.mix_step(index);
             switch (static_cast<MixOp>(m.op)) {
                 case MixOp::RunVoices:
-                    run_voices(g, g.tracks[m.a], m.dst, scratch);
+                    run_voices(g, g.tracks[m.a], m.dst, scratch, tapping);
                     break;
                 case MixOp::RunInsert:
                     run_insert(g, g.inserts[m.a], m, scratch);
@@ -1730,8 +1755,12 @@ class Synth {
         }
     }
 
-    void run_voices(Generation& g, Track& t, u32 dst, float* scratch) {
+    void run_voices(Generation& g, Track& t, u32 dst, float* scratch, bool tapping) {
         for (u32 ch = 0; ch < Ch; ++ch) B::fill(0.0f, bus(g, dst, ch), N);
+        [[maybe_unused]] u32 followed = t.desc.voices;
+        if constexpr (C.tap_slots > 0) {
+            if (tapping) followed = followed_voice(g, t);
+        }
         for (u32 n = 0; n < t.desc.voices; ++n) {
             Voice& v = t.voices[n];
             if (!v.active) continue;
@@ -1744,7 +1773,15 @@ class Synth {
             c.note = v.note;
             c.velocity = v.velocity;
             c.seed = (static_cast<u32>(t.desc.id) << 16) ^ (n << 8) ^ v.age;
-            K::run(b.voice, b.view.h.voice_steps, c);
+            if constexpr (C.tap_slots > 0) {
+                if (n == followed) {
+                    run_probed(g, t, b, c, v.slot, scratch);
+                } else {
+                    K::run(b.voice, b.view.h.voice_steps, c);
+                }
+            } else {
+                K::run(b.voice, b.view.h.voice_steps, c);
+            }
 
             const float* left = scratch + operand_index(b.view.h.out_left) * N;
             const float* right = scratch + operand_index(b.view.h.out_right) * N;
@@ -1756,6 +1793,9 @@ class Synth {
             }
             mix_output(g, dst, left, right, b.view.h.out_left == b.view.h.out_right);
             if (!v.held && (!b.ends || !c.busy)) v.active = false;
+        }
+        if constexpr (C.tap_slots > 0) {
+            if (tapping) finish_probes(g, t);
         }
     }
 
@@ -1823,6 +1863,82 @@ class Synth {
     }
 
     // Taps --------------------------------------------------------------------------------------------------------
+
+    // Sent by the host, so every field is checked here. A probe names one patch's registers, so it holds only while
+    // that patch's slot is what the voice plays.
+    [[nodiscard]] static bool probe_valid(const Generation& g, const Event& e) {
+        if (e.target >= g.program.h.tracks) return false;
+        const Track& t = g.tracks[e.target];
+        if (e.channel >= t.desc.slot_count || e.tick_end > 0xFFFFu) return false;
+        const PatchHeader& h = t.slots[e.channel].binding->view.h;
+        if (e.tick >= h.voice_steps) return false;
+        const u16 operand_value = static_cast<u16>(e.tick_end), index = operand_index(operand_value);
+        switch (operand_bank(operand_value)) {
+            case Bank::Buffer:
+                return index < h.buffers;
+            case Bank::Voice:
+                return index < h.voice_scalars;
+            case Bank::Track:
+                return index < h.track_scalars;
+            default:
+                return false;
+        }
+    }
+
+    // The voice probes on this track follow, which is the one started last, or none if no probe looks at this track.
+    [[nodiscard]] u32 followed_voice(const Generation& g, const Track& t) const {
+        const u16 index = static_cast<u16>(&t - g.tracks);
+        const bool probed = std::any_of(taps_.begin(), taps_.end(), [&](const Tap& tap) { return tap.track == index; });
+        u32 newest = t.desc.voices;
+        if (!probed) return newest;
+        for (u32 n = 0; n < t.desc.voices; ++n) {
+            if (!t.voices[n].active) continue;
+            if (newest == t.desc.voices || t.voices[n].age - t.voices[newest].age < 0x80000000u) newest = n;
+        }
+        return newest;
+    }
+
+    // Only the voice being watched runs a step at a time, because a register holds a given signal only until a later
+    // step reuses it.
+    void run_probed(const Generation& g, const Track& t, const Binding& b, RunContext& c, u32 slot, float* scratch) {
+        const u16 index = static_cast<u16>(&t - g.tracks);
+        for (u32 step = 0; step < b.view.h.voice_steps; ++step) {
+            K::run_step(b.voice[step], c);
+            for (Tap& tap : taps_) {
+                if (tap.track != index || tap.slot != slot || tap.voice_step != step) continue;
+                if (tap.filled == 0) tap.start_sample = sample_index_;
+                const u16 reg = operand_index(tap.operand);
+                float* into = tap.data + tap.filled;
+                switch (operand_bank(tap.operand)) {
+                    case Bank::Buffer:
+                        std::memcpy(into, scratch + reg * N, sizeof(float) * N);
+                        break;
+                    case Bank::Voice:
+                        B::fill(c.voice[reg], into, N);
+                        break;
+                    default:
+                        B::fill(c.track[reg], into, N);
+                        break;
+                }
+                tap.filled += N;
+                tap.caught = true;
+            }
+        }
+    }
+
+    // A probe with no voice to watch reads silence, so that the display and its sample counts keep moving.
+    void finish_probes(const Generation& g, const Track& t) {
+        const u16 index = static_cast<u16>(&t - g.tracks);
+        for (Tap& tap : taps_) {
+            if (tap.track != index) continue;
+            if (!tap.caught) {
+                if (tap.filled == 0) tap.start_sample = sample_index_;
+                B::fill(0.0f, tap.data + tap.filled, N);
+                tap.filled += N;
+            }
+            tap.caught = false;
+        }
+    }
 
     void capture_taps(const Generation& g, u32 step) {
         if constexpr (C.tap_slots > 0) {

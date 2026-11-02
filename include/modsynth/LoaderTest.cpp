@@ -351,7 +351,68 @@ struct PatchCase {
     void (*change)(HandPatch&);
 };
 
+// A Math, a KMath and an OscMod that load, so that a case can break one thing in them and that is what gets refused.
+void revision_six_steps(HandPatch& p) {
+    p.header.buffers = 2;
+    p.header.voice_scalars = kBuiltinVoiceScalars + 1;
+    p.voice.insert(p.voice.begin(), step(Op::Math, {kBuffer0}, {kConst0, kConst0, kConst0}));
+    p.voice.insert(p.voice.begin() + 1,
+                   step(Op::KMath, {operand(Bank::Voice, kBuiltinVoiceScalars)}, {kConst0, kConst0, kConst0}));
+    p.voice.insert(p.voice.begin() + 2, step(Op::OscMod, {kBuffer1}, {kConst0, kBuffer0, kConst0, kConst0}));
+}
+
 const PatchCase kPatchCases[] = {
+    {"an Either input reading a buffer nothing wrote",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice[0].in[0] = operand(Bank::Buffer, 9);
+     }},
+    {"an Either input reading a voice scalar nothing wrote",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice[0].in[1] = operand(Bank::Voice, 9);
+     }},
+    {"an Either input with no bank",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice[0].in[2] = 0;
+     }},
+    {"a Math mode that does not exist",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice[0].mode = 8;
+     }},
+    {"a Math in the control phase",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.header.track_scalars = 1;
+         p.control.push_back(step(Op::Math, {operand(Bank::Track, 0)}, {kConst0, kConst0, kConst0}));
+     }},
+    {"a KMath reading a buffer",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice[1].in[0] = kBuffer0;
+     }},
+    {"a KMath mode that does not exist",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice[1].mode = 8;
+     }},
+    {"an OscMod mode that does not exist",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice[2].mode = 6;
+     }},
+    {"an OscMod naming a resource",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice[2].resource = 1;
+     }},
+    {"a Shape with no table",
+     [](HandPatch& p) {
+         revision_six_steps(p);
+         p.voice.push_back(step(Op::Shape, {kBuffer1}, {kBuffer0}));
+     }},
     {"a reserved header field", [](HandPatch& p) { p.header.reserved = 1; }},
     {"a reserved param field",
      [](HandPatch& p) {
@@ -681,6 +742,17 @@ const ProgramCase kProgramCases[] = {
 };
 
 }  // namespace
+
+TEST(Rules, RevisionSixCoversItsOpcodes) {
+    Hand hand;
+    revision_six_steps(hand.patch);
+    const auto declared = hand.bytes();
+    ASSERT_EQ(load<ManifestHeader>(declared.data() + sizeof(ChunkHeader)).revision, 6u);
+    EXPECT_EQ(load_error(declared), LoadError::None);
+
+    const u32 five = 5;
+    EXPECT_EQ(load_error(with_manifest(declared, offsetof(ManifestHeader, revision), &five, 4)), LoadError::BadPatch);
+}
 
 TEST(Rules, EveryPatchRuleRefusesItsCase) {
     for (const PatchCase& c : kPatchCases) {

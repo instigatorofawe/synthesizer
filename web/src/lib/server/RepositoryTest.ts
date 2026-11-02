@@ -22,7 +22,7 @@ import {
 } from '#lib/server/Repository.ts';
 import { seedDemo } from '#lib/server/Seed.ts';
 import { compileSnapshot } from '#lib/server/Compile.ts';
-import { EMPTY_GRAPH, timelineSchema, type Timeline } from '#lib/Schema.ts';
+import { EMPTY_GRAPH, timelineSchema, type Graph, type Timeline } from '#lib/Schema.ts';
 
 const timeline = (slots: string[]): Timeline =>
 	timelineSchema.parse({
@@ -34,6 +34,80 @@ let db: Db;
 
 beforeEach(() => {
 	db = openDatabase(':memory:');
+});
+
+describe('subpatches', () => {
+	const part: Graph = { params: [], nodes: [{ id: 1, type: 'noise' }, { id: 2, type: 'outlet', name: 'out' }], edges: [{ from: 1, to: 2, input: 'in' }] };
+	const using = (id: string): Graph => ({
+		params: [],
+		nodes: [
+			{ id: 1, type: 'subpatch', patch: id },
+			{ id: 2, type: 'env' },
+			{ id: 3, type: 'mul' },
+			{ id: 4, type: 'out' }
+		],
+		edges: [
+			{ from: 1, port: 'out', to: 3, input: 'a' },
+			{ from: 2, to: 3, input: 'b' },
+			{ from: 3, to: 4, input: 'l' }
+		]
+	});
+
+	it('refuses to delete a patch another expands', () => {
+		const inner = createPatch(db, 'Inner', part);
+		const outer = createPatch(db, 'Outer', using(inner));
+		expect(() => deletePatch(db, inner)).toThrow(InUse);
+		deletePatch(db, outer);
+		deletePatch(db, inner);
+		expect(listPatches(db)).toEqual([]);
+	});
+
+	it('refuses to name a patch that does not exist', () => {
+		expect(() => createPatch(db, 'Outer', using('nothing'))).toThrow(NotFound);
+	});
+
+	it('counts a timeline that reaches a patch through another as affected by editing it', () => {
+		const deepest = createPatch(db, 'Deepest', part);
+		const middle = createPatch(db, 'Middle', {
+			...part,
+			nodes: [{ id: 1, type: 'subpatch', patch: deepest }, { id: 2, type: 'outlet', name: 'out' }],
+			edges: [{ from: 1, port: 'out', to: 2, input: 'in' }]
+		});
+		const outer = createPatch(db, 'Outer', using(middle));
+		createTimeline(db, 'Song', timeline([outer]));
+		expect(patchUsers(db, deepest).map((t) => t.name)).toEqual(['Song']);
+	});
+
+	it('updates its links when a graph stops using one', () => {
+		const inner = createPatch(db, 'Inner', part);
+		const outer = createPatch(db, 'Outer', using(inner));
+		savePatch(db, outer, 1, 'Outer', EMPTY_GRAPH);
+		deletePatch(db, inner);
+		expect(listPatches(db).map((p) => p.name)).toEqual(['Outer']);
+	});
+
+	it('carries a subpatch into an export, so the exported bytes match what was previewed', async () => {
+		const inner = createPatch(db, 'Inner', part);
+		const outer = createPatch(db, 'Outer', using(inner));
+		const id = createTimeline(db, 'Song', timeline([outer]));
+		const taken = snapshot(db, [id]);
+		expect(taken.patches.map((p) => p.name).sort()).toEqual(['Inner', 'Outer']);
+		const { report } = await compileSnapshot(taken);
+		expect(report.ok).toBe(true);
+		expect(report.compiled_patches).toBe(1);
+	});
+
+	it('can delete a graph that names itself, which only the compiler refuses', async () => {
+		const self = createPatch(db, 'Self', EMPTY_GRAPH);
+		savePatch(db, self, 1, 'Self', using(self));
+		const id = createTimeline(db, 'Song', timeline([self]));
+		const { report } = await compileSnapshot(snapshot(db, [id]));
+		expect(report.ok).toBe(false);
+		expect(report.errors?.[0].message).toContain('contains itself');
+		deleteTimeline(db, id);
+		deletePatch(db, self);
+		expect(listPatches(db)).toEqual([]);
+	});
 });
 
 describe('patches are global', () => {

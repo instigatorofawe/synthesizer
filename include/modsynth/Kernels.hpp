@@ -106,6 +106,15 @@ struct Kernels {
     struct ToneState {
         float v, d, k;
     };
+    struct OscModState {
+        u32 phase;            // the accumulator, which the phase input is added to and never moves
+        u32 read;             // where the wave was read last
+        u32 edge;             // where a pulse last fell
+        float sync;           // the sync input's last sample
+        float earlier, last;  // a sine's last two samples, which feedback averages
+        float pending;        // the sample owed, as a jump corrects the sample before it too
+        u32 started;
+    };
     struct NoiseState {
         u32 x;
     };
@@ -144,6 +153,8 @@ struct Kernels {
                 return sizeof(OscState);
             case Op::Tone:
                 return sizeof(ToneState);
+            case Op::OscMod:
+                return sizeof(OscModState);
             case Op::Biquad:
                 return sizeof(BiquadState);
             case Op::Env:
@@ -174,6 +185,16 @@ struct Kernels {
     }
     [[nodiscard]] static float scalar(const RunContext& c, DecodedOperand o) { return c.banks[o.bank][o.index]; }
     [[nodiscard]] static float* buffer(const RunContext& c, DecodedOperand o) { return c.buffers + o.index * N; }
+    // An Either input. A scalar holds for the frame, so a stride of 0 reads the same one every time.
+    struct Signal {
+        const float* at;
+        u32 stride;
+        [[nodiscard]] float operator[](u32 i) const { return at[i * stride]; }
+    };
+    [[nodiscard]] static Signal signal(const RunContext& c, DecodedOperand o) {
+        if (o.bank == static_cast<u16>(Bank::Buffer)) return {buffer(c, o), 1};
+        return {c.banks[o.bank] + o.index, 0};
+    }
     static void set_scalar(RunContext& c, DecodedOperand o, float value) {
         (o.bank == static_cast<u16>(Bank::Track) ? c.track : c.voice)[o.index] = value;
     }
@@ -268,6 +289,18 @@ struct Kernels {
             case Op::KLfo2:
                 klfo(s, c, !c.stopped);
                 break;
+            case Op::OscMod:
+                osc_mod(s, c);
+                break;
+            case Op::Math:
+                math(s, c);
+                break;
+            case Op::KMath:
+                set_scalar(c, s.out[0], kmath(s, c));
+                break;
+            case Op::Shape:
+                shape(s, c);
+                break;
             default:
                 break;  // unreachable: the validator rejects unknown ops
         }
@@ -336,13 +369,21 @@ struct Kernels {
     }
     [[nodiscard]] static float inverse_of(u32 inc) { return inc == 0 ? 0.0f : 1.0f / static_cast<float>(inc); }
 
+    [[nodiscard]] static float ramp(u32 p) {
+        return static_cast<float>(static_cast<std::int32_t>(p)) * 4.656612873e-10f;
+    }
+    [[nodiscard]] static float folded(u32 phase) {
+        const u32 p = phase + 0x40000000u;
+        const u32 fold = p ^ static_cast<u32>(static_cast<std::int32_t>(p) >> 31);
+        return static_cast<float>(static_cast<std::int32_t>(fold)) * 9.313225746e-10f - 1.0f;
+    }
+
     // Rises from 0, so a note starts without a click, and jumps from 1 to -1 at half a turn.
     static void saw(const DecodedStep& s, RunContext& c) {
         auto& st = state<OscState>(c, s);
         const u32 inc = phase_increment(s, c);
         u32 phase = st.phase;
         float* out = buffer(c, s.out[0]);
-        const auto ramp = [](u32 p) { return static_cast<float>(static_cast<std::int32_t>(p)) * 4.656612873e-10f; };
         if (s.mode == kNaive) {
             for (u32 i = 0; i < N; ++i) {
                 out[i] = ramp(phase);
@@ -397,9 +438,7 @@ struct Kernels {
         u32 phase = st.phase;
         float* out = buffer(c, s.out[0]);
         for (u32 i = 0; i < N; ++i) {
-            const u32 p = phase + 0x40000000u;
-            const u32 folded = p ^ static_cast<u32>(static_cast<std::int32_t>(p) >> 31);
-            out[i] = static_cast<float>(static_cast<std::int32_t>(folded)) * 9.313225746e-10f - 1.0f;
+            out[i] = folded(phase);
             phase += inc;
         }
         st.phase = phase;
@@ -434,6 +473,230 @@ struct Kernels {
         }
         st.v = v;
         st.d = d;
+    }
+
+    // What a jump at `height` between two samples adds to each of them. Where the Saw and Pulse kernels correct a
+    // sample only by where it lies, a jump here can come from a sync edge, between samples, in either direction, so
+    // this holds the whole correction: `since` is how much of a sample ago it happened, and the sample before it is
+    // part of it.
+    struct Blep {
+        float before = 0.0f, after = 0.0f;
+        void add(float height, float since) {
+            const float rest = 1.0f - since;
+            before += 0.5f * height * since * since;
+            after -= 0.5f * height * rest * rest;
+        }
+        // Adds a jump at one place in the wave, if reading it moved from `from` to `to` relative to that place. The
+        // moved test tells this crossing from the one half a turn away, where the signs also differ.
+        void cross(u32 from, u32 to, float height) {
+            const auto was = static_cast<std::int32_t>(from), is = static_cast<std::int32_t>(to);
+            const auto moved = static_cast<std::int32_t>(to - from);
+            if ((was ^ is) >= 0 || (is ^ moved) < 0) return;
+            add(moved > 0 ? height : -height, static_cast<float>(is) / static_cast<float>(moved));
+        }
+    };
+
+    template <OscModMode M>
+    [[nodiscard]] static float mod_wave(u32 read, u32 edge, float mean) {
+        if constexpr (M == OscModMode::Sine) {
+            return sin_turns(static_cast<float>(static_cast<std::int32_t>(read)) * 2.32830644e-10f);
+        } else if constexpr (M == OscModMode::Triangle) {
+            return folded(read);
+        } else if constexpr (M == OscModMode::Saw || M == OscModMode::NaiveSaw) {
+            return ramp(read);
+        } else {
+            return (read < edge ? 1.0f : -1.0f) - mean;
+        }
+    }
+
+    // Frequency, phase and sync, any of them audio or a scalar, and a fourth input that is feedback on a sine and width
+    // on a pulse. Frequency can go below zero, and the wave then runs backwards. A rising edge through zero on sync
+    // restarts it, and that jump is smoothed as a saw's own jump is, whichever wave this is, which takes the sample
+    // after it. So the band-limited forms are a sample late. Like Tone, it starts on the note's sample.
+    template <OscModMode M>
+    static void osc_mod_wave(const DecodedStep& s, RunContext& c) {
+        static constexpr bool naive = M == OscModMode::NaiveSaw || M == OscModMode::NaivePulse;
+        static constexpr bool sine = M == OscModMode::Sine;
+        static constexpr bool saw = M == OscModMode::Saw || M == OscModMode::NaiveSaw;
+        static constexpr bool pulse = M == OscModMode::Pulse || M == OscModMode::NaivePulse;
+        auto& st = state<OscModState>(c, s);
+        const Signal freq = signal(c, s.in[0]), offset = signal(c, s.in[1]), sync = signal(c, s.in[2]),
+                     fourth = signal(c, s.in[3]);
+        float* out = buffer(c, s.out[0]);
+        const auto step_at = [&](u32 at) {
+            const float turns = freq[at] * c.inverse_rate;
+            if (turns != turns) return std::int32_t{0};  // As Saw does: clamp() would make NaN a tone at half the rate
+            return static_cast<std::int32_t>(clamp(turns, -0.5f, 0.5f) * 4294967040.0f);
+        };
+        u32 i = 0;
+        if (st.started == 0) {
+            st.started = 1;
+            i = c.gate.on < N ? c.gate.on : 0;
+            std::fill(out, out + i, 0.0f);
+            st.sync = sync[i];
+            // A step back from where it starts, so a wave that starts on a jump, as a pulse does, softens it like any
+            // other.
+            st.read = turns_to_phase(offset[i]) - static_cast<u32>(step_at(i));
+            if constexpr (pulse) st.edge = static_cast<u32>(clamp(fourth[i], 0.0f, 1.0f) * 4294967040.0f);
+        }
+        u32 phase = st.phase, last_read = st.read, last_edge = st.edge;
+        float last_sync = st.sync, earlier = st.earlier, last = st.last, pending = st.pending;
+        for (; i < N; ++i) {
+            const std::int32_t step = step_at(i);
+            const u32 moved = turns_to_phase(offset[i]);
+            const float width = pulse ? clamp(fourth[i], 0.0f, 1.0f) : 0.0f;
+            const u32 edge = pulse ? static_cast<u32>(width * 4294967040.0f) : 0u;
+            const float mean = width + width - 1.0f;
+            const u32 pushed = sine ? turns_to_phase(clamp(fourth[i], -1.0f, 1.0f) * (earlier + last) * 0.5f) : 0u;
+            const float edge_in = sync[i];
+            Blep blep;
+            u32 read;
+            if (last_sync <= 0.0f && edge_in > 0.0f) {
+                const float since = clamp(edge_in / (edge_in - last_sync), 0.0f, 1.0f);
+                const float reach = static_cast<float>(step);
+                const u32 caught = last_read + static_cast<u32>(static_cast<std::int32_t>(reach * (1.0f - since)));
+                if constexpr (!naive) {
+                    blep.add(mod_wave<M>(moved + pushed, edge, mean) - mod_wave<M>(caught + pushed, edge, mean), since);
+                }
+                phase = static_cast<u32>(static_cast<std::int32_t>(reach * since));
+                read = phase + moved;
+            } else {
+                read = phase + moved;
+                if constexpr (saw && !naive) {
+                    blep.cross(last_read + 0x80000000u, read + 0x80000000u, -2.0f);
+                } else if constexpr (pulse && !naive) {
+                    blep.cross(last_read, read, 2.0f);
+                    blep.cross(last_read - last_edge, read - edge, -2.0f);
+                }
+            }
+            last_sync = edge_in;
+            const float value = mod_wave<M>(read + pushed, edge, mean);
+            if constexpr (sine) {
+                earlier = last;
+                last = value;
+            }
+            if constexpr (naive) {
+                out[i] = value;
+            } else {
+                out[i] = pending + blep.before;
+                pending = value + blep.after;
+            }
+            last_read = read;
+            last_edge = edge;
+            phase += static_cast<u32>(step);
+        }
+        st.phase = phase;
+        st.read = last_read;
+        st.edge = last_edge;
+        st.sync = last_sync;
+        st.earlier = earlier;
+        st.last = last;
+        st.pending = pending;
+    }
+
+    static void osc_mod(const DecodedStep& s, RunContext& c) {
+        switch (static_cast<OscModMode>(s.mode)) {
+            case OscModMode::Sine:
+                return osc_mod_wave<OscModMode::Sine>(s, c);
+            case OscModMode::Triangle:
+                return osc_mod_wave<OscModMode::Triangle>(s, c);
+            case OscModMode::Saw:
+                return osc_mod_wave<OscModMode::Saw>(s, c);
+            case OscModMode::Pulse:
+                return osc_mod_wave<OscModMode::Pulse>(s, c);
+            case OscModMode::NaiveSaw:
+                return osc_mod_wave<OscModMode::NaiveSaw>(s, c);
+            case OscModMode::NaivePulse:
+                return osc_mod_wave<OscModMode::NaivePulse>(s, c);
+        }
+    }
+
+    // Division by zero gives 0. Compare gives 1 if a is above b, and select gives b if a is above 0.
+    template <MathMode M>
+    [[nodiscard]] static float math_of(float a, float b, float d) {
+        if constexpr (M == MathMode::Min) {
+            return a < b ? a : b;
+        } else if constexpr (M == MathMode::Max) {
+            return a > b ? a : b;
+        } else if constexpr (M == MathMode::Abs) {
+            return a < 0.0f ? -a : a;
+        } else if constexpr (M == MathMode::Clip) {
+            return clamp(a, b, d);
+        } else if constexpr (M == MathMode::Floor) {
+            return floor_of(a);
+        } else if constexpr (M == MathMode::Divide) {
+            return b == 0.0f ? 0.0f : a / b;
+        } else if constexpr (M == MathMode::Compare) {
+            return a > b ? 1.0f : 0.0f;
+        } else {
+            return a > 0.0f ? b : d;
+        }
+    }
+
+    template <MathMode M>
+    static void math_run(const DecodedStep& s, RunContext& c) {
+        const Signal a = signal(c, s.in[0]), b = signal(c, s.in[1]), d = signal(c, s.in[2]);
+        float* out = buffer(c, s.out[0]);
+        for (u32 i = 0; i < N; ++i) out[i] = math_of<M>(a[i], b[i], d[i]);
+    }
+
+    static void math(const DecodedStep& s, RunContext& c) {
+        switch (static_cast<MathMode>(s.mode)) {
+            case MathMode::Min:
+                return math_run<MathMode::Min>(s, c);
+            case MathMode::Max:
+                return math_run<MathMode::Max>(s, c);
+            case MathMode::Abs:
+                return math_run<MathMode::Abs>(s, c);
+            case MathMode::Clip:
+                return math_run<MathMode::Clip>(s, c);
+            case MathMode::Floor:
+                return math_run<MathMode::Floor>(s, c);
+            case MathMode::Divide:
+                return math_run<MathMode::Divide>(s, c);
+            case MathMode::Compare:
+                return math_run<MathMode::Compare>(s, c);
+            case MathMode::Select:
+                return math_run<MathMode::Select>(s, c);
+        }
+    }
+
+    [[nodiscard]] static float kmath(const DecodedStep& s, const RunContext& c) {
+        const float a = scalar(c, s.in[0]), b = scalar(c, s.in[1]), d = scalar(c, s.in[2]);
+        switch (static_cast<MathMode>(s.mode)) {
+            case MathMode::Min:
+                return math_of<MathMode::Min>(a, b, d);
+            case MathMode::Max:
+                return math_of<MathMode::Max>(a, b, d);
+            case MathMode::Abs:
+                return math_of<MathMode::Abs>(a, b, d);
+            case MathMode::Clip:
+                return math_of<MathMode::Clip>(a, b, d);
+            case MathMode::Floor:
+                return math_of<MathMode::Floor>(a, b, d);
+            case MathMode::Divide:
+                return math_of<MathMode::Divide>(a, b, d);
+            case MathMode::Compare:
+                return math_of<MathMode::Compare>(a, b, d);
+            case MathMode::Select:
+                return math_of<MathMode::Select>(a, b, d);
+        }
+        return 0.0f;  // unreachable: the validator bounds the mode
+    }
+
+    // The input is a place along a table that runs from -1 to 1, so the guard is the curve's value at 1 and not a copy
+    // of its start.
+    static void shape(const DecodedStep& s, RunContext& c) {
+        const BoundTable& t = c.resources[s.resource].table;
+        const float half = static_cast<float>(t.length) * 0.5f;
+        const float* in = buffer(c, s.in[0]);
+        float* out = buffer(c, s.out[0]);
+        for (u32 i = 0; i < N; ++i) {
+            const float place = (clamp(in[i], -1.0f, 1.0f) + 1.0f) * half;
+            const u32 idx = std::min(static_cast<u32>(place), t.length - 1u);
+            const float a = t.data[idx];
+            out[i] = a + (t.data[idx + 1] - a) * (place - static_cast<float>(idx));
+        }
     }
 
     static void biquad(const DecodedStep& s, RunContext& c) {

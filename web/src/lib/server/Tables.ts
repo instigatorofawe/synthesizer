@@ -41,6 +41,21 @@ export const timelinePatches = sqliteTable(
 	(t) => [primaryKey({ columns: [t.timelineId, t.patchId] })]
 );
 
+// Which patches a patch expands as subpatches, derived from its graph on every save. Like timeline_patches it backs the
+// delete guard and "used by", and it also says what an export has to carry along.
+export const patchSubpatches = sqliteTable(
+	'patch_subpatches',
+	{
+		patchId: text('patch_id')
+			.notNull()
+			.references(() => patches.id, { onDelete: 'cascade' }),
+		subpatchId: text('subpatch_id')
+			.notNull()
+			.references(() => patches.id, { onDelete: 'restrict' })
+	},
+	(t) => [primaryKey({ columns: [t.patchId, t.subpatchId] })]
+);
+
 export const assets = sqliteTable('assets', {
 	id: text('id').primaryKey(),
 	name: text('name').notNull(),

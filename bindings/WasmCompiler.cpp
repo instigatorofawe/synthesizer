@@ -17,4 +17,10 @@ static val compile(const std::string& request) {
     return out;
 }
 
-EMSCRIPTEN_BINDINGS(modsynth_compiler) { emscripten::function("compile", &compile); }
+// What the graph editor offers, as JSON text, from the table the compiler reads.
+static std::string catalog() { return modsynth::compiler::node_catalog().dump(); }
+
+EMSCRIPTEN_BINDINGS(modsynth_compiler) {
+    emscripten::function("compile", &compile);
+    emscripten::function("catalog", &catalog);
+}

@@ -33,6 +33,9 @@ make_golden Zones 1920
 # Revision 5.
 make_golden Hold 1920
 
+# Revision 6.
+make_golden Mods 1920
+
 # What a device receives when it already has every chunk but the Programs.
 if [ -e golden/Demo.thin.image ]; then
     exit 0

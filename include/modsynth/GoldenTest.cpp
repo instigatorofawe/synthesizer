@@ -41,6 +41,7 @@ constexpr Golden kGoldens[] = {
     {"AllOps32", 1600, 0x3d10ba76abc6ad78ull, 32}, {"Waves32", 800, 0xe6016cf15bab3260ull, 32},
     {"Tones32", 800, 0x76ac201dd55fe56bull, 32},   {"Lanes", 1920, 0x60d243046489eb9eull, 32},
     {"Zones", 1920, 0xed2b4ca7c30b9bb3ull, 32},    {"Hold", 1920, 0xfb0025e9e989fe1full, 32},
+    {"Mods", 1920, 0x46f84404be93fbffull, 32},
 };
 
 std::vector<std::byte> read_file(const std::string& path) {
@@ -163,7 +164,7 @@ TEST(Golden, TheCompilerStillWritesTheseBytes) {
 // enums rather than a list, so it cannot fall out of step with the registry.
 TEST(Golden, BetweenThemTheImagesUseEverything) {
     std::vector<bool> ops(static_cast<u32>(Op::kCount)), instructions(static_cast<u32>(Instr::kCount)), mix(8);
-    std::vector<bool> biquad(3), delay_read(2), saw(2), pulse(2), sample2(4);
+    std::vector<bool> biquad(3), delay_read(2), saw(2), pulse(2), sample2(4), osc_mod(6), math(8), kmath(8);
     bool i16 = false, f32 = false, mono = false, stereo = false, looped = false, one_shot = false;
 
     for (const Golden& g : kGoldens) {
@@ -182,6 +183,9 @@ TEST(Golden, BetweenThemTheImagesUseEverything) {
                     if (step.op == static_cast<u8>(Op::Saw)) saw[step.mode] = true;
                     if (step.op == static_cast<u8>(Op::Pulse)) pulse[step.mode] = true;
                     if (step.op == static_cast<u8>(Op::Sample2)) sample2[step.mode] = true;
+                    if (step.op == static_cast<u8>(Op::OscMod)) osc_mod[step.mode] = true;
+                    if (step.op == static_cast<u8>(Op::Math)) math[step.mode] = true;
+                    if (step.op == static_cast<u8>(Op::KMath)) kmath[step.mode] = true;
                 }
             } else if (c.kind == static_cast<u8>(ChunkKind::Program)) {
                 ProgramView v;
@@ -208,6 +212,9 @@ TEST(Golden, BetweenThemTheImagesUseEverything) {
     for (u32 i = 0; i < saw.size(); ++i) EXPECT_TRUE(saw[i]) << "saw mode " << i;
     for (u32 i = 0; i < pulse.size(); ++i) EXPECT_TRUE(pulse[i]) << "pulse mode " << i;
     for (u32 i = 0; i < sample2.size(); ++i) EXPECT_TRUE(sample2[i]) << "sample2 mode " << i;
+    for (u32 i = 0; i < osc_mod.size(); ++i) EXPECT_TRUE(osc_mod[i]) << "osc mod mode " << i;
+    for (u32 i = 0; i < math.size(); ++i) EXPECT_TRUE(math[i]) << "math mode " << i;
+    for (u32 i = 0; i < kmath.size(); ++i) EXPECT_TRUE(kmath[i]) << "kmath mode " << i;
     EXPECT_TRUE(i16 && f32 && mono && stereo && looped && one_shot);
 }
 
@@ -227,6 +234,7 @@ TEST(Golden, EachImageDeclaresTheRevisionItNeeds) {
     }
     for (const char* name : {"Lanes.image", "Zones.image"}) EXPECT_EQ(revision(name), 4u) << name;
     EXPECT_EQ(revision("Hold.image"), 5u);
+    EXPECT_EQ(revision("Mods.image"), 6u);
 }
 
 // A frozen image must never quietly change its sound by landing on an engine of another size.

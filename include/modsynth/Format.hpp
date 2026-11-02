@@ -35,7 +35,7 @@ template <class T>
 
 inline constexpr u32 kChunkMagic = 0x4B43534D;  // "MSCK"
 inline constexpr u8 kFormatVersion = 1;         // Changes only if an old engine must not even try to read an image
-inline constexpr u32 kFormatRevision = 5;       // The newest additions this engine understands
+inline constexpr u32 kFormatRevision = 6;       // The newest additions this engine understands
 inline constexpr u32 kChunkAlign = 8;
 inline constexpr u16 kNone = 0xFFFF;
 
@@ -165,6 +165,8 @@ inline constexpr u8 kReadBeforeWrite = 1;
 inline constexpr u8 kNaive = 1;          // Saw and Pulse with no anti-aliasing
 inline constexpr u8 kSampleReverse = 1;  // Sample2 plays towards the start
 inline constexpr u8 kSampleTail = 2;     // Sample2 leaves its loop on release and plays on to the end
+enum class OscModMode : u8 { Sine, Triangle, Saw, Pulse, NaiveSaw, NaivePulse };
+enum class MathMode : u8 { Min, Max, Abs, Clip, Floor, Divide, Compare, Select };
 
 // A Sample2's Table is rows of this many f32, in this order, so a row is a key range, a velocity range, an index into
 // the patch's refs, and the key the recording sounds at, which may be fractional. A row whose low key is above its high
@@ -172,7 +174,7 @@ inline constexpr u8 kSampleTail = 2;     // Sample2 leaves its loop on release a
 enum ZoneField : u32 { kZoneLowKey, kZoneHighKey, kZoneLowVelocity, kZoneHighVelocity, kZoneRef, kZoneRoot };
 inline constexpr u32 kZoneFields = 8;
 
-enum class Arg : u8 { None, Buffer, Scalar };
+enum class Arg : u8 { None, Buffer, Scalar, Either };  // Either takes a buffer or any scalar
 enum class Resource : u8 { None, Table, Asset, Delay };
 
 struct OpSignature {
@@ -202,7 +204,12 @@ struct OpSignature {
 // The revision that added an opcode. An image must declare it, so an older engine reports "needs a newer engine" and
 // not "damaged". Lines in Opcodes.def can't carry this, as they never change. A revision adding an opcode adds a line.
 [[nodiscard]] constexpr u32 op_revision(Op op) {
-    return op >= Op::KLfo2 ? 5 : op >= Op::Sample2 ? 4 : op >= Op::Tone ? 2 : op >= Op::Saw ? 1 : 0;
+    return op >= Op::OscMod    ? 6
+           : op >= Op::KLfo2   ? 5
+           : op >= Op::Sample2 ? 4
+           : op >= Op::Tone    ? 2
+           : op >= Op::Saw     ? 1
+                               : 0;
 }
 
 struct WireStep {

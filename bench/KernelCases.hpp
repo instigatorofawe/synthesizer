@@ -22,6 +22,7 @@ struct KernelCase {
     Op op;
     u8 mode = 0;
     float in[4] = {};  // Each Scalar input's value. A Buffer input holds noise, whatever this says.
+    u8 audio = 0;      // Which Either inputs are buffers, by bit. The rest read `in`.
     int moving = -1;   // An input that changes every frame, as a modulated one does
     float to = 0.0f;   // and the value it alternates with
     u32 stage = 0;     // The stage an Env is held in
@@ -29,6 +30,8 @@ struct KernelCase {
 };
 
 inline constexpr u8 kLowPass = static_cast<u8>(BiquadMode::LowPass);
+[[nodiscard]] consteval u8 wave(OscModMode mode) { return static_cast<u8>(mode); }
+[[nodiscard]] consteval u8 math(MathMode mode) { return static_cast<u8>(mode); }
 inline constexpr KernelCase kKernelCases[] = {
     {.name = "Dispatch only", .op = static_cast<Op>(0)},
     {.name = "Fill", .op = Op::Fill, .in = {0.5f}},
@@ -78,6 +81,38 @@ inline constexpr KernelCase kKernelCases[] = {
     {.name = "KSnap", .op = Op::KSnap},
     {.name = "KLfo", .op = Op::KLfo, .in = {2.0f, 1.0f}},
     {.name = "KLfo2", .op = Op::KLfo2, .in = {2.0f, 1.0f}},
+    {.name = "OscMod, sine", .op = Op::OscMod, .mode = wave(OscModMode::Sine), .in = {440.0f}},
+    {.name = "OscMod, sine, phase audio",
+     .op = Op::OscMod,
+     .mode = wave(OscModMode::Sine),
+     .in = {440.0f},
+     .audio = 0b0010},
+    {.name = "OscMod, sine, feedback", .op = Op::OscMod, .mode = wave(OscModMode::Sine), .in = {440.0f, 0, 0, 0.2f}},
+    {.name = "OscMod, triangle", .op = Op::OscMod, .mode = wave(OscModMode::Triangle), .in = {440.0f}},
+    {.name = "OscMod, saw, 110 Hz", .op = Op::OscMod, .mode = wave(OscModMode::Saw), .in = {110.0f}},
+    {.name = "OscMod, saw, 4186 Hz", .op = Op::OscMod, .mode = wave(OscModMode::Saw), .in = {4186.0f}},
+    {.name = "OscMod, saw, sync audio",
+     .op = Op::OscMod,
+     .mode = wave(OscModMode::Saw),
+     .in = {4186.0f},
+     .audio = 0b0100},
+    {.name = "OscMod, pulse, 4186 Hz", .op = Op::OscMod, .mode = wave(OscModMode::Pulse), .in = {4186.0f, 0, 0, 0.5f}},
+    {.name = "OscMod, saw, naive", .op = Op::OscMod, .mode = wave(OscModMode::NaiveSaw), .in = {440.0f}},
+    {.name = "OscMod, pulse, naive",
+     .op = Op::OscMod,
+     .mode = wave(OscModMode::NaivePulse),
+     .in = {440.0f, 0, 0, 0.5f}},
+    {.name = "Math, min, audio and scalar",
+     .op = Op::Math,
+     .mode = math(MathMode::Min),
+     .in = {0, 0.5f},
+     .audio = 0b001},
+    {.name = "Math, clip, audio", .op = Op::Math, .mode = math(MathMode::Clip), .in = {0, -0.5f, 0.5f}, .audio = 0b001},
+    {.name = "Math, floor, audio", .op = Op::Math, .mode = math(MathMode::Floor), .audio = 0b001},
+    {.name = "Math, divide, audio", .op = Op::Math, .mode = math(MathMode::Divide), .audio = 0b011},
+    {.name = "Math, select, audio", .op = Op::Math, .mode = math(MathMode::Select), .audio = 0b111},
+    {.name = "KMath, divide", .op = Op::KMath, .mode = math(MathMode::Divide), .in = {2.0f, 3.0f}},
+    {.name = "Shape", .op = Op::Shape},
 };
 
 [[nodiscard]] consteval bool every_opcode_has_a_case() {
@@ -150,9 +185,10 @@ class KernelRig {
             step_.out[o] = {static_cast<u16>(signature.out_kind == Arg::Buffer ? Bank::Buffer : Bank::Voice), o};
         }
         for (u16 i = 0; i < signature.ins; ++i) {
-            step_.in[i] = signature.in[i] == Arg::Buffer
-                              ? DecodedOperand{static_cast<u16>(Bank::Buffer), static_cast<u16>(kFirstInput + i)}
-                              : DecodedOperand{static_cast<u16>(Bank::Const), i};
+            const bool audio =
+                signature.in[i] == Arg::Buffer || (signature.in[i] == Arg::Either && (k.audio >> i & 1) != 0);
+            step_.in[i] = audio ? DecodedOperand{static_cast<u16>(Bank::Buffer), static_cast<u16>(kFirstInput + i)}
+                                : DecodedOperand{static_cast<u16>(Bank::Const), i};
         }
         const auto asset = [&]() {
             const bool f32 = k.recording == Recording::MonoF32;
@@ -165,7 +201,7 @@ class KernelRig {
                 .channels = static_cast<u8>(k.recording == Recording::StereoI16 ? 2 : 1),
                 .encoding = static_cast<u8>(f32 ? AssetEncoding::F32 : AssetEncoding::I16)};
         };
-        if (k.op == Op::Osc) resources_[0].table = {table_, kTable, 32 - 11};
+        if (k.op == Op::Osc || k.op == Op::Shape) resources_[0].table = {table_, kTable, 32 - 11};
         if (k.op == Op::Sample) resources_[0].asset = asset();
         if (k.op == Op::Sample2) {
             zones_[kZoneHighKey] = 127.0f;

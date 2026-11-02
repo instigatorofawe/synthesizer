@@ -210,17 +210,19 @@ class Bits {
 
     const auto readable = [&](u16 o, Arg kind, bool control) {
         const u16 i = operand_index(o);
+        const bool takes_buffer = kind == Arg::Buffer || kind == Arg::Either;
+        const bool takes_scalar = kind == Arg::Scalar || kind == Arg::Either;
         switch (operand_bank(o)) {
             case Bank::Buffer:
-                return kind == Arg::Buffer && !control && i < h.buffers && buffers.get(i);
+                return takes_buffer && !control && i < h.buffers && buffers.get(i);
             case Bank::Voice:
-                return kind == Arg::Scalar && !control && i < h.voice_scalars && voice.get(i);
+                return takes_scalar && !control && i < h.voice_scalars && voice.get(i);
             case Bank::Track:
-                return kind == Arg::Scalar && i < h.track_scalars && track.get(i);
+                return takes_scalar && i < h.track_scalars && track.get(i);
             case Bank::Global:
-                return kind == Arg::Scalar && i < h.params && p.param(i).scope == static_cast<u8>(ParamScope::Global);
+                return takes_scalar && i < h.params && p.param(i).scope == static_cast<u8>(ParamScope::Global);
             case Bank::Const:
-                return kind == Arg::Scalar && i < h.consts;
+                return takes_scalar && i < h.consts;
             default:
                 return false;
         }

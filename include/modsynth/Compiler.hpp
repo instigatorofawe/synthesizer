@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -18,6 +19,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -179,37 +181,311 @@ struct InputSpec {
     float def;
 };
 
+// A field of a node that isn't a wire, which the editor needs to offer. An empty list of choices means a number or a
+// string, whichever `number` says.
+struct OptionSpec {
+    const char* name;
+    std::vector<const char*> choices;
+    bool number = false;
+};
+
 struct NodeSpec {
     const char* type;
     std::vector<InputSpec> inputs;
     std::vector<const char*> outputs;
+    std::vector<OptionSpec> options = {};
 };
 
 inline const std::vector<NodeSpec>& node_specs() {
     static const std::vector<NodeSpec> specs = {
         {"note", {}, {"pitch", "velocity", "gate"}},
-        {"param", {}, {"out"}},
-        {"const", {}, {"out"}},
-        {"osc", {{"freq", 440.0f}, {"width", 0.5f}}, {"out"}},
+        {"param", {}, {"out"}, {{"param", {}, true}}},
+        {"const", {}, {"out"}, {{"value", {}, true}}},
+        {"osc",
+         {{"freq", 440.0f}, {"width", 0.5f}, {"phase", 0.0f}, {"sync", 0.0f}, {"feedback", 0.0f}},
+         {"out"},
+         {{"wave", {"sine", "saw", "square", "triangle"}},
+          {"mode", {"bandlimited", "naive", "fixed", "mod", "mod-naive"}}}},
         {"noise", {}, {"out"}},
-        {"biquad", {{"in", 0.0f}, {"cutoff", 1000.0f}, {"q", 0.707f}}, {"out"}},
+        {"biquad",
+         {{"in", 0.0f}, {"cutoff", 1000.0f}, {"q", 0.707f}},
+         {"out"},
+         {{"mode", {"lowpass", "highpass", "bandpass"}}}},
         {"env", {{"attack", 0.01f}, {"decay", 0.1f}, {"sustain", 0.7f}, {"release", 0.2f}}, {"out"}},
-        {"sample", {{"ratio", 1.0f}, {"note", 60.0f}, {"start", 0.0f}}, {"l", "r"}},
+        {"sample",
+         {{"ratio", 1.0f}, {"note", 60.0f}, {"start", 0.0f}},
+         {"l", "r"},
+         {{"mode", {"plain", "zones"}}, {"asset", {}}}},
         {"mul", {{"a", 1.0f}, {"b", 1.0f}}, {"out"}},
         {"add", {{"a", 0.0f}, {"b", 0.0f}}, {"out"}},
         {"mtof", {{"in", 69.0f}}, {"out"}},
         {"snap", {{"in", 0.0f}}, {"out"}},
-        {"ratio", {{"in", 60.0f}}, {"out"}},
+        {"ratio", {{"in", 60.0f}}, {"out"}, {{"root", {}, true}}},
         {"pan", {{"in", 0.0f}, {"position", 0.0f}}, {"l", "r"}},
-        {"delay", {{"in", 0.0f}, {"time", 0.25f}}, {"out"}},
-        {"comb", {{"in", 0.0f}, {"time", 0.03f}, {"feedback", 0.8f}, {"damp", 0.2f}}, {"out"}},
-        {"allpass", {{"in", 0.0f}, {"time", 0.005f}, {"feedback", 0.5f}}, {"out"}},
+        {"delay", {{"in", 0.0f}, {"time", 0.25f}}, {"out"}, {{"max", {}, true}}},
+        {"comb", {{"in", 0.0f}, {"time", 0.03f}, {"feedback", 0.8f}, {"damp", 0.2f}}, {"out"}, {{"max", {}, true}}},
+        {"allpass", {{"in", 0.0f}, {"time", 0.005f}, {"feedback", 0.5f}}, {"out"}, {{"max", {}, true}}},
         {"follow", {{"in", 0.0f}, {"release", 0.1f}}, {"out"}},
         {"lfo", {{"rate", 1.0f}, {"depth", 1.0f}}, {"out"}},
-        {"in", {}, {"l", "r"}},
+        {"math",
+         {{"a", 0.0f}, {"b", 0.0f}, {"c", 0.0f}},
+         {"out"},
+         {{"mode", {"min", "max", "abs", "clip", "floor", "divide", "compare", "select"}}}},
+        {"shape", {{"in", 0.0f}}, {"out"}},
+        {"in", {}, {"l", "r"}, {{"index", {}, true}}},
         {"out", {{"l", 0.0f}, {"r", 0.0f}}, {}},
+        // A graph's interface when it is used as a subpatch. Compiled by itself, an inlet is its default and nothing
+        // reads an outlet.
+        {"inlet", {}, {"out"}, {{"name", {}}, {"default", {}, true}}},
+        {"outlet", {{"in", 0.0f}}, {}, {{"name", {}}}},
+        // Stands where an inlet, an outlet or a subpatch's own in and out nodes were, once expanded. It writes no step.
+        {"wire", {{"in", 0.0f}}, {"out"}},
     };
     return specs;
+}
+
+inline constexpr int kMaxSubpatchDepth = 8;
+
+using PatchLookup = const json* (*)(const std::string& id, const void* context);
+
+// Where one of a subpatch's outputs ended up, or an input, once it has been expanded away.
+using PortMap = std::map<std::pair<int, std::string>, std::pair<int, std::string>>;
+
+struct Expanded {
+    json graph;
+    PortMap outputs;  // for each subpatch in the graph given
+};
+
+// A subpatch's nodes need ids of their own that don't move when something else in either graph is edited, because a
+// state id comes from an id, and a live swap carries state by it. So an id comes from the two ids it is made of, and a
+// clash moves to the next free one, which depends only on ids because nodes are taken in id order. Hoisting them past
+// 2^21 keeps them clear of what an editor hands out.
+inline int fresh_id(int outer, int inner, int part, std::set<int>& used) {
+    const int values[] = {outer, inner, part};
+    const u64 hash = hash_bytes(kHashSeed, reinterpret_cast<const std::byte*>(values), sizeof values);
+    int id = static_cast<int>(hash % (1u << 28)) + (1 << 21);
+    while (!used.insert(id).second) ++id;
+    return id;
+}
+
+// Replaces each subpatch node with a copy of its graph, so that no later pass knows they exist. What was an inlet, an
+// outlet or the subpatch's own in or out node becomes a wire, which keeps ordering, dead-node removal and the rule that
+// audio can't reach an input read once a frame working through a subpatch with nothing added. Parameters merge by id,
+// because a timeline can only address one. A graph with no subpatch comes back unchanged.
+inline Expanded expand_subpatches(const json& graph, const std::string& where, PatchLookup patches, const void* context,
+                                  std::vector<std::string>& stack) {
+    const json none = json::array();
+    const json& listed = graph.contains("nodes") ? graph.at("nodes") : none;
+    const auto is_subpatch = [](const json& n) { return n.value("type", std::string{}) == "subpatch"; };
+    if (std::none_of(listed.begin(), listed.end(), is_subpatch)) return {graph, {}};
+
+    std::map<int, const json*> ordered;
+    std::set<int> used;
+    for (const json& n : listed) {
+        const int id = n.at("id").get<int>();
+        if (!ordered.emplace(id, &n).second) {
+            throw CompileError(where + "/node:" + std::to_string(id), "duplicate node id");
+        }
+        used.insert(id);
+    }
+
+    std::map<int, json> params;
+    std::set<int> declared_here;
+    for (const json& p : graph.value("params", json::array())) {
+        const int id = p.at("id").get<int>();
+        if (!params.emplace(id, p).second) throw CompileError(where, "duplicate param id " + std::to_string(id));
+        declared_here.insert(id);
+    }
+
+    Expanded out;
+    json nodes = json::array(), edges = json::array();
+    PortMap inputs;
+    for (const auto& [id, node] : ordered) {
+        if (!is_subpatch(*node)) {
+            nodes.push_back(*node);
+            continue;
+        }
+        const std::string here = where + "/node:" + std::to_string(id);
+        const std::string name = node->value("patch", std::string{});
+        if (name.empty()) throw CompileError(here, "a subpatch needs a patch");
+        if (std::find(stack.begin(), stack.end(), name) != stack.end()) {
+            throw CompileError(here, "patch '" + name + "' contains itself");
+        }
+        if (stack.size() >= static_cast<std::size_t>(kMaxSubpatchDepth)) {
+            throw CompileError(here, "subpatches nest too deeply");
+        }
+        const json* found = patches ? patches(name, context) : nullptr;
+        if (!found) throw CompileError(here, "no patch '" + name + "' in the library");
+
+        stack.push_back(name);
+        const Expanded inner = expand_subpatches(*found, here, patches, context, stack);
+        stack.pop_back();
+
+        for (const json& p : inner.graph.value("params", json::array())) {
+            const int pid = p.at("id").get<int>();
+            const auto [at, added] = params.emplace(pid, p);
+            if (!added && !declared_here.count(pid) && at->second != p) {
+                throw CompileError(here, "two subpatches declare param " + std::to_string(pid) +
+                                             " differently. Declare it in this graph to settle it");
+            }
+        }
+
+        std::map<std::string, json> literals;
+        const json typed_in = node->value("inputs", json::object());
+        for (const auto& [input, value] : typed_in.items()) literals[input] = value;
+        const auto add_wire = [&](int inner_id, int part, const std::string& input, std::optional<json> fallback) {
+            const int wire = fresh_id(id, inner_id, part, used);
+            json w = {{"id", wire}, {"type", "wire"}, {"_top", id}};
+            w["_where"] = here + "/node:" + std::to_string(inner_id);
+            const auto literal = literals.find(input);
+            if (literal != literals.end()) {
+                w["inputs"] = {{"in", literal->second}};
+                literals.erase(literal);
+            } else if (fallback) {
+                w["inputs"] = {{"in", *fallback}};
+            }
+            nodes.push_back(std::move(w));
+            return wire;
+        };
+        const auto add_input = [&](const std::string& port, int wire) {
+            if (!inputs.try_emplace({id, port}, wire, "in").second) {
+                throw CompileError(here, "two inputs are named '" + port + "'");
+            }
+        };
+        const auto add_output = [&](const std::string& port, int wire) {
+            if (!out.outputs.try_emplace({id, port}, wire, "out").second) {
+                throw CompileError(here, "two outputs are named '" + port + "'");
+            }
+        };
+
+        // Each inner node, in id order: where a wire to it now goes, and where a wire from it now comes from.
+        std::map<int, const json*> inner_nodes;
+        for (const json& n : inner.graph.at("nodes")) inner_nodes[n.at("id").get<int>()] = &n;
+        std::map<int, int> renumbered;
+        PortMap into, from;
+        std::optional<std::array<int, 2>> inner_out;
+        for (const auto& [inner_id, inner_node] : inner_nodes) {
+            const std::string type = inner_node->at("type").get<std::string>();
+            const std::string label = inner_node->value("name", std::string{});
+            if ((type == "inlet" || type == "outlet") && label.empty()) {
+                throw CompileError(here, "an " + type + " needs a name");
+            }
+            if (type == "inlet") {
+                const int wire = add_wire(inner_id, 0, label, json(inner_node->value("default", 0.0f)));
+                add_input(label, wire);
+                from[{inner_id, "out"}] = {wire, "out"};
+            } else if (type == "outlet") {
+                const int wire = add_wire(inner_id, 0, "", std::nullopt);
+                add_output(label, wire);
+                into[{inner_id, "in"}] = {wire, "in"};
+            } else if (type == "in") {
+                if (inner_node->value("index", 0) != 0) throw CompileError(here, "a subpatch has no sidechain");
+                const int left = add_wire(inner_id, 0, "l", std::nullopt),
+                          right = add_wire(inner_id, 1, "r", std::nullopt);
+                add_input("l", left);
+                add_input("r", right);
+                from[{inner_id, "l"}] = {left, "out"};
+                from[{inner_id, "r"}] = {right, "out"};
+            } else if (type == "out") {
+                const int left = add_wire(inner_id, 0, "", std::nullopt),
+                          right = add_wire(inner_id, 1, "", std::nullopt);
+                add_output("l", left);
+                add_output("r", right);
+                into[{inner_id, "l"}] = {left, "in"};
+                into[{inner_id, "r"}] = {right, "in"};
+                inner_out = {left, right};
+            } else {
+                json copy = *inner_node;
+                const int fresh = fresh_id(id, inner_id, 0, used);
+                renumbered[inner_id] = fresh;
+                copy["id"] = fresh;
+                copy["_top"] = id;
+                if (!copy.contains("_where")) copy["_where"] = here + "/node:" + std::to_string(inner_id);
+                nodes.push_back(std::move(copy));
+            }
+        }
+        if (!literals.empty()) throw CompileError(here, "no input '" + literals.begin()->first + "'");
+
+        const auto rename = [&](const PortMap& ports, int inner_id,
+                                const std::string& port) -> std::pair<int, std::string> {
+            const auto moved = ports.find({inner_id, port});
+            if (moved != ports.end()) return moved->second;
+            const auto kept = renumbered.find(inner_id);
+            if (kept == renumbered.end()) {
+                throw CompileError(here, "edge at node " + std::to_string(inner_id) + " has nothing to reach");
+            }
+            return {kept->second, port};
+        };
+        std::map<std::string, json> reaching_out;  // what drives the inner out node's l and r, to mirror a lone one
+        for (const json& e : inner.graph.value("edges", json::array())) {
+            const auto [source, port] = rename(from, e.at("from").get<int>(), e.value("port", "out"));
+            const auto [target, input] = rename(into, e.at("to").get<int>(), e.value("input", "in"));
+            json edge = {{"from", source}, {"port", port}, {"to", target}, {"input", input}};
+            if (inner_out && (target == (*inner_out)[0] || target == (*inner_out)[1])) {
+                reaching_out[target == (*inner_out)[0] ? "l" : "r"] = edge;
+            }
+            edges.push_back(std::move(edge));
+        }
+        if (inner_out && reaching_out.size() == 1) {
+            const bool only_left = reaching_out.count("l") != 0;
+            json mirrored = reaching_out.begin()->second;
+            mirrored["to"] = (*inner_out)[only_left ? 1 : 0];
+            edges.push_back(std::move(mirrored));
+        }
+    }
+
+    for (const json& e : graph.value("edges", json::array())) {
+        json edge = e;
+        const int source = e.at("from").get<int>(), target = e.at("to").get<int>();
+        const std::string port = e.value("port", "out"), input = e.value("input", "in");
+        const auto found_source = ordered.find(source), found_target = ordered.find(target);
+        if (found_source != ordered.end() && is_subpatch(*found_source->second)) {
+            const auto moved = out.outputs.find({source, port});
+            if (moved == out.outputs.end()) {
+                throw CompileError(where + "/node:" + std::to_string(source), "no output '" + port + "'");
+            }
+            edge["from"] = moved->second.first;
+            edge["port"] = moved->second.second;
+        }
+        if (found_target != ordered.end() && is_subpatch(*found_target->second)) {
+            const auto moved = inputs.find({target, input});
+            if (moved == inputs.end()) {
+                throw CompileError(where + "/node:" + std::to_string(target), "no input '" + input + "'");
+            }
+            edge["to"] = moved->second.first;
+            edge["input"] = moved->second.second;
+        }
+        edges.push_back(std::move(edge));
+    }
+
+    out.graph = json::object();
+    out.graph["nodes"] = std::move(nodes);
+    out.graph["edges"] = std::move(edges);
+    json merged = json::array();
+    for (auto& [id, p] : params) merged.push_back(std::move(p));
+    if (!merged.empty()) out.graph["params"] = std::move(merged);
+    return out;
+}
+
+// What the graph editor is told about every node it can offer, from the table the compiler itself reads, so the two
+// can't disagree. A subpatch's ports come from the graph it names, so it has none here.
+inline json node_catalog() {
+    json catalog = json::array();
+    for (const NodeSpec& spec : node_specs()) {
+        if (std::string_view(spec.type) == "wire") continue;
+        json inputs = json::array();
+        for (const InputSpec& input : spec.inputs) inputs.push_back({{"name", input.name}, {"default", input.def}});
+        json options = json::array();
+        for (const OptionSpec& option : spec.options) {
+            options.push_back({{"name", option.name}, {"choices", option.choices}, {"number", option.number}});
+        }
+        catalog.push_back({{"type", spec.type}, {"inputs", inputs}, {"outputs", spec.outputs}, {"options", options}});
+    }
+    catalog.push_back({{"type", "subpatch"},
+                       {"inputs", json::array()},
+                       {"outputs", json::array()},
+                       {"options", json::array({{{"name", "patch"}, {"choices", json::array()}, {"number", false}}})}});
+    return catalog;
 }
 
 struct Node {
@@ -227,6 +503,8 @@ struct Node {
 
 }  // namespace detail
 
+using detail::node_catalog;
+
 struct ParamInfo {
     u16 id = 0;
     std::string name;
@@ -240,15 +518,29 @@ struct CompiledPatch {
     std::vector<Chunk> resources;
     std::vector<ParamInfo> params;
     u32 inputs = 0;
+    json nodes;  // The debug sidecar: for each graph node that survived, what its outputs became. It never enters the
+                 // image.
 };
 
 using AssetLookup = const json* (*)(const std::string& id, const void* context);
 
-// Compiles one graph. The result depends only on `graph` and on the assets it names.
-inline CompiledPatch compile_patch(const json& graph, const std::string& where, AssetLookup assets = nullptr,
-                                   const void* context = nullptr) {
+// Compiles one graph. The result depends only on `source`, on the assets it names and on the graphs of its subpatches.
+inline CompiledPatch compile_patch(const json& source, const std::string& where, AssetLookup assets = nullptr,
+                                   const void* context = nullptr, detail::PatchLookup library = nullptr) {
     using namespace detail;
-    const auto node_where = [&](int id) { return where + "/node:" + std::to_string(id); };
+    std::vector<std::string> subpatch_stack;
+    const Expanded expanded = expand_subpatches(source, where, library, context, subpatch_stack);
+    const json& graph = expanded.graph;
+    std::map<int, std::string> inner_where;
+    std::map<int, int> top_node;  // for a node a subpatch brought in, the graph node it stands for
+    for (const json& n : graph.at("nodes")) {
+        if (n.contains("_where")) inner_where[n.at("id").get<int>()] = n.at("_where").get<std::string>();
+        if (n.contains("_top")) top_node[n.at("id").get<int>()] = n.at("_top").get<int>();
+    }
+    const auto node_where = [&](int id) {
+        const auto inner = inner_where.find(id);
+        return inner != inner_where.end() ? inner->second : where + "/node:" + std::to_string(id);
+    };
 
     std::map<int, Node> nodes;
     for (const json& n : graph.at("nodes")) {
@@ -547,13 +839,40 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         } else if (type == "osc") {
             const std::string wave = n.config.value("wave", "sine");
             const std::string quality = n.config.value("mode", "bandlimited");
-            if (quality != "bandlimited" && quality != "naive" && quality != "fixed") {
+            const bool modulated = quality == "mod" || quality == "mod-naive";
+            if (quality != "bandlimited" && quality != "naive" && quality != "fixed" && !modulated) {
                 throw CompileError(node_where(id), "unknown osc mode '" + quality + "'");
             }
             if (quality == "fixed" && wave != "sine") throw CompileError(node_where(id), "only sine has a fixed mode");
             if (wave != "square" && input(n, "width")) throw CompileError(node_where(id), "only square has a width");
+            if (wave != "sine" && input(n, "feedback")) throw CompileError(node_where(id), "only sine has feedback");
+            for (const char* name : {"phase", "sync", "feedback"}) {
+                if (!modulated && input(n, name)) {
+                    throw CompileError(node_where(id), std::string("only an osc in mod mode has ") + name);
+                }
+            }
             const u8 mode = quality == "naive" ? kNaive : 0;
-            if (quality == "fixed") {
+            if (modulated) {
+                const bool naive = quality == "mod-naive";
+                if (naive && wave != "saw" && wave != "square") {
+                    throw CompileError(node_where(id), "only saw and square have a naive form");
+                }
+                const auto any_in = [&](const char* name) {
+                    const auto v = input(n, name);
+                    return v ? *v : constant(default_of(n, name));
+                };
+                const OscModMode form = wave == "sine"       ? OscModMode::Sine
+                                        : wave == "triangle" ? OscModMode::Triangle
+                                        : wave == "saw"      ? (naive ? OscModMode::NaiveSaw : OscModMode::Saw)
+                                        : wave == "square"
+                                            ? (naive ? OscModMode::NaivePulse : OscModMode::Pulse)
+                                            : throw CompileError(node_where(id), "unknown wave '" + wave + "'");
+                const Value fourth = wave == "sine"     ? any_in("feedback")
+                                     : wave == "square" ? any_in("width")
+                                                        : constant(0.0f);
+                const Value freq = any_in("freq"), phase = any_in("phase"), sync = any_in("sync");
+                set("out", audio_step(Op::OscMod, {freq, phase, sync, fourth}, 1, state, static_cast<u8>(form)).out[0]);
+            } else if (quality == "fixed") {
                 const Value freq = scalar_in(n, "freq");
                 set("out", audio_step(Op::Tone, {freq}, 1, state).out[0]);
             } else if (wave == "sine") {
@@ -709,6 +1028,59 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         } else if (type == "lfo") {
             const Value rate = scalar_in(n, "rate"), depth = scalar_in(n, "depth");
             set("out", control_step(Op::KLfo, {rate, depth}, state));
+        } else if (type == "math") {
+            struct Form {
+                const char* name;
+                MathMode mode;
+                const char*
+                    uses;    // the inputs it reads, because the rest read nothing and must not look as if they did
+                float b, c;  // and what those two are if nothing says
+            };
+            static constexpr Form forms[] = {
+                {"min", MathMode::Min, "ab", 0.0f, 0.0f},         {"max", MathMode::Max, "ab", 0.0f, 0.0f},
+                {"abs", MathMode::Abs, "a", 0.0f, 0.0f},          {"clip", MathMode::Clip, "abc", -1.0f, 1.0f},
+                {"floor", MathMode::Floor, "a", 0.0f, 0.0f},      {"divide", MathMode::Divide, "ab", 1.0f, 0.0f},
+                {"compare", MathMode::Compare, "ab", 0.0f, 0.0f}, {"select", MathMode::Select, "abc", 1.0f, 0.0f},
+            };
+            const std::string mode = n.config.value("mode", "min");
+            const auto form =
+                std::find_if(std::begin(forms), std::end(forms), [&](const Form& f) { return mode == f.name; });
+            if (form == std::end(forms)) throw CompileError(node_where(id), "unknown math mode '" + mode + "'");
+            const std::string uses = form->uses;
+            const auto operand_of = [&](const char* name, float fallback) {
+                const bool used = uses.find(name) != std::string::npos;
+                const auto v = input(n, name);
+                if (!used) {
+                    if (v) throw CompileError(node_where(id), mode + " has no input '" + name + "'");
+                    return constant(0.0f);
+                }
+                if (v) return *v;
+                const auto literal = n.literals.find(name);
+                return constant(literal != n.literals.end() ? literal->second : fallback);
+            };
+            const Value a = operand_of("a", 0.0f), b = operand_of("b", form->b), c = operand_of("c", form->c);
+            const u8 number = static_cast<u8>(form->mode);
+            set("out", a.audio() || b.audio() || c.audio() ? audio_step(Op::Math, {a, b, c}, 1, 0, number).out[0]
+                                                           : control_step(Op::KMath, {a, b, c}, 0, number));
+        } else if (type == "shape") {
+            const json curve = n.config.value("curve", json::array());
+            if (curve.size() < 3 || curve.size() > (1u << 16) + 1 || !std::has_single_bit(curve.size() - 1)) {
+                throw CompileError(node_where(id), "a curve has a power of two plus one points, from 3 to 65537");
+            }
+            Writer table;
+            table.put(TableHeader{static_cast<u32>(curve.size() - 1), 0});
+            for (const json& point : curve) {
+                const float value = point.get<float>();
+                if (!std::isfinite(value)) throw CompileError(node_where(id), "a curve's points must be finite");
+                table.put(value);
+            }
+            const u16 ref = add_ref(make_chunk(ChunkKind::Table, std::move(table.bytes)));
+            set("out", audio_step(Op::Shape, {buffer_in(n, "in")}, 1, 0, 0, ref).out[0]);
+        } else if (type == "wire") {
+            const auto in = input(n, "in");
+            set("out", in ? *in : constant(default_of(n, "in")));
+        } else if (type == "inlet") {
+            set("out", constant(n.config.value("default", 0.0f)));
         } else if (type == "in") {
             const int index = n.config.value("index", 0);
             if (index < 0 || index > 1) throw CompileError(node_where(id), "in index must be 0 or 1");
@@ -832,7 +1204,45 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
     for (const Ir& ir : control) w.put(wire(ir));
     for (const Ir& ir : voice) w.put(wire(ir));
 
+    // Buffers get reused, so a register holds a node's signal only just after the step that wrote it, and a probe has
+    // to say which step. A scalar stays where it was put.
+    std::map<int, int> written_at;
+    for (int i = 0; i < static_cast<int>(voice.size()); ++i) {
+        for (int o = 0; o < voice[i].outs; ++o) {
+            if (voice[i].out[o].audio()) written_at[voice[i].out[o].index] = i;
+        }
+    }
+    const auto describe = [&](const Value& v) {
+        json port = {{"rate", v.audio() ? "audio" : "control"}};
+        if (v.audio()) {
+            const auto step = written_at.find(v.index);
+            port["step"] = step != written_at.end() ? step->second : -1;  // An in port is filled before the first step
+            port["operand"] = encode(v);
+        } else if (v.bank == Bank::Voice || v.bank == Bank::Track) {
+            port["step"] = static_cast<int>(voice.size()) - 1;  // By then whatever writes it this frame has
+            port["operand"] = encode(v);
+        }
+        return port;
+    };
+    json sidecar = json::object();
+    const auto note_port = [&](int id, const std::string& port, const Value& v) {
+        sidecar[std::to_string(id)]["ports"][port] = describe(v);
+    };
+    for (const auto& [key, value] : outputs) {
+        if (!top_node.count(key.first)) note_port(key.first, key.second, value);
+    }
+    for (const auto& [key, flat] : expanded.outputs) {
+        const auto value = outputs.find(flat);
+        if (value != outputs.end()) note_port(key.first, key.second, value->second);
+    }
+    for (const auto& [id, top] : top_node) {
+        if (live.count(id) && !sidecar.contains(std::to_string(top)))
+            sidecar[std::to_string(top)]["ports"] = json::object();
+    }
+    sidecar[std::to_string(out_node)]["ports"] = json::object();
+
     CompiledPatch result;
+    result.nodes = std::move(sidecar);
     result.chunk = make_chunk(ChunkKind::Patch, std::move(w.bytes));
     result.resources = std::move(resources);
     result.params = std::move(params);
@@ -867,12 +1277,18 @@ inline const json* find_asset(const std::string& id, const void* context) {
     return &c->assets->at(id);
 }
 
+inline const json* find_graph(const std::string& id, const void* context) {
+    const auto* c = static_cast<const ImageContext*>(context);
+    if (!c->patches->contains(id)) return nullptr;
+    return &c->patches->at(id).at("graph");
+}
+
 inline const CompiledPatch& compiled_patch(ImageContext& image, const std::string& id, std::size_t program,
                                            const std::string& where) {
     if (!image.compiled.count(id)) {
         if (!image.patches->contains(id)) throw CompileError(where, "no patch '" + id + "' in the library");
         const json& entry = image.patches->at(id);
-        image.compiled[id] = compile_patch(entry.at("graph"), "patch:" + id, find_asset, &image);
+        image.compiled[id] = compile_patch(entry.at("graph"), "patch:" + id, find_asset, &image, find_graph);
     }
     const CompiledPatch& p = image.compiled.at(id);
     image.chunks.try_emplace(p.chunk.hash, p.chunk);
@@ -1895,8 +2311,19 @@ inline ImageResult compile_image(const json& request) {
     json programs = json::array();
     const json& entries = request.at("programs");
     if (entries.empty()) {
-        // A library, sent ahead of the Programs that will use it. Nothing chooses among its patches, so all of them go.
-        for (const auto& [id, patch] : context.patches->items()) (void)compiled_patch(context, id, 0, "patch:" + id);
+        // A library, sent ahead of the Programs that will use it. Nothing chooses among its patches, so all of them go,
+        // but for a graph with outlets and no out node, which can only ever be part of another.
+        for (const auto& [id, patch] : context.patches->items()) {
+            const json nodes = patch.at("graph").value("nodes", json::array());
+            const auto is = [](const char* type) {
+                return [type](const json& n) { return n.value("type", std::string{}) == type; };
+            };
+            if (std::none_of(nodes.begin(), nodes.end(), is("out")) &&
+                std::any_of(nodes.begin(), nodes.end(), is("outlet"))) {
+                continue;
+            }
+            (void)compiled_patch(context, id, 0, "patch:" + id);
+        }
         context.users.clear();  // Nothing uses them yet
         if (context.chunks.empty()) throw CompileError("request", "an image needs a program or a patch");
     }
@@ -1951,6 +2378,9 @@ inline ImageResult compile_image(const json& request) {
     report["ok"] = true;
     report["library_patches"] = context.patches->size();
     report["compiled_patches"] = context.compiled.size();
+    json sidecar = json::object();
+    for (const auto& [id, patch] : context.compiled) sidecar[id] = patch.nodes;
+    report["sidecar"] = std::move(sidecar);
     return {std::move(bytes), std::move(report)};
 }
 

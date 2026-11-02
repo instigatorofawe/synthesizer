@@ -8,10 +8,11 @@ import {
 	bundles,
 	patchAssets,
 	patches,
+	patchSubpatches,
 	timelinePatches,
 	timelines
 } from '#lib/server/Tables.ts';
-import { referencedAssets, referencedPatches, type Graph, type Timeline } from '#lib/Schema.ts';
+import { referencedAssets, referencedPatches, referencedSubpatches, type Graph, type Timeline } from '#lib/Schema.ts';
 import type { AssetEntry, PatchEntry, ProgramEntry } from '#lib/Request.ts';
 
 export class NotFound extends Error {}
@@ -58,14 +59,64 @@ export function allPatches(db: Db): PatchEntry[] {
 	return db.select().from(patches).orderBy(asc(patches.id)).all().map(patchEntry);
 }
 
+// A patch and every patch it expands, however deep. A graph can name itself, which the compiler refuses, so this keeps
+// track of what it has seen rather than trusting the links to end.
+export function withSubpatches(db: Db, ids: string[]): string[] {
+	const seen = new Set(ids);
+	let frontier = ids;
+	while (frontier.length) {
+		const next = db
+			.select({ id: patchSubpatches.subpatchId })
+			.from(patchSubpatches)
+			.where(inArray(patchSubpatches.patchId, frontier))
+			.all()
+			.map((row) => row.id)
+			.filter((id) => !seen.has(id));
+		for (const id of next) seen.add(id);
+		frontier = [...new Set(next)];
+	}
+	return [...seen].sort();
+}
+
+// A patch and every patch that expands it, however deep.
+function withParents(db: Db, id: string): string[] {
+	const seen = new Set([id]);
+	let frontier = [id];
+	while (frontier.length) {
+		const next = db
+			.select({ id: patchSubpatches.patchId })
+			.from(patchSubpatches)
+			.where(inArray(patchSubpatches.subpatchId, frontier))
+			.all()
+			.map((row) => row.id)
+			.filter((other) => !seen.has(other));
+		for (const other of next) seen.add(other);
+		frontier = [...new Set(next)];
+	}
+	return [...seen];
+}
+
+// Every timeline an edit to this patch changes, including those that reach it through another patch.
 export function patchUsers(db: Db, id: string) {
 	return db
-		.select({ id: timelines.id, name: timelines.name })
+		.selectDistinct({ id: timelines.id, name: timelines.name })
 		.from(timelinePatches)
 		.innerJoin(timelines, eq(timelinePatches.timelineId, timelines.id))
-		.where(eq(timelinePatches.patchId, id))
+		.where(inArray(timelinePatches.patchId, withParents(db, id)))
 		.orderBy(asc(timelines.name))
 		.all();
+}
+
+// The patches that expand this one, for the delete guard.
+function patchParents(db: Db, id: string) {
+	return db
+		.select({ id: patches.id, name: patches.name })
+		.from(patchSubpatches)
+		.innerJoin(patches, eq(patchSubpatches.patchId, patches.id))
+		.where(eq(patchSubpatches.subpatchId, id))
+		.orderBy(asc(patches.name))
+		.all()
+		.filter((parent) => parent.id !== id);
 }
 
 function linkAssets(db: Db, id: string, graph: Graph) {
@@ -83,10 +134,26 @@ function linkAssets(db: Db, id: string, graph: Graph) {
 	}
 }
 
+function linkSubpatches(db: Db, id: string, graph: Graph) {
+	const wanted = referencedSubpatches(graph);
+	if (wanted.length) {
+		const known = new Set(
+			db.select({ id: patches.id }).from(patches).where(inArray(patches.id, wanted)).all().map((p) => p.id)
+		);
+		const missing = wanted.filter((p) => !known.has(p));
+		if (missing.length) throw new NotFound(`no patch ${missing.join(', ')}`);
+	}
+	db.delete(patchSubpatches).where(eq(patchSubpatches.patchId, id)).run();
+	if (wanted.length) {
+		db.insert(patchSubpatches).values(wanted.map((subpatchId) => ({ patchId: id, subpatchId }))).run();
+	}
+}
+
 export function createPatch(db: Db, name: string, graph: Graph, id: string = randomUUID()) {
 	return db.transaction((tx) => {
 		tx.insert(patches).values({ id, name, graph }).run();
 		linkAssets(tx as unknown as Db, id, graph);
+		linkSubpatches(tx as unknown as Db, id, graph);
 		return id;
 	});
 }
@@ -100,14 +167,19 @@ export function savePatch(db: Db, id: string, revision: number, name: string, gr
 			.run();
 		if (result.changes === 0) throw new Conflict('this patch was changed elsewhere; reload before saving');
 		linkAssets(tx as unknown as Db, id, graph);
+		linkSubpatches(tx as unknown as Db, id, graph);
 		return revision + 1;
 	});
 }
 
 export function deletePatch(db: Db, id: string) {
-	const users = patchUsers(db, id);
+	const users = [...patchParents(db, id), ...patchUsers(db, id)];
 	if (users.length) throw new InUse(`used by ${users.map((u) => u.name).join(', ')}`);
-	db.delete(patches).where(eq(patches.id, id)).run();
+	db.transaction((tx) => {
+		// A link from a patch to itself would otherwise hold it in place.
+		tx.delete(patchSubpatches).where(eq(patchSubpatches.patchId, id)).run();
+		tx.delete(patches).where(eq(patches.id, id)).run();
+	});
 }
 
 export function listTimelines(db: Db) {
@@ -280,7 +352,7 @@ export function snapshot(db: Db, timelineIds: string[]): Snapshot {
 			const row = getTimeline(t, id);
 			return { id: row.id, name: row.name, timeline: row.doc as Timeline };
 		});
-		const wanted = [...new Set(programs.flatMap((p) => referencedPatches(p.timeline)))].sort();
+		const wanted = withSubpatches(t, [...new Set(programs.flatMap((p) => referencedPatches(p.timeline)))]);
 		const entries = wanted.length
 			? t.select().from(patches).where(inArray(patches.id, wanted)).orderBy(asc(patches.id)).all().map(patchEntry)
 			: [];

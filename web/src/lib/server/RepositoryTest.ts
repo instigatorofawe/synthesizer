@@ -116,6 +116,18 @@ describe('assets', () => {
 		expect(listPatches(db)).toEqual([]);
 	});
 
+	it('counts the assets a zoned sample names', () => {
+		const zoned = {
+			...EMPTY_GRAPH,
+			nodes: [
+				...EMPTY_GRAPH.nodes.filter((n) => n.type !== 'osc'),
+				{ id: 3, type: 'sample' as const, mode: 'zones', zones: [{ asset: 'a' }, { asset: 'missing' }] }
+			]
+		};
+		createAsset(db, asset);
+		expect(() => createPatch(db, 'P', zoned)).toThrow(NotFound);
+	});
+
 	it('includes only the assets the chosen patches need', () => {
 		createAsset(db, asset);
 		createAsset(db, { ...asset, id: 'unused' });

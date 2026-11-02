@@ -357,15 +357,44 @@ class Synth {
         u32 tick;
     };
 
+    // A note a mono or legato track is holding. Only one of them sounds, and the rest wait for it to end.
+    struct Held {
+        u32 off_tick;  // kNoTick for a live note, which waits for its NoteOff
+        u8 note;
+        u8 velocity;
+        bool sounding;
+    };
+
+    // A voice's pitch on its way to a note, moved once a frame.
+    struct Glide {
+        float target;
+        float step;
+        u32 frames;
+    };
+
+    struct MixRamp {
+        float target;
+        float step;
+        u32 frames;
+    };
+
     struct Track {
         TrackDesc desc;
         Slot* slots;
         Voice* voices;
+        Held* held;     // kMaxHeldNotes, or null in a Program with no PlayMode
+        Glide* glides;  // one for each voice, likewise
         Cursor cursor;
         u32 age;
         u32 notes;
         u32 guard_trips;
         u32 slot;
+        float glide;      // seconds
+        float last_note;  // what the next glide starts from, or negative if no note has played
+        u16 line;         // the voice sounding a mono or legato line, or kNone
+        u8 held_count;
+        u8 play;      // PlayKind
+        u8 priority;  // NotePriority
     };
 
     struct Insert {
@@ -397,6 +426,7 @@ class Synth {
         Insert* inserts = nullptr;
         float* buses = nullptr;
         float* mix = nullptr;
+        MixRamp* mix_ramps = nullptr;  // one for each register, or null in a Program with no RampMix
         float* globals = nullptr;
         float* scratch = nullptr;
         Task* tasks = nullptr;
@@ -506,10 +536,15 @@ class Synth {
             const TrackDesc d = p.track(t);
             auto* slots = fast.template array<Slot>(d.slot_count);
             auto* voices = fast.template array<Voice>(d.voices);
+            const bool plays = (h.features & kFeaturePlayModes) != 0;
+            auto* held = fast.template array<Held>(plays ? kMaxHeldNotes : 0);
+            auto* glides = fast.template array<Glide>(plays ? d.voices : 0);
             if constexpr (!Dry) {
                 tracks[t].desc = d;
                 tracks[t].slots = slots;
                 tracks[t].voices = voices;
+                tracks[t].held = plays ? held : nullptr;
+                tracks[t].glides = plays ? glides : nullptr;
             }
             u32 scalars = 0, state = 0;  // sized for the largest slot, per section 6
             u64 floats = 0;
@@ -536,6 +571,8 @@ class Synth {
 
         auto* buses = fast.template array<float>(static_cast<u64>(h.buses) * Ch * N);
         auto* mix = fast.template array<float>(h.mix_regs);
+        const bool mix_ramps = (h.features & kFeatureMixRamps) != 0;
+        auto* ramps = fast.template array<MixRamp>(mix_ramps ? h.mix_regs : 0);
         auto* globals = fast.template array<float>(h.globals);
         auto* scratch = fast.template array<float>(static_cast<u64>(max_buffers) * N * E::max_workers);
         u32 task_count = 0;
@@ -546,6 +583,7 @@ class Synth {
         if constexpr (!Dry) {
             g.buses = buses;
             g.mix = mix;
+            g.mix_ramps = mix_ramps ? ramps : nullptr;
             g.globals = globals;
             g.scratch = scratch;
             g.tasks = tasks;
@@ -704,6 +742,9 @@ class Synth {
     void init_track(Generation& g, Track& t) {
         t.cursor = {};
         t.age = t.notes = t.guard_trips = t.slot = 0;
+        reset_play(t);
+        t.held_count = 0;
+        t.line = kNone;
         for (u32 s = 0; s < t.desc.slot_count; ++s) {
             init_slot(t.slots[s]);
             apply_inits(g, 0, static_cast<u16>(&t - g.tracks), t.slots[s]);
@@ -712,6 +753,7 @@ class Synth {
             t.voices[v].active = false;
             t.voices[v].held = false;
             t.voices[v].gate = {};
+            if (t.glides) t.glides[v] = {};
         }
     }
 
@@ -740,7 +782,10 @@ class Synth {
 
     void finish_bind(Generation& g) {
         const ProgramHeader& h = g.program.h;
-        for (u32 i = 0; i < h.mix_regs; ++i) g.mix[i] = g.program.mix_value(i);
+        for (u32 i = 0; i < h.mix_regs; ++i) {
+            g.mix[i] = g.program.mix_value(i);
+            if (g.mix_ramps) g.mix_ramps[i] = {};
+        }
         for (u32 i = 0; i < h.globals; ++i) g.globals[i] = g.program.global(i).value;
         u32 task = 0;
         for (u32 i = 0; i < h.mix_steps; ++i) {
@@ -921,6 +966,7 @@ class Synth {
             if (!ot) continue;
             nt.age = ot->age;
             nt.notes = ot->notes;
+            nt.last_note = ot->last_note;
             const u32 slots = std::min<u32>(nt.desc.slot_count, ot->desc.slot_count);
             for (u32 s = 0; s < slots; ++s) copy_slot(ot->slots[s], nt.slots[s]);
             const u32 voices = std::min<u32>(nt.desc.voices, ot->desc.voices);
@@ -928,7 +974,20 @@ class Synth {
                 const Voice& ov = ot->voices[v];
                 if (ov.active && ov.slot < slots) {
                     copy_voice(ov, ot->slots[ov.slot], nt.voices[v], nt.slots[ov.slot]);
+                    if (ot->glides && nt.glides) {
+                        nt.glides[v] = ot->glides[v];
+                    } else if (ot->glides && ot->glides[v].frames != 0) {
+                        nt.voices[v].scalars[kScalarNote] = ot->glides[v].target;  // Nothing here can finish the slide
+                    }
                 }
+            }
+            // A line carries over if the new Program still plays one at this tick. Otherwise its voice ends at its own
+            // off tick, as any other note does.
+            if (ot->line != kNone && ot->line < voices && nt.voices[ot->line].active && nt.held &&
+                nt.play != static_cast<u8>(PlayKind::Poly)) {
+                std::copy(ot->held, ot->held + ot->held_count, nt.held);
+                nt.held_count = ot->held_count;
+                nt.line = ot->line;
             }
         }
         for (u32 i = 0; i < to.program.h.inserts; ++i) {
@@ -966,11 +1025,30 @@ class Synth {
 
     void run_control(Generation& g) {
         transport(g);
+        if (g.mix_ramps) update_mix_ramps(g);
         for (u32 t = 0; t < g.program.h.tracks; ++t) {
             Track& track = g.tracks[t];
+            if (track.glides) update_glides(track);
             for (u32 s = 0; s < track.desc.slot_count; ++s) update_slot(g, track.slots[s]);
         }
         for (u32 i = 0; i < g.program.h.inserts; ++i) update_slot(g, g.inserts[i].slot);
+    }
+
+    static void update_mix_ramps(Generation& g) {
+        for (u32 i = 0; i < g.program.h.mix_regs; ++i) {
+            MixRamp& r = g.mix_ramps[i];
+            if (r.frames == 0) continue;
+            g.mix[i] = --r.frames == 0 ? r.target : g.mix[i] + r.step;
+        }
+    }
+
+    static void update_glides(Track& t) {
+        for (u32 v = 0; v < t.desc.voices; ++v) {
+            Glide& glide = t.glides[v];
+            if (glide.frames == 0) continue;
+            float& note = t.voices[v].scalars[kScalarNote];
+            note = --glide.frames == 0 ? glide.target : note + glide.step;
+        }
     }
 
     void update_slot(Generation& g, Slot& slot) {
@@ -1000,14 +1078,15 @@ class Synth {
         const ProgramHeader& h = g.program.h;
         switch (e.kind) {
             case EventKind::NoteOn:
-                if (e.target < h.tracks) start_note(g, g.tracks[e.target], e.note, e.velocity, 0, kNoTick);
+                if (e.target < h.tracks) note_on(g, g.tracks[e.target], e.note, e.velocity, 0, kNoTick);
                 break;
             case EventKind::NoteOff:
                 if (e.target < h.tracks) {
                     Track& t = g.tracks[e.target];
+                    if (live_note_off(g, t, e.note)) break;
                     for (u32 v = 0; v < t.desc.voices; ++v) {
                         Voice& voice = t.voices[v];
-                        if (voice.active && voice.held && voice.note == e.note) release(voice, 0);
+                        if (v != t.line && voice.active && voice.held && voice.note == e.note) release(voice, 0);
                     }
                 }
                 break;
@@ -1021,7 +1100,7 @@ class Synth {
                 }
                 break;
             case EventKind::SetMix:
-                if (e.param < h.mix_regs) g.mix[e.param] = e.value;
+                if (e.param < h.mix_regs) set_mix(g, e.param, e.value);
                 break;
             case EventKind::SetTap:
                 if constexpr (C.tap_slots > 0) {
@@ -1104,14 +1183,30 @@ class Synth {
             Track& track = g.tracks[t];
             for (u32 v = 0; v < track.desc.voices; ++v) {
                 Voice& voice = track.voices[v];
-                if (!voice.active || !voice.held || voice.off_tick == kNoTick) continue;
+                if (v == track.line || !voice.active || !voice.held || voice.off_tick == kNoTick) continue;
                 const u32 s = samples_to(g, voice.off_tick, segment);
                 if (s < segment) release(voice, base + s);
             }
-            while (track.cursor.tick != kNoTick) {
-                const u32 s = samples_to(g, track.cursor.tick, segment);
-                if (s >= segment) break;
-                step_track(g, track, base + s, false, 0);
+            // In time order, because on a line what a note does depends on what is held when it starts. At the same
+            // sample the end goes first, so a note that only touches the next one is not an overlap.
+            for (;;) {
+                u32 first_off = 0, off = segment;
+                for (u32 i = 0; i < track.held_count; ++i) {
+                    if (track.held[i].off_tick == kNoTick) continue;
+                    const u32 s = samples_to(g, track.held[i].off_tick, segment);
+                    if (s < off) {
+                        off = s;
+                        first_off = i;
+                    }
+                }
+                const u32 next = track.cursor.tick == kNoTick ? segment : samples_to(g, track.cursor.tick, segment);
+                if (off < segment && off <= next) {
+                    held_note_off(g, track, first_off, base + off);
+                } else if (next < segment) {
+                    step_track(g, track, base + next, false, 0);
+                } else {
+                    break;
+                }
             }
         }
     }
@@ -1157,10 +1252,11 @@ class Synth {
                 c.tick += in.c;
                 break;
             case Instr::NoteOn:
-                if (!chase) {
-                    start_note(g, t, in.a, in.b, offset, c.tick + in.c);
-                } else if (start_notes && c.tick + in.c > target) {
-                    start_note(g, t, in.a, in.b, offset, c.tick + in.c);  // Held across the locate point
+                if (!chase ||
+                    (start_notes && c.tick + in.c > target)) {  // Chasing, that is a note held across the point
+                    note_on(g, t, in.a, static_cast<u8>(in.b), offset, c.tick + in.c);
+                } else {
+                    t.last_note = static_cast<float>(in.a);  // So a glide after a locate starts where it would have
                 }
                 break;
             case Instr::SetPatch:
@@ -1183,6 +1279,45 @@ class Synth {
                 }
                 break;
             }
+            case Instr::SetInsert:
+                set_slot_param(g, nullptr, g.inserts[in.a].slot, in.b, std::bit_cast<float>(in.c), 0, true);
+                break;
+            case Instr::RampInsert: {
+                const Instruction arg = g.program.instruction(c.pc++);
+                const float value = std::bit_cast<float>(in.c);
+                Slot& slot = g.inserts[in.a].slot;
+                if (!chase) {
+                    set_slot_param(g, nullptr, slot, in.b, value, ticks_to_frames(g, arg.c));
+                } else if (c.tick + arg.c <= target) {
+                    set_slot_param(g, nullptr, slot, in.b, value, 0, true);
+                } else {
+                    const float done = static_cast<float>(target - c.tick) / static_cast<float>(arg.c);
+                    chase_slot_ramp(g, nullptr, slot, in.b, value, done, ticks_to_frames(g, c.tick + arg.c - target),
+                                    0);
+                }
+                break;
+            }
+            case Instr::SetMix:
+                set_mix(g, in.b, std::bit_cast<float>(in.c));
+                break;
+            case Instr::RampMix: {
+                const Instruction arg = g.program.instruction(c.pc++);
+                const float value = std::bit_cast<float>(in.c);
+                if (!chase) {
+                    ramp_mix(g, in.b, value, ticks_to_frames(g, arg.c));
+                } else if (c.tick + arg.c <= target) {
+                    set_mix(g, in.b, value);
+                } else {
+                    const float current = g.mix[in.b];
+                    const float done = static_cast<float>(target - c.tick) / static_cast<float>(arg.c);
+                    set_mix(g, in.b, current + (value - current) * done);
+                    ramp_mix(g, in.b, value, ticks_to_frames(g, c.tick + arg.c - target));
+                }
+                break;
+            }
+            case Instr::PlayMode:
+                set_play(t, in.a, static_cast<u8>(in.b), std::bit_cast<float>(in.c));
+                break;
             case Instr::Call: {
                 const ClipDesc clip = g.program.clip(in.b);
                 c.ret_pc = c.pc;
@@ -1224,7 +1359,15 @@ class Synth {
             Track& track = g.tracks[t];
             track.cursor = make_cursor(track.desc.stream_begin, track.desc.stream_length);
             track.slot = 0;
+            reset_play(track);
+            track.held_count = 0;
+            track.line = kNone;
             while (track.cursor.tick < chase_until) step_track(g, track, 0, true, tick, start_notes);
+            // A track's mode is in force before its first note, even one played live with the transport stopped.
+            while (track.cursor.tick == chase_until && track.cursor.pc < track.cursor.end &&
+                   g.program.instruction(track.cursor.pc).op == static_cast<u8>(Instr::PlayMode)) {
+                step_track(g, track, 0, true, tick, start_notes);
+            }
         }
     }
 
@@ -1239,6 +1382,8 @@ class Synth {
     static void release_all(Generation& g, u32 offset) {
         for (u32 t = 0; t < g.program.h.tracks; ++t) {
             Track& track = g.tracks[t];
+            track.held_count = 0;
+            track.line = kNone;
             for (u32 v = 0; v < track.desc.voices; ++v) {
                 if (track.voices[v].active && track.voices[v].held) release(track.voices[v], offset);
             }
@@ -1259,7 +1404,112 @@ class Synth {
         return oldest_released ? *oldest_released : *oldest;
     }
 
-    void start_note(Generation& g, Track& t, u8 note, u8 velocity, u32 offset, u32 off_tick) {
+    static void reset_play(Track& t) {
+        t.play = static_cast<u8>(PlayKind::Poly);
+        t.priority = static_cast<u8>(NotePriority::Last);
+        t.glide = 0.0f;
+        t.last_note = -1.0f;
+    }
+
+    // Applies to the next note, as SetPatch does. Going back to poly leaves the voice sounding to end at its own tick.
+    static void set_play(Track& t, u8 play, u8 priority, float glide) {
+        if (play == static_cast<u8>(PlayKind::Poly)) {
+            t.held_count = 0;
+            t.line = kNone;
+        }
+        t.play = play;
+        t.priority = priority;
+        t.glide = glide;
+    }
+
+    void begin_glide(Track& t, Voice& v, float from, float to) {
+        Glide& glide = t.glides[&v - t.voices];
+        glide.frames = 0;
+        if (!(t.glide > 0.0f) || from < 0.0f || from == to) {
+            v.scalars[kScalarNote] = to;
+            return;
+        }
+        glide.frames = std::max<u32>(static_cast<u32>(t.glide * rate_ / static_cast<float>(N)), 1);
+        glide.target = to;
+        glide.step = (to - from) / static_cast<float>(glide.frames);
+        v.scalars[kScalarNote] = from;
+    }
+
+    void note_on(Generation& g, Track& t, u8 note, u8 velocity, u32 offset, u32 off_tick) {
+        if (!t.held) {
+            start_note(g, t, note, velocity, offset, off_tick);
+        } else if (t.play == static_cast<u8>(PlayKind::Poly)) {
+            const float from = t.last_note;
+            begin_glide(t, start_note(g, t, note, velocity, offset, off_tick), from, static_cast<float>(note));
+            t.last_note = static_cast<float>(note);
+        } else {
+            if (t.held_count == kMaxHeldNotes) remove_held(t, t.held[0].sounding ? 1 : 0);
+            t.held[t.held_count++] = {off_tick, note, velocity, false};
+            choose_line(g, t, offset);
+        }
+    }
+
+    static void remove_held(Track& t, u32 index) {
+        std::copy(t.held + index + 1, t.held + t.held_count, t.held + index);
+        --t.held_count;
+    }
+
+    // Puts the note that priority chooses on the line, if it is not there already. Ties go to the newest note.
+    void choose_line(Generation& g, Track& t, u32 offset) {
+        u32 best = 0;
+        for (u32 i = 1; i < t.held_count; ++i) {
+            const u8 note = t.held[i].note, other = t.held[best].note;
+            const bool wins = t.priority == static_cast<u8>(NotePriority::High)  ? note >= other
+                              : t.priority == static_cast<u8>(NotePriority::Low) ? note <= other
+                                                                                 : true;
+            if (wins) best = i;
+        }
+        if (t.held[best].sounding) return;
+        for (u32 i = 0; i < t.held_count; ++i) t.held[i].sounding = i == best;
+        const Held next = t.held[best];
+
+        Voice* line = t.line != kNone && t.voices[t.line].active && t.voices[t.line].held ? &t.voices[t.line] : nullptr;
+        const bool legato = t.play == static_cast<u8>(PlayKind::Legato);
+        // Legato slides only across an overlap. Mono slides from the last note even over a gap.
+        const float from = line ? line->scalars[kScalarNote] : legato ? -1.0f : t.last_note;
+        const float pitch = static_cast<float>(next.note);
+        t.last_note = pitch;
+        const u32 slot = t.slot < t.desc.slot_count ? t.slot : 0;
+        if (legato && line && line->slot == slot) {
+            line->note = next.note;
+            line->off_tick = next.off_tick;
+            begin_glide(t, *line, from, pitch);
+            return;
+        }
+        if (line) release(*line, offset);
+        Voice& v = start_note(g, t, next.note, next.velocity, offset, next.off_tick);
+        t.line = static_cast<u16>(&v - t.voices);
+        begin_glide(t, v, from, pitch);
+    }
+
+    void held_note_off(Generation& g, Track& t, u32 index, u32 offset) {
+        const bool sounding = t.held[index].sounding;
+        remove_held(t, index);
+        if (!sounding) return;
+        if (t.held_count != 0) {
+            choose_line(g, t, offset);
+            return;
+        }
+        if (t.line != kNone && t.voices[t.line].active && t.voices[t.line].held) release(t.voices[t.line], offset);
+        t.line = kNone;
+    }
+
+    // True if a held note took this NoteOff. A stream's notes end at their own ticks, so only a live one can.
+    bool live_note_off(Generation& g, Track& t, u8 note) {
+        for (u32 i = t.held_count; i-- > 0;) {
+            if (t.held[i].note != note || t.held[i].off_tick != kNoTick) continue;
+            held_note_off(g, t, i, 0);
+            return true;
+        }
+        return false;
+    }
+
+    Voice& start_note(Generation& g, Track& t, u8 note, u8 velocity, u32 offset, u32 off_tick) {
         Voice& v = pick_voice(t);
         const u32 slot = t.slot < t.desc.slot_count ? t.slot : 0;
         init_instance(*t.slots[slot].binding, t.slots[slot], v, 0);
@@ -1276,6 +1526,16 @@ class Synth {
         v.held = true;
         ++t.notes;
         (void)g;
+        return v;
+    }
+
+    void set_mix(Generation& g, u16 reg, float value) {
+        g.mix[reg] = value;
+        if (g.mix_ramps) g.mix_ramps[reg].frames = 0;
+    }
+
+    static void ramp_mix(Generation& g, u16 reg, float value, u32 frames) {
+        g.mix_ramps[reg] = {value, (value - g.mix[reg]) / static_cast<float>(frames), frames};
     }
 
     void set_track_param(Generation& g, Track& t, u16 id, float value, u32 frames, bool immediate = false) {
@@ -1283,15 +1543,16 @@ class Synth {
     }
 
     void chase_ramp(Generation& g, Track& t, u16 id, float value, float done, u32 frames) {
-        for (u32 s = 0; s < t.desc.slot_count; ++s) {
-            Slot& slot = t.slots[s];
-            const PatchView& v = slot.binding->view;
-            for (u32 i = 0; i < v.h.params; ++i) {
-                if (v.param(i).id != id) continue;
-                const float current = slot.params[i].value;
-                set_slot_param(g, &t, slot, id, current + (value - current) * done, 0, true, s);
-                set_slot_param(g, &t, slot, id, value, frames, false, s);
-            }
+        for (u32 s = 0; s < t.desc.slot_count; ++s) chase_slot_ramp(g, &t, t.slots[s], id, value, done, frames, s);
+    }
+
+    void chase_slot_ramp(Generation& g, Track* t, Slot& slot, u16 id, float value, float done, u32 frames, u32 s) {
+        const PatchView& v = slot.binding->view;
+        for (u32 i = 0; i < v.h.params; ++i) {
+            if (v.param(i).id != id) continue;
+            const float current = slot.params[i].value;
+            set_slot_param(g, t, slot, id, current + (value - current) * done, 0, true, s);
+            set_slot_param(g, t, slot, id, value, frames, false, s);
         }
     }
 
@@ -1399,6 +1660,8 @@ class Synth {
             c.state = v.state;
             c.lines = reinterpret_cast<DelayLine*>(v.state);
             c.gate = v.gate;
+            c.note = v.note;
+            c.velocity = v.velocity;
             c.seed = (static_cast<u32>(t.desc.id) << 16) ^ (n << 8) ^ v.age;
             K::run(b.voice, b.view.h.voice_steps, c);
 

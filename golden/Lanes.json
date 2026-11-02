@@ -1,0 +1,383 @@
+{
+ "frame_size": 32,
+ "patches": {
+  "lead": {
+   "name": "Lead",
+   "graph": {
+    "params": [],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 4,
+      "type": "env",
+      "inputs": {
+       "attack": 0.02,
+       "decay": 0.1,
+       "sustain": 0.7,
+       "release": 0.1
+      }
+     },
+     {
+      "id": 5,
+      "type": "mul"
+     },
+     {
+      "id": 6,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 3,
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "gain": {
+   "name": "Gain",
+   "graph": {
+    "params": [
+     {
+      "id": 1,
+      "name": "amount",
+      "min": 0,
+      "max": 1,
+      "default": 0.8,
+      "smooth_ms": 0
+     }
+    ],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in"
+     },
+     {
+      "id": 2,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 3,
+      "type": "mul"
+     },
+     {
+      "id": 4,
+      "type": "mul"
+     },
+     {
+      "id": 5,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "l",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "b"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "to": 4,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "to": 5,
+      "input": "l"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "r"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "lanes",
+   "name": "Lanes",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 150
+     }
+    ],
+    "clips": [
+     {
+      "id": "line",
+      "length": 1920,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 48,
+        "vel": 100,
+        "dur": 300
+       },
+       {
+        "tick": 240,
+        "note": 55,
+        "vel": 100,
+        "dur": 300
+       },
+       {
+        "tick": 480,
+        "note": 60,
+        "vel": 110,
+        "dur": 720
+       },
+       {
+        "tick": 720,
+        "note": 67,
+        "vel": 90,
+        "dur": 120
+       },
+       {
+        "tick": 1080,
+        "note": 63,
+        "vel": 100,
+        "dur": 600
+       },
+       {
+        "tick": 1200,
+        "note": 58,
+        "vel": 100,
+        "dur": 240
+       },
+       {
+        "tick": 1560,
+        "note": 51,
+        "vel": 120,
+        "dur": 300
+       }
+      ],
+      "play": [
+       {
+        "tick": 960,
+        "mode": "mono",
+        "priority": "high",
+        "glide": 0.03
+       }
+      ],
+      "automation": [
+       {
+        "target": {
+         "insert": 1
+        },
+        "param": 1,
+        "tick": 0,
+        "value": 0.3
+       },
+       {
+        "target": {
+         "insert": 1
+        },
+        "param": 1,
+        "tick": 240,
+        "value": 1.0,
+        "ramp": 720
+       },
+       {
+        "target": {
+         "mix": "send",
+         "track": 1,
+         "to": "room"
+        },
+        "tick": 480,
+        "value": 0.6
+       },
+       {
+        "target": {
+         "mix": "fader",
+         "bus": "room"
+        },
+        "tick": 1440,
+        "value": 0.2,
+        "ramp": 360
+       }
+      ]
+     },
+     {
+      "id": "bass",
+      "length": 1920,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 36,
+        "vel": 110,
+        "dur": 480
+       },
+       {
+        "tick": 360,
+        "note": 43,
+        "vel": 100,
+        "dur": 480
+       },
+       {
+        "tick": 960,
+        "note": 31,
+        "vel": 110,
+        "dur": 360
+       },
+       {
+        "tick": 1200,
+        "note": 38,
+        "vel": 100,
+        "dur": 720
+       }
+      ],
+      "automation": [
+       {
+        "target": {
+         "mix": "pan",
+         "track": 2
+        },
+        "tick": 0,
+        "value": -0.5
+       },
+       {
+        "target": {
+         "mix": "pan",
+         "track": 2
+        },
+        "tick": 960,
+        "value": 0.5,
+        "ramp": 480
+       },
+       {
+        "target": {
+         "insert": 2
+        },
+        "param": 1,
+        "tick": 960,
+        "value": 0.4
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "name": "Line",
+      "voices": 4,
+      "slots": [
+       "lead"
+      ],
+      "gain": 0.6,
+      "play": {
+       "mode": "poly",
+       "glide": 0.02
+      },
+      "placements": [
+       {
+        "clip": "line",
+        "tick": 0,
+        "repeat": 2
+       }
+      ],
+      "inserts": [
+       {
+        "id": 1,
+        "patch": "gain",
+        "params": {
+         "1": 0.5
+        }
+       }
+      ],
+      "sends": [
+       {
+        "bus": "room",
+        "gain": 0.1
+       }
+      ]
+     },
+     {
+      "id": 2,
+      "name": "Bass",
+      "voices": 2,
+      "slots": [
+       "lead"
+      ],
+      "gain": 0.5,
+      "play": {
+       "mode": "legato",
+       "priority": "low",
+       "glide": 0.05
+      },
+      "placements": [
+       {
+        "clip": "bass",
+        "tick": 0,
+        "repeat": 2
+       }
+      ]
+     }
+    ],
+    "buses": [
+     {
+      "id": "room",
+      "inserts": [
+       {
+        "id": 2,
+        "patch": "gain"
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.8
+    }
+   }
+  }
+ ]
+}

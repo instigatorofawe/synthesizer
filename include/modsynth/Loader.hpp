@@ -104,6 +104,38 @@ class Bits {
    private:
     u32 words_[kMaxRegisters / 32] = {};
 };
+
+// True if a Sample2 can use this table. It is the table's job to be finite, and that was checked before any patch.
+[[nodiscard]] inline bool zones_ok(const ChunkRef& table, const Bits& asset_refs, u32 refs) {
+    const auto whole_in = [](float x, float low, float high) {
+        return x >= low && x <= high && x == static_cast<float>(static_cast<std::int32_t>(x));
+    };
+    const u32 length = load<TableHeader>(table.data).length;
+    if (length % kZoneFields != 0 || length / kZoneFields > kMaxZones) return false;
+    for (u32 row = 0; row < length / kZoneFields; ++row) {
+        float f[kZoneFields];
+        for (u32 i = 0; i < kZoneFields; ++i) {
+            f[i] = load<float>(table.data + sizeof(TableHeader) + (row * kZoneFields + i) * sizeof(float));
+        }
+        if (f[kZoneLowKey] > f[kZoneHighKey]) {  // Padding, and only in its one form
+            if (f[kZoneLowKey] != 1.0f || f[kZoneHighKey] != 0.0f) return false;
+            for (u32 i = kZoneLowVelocity; i < kZoneFields; ++i) {
+                if (f[i] != 0.0f) return false;
+            }
+            continue;
+        }
+        if (!whole_in(f[kZoneLowKey], 0.0f, 127.0f) || !whole_in(f[kZoneHighKey], 0.0f, 127.0f)) return false;
+        if (!whole_in(f[kZoneLowVelocity], 0.0f, 127.0f) || !whole_in(f[kZoneHighVelocity], 0.0f, 127.0f)) return false;
+        if (f[kZoneLowVelocity] > f[kZoneHighVelocity]) return false;
+        if (!(f[kZoneRoot] >= 0.0f && f[kZoneRoot] <= 127.0f)) return false;
+        if (!whole_in(f[kZoneRef], 0.0f, static_cast<float>(refs) - 1.0f)) return false;
+        if (!asset_refs.get(static_cast<u32>(f[kZoneRef]))) return false;
+        for (u32 i = kZoneRoot + 1; i < kZoneFields; ++i) {
+            if (f[i] != 0.0f) return false;
+        }
+    }
+    return true;
+}
 }  // namespace detail
 
 [[nodiscard]] inline bool parse_patch(ByteSpan bytes, PatchView& v) {
@@ -159,9 +191,14 @@ class Bits {
         if (port >= h.buffers) return false;
         buffers.set(port);
     }
+    Bits asset_refs, zones_checked;
     for (u32 i = 0; i < h.refs; ++i) {
         const u64 hash = p.ref(i);
-        if (!chunks.find(hash, ChunkKind::Table) && !chunks.find(hash, ChunkKind::Asset)) return false;
+        if (chunks.find(hash, ChunkKind::Asset)) {
+            asset_refs.set(i);
+        } else if (!chunks.find(hash, ChunkKind::Table)) {
+            return false;
+        }
     }
     for (u32 i = 0; i < h.consts; ++i) {
         if (!std::isfinite(p.constant(i))) return false;
@@ -238,9 +275,17 @@ class Bits {
             if (!write(s.out[a], sig.out_kind, control)) return false;
         }
         switch (sig.resource) {
-            case Resource::Table:
-                if (s.resource >= h.refs || !chunks.find(p.ref(s.resource), ChunkKind::Table)) return false;
+            case Resource::Table: {
+                if (s.resource >= h.refs) return false;
+                const ChunkRef* table = chunks.find(p.ref(s.resource), ChunkKind::Table);
+                if (!table) return false;
+                // Once for each table, so many steps sharing one can't multiply the work.
+                if (static_cast<Op>(s.op) == Op::Sample2 && !zones_checked.get(s.resource)) {
+                    if (!detail::zones_ok(*table, asset_refs, h.refs)) return false;
+                    zones_checked.set(s.resource);
+                }
                 break;
+            }
             case Resource::Asset:
                 if (s.resource >= h.refs || !chunks.find(p.ref(s.resource), ChunkKind::Asset)) return false;
                 break;
@@ -323,17 +368,19 @@ struct StreamTotals {
     u64 ticks = 0;     // the sum of its Waits and Calls
     u64 expanded = 0;  // instructions run, with every repeat unrolled
     u32 slots = 0;     // one more than the highest slot its SetPatch names
+    u32 features = 0;  // what its code uses, from the kFeature list
 };
 
 // Each addition is checked at once, and each addend fits well inside a u64, so neither total can wrap.
 [[nodiscard]] inline bool validate_stream(const ProgramView& p, u32 begin, u32 length, Stream kind, u32 track_slots,
-                                          StreamTotals& t) {
+                                          u32 revision, StreamTotals& t) {
     if (begin > p.h.code || length > p.h.code - begin) return false;
     t = {};
     const bool conductor = kind == Stream::Conductor;
     for (u32 i = 0; i < length; ++i) {
         const Instruction in = p.instruction(begin + i);
-        if (in.op >= static_cast<u8>(Instr::kCount)) return false;
+        if (in.op >= static_cast<u8>(Instr::kCount) || instr_revision(static_cast<Instr>(in.op)) > revision)
+            return false;
         const InstrFields used = instr_fields(static_cast<Instr>(in.op));
         if ((!used.a && in.a != 0) || (!used.b && in.b != 0) || (!used.c && in.c != 0)) return false;
         ++t.expanded;
@@ -353,13 +400,36 @@ struct StreamTotals {
             case Instr::SetParam:
                 if (conductor || !std::isfinite(std::bit_cast<float>(in.c))) return false;
                 break;
-            case Instr::Ramp: {
+            case Instr::SetInsert:
+                if (conductor || in.a >= p.h.inserts || !std::isfinite(std::bit_cast<float>(in.c))) return false;
+                break;
+            case Instr::SetMix:
+                if (conductor || in.b >= p.h.mix_regs || !std::isfinite(std::bit_cast<float>(in.c))) return false;
+                break;
+            case Instr::Ramp:
+            case Instr::RampInsert:
+            case Instr::RampMix: {
                 if (conductor || !std::isfinite(std::bit_cast<float>(in.c)) || i + 1 >= length) return false;
+                if (static_cast<Instr>(in.op) == Instr::RampInsert && in.a >= p.h.inserts) return false;
+                if (static_cast<Instr>(in.op) == Instr::RampMix) {
+                    if (in.b >= p.h.mix_regs) return false;
+                    t.features |= kFeatureMixRamps;
+                }
                 const Instruction arg = p.instruction(begin + i + 1);
                 if (arg.op != static_cast<u8>(Instr::RampArg) || arg.a != 0 || arg.b != 0) return false;
                 if (arg.c == 0 || arg.c > kMaxTicks) return false;
                 ++i;
                 ++t.expanded;
+                break;
+            }
+            case Instr::PlayMode: {
+                const float glide = std::bit_cast<float>(in.c);
+                if (conductor || in.a > static_cast<u8>(PlayKind::Legato)) return false;
+                if (in.b > static_cast<u16>(NotePriority::Low) || !(glide >= 0.0f && glide <= kMaxGlideSeconds))
+                    return false;
+                if (in.a == static_cast<u8>(PlayKind::Poly) && in.b != 0)
+                    return false;  // One voice per note has no choice
+                t.features |= kFeaturePlayModes;
                 break;
             }
             case Instr::Call: {
@@ -389,12 +459,13 @@ struct StreamTotals {
 
 }  // namespace detail
 
-[[nodiscard]] inline bool validate_program(const ProgramView& p, const ChunkTable& chunks) {
+[[nodiscard]] inline bool validate_program(const ProgramView& p, const ChunkTable& chunks, u32 revision) {
     using detail::Bits;
     using detail::Stream;
     using detail::StreamTotals;
     const ProgramHeader& h = p.h;
-    if (h.reserved != 0 || h.ppq == 0 || h.ppq > 65535 || h.uspq < 1000 || h.uspq > 60000000) return false;
+    if ((h.features & ~kKnownFeatures) != 0) return false;
+    if (h.ppq == 0 || h.ppq > 65535 || h.uspq < 1000 || h.uspq > 60000000) return false;
     if (h.buses == 0 || h.buses > kMaxRegisters || h.tracks > kMaxTracks || h.inserts > kMaxInserts) return false;
     if (h.patches > kMaxChunks || h.slots > kMaxSlots || h.clips > kMaxClips || h.mix_steps > kMaxMixSteps ||
         h.gather_inputs > kMaxGatherInputs || h.mix_regs > kMaxMixRegisters || h.globals > kMaxGlobals ||
@@ -413,11 +484,13 @@ struct StreamTotals {
         if (!parse_patch({c->data, c->size}, v) || v.h.inputs != 0) return false;
     }
     StreamTotals totals;
+    u32 features = 0;
     for (u32 i = 0; i < h.clips; ++i) {
         const ClipDesc c = p.clip(i);
         if (c.ticks == 0) return false;
-        if (!detail::validate_stream(p, c.begin, c.length, Stream::Clip, 0, totals)) return false;
+        if (!detail::validate_stream(p, c.begin, c.length, Stream::Clip, 0, revision, totals)) return false;
         if (totals.ticks != c.ticks || totals.slots != c.slots) return false;
+        features |= totals.features;
     }
 
     // Every track's slots follow the last's, so their sum is the table's size and no two tracks can share one.
@@ -431,15 +504,19 @@ struct StreamTotals {
         for (u32 k = 0; k < i; ++k) {
             if (p.track(k).id == t.id) return false;
         }
-        if (!detail::validate_stream(p, t.stream_begin, t.stream_length, Stream::Track, t.slot_count, totals)) {
+        if (!detail::validate_stream(p, t.stream_begin, t.stream_length, Stream::Track, t.slot_count, revision,
+                                     totals)) {
             return false;
         }
         if (totals.slots > t.slot_count) return false;
+        features |= totals.features;
         expanded += totals.expanded;
         length_ticks = std::max(length_ticks, totals.ticks);
     }
-    if (next_slot != h.slots || length_ticks != h.length_ticks) return false;
-    if (!detail::validate_stream(p, h.conductor_begin, h.conductor_length, Stream::Conductor, 0, totals)) return false;
+    if (next_slot != h.slots || length_ticks != h.length_ticks || features != h.features) return false;
+    if (!detail::validate_stream(p, h.conductor_begin, h.conductor_length, Stream::Conductor, 0, revision, totals)) {
+        return false;
+    }
     if (expanded + totals.expanded > kMaxExpanded) return false;
 
     for (u32 i = 0; i < h.inserts; ++i) {
@@ -900,7 +977,9 @@ class Loader {
             return c->size;
         }
         ProgramView v;
-        if (!parse_program({c->data, c->size}, v) || !validate_program(v, *table_)) fail(LoadError::BadProgram);
+        if (!parse_program({c->data, c->size}, v) || !validate_program(v, *table_, manifest_.revision)) {
+            fail(LoadError::BadProgram);
+        }
         return c->size;
     }
 

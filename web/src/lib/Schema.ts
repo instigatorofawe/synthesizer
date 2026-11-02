@@ -47,18 +47,41 @@ const noteSchema = z.object({
 	slot: z.number().int().min(0).optional()
 });
 
+// A lane with no target moves a parameter of its own track's patch. A target reaches past it, and new kinds of target
+// can join this union later, which is why it is an object and refuses keys it doesn't know.
+const laneTargetSchema = z.union([
+	z.strictObject({ insert: id16 }),
+	z.strictObject({ mix: z.literal('fader'), track: id16 }),
+	z.strictObject({ mix: z.literal('fader'), bus: z.string().min(1) }),
+	z.strictObject({ mix: z.literal('fader'), master: z.literal(true) }),
+	z.strictObject({ mix: z.literal('pan'), track: id16 }),
+	z.strictObject({ mix: z.literal('pan'), bus: z.string().min(1) }),
+	z.strictObject({ mix: z.literal('send'), track: id16, to: z.string().min(1) }),
+	z.strictObject({ mix: z.literal('send'), bus: z.string().min(1), to: z.string().min(1) })
+]);
+
 const automationSchema = z.object({
-	param: id16,
+	param: id16.optional(),
+	target: laneTargetSchema.optional(),
 	tick,
 	value: z.number(),
 	ramp: z.number().int().min(0).optional()
 });
 
+const playFields = {
+	mode: z.enum(['poly', 'mono', 'legato']).default('poly'),
+	priority: z.enum(['last', 'high', 'low']).default('last'),
+	glide: z.number().min(0).max(60).default(0)
+};
+const playSchema = z.object(playFields);
+const playChangeSchema = z.object({ tick, ...playFields });
+
 const clipSchema = z.object({
 	id: z.string().min(1),
 	length: z.number().int().min(1),
 	notes: z.array(noteSchema).default([]),
-	automation: z.array(automationSchema).default([])
+	automation: z.array(automationSchema).default([]),
+	play: z.array(playChangeSchema).default([])
 });
 
 const insertSchema = z.object({
@@ -92,6 +115,7 @@ const trackSchema = z.object({
 	slots: z.array(z.string().min(1)).default([]),
 	params: z.record(z.string(), z.number()).default({}),
 	placements: z.array(placementSchema).default([]),
+	play: playSchema.optional(),
 	...routing
 });
 
@@ -152,7 +176,13 @@ export function referencedPatches(doc: Timeline): string[] {
 export function referencedAssets(graph: Graph): string[] {
 	const ids = new Set<string>();
 	for (const node of graph.nodes) {
-		if (node.type === 'sample' && typeof node.asset === 'string') ids.add(node.asset);
+		if (node.type !== 'sample') continue;
+		if (typeof node.asset === 'string') ids.add(node.asset);
+		if (Array.isArray(node.zones)) {
+			for (const zone of node.zones) {
+				if (typeof zone?.asset === 'string') ids.add(zone.asset);
+			}
+		}
 	}
 	return [...ids].sort();
 }

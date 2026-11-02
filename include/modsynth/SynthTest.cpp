@@ -599,3 +599,647 @@ TEST(Noise, DoesNotDependOnWhereItsStateSits) {
     for (auto* rig : {&a, &b}) ASSERT_TRUE(rig->engine.send({.kind = EventKind::NoteOn, .note = 60, .velocity = 100}));
     EXPECT_EQ(render_stereo(a, 8), render_stereo(b, 8));
 }
+
+// Lanes, play modes and Sample2. The patches here put what a voice is doing straight on its output, so a test reads it
+// from the samples. A track panned hard left has a left gain of exactly 1.
+namespace {
+
+constexpr char kFlat[] = R"({"nodes": [{"id": 1, "type": "const", "value": 0.5}, {"id": 2, "type": "out"}],
+    "edges": [{"from": 1, "to": 2, "input": "l"}]})";
+constexpr char kPitch[] = R"({"nodes": [{"id": 1, "type": "note"}, {"id": 2, "type": "mul", "inputs": {"b": 0.01}},
+    {"id": 3, "type": "out"}],
+    "edges": [{"from": 1, "port": "pitch", "to": 2, "input": "a"}, {"from": 2, "to": 3, "input": "l"}]})";
+constexpr char kSwell[] = R"({"nodes": [
+    {"id": 1, "type": "env", "inputs": {"attack": 1.0, "decay": 0.1, "sustain": 1.0, "release": 0.001}},
+    {"id": 2, "type": "out"}], "edges": [{"from": 1, "to": 2, "input": "l"}]})";
+constexpr char kGain[] = R"({"params": [{"id": 1, "min": 0, "max": 1, "default": 1, "smooth_ms": 0}],
+    "nodes": [{"id": 1, "type": "in"}, {"id": 2, "type": "param", "param": 1}, {"id": 3, "type": "mul"},
+    {"id": 4, "type": "out"}],
+    "edges": [{"from": 1, "port": "l", "to": 3, "input": "a"}, {"from": 2, "to": 3, "input": "b"},
+    {"from": 3, "to": 4, "input": "l"}]})";
+
+json song(const json& patches, const json& tracks, const json& clips, const json& extra = json::object()) {
+    json timeline = {
+        {"ppq", 480}, {"tempo", json::parse(R"([{"tick": 0, "bpm": 120}])")}, {"clips", clips}, {"tracks", tracks}};
+    timeline.update(extra);
+    json request;
+    request["patches"] = json::object();
+    for (const auto& [id, graph] : patches.items()) request["patches"][id] = {{"name", id}, {"graph", graph}};
+    request["programs"] = {{{"id", "t"}, {"name", "t"}, {"timeline", timeline}}};
+    return request;
+}
+
+// One track, panned left, playing one clip of a patch.
+json one_track(const char* patch, const json& clip, const json& track_extra = json::object(),
+               const json& extra = json::object()) {
+    json track = {{"id", 1}, {"voices", 4}, {"pan", -1.0}, {"slots", {"p"}}};
+    track["placements"] = {{{"clip", "c"}, {"tick", 0}}};
+    track.update(track_extra);
+    json c = clip;
+    c["id"] = "c";
+    if (!c.contains("length")) c["length"] = 3840;
+    return song({{"p", json::parse(patch)}}, json::array({track}), json::array({c}), extra);
+}
+
+// A frame lasts this many ticks: 50 samples to a tick at 120 bpm, 480 ppq and 48 kHz.
+constexpr u32 frame_at(u32 tick) { return tick * 50 / kFrame; }
+
+template <class R>
+std::vector<float> first_samples(R& rig, u32 frames, u32 channel = 0) {
+    std::vector<float> out(frames);
+    float left[kFrame], right[kFrame];
+    for (u32 f = 0; f < frames; ++f) {
+        rig.engine.render({left, right});
+        out[f] = (channel == 0 ? left : right)[0];
+    }
+    return out;
+}
+
+template <class R>
+float level_at_tick(R& rig, std::vector<float>& heard, u32 tick) {
+    const u32 frame = frame_at(tick);
+    if (heard.size() <= frame) {
+        const auto more = first_samples(rig, frame + 1 - static_cast<u32>(heard.size()));
+        heard.insert(heard.end(), more.begin(), more.end());
+    }
+    return heard[frame];
+}
+
+// What the engine plays, read at ticks. A little after a tick, so an event on it has landed.
+template <class R>
+std::vector<float> levels(R& rig, std::initializer_list<u32> ticks) {
+    std::vector<float> heard, out;
+    for (const u32 tick : ticks) out.push_back(level_at_tick(rig, heard, tick));
+    return out;
+}
+
+void expect_near(const std::vector<float>& actual, const std::vector<float>& expected, float tolerance = 1e-4f) {
+    ASSERT_EQ(actual.size(), expected.size());
+    for (std::size_t i = 0; i < actual.size(); ++i) EXPECT_NEAR(actual[i], expected[i], tolerance) << "at " << i;
+}
+
+json one_note(u32 dur = 3840) { return json::array({{{"tick", 0}, {"note", 60}, {"dur", dur}}}); }
+
+}  // namespace
+
+TEST(Lanes, AFaderLaneRampsTheMixer) {
+    json clip = {{"notes", one_note()}};
+    clip["automation"] =
+        json::parse(R"([{"target": {"mix": "fader", "track": 1}, "tick": 480, "value": 0, "ramp": 480}])");
+    Rig<kStereo> rig(compile_image(one_track(kFlat, clip)).image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    expect_near(levels(rig, {100, 479, 720, 959, 1200}), {0.5f, 0.5f, 0.25f, 0.0f, 0.0f}, 0.002f);
+}
+
+TEST(Lanes, APanLaneMovesTheSoundAcross) {
+    json clip = {{"notes", one_note()}};
+    clip["automation"] = json::parse(R"([{"target": {"mix": "pan", "track": 1}, "tick": 480, "value": 1}])");
+    Rig<kStereo> rig(compile_image(one_track(kFlat, clip)).image);
+    play(rig);
+    const auto left = first_samples(rig, frame_at(600));
+    EXPECT_NEAR(left[frame_at(400)], 0.5f, 1e-5f);
+    EXPECT_NEAR(left.back(), 0.0f, 1e-5f);
+    const auto right = first_samples(rig, 1, 1);
+    EXPECT_NEAR(right[0], 0.5f, 1e-5f);
+}
+
+TEST(Lanes, ASendLaneOpensTheSend) {
+    json clip = {{"notes", one_note()}};
+    clip["automation"] =
+        json::parse(R"([{"target": {"mix": "send", "track": 1, "to": "wet"}, "tick": 480, "value": 1}])");
+    json track = {{"sends", json::parse(R"([{"bus": "wet", "gain": 0}])")}};
+    json buses = {{"buses", json::parse(R"([{"id": "wet", "pan": -1}])")}};
+    Rig<kStereo> rig(compile_image(one_track(kFlat, clip, track, buses)).image);
+    play(rig);
+    expect_near(levels(rig, {100, 600}), {0.5f, 1.0f});
+}
+
+TEST(Lanes, AMasterFaderReachesEverythingIntoTheMaster) {
+    json clip = {{"notes", one_note()}};
+    clip["automation"] = json::parse(R"([{"target": {"mix": "fader", "master": true}, "tick": 480, "value": 0.5}])");
+    json master = {{"master", {{"gain", 0.8}}}};
+    Rig<kStereo> rig(compile_image(one_track(kFlat, clip, json::object(), master)).image);
+    play(rig);
+    expect_near(levels(rig, {100, 600}), {0.4f, 0.25f});
+}
+
+TEST(Lanes, AnInsertLaneMovesItsParameter) {
+    json clip = {{"notes", one_note()}};
+    clip["automation"] = json::parse(R"([
+        {"target": {"insert": 7}, "param": 1, "tick": 480, "value": 0.2},
+        {"target": {"insert": 7}, "param": 1, "tick": 960, "value": 1, "ramp": 480}])");
+    json track = {{"inserts", json::parse(R"([{"id": 7, "patch": "gain", "params": {"1": 0.6}}])")}};
+    json request = one_track(kFlat, clip, track);
+    request["patches"]["gain"] = {{"name", "gain"}, {"graph", json::parse(kGain)}};
+    Rig<kStereo> rig(compile_image(request).image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    expect_near(levels(rig, {100, 600, 1200, 1500}), {0.3f, 0.1f, 0.3f, 0.5f}, 0.002f);
+}
+
+TEST(Lanes, ALocateSoundsTheSameAsPlayingThere) {
+    json clip = {{"notes", one_note()}};
+    clip["automation"] = json::parse(R"([
+        {"target": {"mix": "fader", "track": 1}, "tick": 480, "value": 0, "ramp": 480},
+        {"target": {"insert": 7}, "param": 1, "tick": 1440, "value": 0.5, "ramp": 480}])");
+    json track = {{"inserts", json::parse(R"([{"id": 7, "patch": "gain"}])")}};
+    json request = one_track(kFlat, clip, track);
+    request["patches"]["gain"] = {{"name", "gain"}, {"graph", json::parse(kGain)}};
+    const auto image = compile_image(request).image;
+
+    Rig<kStereo> through(image);
+    play(through);
+    const auto heard = first_samples(through, frame_at(3000));
+
+    for (const u32 tick : {u32{0}, u32{300}, u32{720}, u32{1200}, u32{1680}, u32{2400}}) {
+        SCOPED_TRACE(tick);
+        Rig<kStereo> rig(image);
+        play(rig);
+        (void)first_samples(rig, frame_at(2800));  // Past every lane, so nothing is left where a locate would want it
+        rig.engine.send({.kind = EventKind::Locate, .tick = tick});
+        const auto jumped = first_samples(rig, frame_at(300));
+        for (const u32 at : {u32{0}, u32{100}, u32{250}}) {
+            EXPECT_NEAR(jumped[frame_at(at) + 1], heard[frame_at(tick + at) + 1], 0.003f) << "at " << at;
+        }
+    }
+}
+
+TEST(Lanes, ALoopStartsFromWhereTheLaneStarted) {
+    json clip = {{"notes", json::array({{{"tick", 0}, {"note", 60}, {"dur", 960}}})}, {"length", 960}};
+    clip["automation"] =
+        json::parse(R"([{"target": {"mix": "fader", "track": 1}, "tick": 240, "value": 0, "ramp": 240}])");
+    Rig<kStereo> rig(compile_image(one_track(kFlat, clip)).image);
+    rig.engine.send({.kind = EventKind::SetLoop, .tick = 0, .tick_end = 960});
+    play(rig);
+    const auto heard = first_samples(rig, frame_at(1000));
+    EXPECT_NEAR(heard[frame_at(800)], 0.0f, 1e-5f);
+    EXPECT_NEAR(heard[frame_at(960) + 8], 0.5f, 1e-5f);
+}
+
+TEST(Lanes, AProgramPaysOnlyForTheRampsItUses) {
+    const auto required = [](const json& automation) {
+        json clip = {{"notes", one_note()}, {"automation", automation}};
+        LoadedImage loaded(compile_image(one_track(kFlat, clip)).image);
+        return Rig<kStereo>::Engine::bytes_required(loaded.table, loaded.loader.program_hash(0), kRate).fast;
+    };
+    const u64 none = required(json::array());
+    EXPECT_EQ(required(json::parse(R"([{"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1}])")), none);
+    EXPECT_GT(required(json::parse(R"([{"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1, "ramp": 9}])")),
+              none);
+}
+
+TEST(Play, PolyOverlapsAndMonoDoesNot) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 960}, {"tick": 480, "note": 64, "dur": 960}])");
+    Rig<kStereo> poly(compile_image(one_track(kPitch, {{"notes", notes}})).image);
+    play(poly);
+    expect_near(levels(poly, {100, 700, 1200, 1600}), {0.60f, 1.24f, 0.64f, 0.0f});
+
+    json track = {{"play", {{"mode", "mono"}}}};
+    Rig<kStereo> mono(compile_image(one_track(kPitch, {{"notes", notes}}, track)).image);
+    ASSERT_EQ(mono.engine.load_error(), LoadError::None);
+    play(mono);
+    expect_near(levels(mono, {100, 700, 1200, 1600}), {0.60f, 0.64f, 0.64f, 0.0f});
+}
+
+TEST(Play, ANoteComesBackWhenTheOneOverItEnds) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 1440}, {"tick": 480, "note": 64, "dur": 480}])");
+    for (const char* mode : {"mono", "legato"}) {
+        SCOPED_TRACE(mode);
+        json track = {{"play", {{"mode", mode}}}};
+        Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, track)).image);
+        play(rig);
+        expect_near(levels(rig, {100, 700, 1200, 1600}), {0.60f, 0.64f, 0.60f, 0.0f});
+    }
+}
+
+TEST(Play, LegatoKeepsTheEnvelopeAndMonoStartsItAgain) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 960}, {"tick": 480, "note": 64, "dur": 960}])");
+    const auto swell = [&](const char* mode) {
+        json track = {{"play", {{"mode", mode}}}};
+        Rig<kStereo> rig(compile_image(one_track(kSwell, {{"notes", notes}}, track)).image);
+        play(rig);
+        return levels(rig, {479, 490});
+    };
+    const auto legato = swell("legato"), mono = swell("mono");
+    EXPECT_NEAR(legato[1], legato[0] + 0.0104f, 0.002f);
+    EXPECT_LT(mono[1], 0.05f + 0.5f * mono[0]);  // The old note's release is short, and only the new attack is left
+}
+
+TEST(Play, NotesThatOnlyTouchAreNotLegato) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 480}, {"tick": 480, "note": 64, "dur": 480}])");
+    json track = {{"play", {{"mode", "legato"}}}};
+    Rig<kStereo> rig(compile_image(one_track(kSwell, {{"notes", notes}}, track)).image);
+    play(rig);
+    const auto heard = levels(rig, {479, 490});
+    EXPECT_GT(heard[0], 0.45f);
+    EXPECT_LT(heard[1], 0.05f);
+}
+
+TEST(Play, PriorityChoosesAmongHeldNotes) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 1920}, {"tick": 240, "note": 72, "dur": 720},
+        {"tick": 480, "note": 64, "dur": 960}])");
+    const auto heard = [&](const char* priority) {
+        json track = {{"play", {{"mode", "mono"}, {"priority", priority}}}};
+        Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, track)).image);
+        play(rig);
+        return levels(rig, {100, 300, 600, 1100, 1600, 2000});
+    };
+    expect_near(heard("last"), {0.60f, 0.72f, 0.64f, 0.64f, 0.60f, 0.0f});
+    expect_near(heard("high"), {0.60f, 0.72f, 0.72f, 0.64f, 0.60f, 0.0f});
+    expect_near(heard("low"), {0.60f, 0.60f, 0.60f, 0.60f, 0.60f, 0.0f});
+}
+
+TEST(Play, GlideSlidesInSemitonesAndLandsExactly) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 960}, {"tick": 480, "note": 72, "dur": 960}])");
+    for (const char* mode : {"mono", "legato"}) {
+        SCOPED_TRACE(mode);
+        json track = {{"play", {{"mode", mode}, {"glide", 0.1}}}};
+        Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, track)).image);
+        play(rig);
+        // A tenth of a second is 96 ticks.
+        expect_near(levels(rig, {479, 528, 600, 1200}), {0.60f, 0.66f, 0.72f, 0.72f}, 0.002f);
+    }
+}
+
+TEST(Play, GlideAcrossAGapIsMonoOnly) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 240}, {"tick": 480, "note": 72, "dur": 960}])");
+    const auto after_gap = [&](const char* mode) {
+        json track = {{"play", {{"mode", mode}, {"glide", 0.1}}}};
+        Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, track)).image);
+        play(rig);
+        return levels(rig, {484})[0];
+    };
+    EXPECT_NEAR(after_gap("legato"), 0.72f, 1e-4f);
+    EXPECT_LT(after_gap("mono"), 0.62f);
+}
+
+TEST(Play, PolyGlideSlidesEachNewVoice) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 1440}, {"tick": 480, "note": 72, "dur": 960}])");
+    json track = {{"play", {{"mode", "poly"}, {"glide", 0.1}}}};
+    Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, track)).image);
+    play(rig);
+    expect_near(levels(rig, {100, 528, 600}), {0.60f, 1.26f, 1.32f}, 0.002f);
+}
+
+TEST(Play, AClipCanChangeTheModeAndHeldNotesFinishAsTheyStarted) {
+    json clip;
+    clip["notes"] = json::parse(R"([{"tick": 0, "note": 60, "dur": 1200}, {"tick": 240, "note": 64, "dur": 960},
+        {"tick": 960, "note": 67, "dur": 960}, {"tick": 1440, "note": 72, "dur": 240}])");
+    clip["play"] = json::parse(R"([{"tick": 480, "mode": "mono"}])");
+    Rig<kStereo> rig(compile_image(one_track(kPitch, clip)).image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    // The two poly notes keep sounding under the first mono note, and the second mono note replaces it.
+    expect_near(levels(rig, {300, 1000, 1500, 1800}), {1.24f, 1.91f, 0.72f, 0.67f});
+}
+
+TEST(Play, ALocateKeepsTheModeAndTheLastNote) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 240}, {"tick": 480, "note": 72, "dur": 960}])");
+    json track = {{"play", {{"mode", "mono"}, {"glide", 0.1}}}};
+    Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, track)).image);
+    play(rig);
+    (void)first_samples(rig, 4);
+    rig.engine.send({.kind = EventKind::Locate, .tick = 300});
+    const auto heard = first_samples(rig, frame_at(250));
+    EXPECT_LT(heard[frame_at(184)], 0.62f) << "the glide starts from a note that played before the locate";
+}
+
+TEST(Play, LiveNotesFollowTheModeBeforeTheTransportStarts) {
+    json request = one_track(kPitch, {{"notes", one_note(1)}}, {{"play", {{"mode", "legato"}}}});
+    request["live"] = true;
+    Rig<kStereo> rig(compile_image(request).image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    const auto note = [&](EventKind kind, u8 pitch) {
+        rig.engine.send({.kind = kind, .note = pitch, .velocity = 100});
+    };
+    note(EventKind::NoteOn, 60);
+    EXPECT_NEAR(first_samples(rig, 2)[1], 0.60f, 1e-5f);
+    note(EventKind::NoteOn, 64);
+    EXPECT_NEAR(first_samples(rig, 2)[1], 0.64f, 1e-5f);
+    EXPECT_EQ(rig.engine.active_voices(), 1u);
+    note(EventKind::NoteOff, 64);
+    EXPECT_NEAR(first_samples(rig, 2)[1], 0.60f, 1e-5f);
+    note(EventKind::NoteOff, 60);
+    EXPECT_NEAR(first_samples(rig, 2)[1], 0.0f, 1e-5f);
+    EXPECT_EQ(rig.engine.active_voices(), 0u);
+}
+
+TEST(Play, MoreHeldNotesThanItRemembersDropTheOldestSilently) {
+    json notes = json::array();
+    for (u32 i = 0; i < 2 * kMaxHeldNotes; ++i) {
+        notes.push_back({{"tick", i * 10}, {"note", 40 + i}, {"dur", 1000 - i * 10}});
+    }
+    json track = {{"play", {{"mode", "mono"}, {"priority", "low"}}}};
+    Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, track)).image);
+    play(rig);
+    const auto heard = levels(rig, {50, 990, 1100});
+    EXPECT_NEAR(heard[0], 0.40f, 1e-5f);
+    EXPECT_NEAR(heard[2], 0.0f, 1e-5f);
+    EXPECT_EQ(rig.engine.active_voices(), 0u);
+    EXPECT_EQ(rig.engine.guard_trips(), 0u);
+}
+
+TEST(Play, StoppingLeavesNothingHeld) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 960}, {"tick": 100, "note": 64, "dur": 960}])");
+    Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, {{"play", {{"mode", "mono"}}}})).image);
+    play(rig);
+    (void)first_samples(rig, frame_at(300));
+    rig.engine.send({.kind = EventKind::Stop});
+    (void)first_samples(rig, 4);
+    EXPECT_EQ(rig.engine.active_voices(), 0u);
+    rig.engine.send({.kind = EventKind::Play});
+    (void)first_samples(rig, frame_at(1200));
+    EXPECT_EQ(rig.engine.active_voices(), 0u) << "the rest of the stream runs, and nothing is left sounding";
+}
+
+TEST(Play, ASwapToAPolyProgramLetsTheLineEndAtItsTick) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 960}, {"tick": 480, "note": 64, "dur": 960}])");
+    const auto mono = compile_image(one_track(kPitch, {{"notes", notes}}, {{"play", {{"mode", "mono"}}}})).image;
+    const auto poly = compile_image(one_track(kPitch, {{"notes", notes}})).image;
+    Rig<kStereo> rig(mono);
+    play(rig);
+    (void)first_samples(rig, frame_at(600));
+    EXPECT_EQ(rig.engine.active_voices(), 1u);
+    rig.swap_to(poly);
+    (void)first_samples(rig, frame_at(1600));
+    EXPECT_EQ(rig.engine.generation(), 2u);
+    EXPECT_EQ(rig.engine.active_voices(), 0u) << "a line voice must not be left held by a Program with no line";
+}
+
+TEST(Play, ASwapBetweenMonoProgramsKeepsTheLine) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 1440}, {"tick": 480, "note": 64, "dur": 480}])");
+    const auto first = compile_image(one_track(kPitch, {{"notes", notes}}, {{"play", {{"mode", "legato"}}}})).image;
+    json track = {{"play", {{"mode", "legato"}}}, {"gain", 1.0001}};
+    const auto second = compile_image(one_track(kPitch, {{"notes", notes}}, track)).image;
+    Rig<kStereo> rig(first);
+    play(rig);
+    (void)first_samples(rig, frame_at(600));
+    rig.swap_to(second);
+    const auto heard = first_samples(rig, frame_at(1000));
+    EXPECT_NEAR(heard[frame_at(100)], 0.64f, 2e-3f);
+    EXPECT_NEAR(heard[frame_at(600)], 0.60f, 2e-3f) << "the held note comes back after the swap";
+    EXPECT_NEAR(heard[frame_at(950)], 0.0f, 1e-5f);
+}
+
+namespace {
+
+std::string base64(const std::vector<float>& samples) {
+    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::vector<unsigned char> bytes(samples.size() * sizeof(float));
+    std::memcpy(bytes.data(), samples.data(), bytes.size());
+    std::string out;
+    for (std::size_t i = 0; i < bytes.size(); i += 3) {
+        const u32 left = bytes.size() - i;
+        const u32 word = static_cast<u32>(bytes[i]) << 16 | (left > 1 ? static_cast<u32>(bytes[i + 1]) << 8 : 0) |
+                         (left > 2 ? bytes[i + 2] : 0);
+        out += alphabet[word >> 18 & 63];
+        out += alphabet[word >> 12 & 63];
+        out += left > 1 ? alphabet[word >> 6 & 63] : '=';
+        out += left > 2 ? alphabet[word & 63] : '=';
+    }
+    return out;
+}
+
+json asset(const std::vector<float>& samples, u32 loop_start = 0, u32 loop_end = 0) {
+    return {{"encoding", "f32"},        {"channels", 1},        {"frames", samples.size()}, {"rate", 48000.0},
+            {"loop_start", loop_start}, {"loop_end", loop_end}, {"root_key", 60},           {"data", base64(samples)}};
+}
+
+// 0, 0.001, 0.002 and on, so a sample says where in the recording it came from.
+std::vector<float> ramp_samples() {
+    std::vector<float> out(1000);
+    for (u32 i = 0; i < out.size(); ++i) out[i] = static_cast<float>(i) * 0.001f;
+    return out;
+}
+
+json sampler(const json& sample) {
+    json graph = json::parse(R"({"nodes": [{"id": 2, "type": "out"}],
+        "edges": [{"from": 1, "port": "l", "to": 2, "input": "l"}]})");
+    json node = sample;
+    node["id"] = 1;
+    node["type"] = "sample";
+    node["mode"] = "zones";
+    graph["nodes"].push_back(node);
+    return graph;
+}
+
+json sampled(const json& sample, const json& assets, const json& notes, const json& track = json::object()) {
+    json request = one_track(kFlat, {{"notes", notes}}, track);
+    request["patches"]["p"]["graph"] = sampler(sample);
+    request["assets"] = assets;
+    return request;
+}
+
+// Every sample, left channel, as the voice goes.
+template <class R>
+std::vector<float> samples_of(R& rig, u32 frames) {
+    std::vector<float> out(frames * kFrame);
+    float right[kFrame];
+    for (u32 f = 0; f < frames; ++f) rig.engine.render({out.data() + f * kFrame, right});
+    return out;
+}
+
+const json kRampZone = json::parse(R"({"zones": [{"asset": "ramp"}]})");
+
+}  // namespace
+
+TEST(Sample2, ZonesPickByKeyAndVelocity) {
+    json assets = {{"low", asset(std::vector<float>(64, 0.1f))},
+                   {"soft", asset(std::vector<float>(64, 0.2f))},
+                   {"hard", asset(std::vector<float>(64, 0.3f))}};
+    json sample;
+    sample["zones"] = json::parse(R"([{"asset": "low", "keys": [0, 59]},
+        {"asset": "soft", "keys": [60, 127], "velocities": [0, 100]},
+        {"asset": "hard", "keys": [60, 127], "velocities": [101, 127]}])");
+    const auto level = [&](int note, int velocity) {
+        json notes = json::array({{{"tick", 0}, {"note", note}, {"vel", velocity}, {"dur", 960}}});
+        Rig<kStereo> rig(compile_image(sampled(sample, assets, notes)).image);
+        EXPECT_EQ(rig.engine.load_error(), LoadError::None);
+        play(rig);
+        return first_samples(rig, 2)[0];
+    };
+    EXPECT_NEAR(level(48, 100), 0.1f, 1e-6f);
+    EXPECT_NEAR(level(60, 100), 0.2f, 1e-6f);
+    EXPECT_NEAR(level(60, 101), 0.3f, 1e-6f);
+}
+
+TEST(Sample2, ANoteNoZoneCoversIsSilentAndEnds) {
+    json assets = {{"a", asset(std::vector<float>(64, 0.5f))}};
+    json sample;
+    sample["zones"] = json::parse(R"([{"asset": "a", "keys": [70, 80]}])");
+    Rig<kStereo> rig(compile_image(sampled(sample, assets, one_note(10))).image);
+    play(rig);
+    const auto audio = samples_of(rig, frame_at(40));
+    EXPECT_EQ(peak(audio), 0.0f);
+    EXPECT_EQ(rig.engine.active_voices(), 0u);
+}
+
+TEST(Sample2, EachZoneHasItsOwnRoot) {
+    json assets = {{"ramp", asset(ramp_samples())}};
+    json sample;
+    sample["zones"] = json::parse(R"([{"asset": "ramp", "root": 48}])");
+    Rig<kStereo> rig(compile_image(sampled(sample, assets, one_note())).image);
+    play(rig);
+    const auto audio = samples_of(rig, 4);
+    EXPECT_NEAR(audio[10] - audio[9], 0.002f, 1e-4f) << "an octave above its root plays at twice the speed";
+}
+
+TEST(Sample2, StartAndReverseCountFromWherePlaybackBegins) {
+    json assets = {{"ramp", asset(ramp_samples())}};
+    json sample = kRampZone;
+    sample["inputs"] = {{"start", 0.5}};
+    Rig<kStereo> forward(compile_image(sampled(sample, assets, one_note())).image);
+    play(forward);
+    EXPECT_NEAR(samples_of(forward, 1)[1], 0.5005f, 2e-3f);
+
+    json reversed = kRampZone;
+    reversed["reverse"] = true;
+    Rig<kStereo> backward(compile_image(sampled(reversed, assets, one_note())).image);
+    play(backward);
+    const auto audio = samples_of(backward, 1);
+    EXPECT_NEAR(audio[0], 0.999f, 1e-5f);
+    EXPECT_NEAR(audio[1], 0.998f, 1e-5f);
+
+    reversed["inputs"] = {{"start", 0.25}};
+    Rig<kStereo> offset(compile_image(sampled(reversed, assets, one_note())).image);
+    play(offset);
+    EXPECT_NEAR(samples_of(offset, 1)[0], 0.74925f, 2e-3f);
+}
+
+TEST(Sample2, AOneShotOutlivesItsNoteAndThenEnds) {
+    for (const bool reverse : {false, true}) {
+        SCOPED_TRACE(reverse);
+        json sample = kRampZone;
+        sample["reverse"] = reverse;
+        Rig<kStereo> rig(compile_image(sampled(sample, {{"ramp", asset(ramp_samples())}}, one_note(2))).image);
+        play(rig);
+        (void)samples_of(rig, 10);  // Past the note, which is 100 samples
+        EXPECT_EQ(rig.engine.active_voices(), 1u);
+        (void)samples_of(rig, 25);  // Past the recording, which is 1000
+        EXPECT_EQ(rig.engine.active_voices(), 0u);
+    }
+}
+
+TEST(Sample2, ALoopWithoutATailEndsWithTheVoice) {
+    json assets = {{"ramp", asset(ramp_samples(), 100, 200)}};
+    Rig<kStereo> rig(compile_image(sampled(kRampZone, assets, one_note(100))).image);
+    play(rig);
+    const auto audio = samples_of(rig, frame_at(80));
+    for (u32 i = 300; i < 4000; ++i) EXPECT_LE(audio[i], 0.2f) << i;
+    EXPECT_GT(peak(audio), 0.19f);
+    (void)samples_of(rig, frame_at(40));
+    EXPECT_EQ(rig.engine.active_voices(), 0u) << "with no envelope it ends on release, and a loop can't hold it open";
+}
+
+TEST(Sample2, ALoopWithATailPlaysOnFromTheReleaseToTheEnd) {
+    json assets = {{"ramp", asset(ramp_samples(), 100, 200)}};
+    json sample = kRampZone;
+    sample["tail"] = true;
+    Rig<kStereo> rig(compile_image(sampled(sample, assets, one_note(20))).image);
+    play(rig);
+    const auto audio = samples_of(rig, frame_at(20) + 2);
+    EXPECT_LE(peak({audio.data(), 900}), 0.2f) << "held, it stays in the loop";
+    EXPECT_EQ(rig.engine.active_voices(), 1u);
+    const auto rest = samples_of(rig, 40);
+    EXPECT_GT(peak(rest), 0.95f) << "released, it runs on to the last frame";
+    EXPECT_EQ(rig.engine.active_voices(), 0u);
+}
+
+TEST(Sample2, ReverseLoopsBackwardsAndLeavesForTheStart) {
+    json assets = {{"ramp", asset(ramp_samples(), 100, 200)}};
+    json sample = kRampZone;
+    sample["reverse"] = true;
+    sample["tail"] = true;
+    Rig<kStereo> rig(compile_image(sampled(sample, assets, one_note(40))).image);
+    play(rig);
+    const auto audio = samples_of(rig, frame_at(40) - 2);
+    EXPECT_GT(audio[0], 0.9f) << "it starts at the end of the recording";
+    for (u32 i = 1000; i < audio.size(); ++i) {
+        EXPECT_GE(audio[i], 0.1f) << i;
+        EXPECT_LE(audio[i], 0.2f) << i;
+    }
+    float lowest = 1.0f;
+    for (const float x : samples_of(rig, 12)) lowest = std::min(lowest, x);
+    EXPECT_LT(lowest, 0.01f) << "after the release it runs back to the first frame";
+    (void)samples_of(rig, 2);
+    EXPECT_EQ(rig.engine.active_voices(), 0u);
+}
+
+TEST(Sample2, ANoteStartsOnItsSample) {
+    json assets = {{"a", asset(std::vector<float>(4096, 0.5f))}};
+    json sample;
+    sample["zones"] = json::parse(R"([{"asset": "a"}])");
+    json notes = json::array({{{"tick", 1}, {"note", 60}, {"dur", 100}}});
+    Rig<kStereo> rig(compile_image(sampled(sample, assets, notes)).image);
+    play(rig);
+    const auto audio = samples_of(rig, 3);
+    EXPECT_EQ(audio[49], 0.0f);
+    EXPECT_EQ(audio[50], 0.5f);
+}
+
+TEST(Sample2, LegatoKeepsTheZoneAndMovesThePitch) {
+    json assets = {{"ramp", asset(ramp_samples())}, {"other", asset(std::vector<float>(1000, 1.0f))}};
+    json sample;
+    sample["zones"] = json::parse(R"([{"asset": "ramp", "keys": [0, 60], "root": 60},
+        {"asset": "other", "keys": [61, 127]}])");
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 12}, {"tick": 4, "note": 72, "dur": 12}])");
+    Rig<kStereo> rig(compile_image(sampled(sample, assets, notes, {{"play", {{"mode", "legato"}}}})).image);
+    play(rig);
+    const auto audio = samples_of(rig, 16);
+    EXPECT_NEAR(audio[100] - audio[99], 0.001f, 1e-4f);
+    EXPECT_NEAR(audio[400] - audio[399], 0.002f, 1e-4f) << "the note moved the pitch";
+    EXPECT_LT(peak(audio), 0.9f) << "and not the recording";
+}
+
+TEST(Sample2, GlideDoesNotChooseAZoneFromWhereItStarted) {
+    json assets = {{"low", asset(std::vector<float>(4096, 0.25f))}, {"high", asset(std::vector<float>(4096, 0.75f))}};
+    json sample;
+    sample["zones"] =
+        json::parse(R"([{"asset": "low", "keys": [0, 60], "root": 40}, {"asset": "high", "keys": [61, 127]}])");
+    const json notes = json::parse(R"([{"tick": 0, "note": 40, "dur": 100}, {"tick": 200, "note": 80, "dur": 100}])");
+    json track = {{"play", {{"mode", "mono"}, {"glide", 0.05}}}};
+    Rig<kStereo> rig(compile_image(sampled(sample, assets, notes, track)).image);
+    play(rig);
+    EXPECT_NEAR(levels(rig, {50, 205})[1], 0.75f, 1e-5f);
+}
+
+TEST(Sample2, ALiveSwapToAShorterTableStopsTheVoice) {
+    json many = {{"a", asset(std::vector<float>(4096, 0.5f))}};
+    json four, three;
+    four["zones"] = json::parse(R"([{"asset": "a", "keys": [0, 1]}, {"asset": "a", "keys": [2, 3]},
+        {"asset": "a", "keys": [4, 5]}, {"asset": "a", "keys": [6, 127]}])");
+    three["zones"] = json::parse(R"([{"asset": "a", "keys": [0, 1]}, {"asset": "a", "keys": [2, 3]},
+        {"asset": "a", "keys": [4, 5]}])");
+    json one = three;
+    one["zones"].erase(1);
+    one["zones"].erase(1);
+    for (const json& shorter : {three, one}) {
+        Rig<kStereo> rig(compile_image(sampled(four, many, one_note())).image);
+        play(rig);
+        (void)samples_of(rig, 10);
+        rig.swap_to(compile_image(sampled(shorter, many, one_note())).image);
+        (void)samples_of(rig, 200);
+        EXPECT_EQ(rig.engine.guard_trips(), 0u);
+    }
+}
+
+TEST(Sample2, AMonoEngineFoldsAStereoAsset) {
+    json stereo = asset(std::vector<float>(64, 0.0f));
+    std::vector<float> samples;
+    for (u32 i = 0; i < 64; ++i) {
+        samples.push_back(0.2f);
+        samples.push_back(0.6f);
+    }
+    stereo["channels"] = 2;
+    stereo["data"] = base64(samples);
+    json sample;
+    sample["zones"] = json::parse(R"([{"asset": "s"}])");
+    const auto image = compile_image(sampled(sample, {{"s", stereo}}, one_note())).image;
+    Rig<kMono> rig(image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    float out[kMono.frame_size];
+    rig.engine.render({out});
+    EXPECT_NEAR(out[0], 0.2f, 1e-6f) << "(0.2 + 0.6) / 2, and the track's hard left pan halves that again";
+}

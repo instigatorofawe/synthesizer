@@ -164,7 +164,10 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
 - The report gives each track the most notes it holds at once while it plays poly, and warns, with the first tick, when that is more than its
   voices. A track can fade a stolen voice out over 2 ms instead of cutting it, from revision 7: its sound moves to a fade slot, a quarter as
   many as its voices, by swapping memory, so a steal copies nothing and the new note still starts on its own sample. Cutting stays the default,
-  because every document must compile as it did, and a track the editor adds fades.
+  because every document must compile as it did, and a track the editor adds fades. The count of held notes can't see a release still ringing,
+  so a track can steal without a warning [measured: Für Elise holds at most 19 notes on its 24 voices, and its pedal still makes it take a
+  ringing voice in 57 places, where fading moves the render by at most 0.023 against a peak of 0.45, so it now fades; of the shipped examples
+  only the VoiceStealing recipe, which steals on purpose, is warned].
 - Play modes are per track and carried in the stream, so a song can change them midway: poly, mono or legato, with note priority and a glide
   time. Legato can also bring each slurred note's velocity, from revision 7, moving the velocity scalar over the glide or 5 ms. A patch can't do this itself, because it is one voice and can't see the others. Glide moves the voice's note scalar a step per frame, so
   every patch follows it with no new op. `Tone` latches its pitch at note start and does not. Format.md section 7 has the rules, and a Program

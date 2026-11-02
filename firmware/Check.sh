@@ -8,10 +8,11 @@ cmake -S firmware -B build/firmware -G Ninja --toolchain "$PWD/firmware/ArmNoneE
     -DMODSYNTH_FUZZ_SECONDS="${FUZZ_SECONDS:-60}" -DMODSYNTH_FUZZ_RANDOM="${FUZZ_RANDOM:-1}"
 cmake --build build/firmware
 
-firmware/CheckSymbols.sh build/firmware/Stereo.elf build/firmware/Mono.elf build/firmware/StereoCmsis.elf
+firmware/CheckSymbols.sh build/firmware/Stereo.elf build/firmware/Mono.elf build/firmware/StereoCmsis.elf \
+    build/firmware/Stereo128.elf build/firmware/Mono128.elf build/firmware/StereoCmsis128.elf
 
 cd build/firmware
-for name in Stereo Mono StereoCmsis; do
+for name in Stereo Mono StereoCmsis Stereo128 Mono128 StereoCmsis128; do
     echo "== $name"
     timeout 120 qemu-system-arm -machine b-l475e-iot01a -cpu cortex-m4 -nographic -monitor none -serial null \
         -semihosting-config enable=on,target=native -kernel "$name.elf" 2>&1
@@ -19,9 +20,12 @@ done
 cd ../..
 
 for image in Demo AllOps Waves Tones; do
-    python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/Stereo.$image.f32"
-    python3 tools/CompareAudio.py "golden/$image.mono.f32" "build/firmware/Mono.$image.f32"
-    python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/StereoCmsis.$image.f32"
+    python3 tools/CompareAudio.py "golden/${image}32.stereo.f32" "build/firmware/Stereo.$image.f32"
+    python3 tools/CompareAudio.py "golden/${image}32.mono.f32" "build/firmware/Mono.$image.f32"
+    python3 tools/CompareAudio.py "golden/${image}32.stereo.f32" "build/firmware/StereoCmsis.$image.f32"
+    python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/Stereo128.$image.f32"
+    python3 tools/CompareAudio.py "golden/$image.mono.f32" "build/firmware/Mono128.$image.f32"
+    python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/StereoCmsis128.$image.f32"
 done
 
 echo "== Fuzz"

@@ -40,7 +40,7 @@ RECIPE_PEAK = (
     0.45  # Each recipe is rendered to this, so --gain sets where its peak lands
 )
 RATE = 48000
-BLOCK = 128
+BLOCK = 32  # The compiler's default frame size
 TICKS_PER_SECOND = 960  # 480 ticks per beat at 120 bpm
 
 SCALE = [36, 48, 60, 72, 84, 96]

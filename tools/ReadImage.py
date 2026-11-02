@@ -105,8 +105,8 @@ def check_document() -> None:
         "the document and the header describe different revisions",
     )
     require(
-        max(op["since"] for op in OPS.values()) == int(engine.group(1)),
-        "no opcode was added by the newest revision",
+        max(op["since"] for op in OPS.values()) <= int(engine.group(1)),
+        "an opcode is newer than the newest revision",
     )
     registered = re.findall(r"^MODSYNTH_OP\(([^)]*)\)", REGISTRY, re.MULTILINE)
     require(len(registered) == len(OPS), "document and registry list different opcodes")
@@ -385,8 +385,17 @@ def read_image(path: Path) -> dict:
     kind, size, manifest_hash = read_chunk_header(image, 0)
     payload = image[24 : 24 + size]
     require(kind == 0 and fnv(1, 0, payload) == manifest_hash, "manifest")
-    entries, programs, revision, reserved = struct.unpack_from("<4I", payload, 0)
-    require(size == 16 + entries * 16 and reserved == 0, "manifest header")
+    entries, programs, revision, frame_size = struct.unpack_from("<4I", payload, 0)
+    require(size == 16 + entries * 16, "manifest header")
+    require(
+        frame_size == 0
+        or (
+            frame_size != 128
+            and frame_size & (frame_size - 1) == 0
+            and 8 <= frame_size <= 1024
+        ),
+        "manifest frame size",
+    )
 
     chunks, at = [], next_chunk(image, 0, size)
     previous = (0, 0)
@@ -430,6 +439,8 @@ def read_image(path: Path) -> dict:
         ),
         default=0,
     )
+    if frame_size != 0:
+        needed = max(needed, 3)
     # A thin image can need more than what it carries.
     whole = all(c["present"] for c in chunks)
     require(revision == needed if whole else revision >= needed, "manifest revision")

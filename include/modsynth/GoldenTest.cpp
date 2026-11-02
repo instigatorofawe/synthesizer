@@ -16,12 +16,16 @@ using compiler::compile_image;
 
 namespace {
 
-constexpr SynthConfig kGoldenStereo{.frame_size = 128, .channels = 2, .tap_slots = 0, .generations = 1};
+template <u32 Frame>
+constexpr SynthConfig kGoldenStereo{.frame_size = Frame, .channels = 2, .tap_slots = 0, .generations = 1};
+template <u32 Frame>
+constexpr SynthConfig kGoldenMono{.frame_size = Frame, .channels = 1, .tap_slots = 0, .generations = 1};
 
 struct Golden {
     const char* name;
     u32 frames;
     u64 compiled;  // What the compiler writes today, from the json beside the image
+    u32 frame_size = kOriginalFrameSize;
 };
 
 // A change here means a project compiles to different chunks than it used to. Old images still play, but a thin image
@@ -30,9 +34,11 @@ struct Golden {
 // moved Demo and AllOps. Refusing audio at inputs read once a frame made another. It moved them again, because a snap
 // node has its own place among the steps. They render as they did.
 constexpr Golden kGoldens[] = {
-    {"Minimal", 8, 0x1b3153f13f3ea109ull},  {"Demo", 480, 0xbc90aab7da78bf30ull},
-    {"AllOps", 400, 0xed4a0c10d266d7aeull}, {"Waves", 200, 0xf4c0e84598e9134eull},
-    {"Tones", 200, 0x6d4b1572d83c6384ull},
+    {"Minimal", 8, 0x1b3153f13f3ea109ull},         {"Demo", 480, 0xbc90aab7da78bf30ull},
+    {"AllOps", 400, 0xed4a0c10d266d7aeull},        {"Waves", 200, 0xf4c0e84598e9134eull},
+    {"Tones", 200, 0x6d4b1572d83c6384ull},         {"Demo32", 1920, 0x0cd1b564c1f05560ull, 32},
+    {"AllOps32", 1600, 0x598b8f72a660fe6dull, 32}, {"Waves32", 800, 0x00bf5c924ba84056ull, 32},
+    {"Tones32", 800, 0x2226e9059cc63fb0ull, 32},
 };
 
 std::vector<std::byte> read_file(const std::string& path) {
@@ -86,8 +92,13 @@ TEST(Golden, EveryImageSoundsAsItDidAtTheFreeze) {
         SCOPED_TRACE(g.name);
         const std::string base = golden_path(g.name);
         const auto image = read_file(base + ".image");
-        EXPECT_LE(difference_db(read_audio(base + ".stereo.f32"), render<kGoldenStereo>(image, g.frames)), -100.0);
-        EXPECT_LE(difference_db(read_audio(base + ".mono.f32"), render<kMono>(image, g.frames)), -100.0);
+        const bool original = g.frame_size == kOriginalFrameSize;
+        const auto stereo =
+            original ? render<kGoldenStereo<128>>(image, g.frames) : render<kGoldenStereo<32>>(image, g.frames);
+        const auto mono =
+            original ? render<kGoldenMono<128>>(image, g.frames) : render<kGoldenMono<32>>(image, g.frames);
+        EXPECT_LE(difference_db(read_audio(base + ".stereo.f32"), stereo), -100.0);
+        EXPECT_LE(difference_db(read_audio(base + ".mono.f32"), mono), -100.0);
     }
 }
 
@@ -121,7 +132,10 @@ TEST(Golden, TheCompilerStillWritesTheseBytes) {
         const auto bytes = read_file(golden_path(std::string(g.name) + ".json"));
         json request = json::parse(reinterpret_cast<const char*>(bytes.data()),
                                    reinterpret_cast<const char*>(bytes.data()) + bytes.size());
-        add_snaps(request);
+        if (g.frame_size == kOriginalFrameSize) {
+            add_snaps(request);
+            request["frame_size"] = kOriginalFrameSize;  // The default moved, and frozen JSON can't say so itself
+        }
         const auto image = compile_image(request).image;
         EXPECT_EQ(hash_bytes(kHashSeed, image.data(), image.size()), g.compiled);
     }
@@ -188,6 +202,24 @@ TEST(Golden, EachImageDeclaresTheRevisionItNeeds) {
     }
     EXPECT_EQ(revision("Waves.image"), 1u);
     EXPECT_EQ(revision("Tones.image"), 2u);
+    for (const char* name : {"Demo32.image", "AllOps32.image", "Waves32.image", "Tones32.image"}) {
+        EXPECT_EQ(revision(name), 3u) << name;
+    }
+}
+
+// A frozen image must never quietly change its sound by landing on an engine of another size.
+TEST(Golden, AnEngineRefusesAnImageOfAnotherFrameSize) {
+    for (const Golden& g : kGoldens) {
+        SCOPED_TRACE(g.name);
+        const auto image = read_file(golden_path(std::string(g.name) + ".image"));
+        if (g.frame_size == kOriginalFrameSize) {
+            EXPECT_EQ(Rig<kGoldenStereo<32>>(image).engine.load_error(), LoadError::WrongFrameSize);
+            EXPECT_EQ(Rig<kGoldenMono<32>>(image).engine.load_error(), LoadError::WrongFrameSize);
+        } else {
+            EXPECT_EQ(Rig<kGoldenStereo<128>>(image).engine.load_error(), LoadError::WrongFrameSize);
+            EXPECT_EQ(Rig<kGoldenMono<128>>(image).engine.load_error(), LoadError::WrongFrameSize);
+        }
+    }
 }
 
 TEST(Golden, AThinImageFromTheFreezePlaysOnChunksFromTheFreeze) {

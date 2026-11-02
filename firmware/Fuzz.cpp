@@ -16,39 +16,29 @@
 using namespace modsynth;
 using namespace modsynth::fuzz;
 
-__asm(
-    ".section .rodata.seeds,\"a\"\n"
-    ".balign 8\n"
-    ".global g_seed_a\n"
-    "g_seed_a:\n"
-    ".incbin \"" MODSYNTH_FUZZ_SEED_A
-    "\"\n"
-    ".global g_seed_a_end\n"
-    "g_seed_a_end:\n"
-    ".balign 8\n"
-    ".global g_seed_b\n"
-    "g_seed_b:\n"
-    ".incbin \"" MODSYNTH_FUZZ_SEED_B
-    "\"\n"
-    ".global g_seed_b_end\n"
-    "g_seed_b_end:\n"
-    ".balign 8\n"
-    ".global g_seed_c\n"
-    "g_seed_c:\n"
-    ".incbin \"" MODSYNTH_FUZZ_SEED_C
-    "\"\n"
-    ".global g_seed_c_end\n"
-    "g_seed_c_end:\n"
-    ".balign 8\n"
-    ".global g_seed_d\n"
-    "g_seed_d:\n"
-    ".incbin \"" MODSYNTH_FUZZ_SEED_D
-    "\"\n"
-    ".global g_seed_d_end\n"
-    "g_seed_d_end:\n"
-    ".text\n");
-extern const std::byte g_seed_a[], g_seed_a_end[], g_seed_b[], g_seed_b_end[], g_seed_c[], g_seed_c_end[], g_seed_d[],
-    g_seed_d_end[];
+#define MODSYNTH_LINK_SEED(name, path)   \
+    __asm(                               \
+        ".section .rodata.seeds,\"a\"\n" \
+        ".balign 8\n"                    \
+        ".global " #name "\n" #name      \
+        ":\n"                            \
+        ".incbin \"" path                \
+        "\"\n"                           \
+        ".global " #name "_end\n" #name  \
+        "_end:\n"                        \
+        ".text\n");                      \
+    extern const std::byte name[];       \
+    extern const std::byte name##_end[];
+
+MODSYNTH_LINK_SEED(g_seed_a, MODSYNTH_FUZZ_SEED_A)
+MODSYNTH_LINK_SEED(g_seed_b, MODSYNTH_FUZZ_SEED_B)
+MODSYNTH_LINK_SEED(g_seed_c, MODSYNTH_FUZZ_SEED_C)
+MODSYNTH_LINK_SEED(g_seed_d, MODSYNTH_FUZZ_SEED_D)
+MODSYNTH_LINK_SEED(g_seed_e, MODSYNTH_FUZZ_SEED_E)
+MODSYNTH_LINK_SEED(g_seed_f, MODSYNTH_FUZZ_SEED_F)
+MODSYNTH_LINK_SEED(g_seed_g, MODSYNTH_FUZZ_SEED_G)
+MODSYNTH_LINK_SEED(g_seed_h, MODSYNTH_FUZZ_SEED_H)
+
 extern "C" std::byte __arena_start[], __arena_end[];
 
 namespace {
@@ -234,7 +224,11 @@ extern std::uint32_t __bss_start, __bss_end, __stack_top;
     static const ByteSpan seeds[] = {{g_seed_a, static_cast<std::size_t>(g_seed_a_end - g_seed_a)},
                                      {g_seed_b, static_cast<std::size_t>(g_seed_b_end - g_seed_b)},
                                      {g_seed_c, static_cast<std::size_t>(g_seed_c_end - g_seed_c)},
-                                     {g_seed_d, static_cast<std::size_t>(g_seed_d_end - g_seed_d)}};
+                                     {g_seed_d, static_cast<std::size_t>(g_seed_d_end - g_seed_d)},
+                                     {g_seed_e, static_cast<std::size_t>(g_seed_e_end - g_seed_e)},
+                                     {g_seed_f, static_cast<std::size_t>(g_seed_f_end - g_seed_f)},
+                                     {g_seed_g, static_cast<std::size_t>(g_seed_g_end - g_seed_g)},
+                                     {g_seed_h, static_cast<std::size_t>(g_seed_h_end - g_seed_h)}};
     // The top of the arena, out of take_memory()'s reach. As integers, because __arena_end is one past an unknown
     // array.
     const auto top = reinterpret_cast<std::uintptr_t>(__arena_end);
@@ -291,6 +285,8 @@ extern std::uint32_t __bss_start, __bss_end, __stack_top;
     print_number(s.frames);
     print(", guard trips ");
     print_number(s.guard_trips);
+    print(", other frame sizes ");
+    print_number(s.other_frames);
     print("\n");
     finish(true);
 }

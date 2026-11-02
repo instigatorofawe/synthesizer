@@ -126,7 +126,7 @@ class Synth {
     // which render() also calls, and the new generation commits at a frame boundary.
     void load(ChunkTable& chunks, ByteSpan image, u32 program = 0) {
         loader_ = Loader(chunks);
-        loader_.begin(image);
+        loader_.begin(image, C.frame_size);
         chunks_ = &chunks;
         program_index_ = program;
         load_phase_ = LoadPhase::Validating;
@@ -137,8 +137,9 @@ class Synth {
     void bind(ChunkTable& chunks, u64 program) {
         chunks_ = &chunks;
         program_hash_ = program;
-        load_phase_ = LoadPhase::Waiting;
-        error_ = LoadError::None;
+        const bool playable = chunks.frame_size() == C.frame_size;
+        load_phase_ = playable ? LoadPhase::Waiting : LoadPhase::Idle;
+        error_ = playable ? LoadError::None : LoadError::WrongFrameSize;
     }
 
     // Does up to about `budget` units of loading. Returns true while a load is in progress.
@@ -269,7 +270,7 @@ class Synth {
     static constexpr u32 Ch = C.channels;
     static constexpr u32 kNoTick = 0xFFFFFFFFu;
     static constexpr u32 kQueueSize = 64;
-    static constexpr u32 kBudgetPerFrame = 8192;
+    static constexpr u32 kBudgetPerFrame = 64 * C.frame_size;  // The same share of the CPU at any frame size
     static constexpr float kFadeSamples = 2048.0f;
     using K = Kernels<C, B>;
 

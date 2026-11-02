@@ -17,7 +17,8 @@ struct Stats {
     u64 refused_memory = 0;    // Programs too large for the fuzzer's own memory limit
     u64 frames = 0;
     u64 guard_trips = 0;
-    u64 swaps = 0;  // Live swaps completed, each carrying state from one generation to the next
+    u64 swaps = 0;         // Live swaps completed, each carrying state from one generation to the next
+    u64 other_frames = 0;  // Images valid but for a frame size no engine here was built for, so not played
 };
 
 // One input: a mutated image, an intact image to swap from, and a seed for everything else. A failed oracle calls

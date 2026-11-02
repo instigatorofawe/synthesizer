@@ -3,7 +3,7 @@
 // There is no SharedArrayBuffer here, so no cross-origin isolation is needed. Image bytes and tap blocks are transferred.
 import createModsynth from '../wasm/Modsynth.js';
 
-const FRAME = 128;
+const FRAME = 128; // One ms_render(), which is Web Audio's render quantum and not the engine's frame size
 const TAP_SLOTS = 8;
 const POOL_SIZE = 32;
 const COPY_PER_QUANTUM = 64 * 1024; // A large image must not take a whole render quantum to copy in

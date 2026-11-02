@@ -1,4 +1,5 @@
 // modsynth_render image out.f32 frames channels
+// Frames are the image's own, which it states. Each frame's samples are written one channel at a time.
 // Renders program 0 to raw 32-bit floats, one frame of each channel at a time, the same layout firmware writes.
 
 #include <cstdio>
@@ -12,9 +13,9 @@
 
 using namespace modsynth;
 
-template <u32 Channels>
+template <u32 Frame, u32 Channels>
 static int render(ByteSpan image, const char* path, u32 frames) {
-    static constexpr SynthConfig config{.frame_size = 128, .channels = Channels, .tap_slots = 0, .generations = 1};
+    static constexpr SynthConfig config{.frame_size = Frame, .channels = Channels, .tap_slots = 0, .generations = 1};
     using Engine = Synth<config>;
     std::vector<ChunkRef> refs(kMaxChunks);
     ChunkTable table{std::span(refs)};
@@ -28,11 +29,11 @@ static int render(ByteSpan image, const char* path, u32 frames) {
         return 1;
     }
     engine.send({.kind = EventKind::Play});
-    std::vector<float> out(Channels * 128);
+    std::vector<float> out(Channels * Frame);
     std::ofstream file(path, std::ios::binary);
     for (u32 f = 0; f < frames; ++f) {
         if constexpr (Channels == 2) {
-            engine.render({out.data(), out.data() + 128});
+            engine.render({out.data(), out.data() + Frame});
         } else {
             engine.render({out.data()});
         }
@@ -52,5 +53,14 @@ int main(int argc, char** argv) {
     std::memcpy(words.data(), bytes.data(), bytes.size());
     const ByteSpan image{reinterpret_cast<const std::byte*>(words.data()), bytes.size()};
     const u32 frames = static_cast<u32>(std::atoi(argv[3]));
-    return std::atoi(argv[4]) == 1 ? render<1>(image, argv[2], frames) : render<2>(image, argv[2], frames);
+    const bool mono = std::atoi(argv[4]) == 1;
+    switch (image_frame_size(image)) {
+        case 32:
+            return mono ? render<32, 1>(image, argv[2], frames) : render<32, 2>(image, argv[2], frames);
+        case 128:
+            return mono ? render<128, 1>(image, argv[2], frames) : render<128, 2>(image, argv[2], frames);
+        default:
+            std::cerr << to_string(LoadError::WrongFrameSize) << "\n";
+            return 1;
+    }
 }

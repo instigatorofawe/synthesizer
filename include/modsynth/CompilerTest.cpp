@@ -290,6 +290,45 @@ TEST(CompileImage, OnlySineCarriesATable) {
     EXPECT_EQ(count_kind(compile_image(fixed).report, "table"), 0);
 }
 
+TEST(CompileImage, ANewProjectIsAtTheDefaultFrameSize) {
+    const auto image = compile_image(request_with({"sine"}, {program("a", one_note_timeline("sine"))})).image;
+    const auto h = load<ManifestHeader>(image.data() + sizeof(ChunkHeader));
+    EXPECT_EQ(h.frame_size, 32u);
+    EXPECT_EQ(frame_size_of(h), SynthConfig{}.frame_size);
+    EXPECT_EQ(h.revision, kFrameSizeRevision);
+}
+
+TEST(CompileImage, FrameSize128KeepsTheEncodingOfEveryOlderImage) {
+    json request = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+    request["frame_size"] = 128;
+    const auto image = compile_image(request).image;
+    const auto h = load<ManifestHeader>(image.data() + sizeof(ChunkHeader));
+    EXPECT_EQ(h.frame_size, 0u);
+    EXPECT_EQ(frame_size_of(h), 128u);
+    EXPECT_EQ(h.revision, 0u);  // Only what its opcodes need, so it still loads on the oldest engine
+}
+
+TEST(CompileImage, RefusesAFrameSizeNoEngineCanHave) {
+    for (const int size : {-32, 0, 3, 4, 48, 2048}) {
+        json request = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+        request["frame_size"] = size;
+        EXPECT_THROW(compile_image(request), CompileError) << size;
+    }
+    for (const int size : {8, 1024}) {
+        json request = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+        request["frame_size"] = size;
+        EXPECT_NO_THROW(compile_image(request)) << size;
+    }
+    for (const json& size : {json(32.5), json("32"), json(nullptr), json(4294967328.0)}) {
+        json request = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+        request["frame_size"] = size;
+        EXPECT_THROW(compile_image(request), CompileError) << size;
+    }
+    json request = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+    request["frame_size"] = 4294967328ll;  // 2^32 + 32, which must not wrap round to a size that looks valid
+    EXPECT_THROW(compile_image(request), CompileError);
+}
+
 TEST(CompileImage, OnlySineHasAFixedMode) {
     for (const char* wave : {"saw", "square", "triangle"}) {
         json request = request_with({wave}, {program("a", one_note_timeline(wave))});
@@ -302,17 +341,20 @@ TEST(CompileImage, DeclaresOnlyTheRevisionItUses) {
     const auto revision_of = [](const std::vector<std::byte>& image) {
         return load<ManifestHeader>(image.data() + sizeof(ChunkHeader)).revision;
     };
-    const auto compile = [](const char* wave) {
-        return compile_image(request_with({wave}, {program("a", one_note_timeline(wave))}));
+    const auto request_for = [](const char* wave) {
+        json request = request_with({wave}, {program("a", one_note_timeline(wave))});
+        request["frame_size"] = kOriginalFrameSize;  // Any other size needs a revision of its own
+        return request;
     };
+    const auto compile = [&](const char* wave) { return compile_image(request_for(wave)); };
     EXPECT_EQ(revision_of(compile("sine").image), 0u);
     for (const char* wave : {"saw", "square", "triangle"}) EXPECT_EQ(revision_of(compile(wave).image), 1u) << wave;
-    json fixed = request_with({"sine"}, {program("a", one_note_timeline("sine"))});
+    json fixed = request_for("sine");
     fixed["patches"]["sine"]["graph"]["nodes"][2]["mode"] = "fixed";
     EXPECT_EQ(revision_of(compile_image(fixed).image), 2u);
 
     // A thin image omits the patch, and a receiver still has to run it.
-    json request = request_with({"saw"}, {program("a", one_note_timeline("saw"))});
+    json request = request_for("saw");
     json omit = json::array();
     for (const json& c : compile("saw").report.at("chunks")) {
         if (c.at("kind") == "patch") omit.push_back(c.at("hash"));

@@ -18,8 +18,8 @@ struct Bytes {
     std::size_t size;
 };
 
-LoadStatus load_all(Loader& l, ByteSpan image, u32 budget = 1 << 20) {
-    l.begin(image);
+LoadStatus load_all(Loader& l, ByteSpan image, u32 budget = 1 << 20, u32 frame_size = 0) {
+    l.begin(image, frame_size);
     while (l.step(budget) == LoadStatus::Working) {
     }
     return l.status();
@@ -36,7 +36,7 @@ std::vector<std::byte> with_payload(const std::vector<std::byte>& image, ChunkKi
         c = compiler::detail::make_chunk(c.kind, std::move(c.payload));
         break;
     }
-    return assemble(chunks);
+    return assemble(chunks, frame_size_of(load<ManifestHeader>(image.data() + sizeof(ChunkHeader))));
 }
 
 template <class T>
@@ -44,12 +44,12 @@ void poke(std::vector<std::byte>& bytes, std::size_t at, const T& value) {
     std::memcpy(bytes.data() + at, &value, sizeof value);
 }
 
-LoadError load_error(const std::vector<std::byte>& bytes) {
+LoadError load_error(const std::vector<std::byte>& bytes, u32 frame_size = 0) {
     Bytes image(bytes);
     std::vector<ChunkRef> storage(kMaxChunks);
     ChunkTable table(storage);
     Loader loader(table);
-    const LoadStatus status = load_all(loader, image.span());
+    const LoadStatus status = load_all(loader, image.span(), 1 << 20, frame_size);
     EXPECT_EQ(status == LoadStatus::Ready, loader.error() == LoadError::None);
     if (status != LoadStatus::Ready) EXPECT_EQ(table.size(), 0u) << "a failed image must leave nothing behind";
     return loader.error();
@@ -69,7 +69,7 @@ struct Hand {
         std::vector<compiler::Chunk> chunks = extra;
         chunks.push_back(p);
         chunks.push_back(prog.chunk());
-        return assemble(chunks);
+        return assemble(chunks, kOriginalFrameSize);  // The size whose revision is only what its opcodes need
     }
 };
 
@@ -160,8 +160,6 @@ TEST(Rules, ImageLayout) {
     const u32 wrong_programs = h.programs + 1;
     EXPECT_EQ(load_error(with_manifest(good, offsetof(ManifestHeader, programs), &wrong_programs, 4)),
               LoadError::BadManifest);
-    const u32 one = 1;
-    EXPECT_EQ(load_error(with_manifest(good, offsetof(ManifestHeader, reserved), &one, 4)), LoadError::BadManifest);
     const u32 newer_revision = kFormatRevision + 1;
     EXPECT_EQ(load_error(with_manifest(good, offsetof(ManifestHeader, revision), &newer_revision, 4)),
               LoadError::TooNew);
@@ -182,6 +180,74 @@ TEST(Rules, ImageLayout) {
     first.version = kFormatVersion + 1;
     std::memcpy(newer.data(), &first, sizeof first);
     EXPECT_EQ(load_error(newer), LoadError::TooNew);
+}
+
+// An image with a frame size in its manifest, rebuilt from one with none.
+std::vector<std::byte> at_frame_size(const std::vector<std::byte>& image, u32 frame_size, u32 revision) {
+    const auto sized = with_manifest(image, offsetof(ManifestHeader, frame_size), &frame_size, 4);
+    return with_manifest(sized, offsetof(ManifestHeader, revision), &revision, 4);
+}
+
+TEST(Rules, AFrameSizeHasOneEncodingAndARevision) {
+    const auto good = Hand{}.bytes();
+    ASSERT_EQ(load<ManifestHeader>(good.data() + sizeof(ChunkHeader)).frame_size, 0u);
+
+    EXPECT_EQ(load_error(at_frame_size(good, 32, kFrameSizeRevision)), LoadError::None);
+    EXPECT_EQ(load_error(at_frame_size(good, 8, kFrameSizeRevision)), LoadError::None);
+    EXPECT_EQ(load_error(at_frame_size(good, 1024, kFrameSizeRevision)), LoadError::None);
+
+    EXPECT_EQ(load_error(at_frame_size(good, 128, kFormatRevision)), LoadError::BadManifest) << "128 is written as 0";
+    EXPECT_EQ(load_error(at_frame_size(good, 32, kFrameSizeRevision - 1)), LoadError::BadManifest);
+    for (const u32 size : {1u, 3u, 4u, 48u, 2048u}) {
+        EXPECT_EQ(load_error(at_frame_size(good, size, kFrameSizeRevision)), LoadError::BadManifest) << size;
+    }
+}
+
+TEST(Rules, ALoaderHeldToAFrameSizeRefusesAnother) {
+    const auto original = Hand{}.bytes();
+    const auto frame32 = at_frame_size(original, 32, kFrameSizeRevision);
+    EXPECT_EQ(load_error(original, 128), LoadError::None);
+    EXPECT_EQ(load_error(original, 32), LoadError::WrongFrameSize);  // load_error also checks nothing was left behind
+    EXPECT_EQ(load_error(frame32, 32), LoadError::None);
+    EXPECT_EQ(load_error(frame32, 128), LoadError::WrongFrameSize);
+}
+
+TEST(Rules, OneTableHoldsOneFrameSize) {
+    const auto original = Hand{}.bytes();
+    std::vector<ChunkRef> storage(kMaxChunks);
+    ChunkTable table(storage);
+    EXPECT_EQ(table.frame_size(), 0u);
+
+    Bytes first(original);
+    Loader loader(table);
+    ASSERT_EQ(load_all(loader, first.span()), LoadStatus::Ready);
+    EXPECT_EQ(table.frame_size(), 128u);
+    const u32 size = table.size();
+
+    Bytes second(at_frame_size(original, 32, kFrameSizeRevision));
+    Loader refused(table);
+    EXPECT_EQ(load_all(refused, second.span()), LoadStatus::Failed);
+    EXPECT_EQ(refused.error(), LoadError::WrongFrameSize);
+    EXPECT_EQ(table.size(), size);
+    EXPECT_EQ(table.frame_size(), 128u);
+
+    table.clear();
+    EXPECT_EQ(table.frame_size(), 0u);
+    Loader fresh(table);
+    EXPECT_EQ(load_all(fresh, second.span()), LoadStatus::Ready);
+    EXPECT_EQ(table.frame_size(), 32u);
+}
+
+TEST(Rules, AHostCanReadAnImagesFrameSize) {
+    Bytes original(Hand{}.bytes());
+    EXPECT_EQ(image_frame_size(original.span()), 128u);
+    Bytes frame32(at_frame_size(Hand{}.bytes(), 32, kFrameSizeRevision));
+    EXPECT_EQ(image_frame_size(frame32.span()), 32u);
+
+    const std::size_t header = sizeof(ChunkHeader) + sizeof(ManifestHeader);
+    EXPECT_EQ(image_frame_size({original.span().data(), header}), 128u);
+    EXPECT_EQ(image_frame_size({original.span().data(), header - 1}), 0u);
+    EXPECT_EQ(image_frame_size({}), 0u);
 }
 
 TEST(Rules, AnImageMustDeclareTheRevisionOfItsOpcodes) {

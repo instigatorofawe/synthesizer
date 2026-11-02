@@ -4,7 +4,7 @@ A synthesizer engine that runs the same compiled patches and programs on Cortex-
 Python, with a SvelteKit app for writing them. The design is in [docs/Design.md](docs/Design.md), and the image format, frozen
 at version 1, is specified in [docs/Format.md](docs/Format.md).
 
-An image written today plays on every future engine. The scalar backend gives identical bits on every target, and that is
+An image written today plays on every future engine built for its frame size. The scalar backend gives identical bits on every target, and that is
 checked against committed renders in [golden](golden).
 
 ## Layout
@@ -49,23 +49,26 @@ container.
 
     firmware/Check.sh
 
-That builds stereo, mono and CMSIS-DSP firmware, runs each on QEMU's L475 model, compares its audio with the golden renders,
+That builds stereo, mono and CMSIS-DSP firmware at frames 32 and 128, runs each on QEMU's L475 model, compares its audio with the golden renders,
 and then fuzzes on a Cortex-M4. `FUZZ_SECONDS` and `FUZZ_RANDOM` set how long, and from what seed.
 
 ## Fuzzing
 
     cmake -B build/fuzz -DMODSYNTH_BUILD_FUZZ=ON -DMODSYNTH_BUILD_TESTS=OFF -DMODSYNTH_BUILD_COMPILER=OFF -DMODSYNTH_INSTALL=OFF
     cmake --build build/fuzz --target modsynth_fuzz
-    build/fuzz/modsynth_fuzz 60 1 golden/AllOps.image golden/Demo.image golden/Waves.image golden/Tones.image
+    build/fuzz/modsynth_fuzz 60 1 golden/AllOps.image golden/Demo.image golden/Waves.image golden/Tones.image \
+        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image
 
 The arguments are seconds, a random seed, and the images to start from. Use `emcmake cmake` for wasm32 and run the result with
 `node`. A failure prints a recipe, and `--replay` runs it again on any target, with the same image, under whatever sanitizers
 that target has:
 
-    build/fuzz/modsynth_fuzz --replay 0:3219687050,256226439 1 golden/AllOps.image golden/Demo.image golden/Waves.image golden/Tones.image
+    build/fuzz/modsynth_fuzz --replay 0:3219687050,256226439 1 golden/AllOps.image golden/Demo.image golden/Waves.image golden/Tones.image \
+        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image
 
 Fuzz with `AllOps.image` as well as `Demo.image`. The demo's tasks all depend on each other and it has no globals, so on its own it
-cannot exercise the rules that make task order irrelevant. Section 23 of the design says what each oracle catches.
+cannot exercise the rules that make task order irrelevant. The frozen images play at frame 128 and the others at 32, and an image reaches
+only the engine for its own size, so fuzz from both sets. Section 23 of the design says what each oracle catches.
 
 ## The format
 
@@ -73,7 +76,8 @@ Before changing anything in `Format.hpp`, `Opcodes.def` or a kernel, read sectio
 files are append-only, and CI enforces that against the base branch. `tools/ReadImage.py` reads images from the specification alone, and
 fails if the document and the code disagree:
 
-    python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image golden/Tones.image
+    python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image golden/Tones.image \
+        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image
     python3 tools/ReadImage.py --example golden/Minimal.image
     python3 tools/CheckAppendOnly.py origin/main
 

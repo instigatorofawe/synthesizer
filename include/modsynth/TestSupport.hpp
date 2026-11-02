@@ -16,9 +16,12 @@ namespace modsynth_test {
 using namespace modsynth;
 using compiler::json;
 
-inline constexpr SynthConfig kStereo{.frame_size = 128, .channels = 2, .tap_slots = 2, .generations = 2};
-inline constexpr SynthConfig kMono{.frame_size = 128, .channels = 1, .tap_slots = 0, .generations = 1};
+inline constexpr SynthConfig kStereo{.frame_size = 32, .channels = 2, .tap_slots = 2, .generations = 2};
+inline constexpr SynthConfig kMono{.frame_size = 32, .channels = 1, .tap_slots = 0, .generations = 1};
 inline constexpr float kRate = 48000.0f;
+inline constexpr u32 kFrame = kStereo.frame_size;
+inline constexpr u32 kFramesPerBlock =
+    128 / kFrame;  // Tests count time in blocks of 128 samples, whatever the frame size
 
 inline json demo() { return json::parse(demo_json); }
 
@@ -86,12 +89,14 @@ struct LoadedImage {
     Loader loader;
 };
 
+// `blocks` counts 128 samples, so a test lasts as long at any frame size. Each frame is written left then right.
 template <class R>
-std::vector<float> render_stereo(R& rig, u32 frames) {
-    std::vector<float> out(frames * 128 * 2);
-    for (u32 f = 0; f < frames; ++f) {
-        float* left = out.data() + f * 256;
-        rig.engine.render({left, left + 128});
+std::vector<float> render_stereo(R& rig, u32 blocks) {
+    constexpr u32 frame = R::Engine::frame_size;
+    std::vector<float> out(blocks * 128 * 2);
+    for (u32 f = 0; f < blocks * 128 / frame; ++f) {
+        float* left = out.data() + f * 2 * frame;
+        rig.engine.render({left, left + frame});
     }
     return out;
 }
@@ -230,14 +235,15 @@ inline std::vector<compiler::Chunk> disassemble(const std::vector<std::byte>& im
 }
 
 // The chunks in the order the format wants: assets, tables and patches by hash, then Programs as given.
-inline std::vector<std::byte> assemble(const std::vector<compiler::Chunk>& chunks) {
+inline std::vector<std::byte> assemble(const std::vector<compiler::Chunk>& chunks,
+                                       u32 frame_size = kStereo.frame_size) {
     std::vector<const compiler::Chunk*> ordered;
     for (const compiler::Chunk& c : chunks) ordered.push_back(&c);
     std::stable_sort(ordered.begin(), ordered.end(), [](const compiler::Chunk* a, const compiler::Chunk* b) {
         if (a->kind != b->kind) return a->kind < b->kind;
         return a->kind != ChunkKind::Program && a->hash < b->hash;
     });
-    return compiler::detail::write_image(ordered, {});
+    return compiler::detail::write_image(ordered, {}, frame_size);
 }
 
 }  // namespace modsynth_test

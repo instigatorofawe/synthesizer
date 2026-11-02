@@ -1,0 +1,268 @@
+{
+ "patches": {
+  "waves": {
+   "name": "Every oscillator of revision 1 in both modes, with a pulse width that moves",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 4,
+      "type": "osc",
+      "wave": "saw",
+      "mode": "naive"
+     },
+     {
+      "id": 5,
+      "type": "lfo",
+      "inputs": {
+       "rate": 8.0,
+       "depth": 0.3
+      }
+     },
+     {
+      "id": 6,
+      "type": "add",
+      "inputs": {
+       "b": 0.5
+      }
+     },
+     {
+      "id": 7,
+      "type": "osc",
+      "wave": "square"
+     },
+     {
+      "id": 8,
+      "type": "osc",
+      "wave": "square",
+      "mode": "naive",
+      "inputs": {
+       "width": 0.25
+      }
+     },
+     {
+      "id": 9,
+      "type": "osc",
+      "wave": "triangle"
+     },
+     {
+      "id": 10,
+      "type": "add"
+     },
+     {
+      "id": 11,
+      "type": "add"
+     },
+     {
+      "id": 12,
+      "type": "add"
+     },
+     {
+      "id": 13,
+      "type": "add"
+     },
+     {
+      "id": 14,
+      "type": "env",
+      "inputs": {
+       "attack": 0.002,
+       "decay": 0.03,
+       "sustain": 0.7,
+       "release": 0.01
+      }
+     },
+     {
+      "id": 15,
+      "type": "mul"
+     },
+     {
+      "id": 16,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 2,
+      "to": 4,
+      "input": "freq"
+     },
+     {
+      "from": 2,
+      "to": 7,
+      "input": "freq"
+     },
+     {
+      "from": 2,
+      "to": 8,
+      "input": "freq"
+     },
+     {
+      "from": 2,
+      "to": 9,
+      "input": "freq"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "width"
+     },
+     {
+      "from": 3,
+      "to": 10,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 10,
+      "input": "b"
+     },
+     {
+      "from": 10,
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 11,
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "to": 12,
+      "input": "b"
+     },
+     {
+      "from": 12,
+      "to": 13,
+      "input": "a"
+     },
+     {
+      "from": 9,
+      "to": 13,
+      "input": "b"
+     },
+     {
+      "from": 13,
+      "to": 15,
+      "input": "a"
+     },
+     {
+      "from": 14,
+      "to": 15,
+      "input": "b"
+     },
+     {
+      "from": 15,
+      "to": 16,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "scale",
+   "name": "Six octaves, where aliasing goes from slight to severe",
+   "timeline": {
+    "ppq": 480,
+    "clips": [
+     {
+      "id": "octaves",
+      "length": 480,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 36,
+        "vel": 100,
+        "dur": 70
+       },
+       {
+        "tick": 80,
+        "note": 48,
+        "vel": 100,
+        "dur": 70
+       },
+       {
+        "tick": 160,
+        "note": 60,
+        "vel": 100,
+        "dur": 70
+       },
+       {
+        "tick": 240,
+        "note": 72,
+        "vel": 100,
+        "dur": 70
+       },
+       {
+        "tick": 320,
+        "note": 84,
+        "vel": 100,
+        "dur": 70
+       },
+       {
+        "tick": 400,
+        "note": 96,
+        "vel": 100,
+        "dur": 70
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 1,
+      "slots": [
+       "waves"
+      ],
+      "placements": [
+       {
+        "clip": "octaves",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.2
+    }
+   }
+  }
+ ],
+ "frame_size": 32
+}

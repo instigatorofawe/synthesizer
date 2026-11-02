@@ -21,6 +21,7 @@
 #include <tuple>
 #include <vector>
 
+#include <modsynth/Config.hpp>
 #include <modsynth/Format.hpp>
 #include <modsynth/Loader.hpp>
 
@@ -1406,7 +1407,8 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
 namespace detail {
 
 // A manifest and then every chunk not in `omit`, in the order given.
-inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& ordered, const std::set<u64>& omit) {
+inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& ordered, const std::set<u64>& omit,
+                                          u32 frame_size) {
     u32 programs = 0;
     Writer body;
     for (const Chunk* c : ordered) programs += c->kind == ChunkKind::Program;
@@ -1422,7 +1424,9 @@ inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& order
             if (op_known(op)) needs_revision = std::max(needs_revision, op_revision(static_cast<Op>(op)));
         }
     }
-    body.put(ManifestHeader{static_cast<u32>(ordered.size()), programs, needs_revision, 0});
+    if (frame_size != kOriginalFrameSize) needs_revision = std::max(needs_revision, kFrameSizeRevision);
+    body.put(ManifestHeader{static_cast<u32>(ordered.size()), programs, needs_revision,
+                            frame_size == kOriginalFrameSize ? 0 : frame_size});
     for (const Chunk* c : ordered) {
         const bool present = !omit.count(c->hash);
         body.put(ManifestEntry{c->hash, static_cast<u32>(c->payload.size()), static_cast<u8>(c->kind),
@@ -1451,8 +1455,8 @@ inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& order
 
 // A limit or a rule the passes above did not catch is reported here, by the validator a device would run, rather than
 // on that device. Thin images are checked in full, because their omitted chunks are what the rest refer to.
-inline void check_loads(const std::vector<const Chunk*>& ordered) {
-    const std::vector<std::byte> bytes = write_image(ordered, {});
+inline void check_loads(const std::vector<const Chunk*>& ordered, u32 frame_size) {
+    const std::vector<std::byte> bytes = write_image(ordered, {}, frame_size);
     std::vector<u64> aligned((bytes.size() + 7) / 8);
     std::memcpy(aligned.data(), bytes.data(), bytes.size());
     std::vector<ChunkRef> storage(kMaxChunks);
@@ -1483,6 +1487,12 @@ inline ImageResult compile_image(const json& request) {
     context.patches = request.contains("patches") ? &request.at("patches") : &no_entries;
     context.assets = request.contains("assets") ? &request.at("assets") : nullptr;
     const bool keep_unused = request.value("live", false);
+    const json requested_frame = request.value("frame_size", json(SynthConfig{}.frame_size));
+    const std::int64_t requested_size = requested_frame.is_number_integer() ? requested_frame.get<std::int64_t>() : 0;
+    const u32 frame_size = static_cast<u32>(std::clamp<std::int64_t>(requested_size, 0, kMaxFrameSize + 1));
+    if (!std::has_single_bit(frame_size) || frame_size < kMinFrameSize || frame_size > kMaxFrameSize) {
+        throw CompileError("request", "frame_size must be a power of two from 8 to 1024");
+    }
 
     json programs = json::array();
     const json& entries = request.at("programs");
@@ -1513,8 +1523,8 @@ inline ImageResult compile_image(const json& request) {
     }
     for (const u64 hash : program_hashes) ordered.push_back(&context.chunks.at(hash));
 
-    check_loads(ordered);
-    std::vector<std::byte> bytes = write_image(ordered, omit);
+    check_loads(ordered, frame_size);
+    std::vector<std::byte> bytes = write_image(ordered, omit, frame_size);
 
     json chunks = json::array();
     static constexpr const char* kind_names[] = {"manifest", "asset", "table", "patch", "program"};

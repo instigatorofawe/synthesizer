@@ -42,13 +42,14 @@ target_compile_options(cmsis_kernels PRIVATE ${ARCH} -Ofast -ffp-contract=off -f
 target_compile_definitions(cmsis_kernels PRIVATE ${CMSIS_DEFINES})
 target_include_directories(cmsis_kernels SYSTEM PRIVATE ${CMSIS_INCLUDES})
 
-function(add_firmware name channels backend)
+function(add_firmware name channels backend frame)
     add_executable(${name} Main.cpp)
     set_target_properties(${name} PROPERTIES SUFFIX .elf)
     target_compile_features(${name} PRIVATE cxx_std_23)
     target_include_directories(${name} PRIVATE ../include)
     target_compile_definitions(${name} PRIVATE
         MODSYNTH_CHANNELS=${channels}
+        MODSYNTH_FRAME=${frame}
         MODSYNTH_GOLDEN="${MODSYNTH_GOLDEN}"
         MODSYNTH_OUTPUT="${name}"
     )
@@ -66,9 +67,13 @@ function(add_firmware name channels backend)
     add_custom_command(TARGET ${name} POST_BUILD COMMAND arm-none-eabi-size $<TARGET_FILE:${name}>)
 endfunction()
 
-add_firmware(Stereo 2 scalar)
-add_firmware(Mono 1 scalar)
-add_firmware(StereoCmsis 2 cmsis)
+# The default frame size, then the one the frozen images declare. An engine refuses any other size than its own.
+add_firmware(Stereo 2 scalar 32)
+add_firmware(Mono 1 scalar 32)
+add_firmware(StereoCmsis 2 cmsis 32)
+add_firmware(Stereo128 2 scalar 128)
+add_firmware(Mono128 1 scalar 128)
+add_firmware(StereoCmsis128 2 cmsis 128)
 
 # The fuzzer, on QEMU's mps2-an386, whose Cortex-M4 has the room for it. Only Target.cpp is instrumented, so what a
 # mutation discovers is new engine behaviour and not a new path through the mutator. It links first, so that an inline
@@ -77,6 +82,10 @@ set(MODSYNTH_FUZZ_SEED_A ${MODSYNTH_GOLDEN}/AllOps.image CACHE FILEPATH "First i
 set(MODSYNTH_FUZZ_SEED_B ${MODSYNTH_GOLDEN}/Demo.image CACHE FILEPATH "Second image to fuzz from")
 set(MODSYNTH_FUZZ_SEED_C ${MODSYNTH_GOLDEN}/Waves.image CACHE FILEPATH "Third image to fuzz from")
 set(MODSYNTH_FUZZ_SEED_D ${MODSYNTH_GOLDEN}/Tones.image CACHE FILEPATH "Fourth image to fuzz from")
+set(MODSYNTH_FUZZ_SEED_E ${MODSYNTH_GOLDEN}/AllOps32.image CACHE FILEPATH "Fifth image to fuzz from")
+set(MODSYNTH_FUZZ_SEED_F ${MODSYNTH_GOLDEN}/Demo32.image CACHE FILEPATH "Sixth image to fuzz from")
+set(MODSYNTH_FUZZ_SEED_G ${MODSYNTH_GOLDEN}/Waves32.image CACHE FILEPATH "Seventh image to fuzz from")
+set(MODSYNTH_FUZZ_SEED_H ${MODSYNTH_GOLDEN}/Tones32.image CACHE FILEPATH "Eighth image to fuzz from")
 set(MODSYNTH_FUZZ_SECONDS 60 CACHE STRING "How long the fuzzer runs")
 set(MODSYNTH_FUZZ_RANDOM 1 CACHE STRING "Random seed for the fuzzer")
 set(FUZZ_FLAGS ${ARCH} -O2 -g -ffp-contract=off -fno-math-errno -fno-exceptions -fno-rtti -fno-threadsafe-statics
@@ -95,6 +104,10 @@ target_compile_definitions(Fuzz PRIVATE
     MODSYNTH_FUZZ_SEED_B="${MODSYNTH_FUZZ_SEED_B}"
     MODSYNTH_FUZZ_SEED_C="${MODSYNTH_FUZZ_SEED_C}"
     MODSYNTH_FUZZ_SEED_D="${MODSYNTH_FUZZ_SEED_D}"
+    MODSYNTH_FUZZ_SEED_E="${MODSYNTH_FUZZ_SEED_E}"
+    MODSYNTH_FUZZ_SEED_F="${MODSYNTH_FUZZ_SEED_F}"
+    MODSYNTH_FUZZ_SEED_G="${MODSYNTH_FUZZ_SEED_G}"
+    MODSYNTH_FUZZ_SEED_H="${MODSYNTH_FUZZ_SEED_H}"
     MODSYNTH_FUZZ_SECONDS=${MODSYNTH_FUZZ_SECONDS}
     MODSYNTH_FUZZ_RANDOM=${MODSYNTH_FUZZ_RANDOM}
 )

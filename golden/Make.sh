@@ -20,6 +20,12 @@ make_golden AllOps 400
 make_golden Waves 200
 make_golden Tones 200
 
+# Revision 3. Frames here are the image's own, so these are as long as the four above.
+make_golden Demo32 1920
+make_golden AllOps32 1600
+make_golden Waves32 800
+make_golden Tones32 800
+
 # What a device receives when it already has every chunk but the Programs.
 if [ -e golden/Demo.thin.image ]; then
     exit 0

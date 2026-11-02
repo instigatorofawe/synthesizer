@@ -234,6 +234,45 @@ export function setOption(
 	return { ...graph, nodes, edges };
 }
 
+export interface Zone {
+	asset: string;
+	keys?: [number, number];
+	velocities?: [number, number];
+	root?: number;
+}
+
+export const zonesOf = (node: GraphNode): Zone[] => (Array.isArray(node.zones) ? (node.zones as Zone[]) : []);
+
+// A value that isn't one of a node's plain options, such as a list of zones or a switch, which nothing wires to.
+export function setField(graph: Graph, id: number, name: string, value: unknown): Graph {
+	return {
+		...graph,
+		nodes: graph.nodes.map((node) => {
+			if (node.id !== id) return node;
+			const next: GraphNode = { ...node };
+			if (value === undefined) delete next[name];
+			else next[name] = value;
+			return next;
+		})
+	};
+}
+
+export function setZone(graph: Graph, id: number, index: number, change: Partial<Zone>): Graph {
+	const node = graph.nodes.find((candidate) => candidate.id === id);
+	if (!node) return graph;
+	return setField(graph, id, 'zones', zonesOf(node).map((zone, i) => (i === index ? { ...zone, ...change } : zone)));
+}
+
+export function addZone(graph: Graph, id: number, asset: string): Graph {
+	const node = graph.nodes.find((candidate) => candidate.id === id);
+	return node ? setField(graph, id, 'zones', [...zonesOf(node), { asset }]) : graph;
+}
+
+export function removeZone(graph: Graph, id: number, index: number): Graph {
+	const node = graph.nodes.find((candidate) => candidate.id === id);
+	return node ? setField(graph, id, 'zones', zonesOf(node).filter((_, i) => i !== index)) : graph;
+}
+
 // Which of this patch's nodes an error belongs to. Inside a subpatch that is the subpatch's node, since that is what is on
 // screen. An error somewhere else in the library has no node here.
 export function nodeOfError(where: string, patch: string): number | null {

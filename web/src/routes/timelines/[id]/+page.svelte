@@ -5,10 +5,11 @@
 	import { Compiler } from '#lib/Compiler.ts';
 	import { downloadImage } from '#lib/Download.ts';
 	import ReportPanel from '#lib/ReportPanel.svelte';
-	import { buildRequest, reachable, type ChainReport, type CompileReport } from '#lib/Request.ts';
-	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
-	import Scope from '#lib/Scope.svelte';
+	import { buildRequest, reachable, type CompileReport } from '#lib/Request.ts';
+	import { referencedPatches, timelineSchema, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
+	import { settlingWrites } from '#lib/TimelineEdit.ts';
+	import TimelineEditor from '#lib/TimelineEditor.svelte';
 
 	let { data, form } = $props();
 
@@ -21,10 +22,13 @@
 	let started = $state(false);
 	let engineState = $state<EngineState | null>(null);
 	let targets = $state<TapTarget[]>([]);
-	let looping = $state(false);
+	let rejected = $state('');
+	// What the editors draw, which is the text as long as that makes a document. Text that doesn't leaves the last drawing alone.
+	let doc = $state.raw(untrack(() => timelineSchema.parse(data.timeline.doc)));
 
 	const engine = new AudioEngine();
 	const rings = Array.from({ length: 8 }, () => new Ring(48000));
+	const compiledFrom = new WeakMap<CompileReport, Timeline>(); // Which document each report came from
 	let compiler: Compiler | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -40,31 +44,6 @@
 		}
 	});
 
-	function paramsFor(track: ChainReport): Param[] {
-		const source = parsed.doc?.tracks.find((t) => t.id === track.id);
-		const seen = new Map<number, Param>();
-		for (const slot of source?.slots ?? []) {
-			const graph = data.patches.find((p) => p.id === slot)?.graph as Graph | undefined;
-			for (const param of graph?.params ?? []) {
-				if (param.scope === 'track' && !seen.has(param.id)) seen.set(param.id, param);
-			}
-		}
-		return [...seen.values()];
-	}
-
-	function paramValue(track: ChainReport, param: Param) {
-		return parsed.doc?.tracks.find((t) => t.id === track.id)?.params?.[String(param.id)] ?? param.default;
-	}
-
-	function setGain(track: ChainReport, gain: number) {
-		const source = parsed.doc?.tracks.find((t) => t.id === track.id);
-		const route = track.mix.find((r) => r.to === (source?.output ?? 'master'));
-		if (!route) return;
-		const pan = source?.pan ?? 0;
-		engine.setMix(route.left, gain * Math.sin(((1 - pan) * Math.PI) / 4));
-		engine.setMix(route.right, gain * Math.sin(((1 + pan) * Math.PI) / 4));
-	}
-
 	async function compile() {
 		if (!compiler) return;
 		const timeline = parsed.doc;
@@ -78,12 +57,38 @@
 		const result = await compiler.compile(request);
 		if (!result) return;
 		report = result.report;
-		if (result.report.ok && started) engine.load(result.image, result.report);
+		if (checked.success) compiledFrom.set(result.report, checked.data);
+		if (result.report.ok && started) {
+			rejected = '';
+			engine.load(result.image, result.report);
+		}
+	}
+
+	function settle(live: CompileReport) {
+		const settled = compiledFrom.get(live);
+		const live_program = live.programs[0];
+		if (!settled || !live_program) return;
+		const { mix, params, inserts } = settlingWrites(settled, live_program, data.patches);
+		for (const { register, value } of mix) engine.setMix(register, value);
+		for (const { track, param, value } of params) engine.setParam(track, param, value);
+		for (const { insert, param, value } of inserts) engine.setInsertParam(insert, param, value);
 	}
 
 	function edited() {
 		clearTimeout(timer);
 		timer = setTimeout(compile, 250);
+	}
+
+	function textEdited() {
+		const checked = timelineSchema.safeParse(parsed.doc);
+		if (checked.success) doc = checked.data;
+		edited();
+	}
+
+	function drawn(next: Timeline) {
+		doc = next;
+		text = JSON.stringify(next, null, 1);
+		edited();
 	}
 
 	async function start() {
@@ -92,16 +97,13 @@
 		await compile();
 	}
 
-	function toggleLoop() {
-		looping = !looping;
-		engine.setLoop(0, looping ? length : 0);
-	}
-
 	onMount(() => {
 		compiler = new Compiler();
 		engine.onState = (s) => (engineState = s);
 		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start);
 		engine.onTargets = (t) => (targets = t);
+		engine.onRejected = (reason) => (rejected = reason);
+		engine.onLive = settle;
 		compile();
 	});
 
@@ -120,6 +122,7 @@
 
 {#if form?.message}<p class="problem">{form.message}</p>{/if}
 {#if form?.saved}<p class="muted">Saved.</p>{/if}
+{#if rejected}<p class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</p>{/if}
 {#if parsed.error}<p class="problem">{parsed.error}</p>{/if}
 {#if report && !report.ok}
 	{#each report.errors ?? [] as problem}
@@ -153,7 +156,6 @@
 	<div class="row">
 		<button onclick={() => engine.play()}>Play</button>
 		<button onclick={() => engine.stop()}>Stop</button>
-		<button onclick={toggleLoop} aria-pressed={looping}>Loop {looping ? 'on' : 'off'}</button>
 		<input
 			class="grow"
 			type="range"
@@ -173,56 +175,25 @@
 			</span>
 		{/if}
 	</div>
-
-	{#if program}
-		<div class="columns">
-			{#each program.tracks as track (track.id)}
-				<section>
-					<h3>{track.name || `Track ${track.id}`}</h3>
-					<label class="row">
-						<span style="width: 6rem">gain</span>
-						<input
-							class="grow"
-							type="range"
-							min="0"
-							max="1.5"
-							step="0.01"
-							value={parsed.doc?.tracks.find((t) => t.id === track.id)?.gain ?? 1}
-							oninput={(e) => setGain(track, Number(e.currentTarget.value))}
-						/>
-					</label>
-					{#each paramsFor(track) as param (param.id)}
-						<label class="row">
-							<span style="width: 6rem">{param.name || `param ${param.id}`}</span>
-							<input
-								class="grow"
-								type="range"
-								min={param.min}
-								max={param.max}
-								step={(param.max - param.min) / 500}
-								value={paramValue(track, param)}
-								oninput={(e) => engine.setParam(track.index ?? 0, param.id, Number(e.currentTarget.value))}
-							/>
-						</label>
-					{/each}
-				</section>
-			{/each}
-		</div>
-	{/if}
-
-	<h2>Scopes</h2>
-	<div class="scopes">
-		{#each targets as target (target.slot)}
-			<Scope label={target.label} ring={rings[target.slot]} />
-		{/each}
-	</div>
 {/if}
 
-<h2>Document</h2>
-<p class="muted">
-	Milestone 4 replaces this with the timeline, piano roll and mixer. Edits compile as you type, and audio crossfades to
-	them without stopping.
-</p>
-<textarea rows="24" bind:value={text} oninput={edited} aria-label="Timeline JSON" spellcheck="false"></textarea>
+<h2>Timeline</h2>
+<TimelineEditor
+	{doc}
+	patches={data.patches}
+	{program}
+	errors={report?.ok === false ? (report.errors ?? []) : []}
+	tick={engineState?.tick ?? 0}
+	{targets}
+	{rings}
+	{engine}
+	onchange={drawn}
+/>
+
+<details>
+	<summary>Timeline as JSON</summary>
+	<p class="muted">Edits compile as you type, and audio crossfades to them without stopping.</p>
+	<textarea rows="24" bind:value={text} oninput={textEdited} aria-label="Timeline JSON" spellcheck="false"></textarea>
+</details>
 
 {#if report?.ok}<ReportPanel {report} />{/if}

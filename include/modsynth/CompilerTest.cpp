@@ -701,6 +701,18 @@ TEST(CompileImage, ReportsWhichMixRegistersBelongToWhichRoute) {
     EXPECT_EQ(routes, (std::set<std::string>{"master", "bus:room"}));
 }
 
+TEST(CompileImage, ReportsWhereEachInsertIsInTheImage) {
+    // A document names an insert by its id, and a live change addresses it by its place in the Program.
+    const auto result = compile_image(demo());
+    const json& inserts = result.report.at("programs")[0].at("inserts");
+    std::map<int, int> index_of;
+    for (const json& insert : inserts) index_of[insert.at("id").get<int>()] = insert.at("index").get<int>();
+    EXPECT_EQ(index_of.size(), 2u);
+    EXPECT_NE(index_of.at(1), index_of.at(2));
+    EXPECT_LT(index_of.at(1), 2);
+    EXPECT_LT(index_of.at(2), 2);
+}
+
 TEST(CompileImage, RejectsOverlappingClips) {
     json timeline = one_note_timeline("saw");
     timeline["tracks"][0]["placements"].push_back({{"clip", "c"}, {"tick", 100}});

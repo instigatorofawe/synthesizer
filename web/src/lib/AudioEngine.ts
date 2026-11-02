@@ -44,6 +44,7 @@ export interface TapTarget {
 	step: number;
 	bus: number;
 	channel: number;
+	chain?: string; // The compiler's name for the bus this reads. A probe has none.
 }
 
 // A node output someone asked to watch. Registers change with every compile, so this names the node, and each image's
@@ -52,6 +53,12 @@ export interface Probe {
 	node: number;
 	port: string;
 	label: string;
+}
+
+// Which of a Program's voices a probe follows: a track, by its place in the image, and one of its patch slots.
+export interface ProbedVoice {
+	track: number;
+	slot: number;
 }
 
 export interface ProbeTarget {
@@ -77,19 +84,16 @@ export const LOAD_ERRORS = [
 	'image was compiled for another frame size'
 ];
 
-// The master and up to seven tracks, from the compiler's report. Registers change between generations, so these are
-// worked out again for each image and never kept.
+// The master, then tracks, then mixer buses, as far as the slots go. Registers change between generations, so these are worked
+// out again for each image and never kept.
 export function tapTargets(program: ProgramReport): TapTarget[] {
-	const targets: TapTarget[] = [{ slot: 0, label: 'Master', step: program.master.step, bus: program.master.bus, channel: 0 }];
-	for (const track of program.tracks.slice(0, 7)) {
-		targets.push({
-			slot: targets.length,
-			label: track.name || `Track ${track.id}`,
-			step: track.step,
-			bus: track.bus,
-			channel: 0
-		});
-	}
+	const { master } = program;
+	const targets: TapTarget[] = [{ slot: 0, label: 'Master', step: master.step, bus: master.bus, channel: 0, chain: 'master' }];
+	const add = (label: string, chain: string, { step, bus }: { step: number; bus: number }) => {
+		if (targets.length < TAP_SLOTS) targets.push({ slot: targets.length, label, step, bus, channel: 0, chain });
+	};
+	for (const track of program.tracks) add(track.name || `Track ${track.id}`, `track:${track.id}`, track);
+	for (const bus of program.buses) add(String(bus.id), `bus:${bus.id}`, bus);
 	return targets;
 }
 
@@ -121,6 +125,8 @@ export class AudioEngine {
 	onState: (state: EngineState) => void = () => {};
 	onTap: (slot: number, block: TapBlock) => void = () => {};
 	onTargets: (targets: TapTarget[]) => void = () => {};
+	onRejected: (reason: string) => void = () => {}; // An image the engine would not take, so the old one is still playing
+	onLive: (report: CompileReport) => void = () => {}; // An image has just become the one playing
 
 	private context: AudioContext | null = null;
 	private node: AudioWorkletNode | null = null;
@@ -129,6 +135,7 @@ export class AudioEngine {
 	private live: CompileReport | null = null;
 	private probes: Probe[] = [];
 	private probed = ''; // The patch whose nodes those are
+	private voice: ProbedVoice = { track: 0, slot: 0 };
 
 	// Must be called from a user gesture, because browsers keep an AudioContext suspended until then.
 	start(): Promise<void> {
@@ -157,6 +164,8 @@ export class AudioEngine {
 			this.state = message as unknown as EngineState;
 			this.applyTargets();
 			this.onState(this.state);
+		} else if (message.type === 'load-rejected') {
+			this.onRejected(message.reason as string);
 		} else if (message.type === 'tap') {
 			const buffer = message.buffer as ArrayBuffer;
 			const samples = new Float32Array(buffer);
@@ -176,6 +185,7 @@ export class AudioEngine {
 		if (!report) return;
 		this.live = report;
 		this.sendTargets();
+		this.onLive(report);
 	}
 
 	private sendTargets() {
@@ -186,9 +196,9 @@ export class AudioEngine {
 		for (const t of buses) {
 			this.send({ kind: EventKind.SetTap, param: t.slot, target: t.step, note: t.bus, channel: t.channel });
 		}
-		// Track 0's first patch slot, because this watches a patch on the page that plays it alone.
 		for (const t of probes) {
-			this.send({ kind: EventKind.SetProbe, param: t.slot, target: 0, channel: 0, tick: t.step, tickEnd: t.operand });
+			const { track, slot } = this.voice;
+			this.send({ kind: EventKind.SetProbe, param: t.slot, target: track, channel: slot, tick: t.step, tickEnd: t.operand });
 		}
 		for (let slot = buses.length + probes.length; slot < TAP_SLOTS; ++slot) {
 			this.send({ kind: EventKind.SetTap, param: slot, target: NO_TARGET });
@@ -196,9 +206,10 @@ export class AudioEngine {
 		this.onTargets([...buses, ...probes.map(({ slot, label }) => ({ slot, label, step: 0, bus: 0, channel: 0 }))]);
 	}
 
-	setProbes(patch: string, probes: Probe[]) {
+	setProbes(patch: string, probes: Probe[], voice: ProbedVoice = { track: 0, slot: 0 }) {
 		this.probed = patch;
 		this.probes = probes;
+		this.voice = voice;
 		this.sendTargets();
 	}
 
@@ -231,6 +242,9 @@ export class AudioEngine {
 	}
 	setParam(track: number, param: number, value: number) {
 		this.send({ kind: EventKind.SetParam, target: track, param, value });
+	}
+	setInsertParam(insert: number, param: number, value: number) {
+		this.send({ kind: EventKind.SetInsertParam, target: insert, param, value });
 	}
 	setMix(register: number, value: number) {
 		this.send({ kind: EventKind.SetMix, param: register, value });

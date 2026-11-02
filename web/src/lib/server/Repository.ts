@@ -244,7 +244,32 @@ export function deleteTimeline(db: Db, id: string) {
 }
 
 export function listAssets(db: Db) {
-	return db.select({ id: assets.id, name: assets.name }).from(assets).orderBy(asc(assets.name)).all();
+	const rows = db
+		.select({
+			id: assets.id,
+			name: assets.name,
+			channels: assets.channels,
+			rate: assets.rate,
+			frames: assets.frames,
+			encoding: assets.encoding
+		})
+		.from(assets)
+		.orderBy(asc(assets.name))
+		.all();
+	const uses = db.select({ assetId: patchAssets.assetId }).from(patchAssets).all();
+	return rows.map((row) => ({ ...row, patches: uses.filter((use) => use.assetId === row.id).length }));
+}
+
+export function deleteAsset(db: Db, id: string) {
+	const users = db
+		.select({ name: patches.name })
+		.from(patchAssets)
+		.innerJoin(patches, eq(patchAssets.patchId, patches.id))
+		.where(eq(patchAssets.assetId, id))
+		.orderBy(asc(patches.name))
+		.all();
+	if (users.length) throw new InUse(`used by ${users.map((u) => u.name).join(', ')}`);
+	db.delete(assets).where(eq(assets.id, id)).run();
 }
 
 export function createAsset(db: Db, entry: AssetEntry) {

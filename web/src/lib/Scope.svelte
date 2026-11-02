@@ -2,7 +2,12 @@
 	import { onMount } from 'svelte';
 	import { columns, findTrigger, Ring } from '#lib/ScopeMath.ts';
 
-	let { label, ring, sampleRate = 48000 }: { label: string; ring: Ring; sampleRate?: number } = $props();
+	let {
+		label,
+		ring,
+		sampleRate = 48000,
+		compact = false
+	}: { label: string; ring: Ring; sampleRate?: number; compact?: boolean } = $props();
 
 	const TIMEBASES = [0.001, 0.005, 0.02, 0.1, 0.5, 1];
 	let timebase = $state(0.02);
@@ -63,20 +68,22 @@
 			<span class="dim" data-testid="peak" data-peak={peak}>
 				{peak > 0 ? `${(20 * Math.log10(peak)).toFixed(1)} dB` : 'silent'}
 			</span>
-			<span class:dim={!triggered}>{triggered ? 'trig' : 'auto'}</span>
+			{#if !compact}<span class:dim={!triggered}>{triggered ? 'trig' : 'auto'}</span>{/if}
 		</span>
-		<label>
-			<select bind:value={timebase} aria-label="Timebase for {label}">
-				{#each TIMEBASES as t}
-					<option value={t}>{t * 1000} ms</option>
-				{/each}
-			</select>
-		</label>
-		<label class="level">
-			<input type="range" min="-1" max="1" step="0.01" bind:value={level} aria-label="Trigger level for {label}" />
-		</label>
+		{#if !compact}
+			<label>
+				<select bind:value={timebase} aria-label="Timebase for {label}">
+					{#each TIMEBASES as t}
+						<option value={t}>{t * 1000} ms</option>
+					{/each}
+				</select>
+			</label>
+			<label class="level">
+				<input type="range" min="-1" max="1" step="0.01" bind:value={level} aria-label="Trigger level for {label}" />
+			</label>
+		{/if}
 	</figcaption>
-	<canvas bind:this={canvas} width="460" height="120"></canvas>
+	<canvas bind:this={canvas} width={compact ? 220 : 460} height={compact ? 60 : 120} class:compact></canvas>
 </figure>
 
 <style>
@@ -112,5 +119,8 @@
 		display: block;
 		width: 100%;
 		height: 120px;
+	}
+	canvas.compact {
+		height: 60px;
 	}
 </style>

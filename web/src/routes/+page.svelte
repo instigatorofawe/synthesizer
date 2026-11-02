@@ -25,6 +25,33 @@
 	</section>
 
 	<section>
+		<h2>Samples</h2>
+		<p class="muted">
+			WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like Piano_C4.wav says which
+			key it was recorded at.
+		</p>
+		<ul class="list">
+			{#each data.assets as asset (asset.id)}
+				<li class="row">
+					<span>{asset.name}</span>
+					<span class="muted">
+						{(asset.frames / asset.rate).toFixed(2)} s, {asset.channels === 1 ? 'mono' : 'stereo'}, used by {asset.patches}
+					</span>
+					<form method="POST" action="?/deleteAsset" use:enhance>
+						<input type="hidden" name="id" value={asset.id} />
+						<button aria-label={`Delete ${asset.name}`}>×</button>
+					</form>
+				</li>
+			{/each}
+		</ul>
+		<form method="POST" action="?/importSamples" enctype="multipart/form-data" use:enhance class="row">
+			<input type="file" name="files" accept=".wav,audio/wav" multiple aria-label="WAV files" />
+			<input name="name" placeholder="Instrument name" aria-label="Instrument name" />
+			<button>Import</button>
+		</form>
+	</section>
+
+	<section>
 		<h2>Timelines</h2>
 		<p class="muted">Each compiles to one Program.</p>
 		<ul class="list">

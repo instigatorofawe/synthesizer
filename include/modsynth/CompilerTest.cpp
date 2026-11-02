@@ -131,6 +131,172 @@ TEST(CompilePatch, ASnapNodeLetsAudioThrough) {
     }
 }
 
+namespace {
+
+json voice_of(json extra_nodes, json extra_edges) {
+    json graph = json::parse(R"({
+      "nodes": [{"id": 1, "type": "note"}, {"id": 2, "type": "out"}, {"id": 3, "type": "noise"}],
+      "edges": [{"from": 3, "to": 2, "input": "l"}]})");
+    for (const json& n : extra_nodes) graph["nodes"].push_back(n);
+    for (const json& e : extra_edges) graph["edges"].push_back(e);
+    return graph;
+}
+
+std::vector<u8> ops_of(const json& graph, const char* where = "p") {
+    const auto patch = compile_patch(graph, where);
+    PatchView v;
+    EXPECT_TRUE(parse_patch({patch.chunk.payload.data(), patch.chunk.payload.size()}, v));
+    std::vector<u8> ops;
+    for (u32 i = 0; i < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++i) ops.push_back(v.step(i).op);
+    return ops;
+}
+
+bool has_op(const std::vector<u8>& ops, Op op) {
+    return std::find(ops.begin(), ops.end(), static_cast<u8>(op)) != ops.end();
+}
+
+std::string error_of(const json& graph) {
+    try {
+        compile_patch(graph, "p");
+    } catch (const CompileError& e) {
+        return e.what();
+    }
+    return "";
+}
+
+}  // namespace
+
+TEST(CompilePatch, AnOscInModModeTakesAudioOnEveryInput) {
+    for (const char* input : {"freq", "phase", "sync", "feedback"}) {
+        SCOPED_TRACE(input);
+        const json graph = voice_of(
+            json::array({{{"id", 4}, {"type", "osc"}, {"mode", "mod"}}}),
+            json::array({{{"from", 3}, {"to", 4}, {"input", input}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+        EXPECT_TRUE(has_op(ops_of(graph), Op::OscMod));
+    }
+    const json pulse =
+        voice_of(json::array({{{"id", 4}, {"type", "osc"}, {"wave", "square"}, {"mode", "mod"}}}),
+                 json::array({{{"from", 3}, {"to", 4}, {"input", "width"}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+    EXPECT_TRUE(has_op(ops_of(pulse), Op::OscMod));
+}
+
+TEST(CompilePatch, EveryWaveAndFormReachesItsMode) {
+    const struct {
+        const char* wave;
+        const char* mode;
+        OscModMode expected;
+    } forms[] = {
+        {"sine", "mod", OscModMode::Sine},
+        {"triangle", "mod", OscModMode::Triangle},
+        {"saw", "mod", OscModMode::Saw},
+        {"square", "mod", OscModMode::Pulse},
+        {"saw", "mod-naive", OscModMode::NaiveSaw},
+        {"square", "mod-naive", OscModMode::NaivePulse},
+    };
+    for (const auto& f : forms) {
+        SCOPED_TRACE(std::string(f.wave) + " " + f.mode);
+        const json graph = voice_of(json::array({{{"id", 4}, {"type", "osc"}, {"wave", f.wave}, {"mode", f.mode}}}),
+                                    json::array({{{"from", 4}, {"to", 2}, {"input", "r"}}}));
+        const auto patch = compile_patch(graph, "p");
+        PatchView v;
+        ASSERT_TRUE(parse_patch({patch.chunk.payload.data(), patch.chunk.payload.size()}, v));
+        bool found = false;
+        for (u32 i = 0; i < v.h.voice_steps; ++i) {
+            const WireStep s = v.step(v.h.control_steps + i);
+            if (s.op == static_cast<u8>(Op::OscMod)) {
+                found = true;
+                EXPECT_EQ(s.mode, static_cast<u8>(f.expected));
+            }
+        }
+        EXPECT_TRUE(found);
+    }
+}
+
+TEST(CompilePatch, AnOscNotInModModeRefusesItsInputs) {
+    for (const char* input : {"phase", "sync", "feedback"}) {
+        SCOPED_TRACE(input);
+        const json graph = voice_of(
+            json::array({{{"id", 4}, {"type", "osc"}}}),
+            json::array({{{"from", 3}, {"to", 4}, {"input", input}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+        EXPECT_EQ(error_of(graph), std::string("only an osc in mod mode has ") + input);
+    }
+}
+
+TEST(CompilePatch, AnOscInModModeRefusesWhatItsWaveLacks) {
+    const auto with = [](const char* wave, const char* mode, const char* input) {
+        json edges = json::array({{{"from", 4}, {"to", 2}, {"input", "r"}}});
+        if (input[0] != 0) edges.push_back({{"from", 3}, {"to", 4}, {"input", input}});
+        return voice_of(json::array({{{"id", 4}, {"type", "osc"}, {"wave", wave}, {"mode", mode}}}), edges);
+    };
+    EXPECT_EQ(error_of(with("saw", "mod", "feedback")), "only sine has feedback");
+    EXPECT_EQ(error_of(with("saw", "mod", "width")), "only square has a width");
+    EXPECT_EQ(error_of(with("sine", "mod-naive", "")), "only saw and square have a naive form");
+    EXPECT_EQ(error_of(with("triangle", "mod-naive", "")), "only saw and square have a naive form");
+    EXPECT_EQ(error_of(with("sine", "fm", "")), "unknown osc mode 'fm'");
+    EXPECT_EQ(error_of(with("noise", "mod", "")), "unknown wave 'noise'");
+}
+
+TEST(CompilePatch, MathRunsAtTheRateOfItsInputs) {
+    const json control =
+        voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", "max"}}, {{"id", 5}, {"type", "osc"}}}),
+                 json::array({{{"from", 1}, {"port", "velocity"}, {"to", 4}, {"input", "a"}},
+                              {{"from", 4}, {"to", 5}, {"input", "freq"}},
+                              {{"from", 5}, {"to", 2}, {"input", "r"}}}));
+    const auto scalar = ops_of(control);
+    EXPECT_TRUE(has_op(scalar, Op::KMath));  // So it can drive an input read once a frame with no snap
+    EXPECT_FALSE(has_op(scalar, Op::Math));
+
+    const json audio =
+        voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", "max"}}, {{"id", 5}, {"type", "osc"}}}),
+                 json::array({{{"from", 3}, {"to", 4}, {"input", "a"}},
+                              {{"from", 4}, {"to", 5}, {"input", "freq"}},
+                              {{"from", 5}, {"to", 2}, {"input", "r"}}}));
+    EXPECT_NE(error_of(audio).find("put a snap node on the wire"), std::string::npos);
+}
+
+TEST(CompilePatch, MathRefusesAWireOnAnInputItsModeDoesNotRead) {
+    for (const char* mode : {"abs", "floor"}) {
+        const json graph =
+            voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", mode}}}),
+                     json::array({{{"from", 3}, {"to", 4}, {"input", "b"}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+        EXPECT_EQ(error_of(graph), std::string(mode) + " has no input 'b'");
+    }
+    const json graph =
+        voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", "min"}}}),
+                 json::array({{{"from", 3}, {"to", 4}, {"input", "c"}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+    EXPECT_EQ(error_of(graph), "min has no input 'c'");
+}
+
+TEST(CompilePatch, MathRefusesAModeItDoesNotHave) {
+    const json graph = voice_of(json::array({{{"id", 4}, {"type", "math"}, {"mode", "tanh"}}}),
+                                json::array({{{"from", 4}, {"to", 2}, {"input", "r"}}}));
+    EXPECT_EQ(error_of(graph), "unknown math mode 'tanh'");
+}
+
+TEST(CompilePatch, ACurveIsAPowerOfTwoPlusOnePoints) {
+    const auto with = [](json curve) {
+        return voice_of(json::array({{{"id", 4}, {"type", "shape"}, {"curve", std::move(curve)}}}),
+                        json::array({{{"from", 3}, {"to", 4}}, {{"from", 4}, {"to", 2}, {"input", "r"}}}));
+    };
+    EXPECT_TRUE(has_op(ops_of(with(json::array({-1.0, 0.0, 1.0}))), Op::Shape));
+    EXPECT_TRUE(has_op(ops_of(with(json::array({-1.0, -0.5, 0.0, 0.5, 1.0}))), Op::Shape));
+    for (const json& bad : {json::array(), json::array({1.0, 2.0}), json::array({1.0, 2.0, 3.0, 4.0})}) {
+        EXPECT_NE(error_of(with(bad)).find("power of two plus one"), std::string::npos) << bad;
+    }
+}
+
+TEST(CompilePatch, ACurvesPointsReachTheHash) {
+    const auto hash = [](double middle) {
+        return compile_patch(
+                   voice_of(json::array({{{"id", 4}, {"type", "shape"}, {"curve", {-1.0, middle, 1.0}}}}),
+                            json::array({{{"from", 3}, {"to", 4}}, {{"from", 4}, {"to", 2}, {"input", "r"}}})),
+                   "p")
+            .resources.at(0)
+            .hash;
+    };
+    EXPECT_NE(hash(0.0), hash(0.1));
+}
+
 TEST(CompilePatch, AnEnvelopeIsAudio) {
     const json direct = json::parse(R"({
       "nodes": [{"id": 1, "type": "env"}, {"id": 2, "type": "biquad"}, {"id": 3, "type": "out"}],

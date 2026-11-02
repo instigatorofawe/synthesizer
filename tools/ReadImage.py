@@ -129,7 +129,7 @@ def check_document() -> None:
         )
         require(len(op["out"]) == int(outs), f"{where}: output count")
         require(len(op["in"]) == int(ins), f"{where}: input count")
-        kinds = {"Buffer": "B", "Scalar": "S"}
+        kinds = {"Buffer": "B", "Scalar": "S", "Either": "E"}
         require(
             op["in"] == [kinds[k] for k in inputs[: int(ins)]],
             f"{where}: input kinds",
@@ -289,7 +289,9 @@ def read_patch(data: bytes) -> dict:
             )
         for slot, kind in enumerate(spec["in"]):
             require(
-                (bank(inputs_used[slot]) == 1) == (kind == "B"),
+                bank(inputs_used[slot]) != 0
+                if kind == "E"
+                else (bank(inputs_used[slot]) == 1) == (kind == "B"),
                 f"{spec['name']} input kind",
             )
         require(not any(out[len(spec["out"]) :]), f"{spec['name']} unused output")

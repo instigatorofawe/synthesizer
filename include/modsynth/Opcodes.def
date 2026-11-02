@@ -45,6 +45,10 @@ MODSYNTH_OP(Triangle,   25, 1,   Buffer, 1,  Scalar, None,   None,   None,   Non
 MODSYNTH_OP(Tone,       26, 1,   Buffer, 1,  Scalar, None,   None,   None,   None,    0,       false,  false)
 MODSYNTH_OP(Sample2,    27, 2,   Buffer, 2,  Scalar, Scalar, None,   None,   Table,   3,       false,  true)
 MODSYNTH_OP(KLfo2,      28, 1,   Scalar, 2,  Scalar, Scalar, None,   None,   None,    0,       true,   false)
+MODSYNTH_OP(OscMod,     29, 1,   Buffer, 4,  Either, Either, Either, Either, None,    5,       false,  false)
+MODSYNTH_OP(Math,       30, 1,   Buffer, 3,  Either, Either, Either, None,   None,    7,       false,  false)
+MODSYNTH_OP(KMath,      31, 1,   Scalar, 3,  Scalar, Scalar, Scalar, None,   None,    7,       true,   false)
+MODSYNTH_OP(Shape,      32, 1,   Buffer, 1,  Buffer, None,   None,   None,   Table,   0,       false,  false)
 
 // Instructions. a, b and c say which fields it uses. An unused field must be zero.
 //             name      id  a  b  c

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -190,7 +191,7 @@ inline const std::vector<NodeSpec>& node_specs() {
         {"note", {}, {"pitch", "velocity", "gate"}},
         {"param", {}, {"out"}},
         {"const", {}, {"out"}},
-        {"osc", {{"freq", 440.0f}, {"width", 0.5f}}, {"out"}},
+        {"osc", {{"freq", 440.0f}, {"width", 0.5f}, {"phase", 0.0f}, {"sync", 0.0f}, {"feedback", 0.0f}}, {"out"}},
         {"noise", {}, {"out"}},
         {"biquad", {{"in", 0.0f}, {"cutoff", 1000.0f}, {"q", 0.707f}}, {"out"}},
         {"env", {{"attack", 0.01f}, {"decay", 0.1f}, {"sustain", 0.7f}, {"release", 0.2f}}, {"out"}},
@@ -206,6 +207,8 @@ inline const std::vector<NodeSpec>& node_specs() {
         {"allpass", {{"in", 0.0f}, {"time", 0.005f}, {"feedback", 0.5f}}, {"out"}},
         {"follow", {{"in", 0.0f}, {"release", 0.1f}}, {"out"}},
         {"lfo", {{"rate", 1.0f}, {"depth", 1.0f}}, {"out"}},
+        {"math", {{"a", 0.0f}, {"b", 0.0f}, {"c", 0.0f}}, {"out"}},
+        {"shape", {{"in", 0.0f}}, {"out"}},
         {"in", {}, {"l", "r"}},
         {"out", {{"l", 0.0f}, {"r", 0.0f}}, {}},
     };
@@ -547,13 +550,40 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         } else if (type == "osc") {
             const std::string wave = n.config.value("wave", "sine");
             const std::string quality = n.config.value("mode", "bandlimited");
-            if (quality != "bandlimited" && quality != "naive" && quality != "fixed") {
+            const bool modulated = quality == "mod" || quality == "mod-naive";
+            if (quality != "bandlimited" && quality != "naive" && quality != "fixed" && !modulated) {
                 throw CompileError(node_where(id), "unknown osc mode '" + quality + "'");
             }
             if (quality == "fixed" && wave != "sine") throw CompileError(node_where(id), "only sine has a fixed mode");
             if (wave != "square" && input(n, "width")) throw CompileError(node_where(id), "only square has a width");
+            if (wave != "sine" && input(n, "feedback")) throw CompileError(node_where(id), "only sine has feedback");
+            for (const char* name : {"phase", "sync", "feedback"}) {
+                if (!modulated && input(n, name)) {
+                    throw CompileError(node_where(id), std::string("only an osc in mod mode has ") + name);
+                }
+            }
             const u8 mode = quality == "naive" ? kNaive : 0;
-            if (quality == "fixed") {
+            if (modulated) {
+                const bool naive = quality == "mod-naive";
+                if (naive && wave != "saw" && wave != "square") {
+                    throw CompileError(node_where(id), "only saw and square have a naive form");
+                }
+                const auto any_in = [&](const char* name) {
+                    const auto v = input(n, name);
+                    return v ? *v : constant(default_of(n, name));
+                };
+                const OscModMode form = wave == "sine"       ? OscModMode::Sine
+                                        : wave == "triangle" ? OscModMode::Triangle
+                                        : wave == "saw"      ? (naive ? OscModMode::NaiveSaw : OscModMode::Saw)
+                                        : wave == "square"
+                                            ? (naive ? OscModMode::NaivePulse : OscModMode::Pulse)
+                                            : throw CompileError(node_where(id), "unknown wave '" + wave + "'");
+                const Value fourth = wave == "sine"     ? any_in("feedback")
+                                     : wave == "square" ? any_in("width")
+                                                        : constant(0.0f);
+                const Value freq = any_in("freq"), phase = any_in("phase"), sync = any_in("sync");
+                set("out", audio_step(Op::OscMod, {freq, phase, sync, fourth}, 1, state, static_cast<u8>(form)).out[0]);
+            } else if (quality == "fixed") {
                 const Value freq = scalar_in(n, "freq");
                 set("out", audio_step(Op::Tone, {freq}, 1, state).out[0]);
             } else if (wave == "sine") {
@@ -709,6 +739,54 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         } else if (type == "lfo") {
             const Value rate = scalar_in(n, "rate"), depth = scalar_in(n, "depth");
             set("out", control_step(Op::KLfo, {rate, depth}, state));
+        } else if (type == "math") {
+            struct Form {
+                const char* name;
+                MathMode mode;
+                const char*
+                    uses;    // the inputs it reads, because the rest read nothing and must not look as if they did
+                float b, c;  // and what those two are if nothing says
+            };
+            static constexpr Form forms[] = {
+                {"min", MathMode::Min, "ab", 0.0f, 0.0f},         {"max", MathMode::Max, "ab", 0.0f, 0.0f},
+                {"abs", MathMode::Abs, "a", 0.0f, 0.0f},          {"clip", MathMode::Clip, "abc", -1.0f, 1.0f},
+                {"floor", MathMode::Floor, "a", 0.0f, 0.0f},      {"divide", MathMode::Divide, "ab", 1.0f, 0.0f},
+                {"compare", MathMode::Compare, "ab", 0.0f, 0.0f}, {"select", MathMode::Select, "abc", 1.0f, 0.0f},
+            };
+            const std::string mode = n.config.value("mode", "min");
+            const auto form =
+                std::find_if(std::begin(forms), std::end(forms), [&](const Form& f) { return mode == f.name; });
+            if (form == std::end(forms)) throw CompileError(node_where(id), "unknown math mode '" + mode + "'");
+            const std::string uses = form->uses;
+            const auto operand_of = [&](const char* name, float fallback) {
+                const bool used = uses.find(name) != std::string::npos;
+                const auto v = input(n, name);
+                if (!used) {
+                    if (v) throw CompileError(node_where(id), mode + " has no input '" + name + "'");
+                    return constant(0.0f);
+                }
+                if (v) return *v;
+                const auto literal = n.literals.find(name);
+                return constant(literal != n.literals.end() ? literal->second : fallback);
+            };
+            const Value a = operand_of("a", 0.0f), b = operand_of("b", form->b), c = operand_of("c", form->c);
+            const u8 number = static_cast<u8>(form->mode);
+            set("out", a.audio() || b.audio() || c.audio() ? audio_step(Op::Math, {a, b, c}, 1, 0, number).out[0]
+                                                           : control_step(Op::KMath, {a, b, c}, 0, number));
+        } else if (type == "shape") {
+            const json curve = n.config.value("curve", json::array());
+            if (curve.size() < 3 || curve.size() > (1u << 16) + 1 || !std::has_single_bit(curve.size() - 1)) {
+                throw CompileError(node_where(id), "a curve has a power of two plus one points, from 3 to 65537");
+            }
+            Writer table;
+            table.put(TableHeader{static_cast<u32>(curve.size() - 1), 0});
+            for (const json& point : curve) {
+                const float value = point.get<float>();
+                if (!std::isfinite(value)) throw CompileError(node_where(id), "a curve's points must be finite");
+                table.put(value);
+            }
+            const u16 ref = add_ref(make_chunk(ChunkKind::Table, std::move(table.bytes)));
+            set("out", audio_step(Op::Shape, {buffer_in(n, "in")}, 1, 0, 0, ref).out[0]);
         } else if (type == "in") {
             const int index = n.config.value("index", 0);
             if (index < 0 || index > 1) throw CompileError(node_where(id), "in index must be 0 or 1");

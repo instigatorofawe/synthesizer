@@ -1,6 +1,9 @@
 # /// script
 # requires-python = ">=3.12,<3.14"
-# dependencies = ["numpy", "soundcard"]
+# dependencies = ["numpy", "soundcard", "modsynth"]
+#
+# [tool.uv.sources]
+# modsynth = { path = "..", editable = false }
 # ///
 """Plays the oscillators and the recipes through the sound card.
 
@@ -17,20 +20,14 @@ a detuned supersaw to a drum loop. Turn your volume down before the first run.
     uv run examples/Listen.py --group drums   # one group of recipes
     uv run examples/Listen.py --recipes       # all of them, about 4 minutes
 
-This renders with the native tools, because the Python binding has no engine in it yet:
-
-    cmake -B build/native
-    cmake --build build/native --target modsynth_compile modsynth_render
+It renders through the Python binding, which uv builds from this checkout on the first run.
 """
 
 import argparse
 import json
-import math
-import subprocess
-import sys
-import tempfile
 from pathlib import Path
 
+import modsynth
 import numpy as np
 import soundcard
 
@@ -40,7 +37,6 @@ RECIPE_PEAK = (
     0.45  # Each recipe is rendered to this, so --gain sets where its peak lands
 )
 RATE = 48000
-BLOCK = 32  # The compiler's default frame size
 TICKS_PER_SECOND = 960  # 480 ticks per beat at 120 bpm
 
 SCALE = [36, 48, 60, 72, 84, 96]
@@ -61,13 +57,6 @@ SOUNDS = {
     "triangle": {"wave": "triangle", "modes": [None]},
 }
 MODES = ["bandlimited", "naive"]
-
-
-def find_tool(name: str) -> Path:
-    for folder in ("build/native", "build/tools"):
-        if (ROOT / folder / name).exists():
-            return ROOT / folder / name
-    sys.exit(f"{name} is not built. See the build commands at the top of {__file__}.")
 
 
 def patch(sound: dict, mode: str | None) -> dict:
@@ -167,31 +156,14 @@ def project(sound: dict, mode: str | None, gain: float) -> dict:
     }
 
 
-def render_request(request: Path, blocks: int, channels: int) -> np.ndarray:
-    """One row per sample. modsynth_render writes each channel's block in turn."""
-    with tempfile.TemporaryDirectory() as folder:
-        image = Path(folder) / "out.image"
-        samples = Path(folder) / "out.f32"
-        subprocess.run([find_tool("modsynth_compile"), request, image], check=True)
-        subprocess.run(
-            [find_tool("modsynth_render"), image, samples, str(blocks), str(channels)],
-            check=True,
-        )
-        audio = np.fromfile(samples, dtype="<f4")
-    return audio.reshape(-1, channels, BLOCK).transpose(0, 2, 1).reshape(-1, channels)
-
-
 def render(sound: dict, mode: str | None, gain: float) -> np.ndarray:
-    blocks = TOTAL_TICKS * RATE // TICKS_PER_SECOND // BLOCK
-    with tempfile.TemporaryDirectory() as folder:
-        request = Path(folder) / "request.json"
-        request.write_text(json.dumps(project(sound, mode, gain)))
-        return render_request(request, blocks, 1)
+    image = modsynth.compile_image(project(sound, mode, gain))
+    return modsynth.render(image, TOTAL_TICKS / TICKS_PER_SECOND, rate=RATE, channels=1)
 
 
 def render_recipe(recipe: dict, gain: float) -> np.ndarray:
-    blocks = math.ceil(recipe["seconds"] * RATE / BLOCK)
-    return render_request(RECIPES / recipe["file"], blocks, 2) * (gain / RECIPE_PEAK)
+    image = modsynth.compile_image((RECIPES / recipe["file"]).read_text())
+    return modsynth.render(image, recipe["seconds"], rate=RATE) * (gain / RECIPE_PEAK)
 
 
 def list_recipes(recipes: list[dict]) -> None:

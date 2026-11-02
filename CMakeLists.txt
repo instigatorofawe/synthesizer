@@ -23,6 +23,18 @@ option(MODSYNTH_BUILD_COMPILER "Build the authoring compiler, which firmware nev
 option(MODSYNTH_BUILD_FUZZ "Build the coverage-guided fuzzer, with sanitizers" OFF)
 option(MODSYNTH_INSTALL "Install the headers and CMake package" ${MODSYNTH_DEV_BUILD})
 
+# Section 18's PoolExecutor, in modsynth/Parallel.hpp, needs threads. Wasm and bare metal have none, so there it is off and
+# can't be turned on, and nothing they build can reach it.
+if(EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    set(MODSYNTH_CAN_THREAD OFF)
+else()
+    set(MODSYNTH_CAN_THREAD ON)
+endif()
+option(MODSYNTH_PARALLEL "Build modsynth::parallel, the thread pool executor" ${MODSYNTH_CAN_THREAD})
+if(MODSYNTH_PARALLEL AND NOT MODSYNTH_CAN_THREAD)
+    message(FATAL_ERROR "MODSYNTH_PARALLEL needs threads, which Emscripten and bare-metal builds don't have")
+endif()
+
 add_library(modsynth INTERFACE)
 add_library(modsynth::modsynth ALIAS modsynth)
 target_include_directories(modsynth INTERFACE
@@ -34,7 +46,16 @@ target_compile_features(modsynth INTERFACE cxx_std_23)
 # Wasm has none, so every target builds without it and they all round alike. See docs/Format.md section 10.
 target_compile_options(modsynth INTERFACE $<$<PLATFORM_ID:Emscripten>:-msimd128> -ffp-contract=off)
 
-if(MODSYNTH_BUILD_COMPILER)
+if(MODSYNTH_PARALLEL)
+    find_package(Threads REQUIRED)
+    add_library(modsynth_parallel INTERFACE)
+    add_library(modsynth::parallel ALIAS modsynth_parallel)
+    set_target_properties(modsynth_parallel PROPERTIES EXPORT_NAME parallel)
+    target_link_libraries(modsynth_parallel INTERFACE modsynth Threads::Threads)
+endif()
+
+# The Python module compiles requests too, so a wheel needs the compiler library, though not the command-line tools.
+if(MODSYNTH_BUILD_COMPILER OR SKBUILD OR MODSYNTH_BUILD_PYTHON)
     include(FetchContent)
     FetchContent_Declare(nlohmann_json
         GIT_REPOSITORY https://github.com/nlohmann/json.git
@@ -60,8 +81,11 @@ if(SKBUILD OR MODSYNTH_BUILD_PYTHON)
 
     # NOMINSIZE: nanobind defaults to -Os, which would also apply to the DSP templates
     # instantiated in this translation unit.
+    if(NOT MODSYNTH_PARALLEL)
+        message(FATAL_ERROR "The Python module renders on a thread pool, so it needs MODSYNTH_PARALLEL")
+    endif()
     nanobind_add_module(_core NOMINSIZE STABLE_ABI bindings/Python.cpp)
-    target_link_libraries(_core PRIVATE modsynth)
+    target_link_libraries(_core PRIVATE modsynth_compiler modsynth_parallel)
     install(TARGETS _core LIBRARY DESTINATION modsynth COMPONENT python)
 elseif(EMSCRIPTEN AND PROJECT_IS_TOP_LEVEL)
     add_executable(modsynth_wasm bindings/Wasm.cpp)
@@ -151,12 +175,19 @@ if(MODSYNTH_BUILD_TESTS)
         bindings/*Test.cpp
         tools/*Test.cpp
     )
+    if(NOT MODSYNTH_PARALLEL)
+        list(FILTER MODSYNTH_TEST_SOURCES EXCLUDE REGEX "ParallelTest\\.cpp$")
+    endif()
     foreach(source IN LISTS MODSYNTH_TEST_SOURCES)
         cmake_path(GET source STEM name)
         add_executable(${name} ${source})
         target_link_libraries(${name} PRIVATE modsynth_compiler GTest::gtest_main)
+        if(name STREQUAL "ParallelTest")
+            target_link_libraries(${name} PRIVATE modsynth_parallel)
+        endif()
         target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
-        target_compile_definitions(${name} PRIVATE MODSYNTH_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+        target_compile_definitions(${name} PRIVATE MODSYNTH_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/golden"
+            MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes")
         if(EMSCRIPTEN)
             add_test(NAME ${name} COMMAND ${name})
         else()
@@ -210,6 +241,9 @@ if(MODSYNTH_INSTALL)
     set(MODSYNTH_CMAKE_DIR share/cmake/modsynth)
 
     install(TARGETS modsynth EXPORT modsynthTargets)
+    if(MODSYNTH_PARALLEL)
+        install(TARGETS modsynth_parallel EXPORT modsynthTargets)
+    endif()
     install(DIRECTORY include/ DESTINATION include
         PATTERN "*Test.cpp" EXCLUDE
         PATTERN "TestSupport.hpp" EXCLUDE
@@ -217,9 +251,18 @@ if(MODSYNTH_INSTALL)
     )
     install(EXPORT modsynthTargets
         NAMESPACE modsynth::
-        FILE modsynthConfig.cmake
+        FILE modsynthTargets.cmake
         DESTINATION ${MODSYNTH_CMAKE_DIR}
     )
+    # modsynth::parallel links Threads::Threads, which a consumer has to find before the targets load.
+    file(CONFIGURE OUTPUT modsynthConfig.cmake CONTENT [=[
+include(CMakeFindDependencyMacro)
+if(@MODSYNTH_PARALLEL@)
+    find_dependency(Threads)
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/modsynthTargets.cmake")
+]=] @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/modsynthConfig.cmake DESTINATION ${MODSYNTH_CMAKE_DIR})
     write_basic_package_version_file(modsynthConfigVersion.cmake
         COMPATIBILITY SameMinorVersion
         ARCH_INDEPENDENT

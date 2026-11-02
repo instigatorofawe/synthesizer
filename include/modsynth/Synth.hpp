@@ -98,8 +98,8 @@ class Synth {
             fast += taps;
             fast_size -= taps;  // Too little memory leaves regions empty, so every load reports OutOfMemory
         }
-        const std::size_t fast_each = fast_size / C.generations / 16 * 16;
-        const std::size_t bulk_each = memory.bulk.size() / C.generations / 16 * 16;
+        const std::size_t fast_each = fast_size / C.generations / kRegionAlign * kRegionAlign;
+        const std::size_t bulk_each = memory.bulk.size() / C.generations / kRegionAlign * kRegionAlign;
         for (u32 i = 0; i < C.generations; ++i) {
             regions_[i].fast = fast + i * fast_each;
             regions_[i].fast_size = fast_each;
@@ -121,7 +121,9 @@ class Synth {
         Generation g;
         g.program = p;
         reserve<true>(g, chunks, fast, bulk, rate);
-        const auto rounded = [](u64 n) { return (n + 15) / 16 * 16; };  // The constructor keeps regions 16-aligned
+        const auto rounded = [](u64 n) {
+            return (n + kRegionAlign - 1) / kRegionAlign * kRegionAlign;
+        };  // As the constructor splits
         return {rounded(kGenerationBytes + fast.used()), rounded(bulk.used())};
     }
     [[nodiscard]] static constexpr std::size_t tap_bytes() { return sizeof(float) * tap_block * C.tap_slots; }
@@ -239,6 +241,8 @@ class Synth {
     }
 
     [[nodiscard]] u32 tick() const { return live_ ? live_->clock.tick : 0; }
+    // Where the Program's last note ends, so an offline render knows when the song is over.
+    [[nodiscard]] u32 length() const { return live_ ? live_->program.h.length_ticks : 0; }
     [[nodiscard]] bool playing() const { return live_ && live_->clock.playing; }
     [[nodiscard]] u32 active_voices() const {
         if (!live_) return 0;
@@ -280,6 +284,10 @@ class Synth {
     static constexpr u32 kBudgetPerFrame = 64 * C.frame_size;  // The same share of the CPU at any frame size
     static constexpr float kFadeSamples = 2048.0f;
     using K = Kernels<C, B>;
+    // Parallel builds start every array on its own cache line, so tasks on different threads don't share one. Serial
+    // builds stay packed, as section 18 says. It holds only if the host's memory is aligned to 64 bytes too.
+    static constexpr u64 kAlign = E::max_workers > 1 ? 64 : 8;
+    static constexpr u64 kRegionAlign = kAlign > 16 ? kAlign : 16;
 
     // Counts in 64 bits on every target. Format limits keep the largest possible total far below 2^64, so it cannot
     // wrap even on the dry run that decides whether a Program fits. Only a total that fit is ever turned into a
@@ -289,7 +297,7 @@ class Synth {
         explicit Bump(std::byte* base) : base_(base) {}
         template <class T>
         [[nodiscard]] T* array(u64 count) {
-            const u64 align = std::max<std::size_t>(alignof(T), 8);
+            const u64 align = std::max<u64>(alignof(T), kAlign);
             const u64 start = (used_ + align - 1) / align * align;
             used_ = start + count * sizeof(T);
             return base_ ? reinterpret_cast<T*>(base_ + static_cast<std::size_t>(start)) : nullptr;
@@ -462,7 +470,7 @@ class Synth {
     };
 
     // The Generation itself lives at the start of its region.
-    static constexpr std::size_t kGenerationBytes = (sizeof(Generation) + 7) / 8 * 8;
+    static constexpr std::size_t kGenerationBytes = (sizeof(Generation) + kAlign - 1) / kAlign * kAlign;
 
     enum class LoadPhase : u8 { Idle, Validating, Waiting, Binding, Ready };
     enum class BindPhase : u8 { Patches, Instances, Done };

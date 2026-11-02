@@ -98,7 +98,7 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			const pointer = m._ms_tap_take(slot);
 			if (pointer === 0) continue;
 			const buffer = this.pool.pop();
-			if (!buffer) continue; // The display can never hold up audio. The engine counts this as a drop on its next block.
+			if (!buffer) continue; // The display can never hold up audio. This block goes uncounted: see docs/Design.md section 24.
 			const offset = pointer >> 2;
 			this.tapStart[slot] ??= m.HEAPF32.subarray(offset, offset + this.tapBlock);
 			new Float32Array(buffer).set(this.tapStart[slot]);

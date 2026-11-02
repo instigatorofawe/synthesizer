@@ -1,6 +1,6 @@
 #!/bin/sh
-# Fails if a firmware ELF picked up threading, atomics or double-precision run-path code. This check has to exist: a
-# toolchain with a full C++ library would compile parallel.hpp without complaint.
+# Fails if a firmware ELF picked up threading or atomics. This check has to exist: a toolchain with a full C++ library
+# would compile parallel.hpp without complaint.
 set -e
 status=0
 for elf in "$@"; do

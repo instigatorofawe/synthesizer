@@ -1346,3 +1346,135 @@ TEST(Swap, ACarriedRampInsideTheRangeIsNotDisturbed) {
     expected.erase(expected.begin(), expected.begin() + kFadeFrames);
     EXPECT_EQ(heard, expected) << "the same image and the same range, so not one bit may move";
 }
+
+namespace {
+
+// Patches that sound an LFO as it is, so a test hears its phase. It runs through about 1/37 of a turn in a frame.
+constexpr char kSharedLfo[] = R"({"nodes": [{"id": 1, "type": "lfo", "inputs": {"rate": 40, "depth": 0.5}},
+    {"id": 2, "type": "out"}], "edges": [{"from": 1, "to": 2, "input": "l"}]})";
+constexpr char kLfoWithDepth[] = R"({"params": [{"id": 1, "min": 0, "max": 1, "default": 1, "smooth_ms": 0}],
+    "nodes": [{"id": 1, "type": "param", "param": 1}, {"id": 2, "type": "lfo", "inputs": {"rate": 40}},
+    {"id": 3, "type": "out"}],
+    "edges": [{"from": 1, "to": 2, "input": "depth"}, {"from": 2, "to": 3, "input": "l"}]})";
+constexpr char kVoiceLfo[] = R"({"nodes": [{"id": 1, "type": "note"}, {"id": 2, "type": "lfo", "inputs": {"rate": 40}},
+    {"id": 3, "type": "out"}],
+    "edges": [{"from": 1, "port": "velocity", "to": 2, "input": "depth"}, {"from": 2, "to": 3, "input": "l"}]})";
+
+// A track with no notes, as the patch page has, so every note a test wants it plays live.
+std::vector<std::byte> live_image(const char* patch) {
+    json request = one_track(patch, {{"notes", json::array()}});
+    request["live"] = true;
+    return compile_image(request).image;
+}
+
+template <class R>
+void hold_note(R& rig) {
+    rig.engine.send({.kind = EventKind::NoteOn, .note = 60, .velocity = 100});
+}
+
+// Stop ends a held note, so this plays another to go on hearing the LFO. For the frame the two share they are both
+// heard.
+template <class R>
+void stop_and_hold_note(R& rig) {
+    rig.engine.send({.kind = EventKind::Stop});
+    hold_note(rig);
+    (void)first_samples(rig, 1);
+}
+
+template <class R>
+void play_and_hold_note(R& rig) {
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    hold_note(rig);
+}
+
+std::vector<float> slice(const std::vector<float>& from, u32 first, u32 count) {
+    return {from.begin() + first, from.begin() + first + count};
+}
+
+}  // namespace
+
+TEST(Lfo, ASharedOneWaitsForPlay) {
+    Rig<kStereo> rig(live_image(kSharedLfo));
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    hold_note(rig);
+    for (const float heard : first_samples(rig, 100)) EXPECT_EQ(heard, 0.0f);
+    play(rig);
+    const auto moving = first_samples(rig, 20);
+    EXPECT_EQ(moving[0], 0.0f);
+    EXPECT_GT(moving[9], moving[1]);
+}
+
+TEST(Lfo, FramesBeforePlayChangeNothing) {
+    const auto image = live_image(kSharedLfo);
+    Rig<kStereo> prompt(image), late(image);
+    (void)first_samples(late, 37);
+    play_and_hold_note(prompt);
+    play_and_hold_note(late);
+    EXPECT_EQ(first_samples(late, 200), first_samples(prompt, 200));
+}
+
+TEST(Lfo, ASharedOneStopsWithTheTransportAndCarriesOnFromThere) {
+    const auto image = live_image(kSharedLfo);
+    Rig<kStereo> rig(image), never_stopped(image);
+    play_and_hold_note(rig);
+    play_and_hold_note(never_stopped);
+    const auto ahead = first_samples(never_stopped, 150);
+    (void)first_samples(rig, 50);
+    ASSERT_NE(ahead[50], 0.0f);
+
+    stop_and_hold_note(rig);
+    for (const float heard : first_samples(rig, 20)) EXPECT_EQ(heard, ahead[50]);
+    play(rig);
+    EXPECT_EQ(first_samples(rig, 100), slice(ahead, 50, 100));
+}
+
+TEST(Lfo, ADepthChangeIsHeardWhileItHolds) {
+    Rig<kStereo> rig(live_image(kLfoWithDepth));
+    play_and_hold_note(rig);
+    (void)first_samples(rig, 50);
+    stop_and_hold_note(rig);
+    const float full = first_samples(rig, 1).back();
+    ASSERT_NE(full, 0.0f);
+    rig.engine.send({.kind = EventKind::SetParam, .target = 0, .param = 1, .value = 0.25f});
+    EXPECT_FLOAT_EQ(first_samples(rig, 1).back(), full * 0.25f);
+}
+
+// A voice starts with its note, so nothing before that can reach it, and a release outlasts a Stop.
+TEST(Lfo, OneInAVoiceBelongsToItsNote) {
+    Rig<kStereo> rig(live_image(kVoiceLfo));
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    ASSERT_FALSE(rig.engine.playing());
+    hold_note(rig);
+    const auto heard = first_samples(rig, 20);
+    EXPECT_GT(heard[9], heard[1]);
+}
+
+TEST(Lfo, ASwapWhileStoppedLeavesItHeld) {
+    const auto image = live_image(kSharedLfo);
+    Rig<kStereo> rig(image), never_stopped(image);
+    play_and_hold_note(rig);
+    play_and_hold_note(never_stopped);
+    const auto ahead = first_samples(never_stopped, 150);
+    (void)first_samples(rig, 50);
+    stop_and_hold_note(rig);
+
+    swap_now(rig, image);
+    for (const float heard : first_samples(rig, kFadeFrames + 8)) EXPECT_FLOAT_EQ(heard, ahead[50]);
+    play(rig);
+    EXPECT_EQ(first_samples(rig, 100), slice(ahead, 50, 100));
+}
+
+TEST(Lfo, ASwapWhilePlayingLeavesItMoving) {
+    const auto image = live_image(kSharedLfo);
+    Rig<kStereo> rig(image), never_swapped(image);
+    play_and_hold_note(rig);
+    play_and_hold_note(never_swapped);
+    const auto ahead = first_samples(never_swapped, kFadeFrames + 200);
+    (void)first_samples(rig, 50);
+
+    swap_now(rig, image);
+    const u32 faded = 51 + kFadeFrames;
+    (void)first_samples(rig, kFadeFrames);
+    EXPECT_EQ(first_samples(rig, 100), slice(ahead, faded, 100));
+}

@@ -459,6 +459,8 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         ir.ins = static_cast<int>(in.size());
         std::copy(in.begin(), in.end(), ir.in);
         const bool hoist = std::all_of(in.begin(), in.end(), is_hoistable) && op != Op::KSnap;
+        if (hoist && op == Op::KLfo)
+            ir.op = Op::KLfo2;  // It no longer belongs to a note, so it waits for the transport
         ir.control = hoist;
         ir.outs = 1;
         ir.out[0] = hoist ? Value{Bank::Track, track_scalars++} : Value{Bank::Voice, voice_scalars++};

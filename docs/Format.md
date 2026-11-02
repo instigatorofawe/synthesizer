@@ -29,7 +29,7 @@ Three kinds of change are possible after this freeze, and nothing else is.
 Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
 can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
 damaged. A compiler writes the lowest revision that covers what it actually used, so an image that uses nothing new keeps
-loading on old engines. This document describes revision 4. The opcode table says which revision added each opcode.
+loading on old engines. This document describes revision 5. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
 version so far, and no such change is planned. A version above the engine's gets the same refusal.
@@ -299,6 +299,7 @@ samples.
 | 25 | Triangle | B | S frequency | | | voice | 1 |
 | 26 | Tone | B | S frequency | | | voice | 2 |
 | 27 | Sample2 | B left, B right | S note, S start | bit 0 reverse, bit 1 tail | Table | voice | 4 |
+| 28 | KLfo2 | S | S rate, S depth | | | either | 5 |
 
 What each one does:
 
@@ -375,6 +376,10 @@ What each one does:
 - **KSnap.** Writes the last sample of a buffer to a scalar, so audio can drive a control input.
 - **KLfo.** `sin_turns(phase / 2^32) * depth`, with a 32-bit phase advanced once a frame by `clamp(rate * N / sample rate, 0, 0.5) * 4294967040`,
   truncated to an integer, for `rate` clamped to 0 to 1000 Hz.
+- **KLfo2.** A KLfo, except that as a control step its phase does not advance in a frame in which the transport is stopped. That frame still writes
+  the output, so a change of `depth` is heard, and Play carries on from the same phase. A control step runs whether or not a note does, so
+  without this every frame rendered before Play would move what follows. As a voice step it is a KLfo, since a voice has its own start and
+  outlives a Stop in its release. A compiler writes KLfo2 for a control step and KLfo for a voice step.
 
 ### Arithmetic
 
@@ -715,7 +720,7 @@ is what the per-op cost limit in the design is for.
 
 ## 10. Golden images
 
-`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, and `Lanes` and `Zones` from revision 4, each with its render on a stereo and a mono engine. They are the
+`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, `Lanes` and `Zones` from revision 4, and `Hold` from revision 5, each with its render on a stereo and a mono engine. They are the
 contract in executable form.
 
 - A golden image and its render never change, and CI fails a pull request that edits or removes one.

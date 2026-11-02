@@ -44,6 +44,7 @@ MODSYNTH_OP(Pulse,      24, 1,   Buffer, 2,  Scalar, Scalar, None,   None,   Non
 MODSYNTH_OP(Triangle,   25, 1,   Buffer, 1,  Scalar, None,   None,   None,   None,    0,       false,  false)
 MODSYNTH_OP(Tone,       26, 1,   Buffer, 1,  Scalar, None,   None,   None,   None,    0,       false,  false)
 MODSYNTH_OP(Sample2,    27, 2,   Buffer, 2,  Scalar, Scalar, None,   None,   Table,   3,       false,  true)
+MODSYNTH_OP(KLfo2,      28, 1,   Scalar, 2,  Scalar, Scalar, None,   None,   None,    0,       true,   false)
 
 // Instructions. a, b and c say which fields it uses. An unused field must be zero.
 //             name      id  a  b  c

@@ -1,6 +1,6 @@
 # modsynth design, revision 9
 
-Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 4. `docs/Format.md` is its specification,
+Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 5. `docs/Format.md` is its specification,
 and where this document and that one differ, that one is right. This document replaces all earlier revisions, and everything
 needed from them is included here. Sections about later milestones are still proposals.
 
@@ -490,7 +490,9 @@ thread ran a task.
 be impossible, because images relying on the looser rules would then exist.
 
 - A voice writes only voice scalars and an insert writes only scalars of its own track. Global scalars change only in the
-  control phase. A shared LFO becomes a track-scope control Step, which runs before the voices.
+  control phase. A shared LFO becomes a track-scope control Step, which runs before the voices. From revision 5 that Step is `KLfo2`, which
+  holds its phase while the transport is stopped, so how long the engine sat before Play does not move it. One in a voice stays `KLfo`, because it
+  belongs to its note. An oscillator or Noise in an insert still runs while stopped, because an insert has to, for its tail. No recipe has one.
 - Instances share no mutable state. Noise generator state is per voice and seeded deterministically, and delay lines
   belong to one instance. Tables and assets are read-only.
 - Sums run in compiled order, because float addition is not associative. A bus's inputs are gathered by one task. The format makes
@@ -596,7 +598,8 @@ only by being reached.
 4. Each used patch adds the tables and assets it references.
 
 Muted tracks stay in, because mute is a mixer parameter that can change during playback. A browser preview passes `live`,
-which keeps every slot and track, so an empty track can still be played from the keyboard. Exports never set it.
+which keeps every slot and track, so an empty track can still be played from the keyboard. The patch page also starts the transport, because a
+shared LFO waits for it and that page has no Play button. Exports never set it.
 
 Unused library patches cannot affect an image: changing them leaves its bytes identical, and CI asserts this.
 

@@ -80,7 +80,8 @@ struct RunContext {
     u32 seed = 1;
     u8 note = 0;  // what the voice was started with, which a glide doesn't move. 0 in an insert.
     u8 velocity = 0;
-    bool busy = false;  // an Env or Sample is still sounding
+    bool busy = false;     // an Env or Sample is still sounding
+    bool stopped = false;  // the transport is not playing, which only a control step is told
 };
 
 template <SynthConfig C, Backend B>
@@ -159,6 +160,7 @@ struct Kernels {
             case Op::KRatio:
                 return sizeof(CachedState);
             case Op::KLfo:
+            case Op::KLfo2:
                 return sizeof(LfoState);
             default:
                 return 0;
@@ -261,7 +263,10 @@ struct Kernels {
                 set_scalar(c, s.out[0], buffer(c, s.in[0])[N - 1]);
                 break;
             case Op::KLfo:
-                klfo(s, c);
+                klfo(s, c, true);
+                break;
+            case Op::KLfo2:
+                klfo(s, c, !c.stopped);
                 break;
             default:
                 break;  // unreachable: the validator rejects unknown ops
@@ -844,11 +849,12 @@ struct Kernels {
         set_scalar(c, s.out[0], st.out);
     }
 
-    static void klfo(const DecodedStep& s, RunContext& c) {
+    static void klfo(const DecodedStep& s, RunContext& c, bool advance) {
         auto& st = state<LfoState>(c, s);
         const float rate = clamp(scalar(c, s.in[0]), 0.0f, 1000.0f);
         const float phase = static_cast<float>(st.phase) * 2.3283064e-10f;
         set_scalar(c, s.out[0], scalar(c, s.in[1]) * sin_turns(phase));
+        if (!advance) return;
         st.phase += static_cast<u32>(clamp(rate * static_cast<float>(N) * c.inverse_rate, 0.0f, 0.5f) * 4294967040.0f);
     }
 };

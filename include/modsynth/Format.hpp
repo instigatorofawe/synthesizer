@@ -35,7 +35,7 @@ template <class T>
 
 inline constexpr u32 kChunkMagic = 0x4B43534D;  // "MSCK"
 inline constexpr u8 kFormatVersion = 1;         // Changes only if an old engine must not even try to read an image
-inline constexpr u32 kFormatRevision = 4;       // The newest additions this engine understands
+inline constexpr u32 kFormatRevision = 5;       // The newest additions this engine understands
 inline constexpr u32 kChunkAlign = 8;
 inline constexpr u16 kNone = 0xFFFF;
 
@@ -202,7 +202,7 @@ struct OpSignature {
 // The revision that added an opcode. An image must declare it, so an older engine reports "needs a newer engine" and
 // not "damaged". Lines in Opcodes.def can't carry this, as they never change. A revision adding an opcode adds a line.
 [[nodiscard]] constexpr u32 op_revision(Op op) {
-    return op >= Op::Sample2 ? 4 : op >= Op::Tone ? 2 : op >= Op::Saw ? 1 : 0;
+    return op >= Op::KLfo2 ? 5 : op >= Op::Sample2 ? 4 : op >= Op::Tone ? 2 : op >= Op::Saw ? 1 : 0;
 }
 
 struct WireStep {

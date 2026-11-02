@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -175,6 +176,18 @@ struct Ir {
     int outs = 0;
     int ins = 0;
 };
+
+// A field that isn't one of these is refused, not ignored. A misspelt one would otherwise play as its default, and a
+// newer document read by an older compiler would play without what it asked for.
+inline void check_keys(const json& object, std::initializer_list<const char*> known, const std::string& where,
+                       const std::string& what) {
+    if (!object.is_object()) throw CompileError(where, what + " is an object");
+    for (const auto& [name, value] : object.items()) {
+        if (std::none_of(known.begin(), known.end(), [&](const char* k) { return name == k; })) {
+            throw CompileError(where, what + " has no '" + name + "'");
+        }
+    }
+}
 
 struct InputSpec {
     const char* name;
@@ -914,7 +927,7 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
                 return found;
             };
             if (mode == "plain") {
-                for (const char* key : {"zones", "reverse", "tail"}) {
+                for (const char* key : {"zones", "reverse", "tail", "release"}) {
                     if (n.config.contains(key)) {
                         throw CompileError(node_where(id), std::string("only a sample in zones mode has ") + key);
                     }
@@ -936,7 +949,14 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
                 if (zones.empty() || zones.size() > kMaxZones) {
                     throw CompileError(node_where(id), "a sample has 1 to 256 zones");
                 }
-                std::vector<std::array<float, kZoneFields>> rows;
+                // A round robin, a crossfade or a release needs Sample3's wider rows. Without them it is Sample2, so a
+                // patch that uses none of them is the bytes it always was.
+                const bool release = n.config.value("release", false);
+                const bool wide = release || std::any_of(zones.begin(), zones.end(), [](const json& zone) {
+                                      return zone.contains("round_robin") || zone.contains("fade");
+                                  });
+                const u32 fields = wide ? kZone3Fields : kZoneFields;
+                std::vector<std::array<float, kZone3Fields>> rows;
                 const auto range = [&](const json& zone, const char* key) {
                     const json pair = zone.value(key, json::array({0, 127}));
                     const int low = pair.at(0).get<int>(), high = pair.at(1).get<int>();
@@ -947,6 +967,8 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
                     return std::pair(static_cast<float>(low), static_cast<float>(high));
                 };
                 for (const json& zone : zones) {
+                    check_keys(zone, {"asset", "root", "keys", "velocities", "round_robin", "fade"}, node_where(id),
+                               "a zone");
                     const std::string asset = zone.at("asset").get<std::string>();
                     const json* found = find_asset(asset);
                     const u16 ref = add_ref(make_asset(*found, node_where(id)));
@@ -955,21 +977,50 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
                         throw CompileError(node_where(id), "zone root must be 0 to 127");
                     const auto [low_key, high_key] = range(zone, "keys");
                     const auto [low_velocity, high_velocity] = range(zone, "velocities");
-                    rows.push_back({low_key, high_key, low_velocity, high_velocity, static_cast<float>(ref), root});
+                    std::array<float, kZone3Fields> row{
+                        low_key, high_key, low_velocity, high_velocity, static_cast<float>(ref), root};
+                    if (zone.contains("round_robin")) {
+                        // Which of how many, counting from 1: [2, 3] plays on the second note of every three.
+                        const json rr = zone.at("round_robin");
+                        const int position = rr.at(0).get<int>(), length = rr.at(1).get<int>();
+                        if (rr.size() != 2 || length < 1 || length > static_cast<int>(kMaxZones) || position < 1 ||
+                            position > length) {
+                            throw CompileError(node_where(id), "a zone's round_robin is [which, of how many], from 1");
+                        }
+                        row[kZoneSeqPosition] = static_cast<float>(position - 1);
+                        row[kZoneSeqLength] = static_cast<float>(length);
+                    }
+                    if (zone.contains("fade")) {
+                        const json fade = zone.at("fade");
+                        const float in = fade.at(0).get<float>(), out = fade.at(1).get<float>();
+                        const float span = high_velocity - low_velocity;
+                        if (fade.size() != 2 || !(in >= 0.0f && in <= span) || !(out >= 0.0f && out <= span)) {
+                            throw CompileError(node_where(id),
+                                               "a zone's fade is [in, out] in velocity, each within its velocities");
+                        }
+                        row[kZoneFadeIn] = in;
+                        row[kZoneFadeOut] = out;
+                    }
+                    rows.push_back(row);
                 }
                 while (!std::has_single_bit(rows.size())) rows.push_back({1.0f});
                 Writer table;
-                table.put(TableHeader{static_cast<u32>(rows.size()) * kZoneFields, 0});
+                table.put(TableHeader{static_cast<u32>(rows.size()) * fields, 0});
                 for (const auto& row : rows) {
-                    for (const float value : row) table.put(value);
+                    for (u32 f = 0; f < fields; ++f) table.put(row[f]);
                 }
                 table.put(0.0f);  // guard
                 const u16 ref = add_ref(make_chunk(ChunkKind::Table, std::move(table.bytes)));
                 const bool literal = n.literals.count("note") != 0;
                 const Value note = input(n, "note") || literal ? scalar_in(n, "note") : Value{Bank::Voice, kScalarNote};
-                const u8 flags = static_cast<u8>((n.config.value("reverse", false) ? kSampleReverse : 0) |
-                                                 (n.config.value("tail", false) ? kSampleTail : 0));
-                const Ir ir = audio_step(Op::Sample2, {note, scalar_in(n, "start")}, 2, state, flags, ref);
+                const u8 flags =
+                    static_cast<u8>((n.config.value("reverse", false) ? kSampleReverse : 0) |
+                                    (n.config.value("tail", false) ? kSampleTail : 0) | (release ? kSampleRelease : 0));
+                if (release && n.config.value("tail", false)) {
+                    throw CompileError(node_where(id), "a release sample plays once through, so it has no tail");
+                }
+                const Ir ir =
+                    audio_step(wide ? Op::Sample3 : Op::Sample2, {note, scalar_in(n, "start")}, 2, state, flags, ref);
                 set("l", ir.out[0]);
                 set("r", ir.out[1]);
             } else {
@@ -1305,26 +1356,247 @@ constexpr u32 kDefaultPpq = 480;
 inline float pan_left(float pan) { return static_cast<float>(exact_sin_turns((1.0 - pan) * 0.125)); }
 inline float pan_right(float pan) { return static_cast<float>(exact_sin_turns((1.0 + pan) * 0.125)); }
 
+// libm's log and exp differ between hosts too, and a curve's values enter a hash, so these also use only + * / and the
+// exact operations frexp, ldexp and floor.
+inline double exact_log(double x) {
+    constexpr double ln2 = 0.69314718055994530942;
+    int e = 0;
+    double m = std::frexp(x, &e);
+    if (m < 0.70710678118654752440) {
+        m *= 2.0;
+        --e;
+    }
+    const double z = (m - 1.0) / (m + 1.0), z2 = z * z;
+    double term = z, sum = z;
+    for (int k = 1; k <= 12; ++k) {
+        term *= z2;
+        sum += term / static_cast<double>(2 * k + 1);
+    }
+    return 2.0 * sum + static_cast<double>(e) * ln2;
+}
+
+inline double exact_exp(double y) {
+    constexpr double ln2 = 0.69314718055994530942;
+    const double k = std::floor(y / ln2 + 0.5);
+    const double r = y - k * ln2;
+    double term = 1.0, sum = 1.0;
+    for (int n = 1; n <= 20; ++n) {
+        term = term * r / static_cast<double>(n);
+        sum += term;
+    }
+    return std::ldexp(sum, static_cast<int>(k));
+}
+
+// A lane's `"curve": "exp"` moves by equal ratios, which is even in decibels for a gain and in pitch for a frequency. 0
+// has no ratio, so a curve to or from 0 runs to or from 60 dB below its other end, and lands on 0 at the end.
+constexpr double kCurveFloor = 0.001;
+constexpr u32 kMaxCurveSteps = 256;
+
+inline double curve_at(double from, double to, double t) {
+    if (t >= 1.0) return to;
+    if (t <= 0.0) return from;
+    const double a = from > 0.0 ? from : to * kCurveFloor;
+    const double b = to > 0.0 ? to : from * kCurveFloor;
+    if (!(a > 0.0 && b > 0.0)) return from + (to - from) * t;
+    return a * exact_exp(t * exact_log(b / a));
+}
+
+// The engine ramps in straight lines, so a curve is compiled as one per decibel it spans. None strays from the curve
+// by more than 0.015 dB.
+inline u32 curve_steps(double from, double to) {
+    const double a = from > 0.0 ? from : to * kCurveFloor;
+    const double b = to > 0.0 ? to : from * kCurveFloor;
+    if (!(a > 0.0 && b > 0.0) || a == b) return 1;
+    const double decibels = std::abs(exact_log(b / a)) * (20.0 / 2.30258509299404568402);
+    return static_cast<u32>(std::clamp(std::ceil(decibels), 1.0, static_cast<double>(kMaxCurveSteps)));
+}
+
+// What a lane's target is doing, in ticks from the start of the clip being compiled: holding `to`, or on its way there
+// from `from`, in a straight line or along a curve.
+struct LaneState {
+    double from = 0.0, to = 0.0, begin = 0.0, end = 0.0;
+    bool curved = false;
+    [[nodiscard]] double at(double tick) const {
+        if (tick >= end) return to;
+        if (tick <= begin) return from;
+        const double t = (tick - begin) / (end - begin);
+        return curved ? curve_at(from, to, t) : from + (to - from) * t;
+    }
+    // Seen from `ticks` later. A target that has arrived is only its value, so a clip that leaves it alone sees the
+    // same thing at every repeat.
+    [[nodiscard]] LaneState later(double ticks) const {
+        if (end - ticks <= 0.0) return {to, to, 0.0, 0.0, false};
+        return {from, to, begin - ticks, end - ticks, curved};
+    }
+    // A start no lane has needed yet is NaN, which is the same as another.
+    bool operator==(const LaneState& o) const {
+        const auto same = [](double a, double b) { return a == b || (std::isnan(a) && std::isnan(b)); };
+        return same(from, o.from) && same(to, o.to) && begin == o.begin && end == o.end && curved == o.curved;
+    }
+};
+using LaneStates = std::map<std::string, LaneState>;
+
+// What a mix register pair can hold. It holds their product, so a lane on one of them writes that product with the
+// others' fixed values in it. A fader holds its chain's mute with it, and a pre-fader send holds the mute alone.
+enum MixFactor : unsigned { kFaderFactor = 1, kMuteFactor = 2, kPanFactor = 4, kSendFactor = 8, kMasterFactor = 16 };
+
+struct MixValues {
+    float fader, mute, pan, send, master;
+};
+
+// Always in this order, so the bits never depend on which factor a lane moves, and are what they always were.
+inline float gain_of(unsigned of, const MixValues& v, bool right) {
+    float g = 1.0f;
+    if (of & kFaderFactor) {
+        g = v.fader * v.mute;
+    } else if (of & kMuteFactor) {
+        g = v.mute;
+    }
+    if (of & kPanFactor) g *= right ? pan_right(v.pan) : pan_left(v.pan);
+    if (of & kSendFactor) g *= v.send;
+    if (of & kMasterFactor) g *= v.master;
+    return g;
+}
+
+inline json factor_names(unsigned of) {
+    json names = json::array();
+    for (const auto& [bit, name] :
+         {std::pair{kFaderFactor, "fader"}, std::pair{kMuteFactor, "mute"}, std::pair{kPanFactor, "pan"},
+          std::pair{kSendFactor, "send"}, std::pair{kMasterFactor, "master"}}) {
+        if (of & bit) names.push_back(name);
+    }
+    return names;
+}
+
 struct Chain {
     enum Kind { TrackChain, BusChain, MasterChain } kind = TrackChain;
     std::string key;
     const json* doc = nullptr;
     bool has_notes = false;
+    float fader = 1.0f, mute = 1.0f, pan = 0.0f;
     struct Output {
         std::string to;
-        float gain_left, gain_right;
-        // What those two are the product of, so that a lane can move one of them.
-        float fader, mute, pan, send;
-        bool is_send;
-        int reg = -1;  // its left gain's mix register, with the right one next, once the mixer has one for it
+        float send;  // 1 unless it is a send
+        bool is_send, pre;
+        unsigned of = 0;  // the factors its registers hold
+        int reg = -1;     // its left gain's mix register, with the right one next, once the mixer has one for it
     };
     std::vector<Output> outputs;
+    // Factors applied to the whole chain by a step of their own, so a lane can move one while another lane moves
+    // something its outputs hold. A chain's come after its inserts, and master's before, where its fader always was.
+    struct Stage {
+        unsigned of;
+        int reg = -1;  // its gain pair, as for an output
+    };
+    std::vector<Stage> stages;
     std::vector<std::string> keys;  // sidechain sources of its inserts
     bool live = false;
-    int reg = -1;
-    int step = -1;  // last mix step, where its output is complete
+    int reg = -1;      // the bus its signal ends on, after any stages
+    int pre_reg = -1;  // the bus before a track's or bus's stages, which a meter, a sidechain and a pre-fader send read
+    int step = -1;     // the mix step that completes pre_reg, or for master its last
     json mix = json::array();
 };
+
+// Values by parameter id, as a track's, an insert's and the globals are.
+inline void check_param_values(const json& values, const std::string& where, const std::string& what) {
+    if (!values.is_object()) throw CompileError(where, what + " is an object");
+    for (const auto& [key, value] : values.items()) {
+        const bool digits = !key.empty() && key.size() <= 5 &&
+                            std::all_of(key.begin(), key.end(), [](char c) { return c >= '0' && c <= '9'; });
+        if (!digits || std::stoul(key) > 65535) {
+            throw CompileError(where, what + " are by parameter id, and '" + key + "' isn't one");
+        }
+        if (!value.is_number()) throw CompileError(where, what + " are numbers");
+    }
+}
+
+inline void check_list(const json& list, const std::string& where, const std::string& what) {
+    if (!list.is_array()) throw CompileError(where, what + " is a list");
+}
+
+inline void check_timeline(const json& doc, const std::string& where) {
+    check_keys(doc, {"ppq", "tempo", "clips", "tracks", "buses", "master", "globals"}, where, "a timeline");
+    const auto list = [&](const json& d, const char* name, const std::string& at) -> const json& {
+        static const json none = json::array();
+        if (!d.contains(name)) return none;
+        check_list(d.at(name), at, name);
+        return d.at(name);
+    };
+    for (const json& t : list(doc, "tempo", where)) check_keys(t, {"tick", "bpm", "ramp"}, where, "a tempo change");
+    for (const json& clip : list(doc, "clips", where)) {
+        const std::string at = where + "/clip:" + (clip.is_object() ? clip.value("id", std::string{}) : "");
+        check_keys(clip, {"id", "length", "notes", "automation", "play"}, at, "a clip");
+        for (const json& n : list(clip, "notes", at))
+            check_keys(n, {"tick", "note", "vel", "dur", "slot"}, at, "a note");
+        for (const json& a : list(clip, "automation", at)) {
+            check_keys(a, {"param", "target", "tick", "value", "ramp", "curve"}, at, "a lane");
+        }
+        for (const json& p : list(clip, "play", at)) {
+            check_keys(p, {"tick", "mode", "priority", "glide", "slur_velocity"}, at, "a play change");
+        }
+    }
+    const auto chain = [&](const json& d, const std::string& at) {
+        for (const json& s : list(d, "sends", at)) check_keys(s, {"bus", "gain", "pre"}, at, "a send");
+        for (const json& i : list(d, "inserts", at)) {
+            check_keys(i, {"id", "patch", "params", "key"}, at, "an insert");
+            if (i.contains("params")) check_param_values(i.at("params"), at, "an insert's params");
+        }
+    };
+    for (const json& t : list(doc, "tracks", where)) {
+        const std::string at = where + "/track:" + (t.is_object() && t.contains("id") ? t.at("id").dump() : "");
+        check_keys(t,
+                   {"id", "name", "voices", "slots", "params", "placements", "play", "steal", "gain", "pan", "mute",
+                    "output", "sends", "inserts"},
+                   at, "a track");
+        for (const json& p : list(t, "placements", at)) {
+            check_keys(p, {"clip", "tick", "repeat", "transpose", "velocity", "start", "length"}, at, "a placement");
+        }
+        if (t.contains("params")) check_param_values(t.at("params"), at, "a track's params");
+        chain(t, at);
+    }
+    for (const json& b : list(doc, "buses", where)) {
+        const std::string at = where + "/bus:" + (b.is_object() ? b.value("id", std::string{}) : "");
+        check_keys(b, {"id", "gain", "pan", "mute", "output", "sends", "inserts"}, at, "a bus");
+        chain(b, at);
+    }
+    if (doc.contains("master")) {
+        check_keys(doc.at("master"), {"gain", "inserts"}, where + "/master", "master");
+        chain(doc.at("master"), where + "/master");
+    }
+    if (doc.contains("globals")) check_param_values(doc.at("globals"), where, "globals");
+}
+
+// What a placement plays of its clip: a window of it, transposed and with its velocities scaled.
+struct Placed {
+    const json* clip;
+    u32 tick, repeat;
+    u32 start, length;  // the window, in the clip's ticks
+    int transpose;
+    double velocity;
+    // Whether a note of the clip is in the window. One that starts before it doesn't play, as in most editors.
+    [[nodiscard]] bool plays(u32 note_tick) const { return note_tick >= start && note_tick - start < length; }
+    [[nodiscard]] u32 span() const { return repeat * length; }
+};
+
+inline Placed read_placement(const json& placed, const std::map<std::string, const json*>& clips,
+                             const std::string& where) {
+    const std::string id = placed.at("clip").get<std::string>();
+    if (!clips.count(id)) throw CompileError(where, "no clip '" + id + "'");
+    const json& clip = *clips.at(id);
+    const u32 clip_length = clip.at("length").get<u32>();
+    Placed p{&clip, placed.at("tick").get<u32>(), placed.value("repeat", 1u),   placed.value("start", 0u),
+             0,     placed.value("transpose", 0), placed.value("velocity", 1.0)};
+    if (p.repeat == 0) throw CompileError(where, "a placement repeats 0 times");
+    if (clip_length != 0 && p.start >= clip_length) throw CompileError(where, "a placement starts after its clip ends");
+    p.length = placed.value("length", clip_length - std::min(p.start, clip_length));
+    if (p.length == 0) throw CompileError(where, "a placement has no length");
+    if (p.transpose < -127 || p.transpose > 127) throw CompileError(where, "transpose must be -127 to 127");
+    if (!(p.velocity >= 0.0 && p.velocity <= 4.0)) {
+        throw CompileError(where, "a placement's velocity scales each note's, from 0 to 4");
+    }
+    if (static_cast<u64>(p.repeat) * p.length > kMaxTicks) throw CompileError(where, "a placement is too long");
+    return p;
+}
 
 }  // namespace detail
 
@@ -1335,6 +1607,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     const json& doc = entry.at("timeline");
     const std::string name = entry.value("name", std::string{});
     const std::string where = "timeline:" + (entry.contains("id") ? entry.at("id").dump() : name);
+    check_timeline(doc, where);
 
     const u32 ppq = doc.value("ppq", kDefaultPpq);
     if (ppq == 0 || ppq > 65535) throw CompileError(where, "ppq must be 1 to 65535");
@@ -1351,34 +1624,35 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     const json& buses_doc = doc.contains("buses") ? doc.at("buses") : empty_list;
 
     const auto add_outputs = [&](Chain& c, const json& d) {
-        const float gain = d.value("gain", 1.0f);
-        const float pan = d.value("pan", 0.0f);
-        if (!(pan >= -1.0f && pan <= 1.0f)) throw CompileError(where + "/" + c.key, "pan must be -1 to 1");
-        const float mute = d.value("mute", false) ? 0.0f : 1.0f;
-        const float left = gain * mute * pan_left(pan), right = gain * mute * pan_right(pan);
-        const std::string to = d.value("output", "master");
-        c.outputs.push_back({to, left, right, gain, mute, pan, 1.0f, false});
+        c.fader = d.value("gain", 1.0f);
+        c.pan = d.value("pan", 0.0f);
+        if (!(c.pan >= -1.0f && c.pan <= 1.0f)) throw CompileError(where + "/" + c.key, "pan must be -1 to 1");
+        c.mute = d.value("mute", false) ? 0.0f : 1.0f;
+        c.outputs.push_back({d.value("output", "master"), 1.0f, false, false});
         for (const json& s : d.value("sends", json::array())) {
-            const float send = s.value("gain", 1.0f);
             c.outputs.push_back(
-                {"bus:" + s.at("bus").get<std::string>(), left * send, right * send, gain, mute, pan, send, true});
+                {"bus:" + s.at("bus").get<std::string>(), s.value("gain", 1.0f), true, s.value("pre", false)});
         }
         for (const json& i : d.value("inserts", json::array())) {
             if (i.contains("key")) c.keys.push_back(i.at("key").get<std::string>());
         }
     };
 
+    // Each track's placements, in the order they play.
+    std::map<std::string, std::vector<Placed>> placements_of;
     for (std::size_t t = 0; t < tracks_doc.size(); ++t) {
         const json& d = tracks_doc[t];
         Chain c;
         c.kind = Chain::TrackChain;
         c.key = "track:" + d.at("id").dump();
         c.doc = &d;
+        std::vector<Placed>& placed_list = placements_of[c.key];
         for (const json& placed : d.value("placements", json::array())) {
-            const std::string id = placed.at("clip").get<std::string>();
-            if (!clips.count(id)) throw CompileError(where + "/" + c.key, "no clip '" + id + "'");
-            if (!clips.at(id)->value("notes", json::array()).empty()) c.has_notes = true;
+            placed_list.push_back(read_placement(placed, clips, where + "/" + c.key));
+            if (!placed_list.back().clip->value("notes", json::array()).empty()) c.has_notes = true;
         }
+        std::stable_sort(placed_list.begin(), placed_list.end(),
+                         [](const Placed& a, const Placed& b) { return a.tick < b.tick; });
         add_outputs(c, d);
         chain_order.push_back(c.key);
         if (!chains.emplace(c.key, c).second) throw CompileError(where, "duplicate " + c.key);
@@ -1521,7 +1795,6 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         std::string key, where;
         std::map<int, int> slot_map;
         std::vector<const CompiledPatch*> patches;
-        std::vector<json> placements;
         std::size_t index;
     };
     std::vector<TrackWork> track_work;
@@ -1537,13 +1810,9 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         if (keep_unused) {
             for (int s = 0; s < static_cast<int>(slot_ids.size()); ++s) used.insert(s);
         }
-        std::vector<json> placements = d.value("placements", json::array()).get<std::vector<json>>();
-        std::stable_sort(placements.begin(), placements.end(), [](const json& a, const json& b) {
-            return a.at("tick").get<u32>() < b.at("tick").get<u32>();
-        });
-        for (const json& placed : placements) {
-            for (const json& note : clips.at(placed.at("clip").get<std::string>())->value("notes", json::array())) {
-                used.insert(note.value("slot", 0));
+        for (const Placed& placed : placements_of.at(key)) {
+            for (const json& note : placed.clip->value("notes", json::array())) {
+                if (placed.plays(note.at("tick").get<u32>())) used.insert(note.value("slot", 0));
             }
         }
         std::map<int, int> slot_map;
@@ -1572,8 +1841,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         desc.slot_count = static_cast<u16>(slots.size()) - slot_begin;
         compiled_track_index[key] = static_cast<int>(track_table.size());
         add_inits(d, 0, static_cast<u16>(track_table.size()));
-        track_work.push_back({key, track_where, std::move(slot_map), std::move(track_patches), std::move(placements),
-                              track_table.size()});
+        track_work.push_back({key, track_where, std::move(slot_map), std::move(track_patches), track_table.size()});
         track_table.push_back(desc);
     }
 
@@ -1583,23 +1851,126 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         if (c.kind == Chain::TrackChain && !compiled_track_index.count(key)) c.live = false;
     }
 
-    // Mixer, with registers allocated by last use.
-    std::map<std::string, int> readers;
-    for (const std::string& key : order) {
+    // Which mix controls a lane moves, anywhere in the song.
+    struct Moves {
+        bool fader = false, pan = false;
+        std::set<std::string> sends;
+    };
+    std::map<std::string, Moves> moves;
+    bool master_moves = false;
+    for (const std::string& key : chain_order) {
         const Chain& c = chains.at(key);
-        if (!c.live) continue;
-        for (const auto& o : c.outputs) {
-            if (chains.at(o.to).live) ++readers[key];
-        }
-    }
-    for (const std::string& key : order) {
-        const Chain& c = chains.at(key);
-        if (!c.live) continue;
-        for (const auto& k : c.keys) {
-            if (chains.at(k).live) ++readers[k];
+        if (c.kind != Chain::TrackChain) continue;
+        for (const Placed& placed : placements_of.at(key)) {
+            for (const json& lane : placed.clip->value("automation", json::array())) {
+                if (!lane.contains("target") || !lane.at("target").is_object()) continue;
+                const json& t = lane.at("target");
+                if (!t.contains("mix") || !t.at("mix").is_string()) continue;
+                const std::string control = t.at("mix").get<std::string>();
+                std::string owner;
+                if (t.contains("master")) {
+                    master_moves = master_moves || control == "fader";
+                    continue;
+                }
+                if (t.contains("track")) {
+                    owner = "track:" + t.at("track").dump();
+                } else if (t.contains("bus") && t.at("bus").is_string()) {
+                    owner = "bus:" + t.at("bus").get<std::string>();
+                } else {
+                    continue;
+                }
+                Moves& m = moves[owner];
+                m.fader = m.fader || control == "fader";
+                m.pan = m.pan || control == "pan";
+                if (control == "send" && t.contains("to") && t.at("to").is_string()) {
+                    m.sends.insert("bus:" + t.at("to").get<std::string>());
+                }
+            }
         }
     }
 
+    // Where each factor is applied. A register pair holds the product of its factors, so it can follow a lane on only
+    // one of them. Until two that move would share a pair, everything stays in the output registers, which is what
+    // every Program compiled before stages existed has. Then the master fader takes a stage of its own, then a chain's
+    // fader, then its pan, until no pair holds two that move. A send's gain is only ever in its own register. A
+    // pre-fader send needs the chain before its fader and pan, so a chain with one applies those in a stage.
+    struct Staged {
+        bool fader = false, pan = false;
+    };
+    std::map<std::string, Staged> staged_alone;
+    bool master_staged = false;
+    const auto has_pre = [](const Chain& c) {
+        return std::any_of(c.outputs.begin(), c.outputs.end(), [](const Chain::Output& o) { return o.pre; });
+    };
+    const auto staged_factors = [&](const Chain& c) {
+        const Staged s = staged_alone.count(c.key) ? staged_alone.at(c.key) : Staged{};
+        unsigned of = 0;
+        if (has_pre(c) || s.fader) of |= kFaderFactor;
+        if (has_pre(c) || s.pan) of |= kPanFactor;
+        return of;
+    };
+    const auto stages_of = [&](const Chain& c) {
+        const Staged s = staged_alone.count(c.key) ? staged_alone.at(c.key) : Staged{};
+        std::vector<unsigned> list;
+        if (s.fader) list.push_back(kFaderFactor);
+        if (s.pan) list.push_back(kPanFactor);
+        const unsigned rest =
+            staged_factors(c) & ~((s.fader ? unsigned{kFaderFactor} : 0u) | (s.pan ? unsigned{kPanFactor} : 0u));
+        if (rest) list.push_back(rest);
+        return list;
+    };
+    const auto output_factors = [&](const Chain& c, const Chain::Output& o) -> unsigned {
+        if (o.pre) return kMuteFactor | kSendFactor;
+        unsigned of = (kFaderFactor | kPanFactor) & ~staged_factors(c);
+        if (o.is_send) of |= kSendFactor;
+        if (o.to == "master" && !master_staged) of |= kMasterFactor;
+        return of;
+    };
+    const auto moving = [&](const Chain& c, unsigned of, const std::string& send_to) {
+        const Moves m = moves.count(c.key) ? moves.at(c.key) : Moves{};
+        unsigned out = 0;
+        if ((of & kFaderFactor) && m.fader) out |= kFaderFactor;
+        if ((of & kPanFactor) && m.pan) out |= kPanFactor;
+        if ((of & kSendFactor) && m.sends.count(send_to)) out |= kSendFactor;
+        if ((of & kMasterFactor) && master_moves) out |= kMasterFactor;
+        return out;
+    };
+    for (bool settled = false; !settled;) {
+        settled = true;
+        for (const std::string& key : chain_order) {
+            const Chain& c = chains.at(key);
+            if (c.kind == Chain::MasterChain) continue;
+            std::vector<unsigned> pairs;
+            for (const auto& o : c.outputs) pairs.push_back(moving(c, output_factors(c, o), o.to));
+            for (const unsigned s : stages_of(c)) pairs.push_back(moving(c, s, ""));
+            for (const unsigned both : pairs) {
+                if (std::popcount(both) < 2) continue;
+                // Each of these was not yet staged, since a staged factor is in no output and alone in its stage.
+                if (both & kMasterFactor) {
+                    master_staged = true;
+                } else if (both & kFaderFactor) {
+                    staged_alone[key].fader = true;
+                } else {
+                    staged_alone[key].pan = true;
+                }
+                settled = false;
+                break;
+            }
+            if (!settled) break;
+        }
+    }
+    for (const std::string& key : chain_order) {
+        Chain& c = chains.at(key);
+        if (c.kind == Chain::MasterChain) {
+            if (master_staged) c.stages.push_back({kMasterFactor});
+            continue;
+        }
+        for (auto& o : c.outputs) o.of = output_factors(c, o);
+        for (const unsigned of : stages_of(c)) c.stages.push_back({of});
+    }
+
+    // Mixer, with registers allocated by last use. Each bus register counts the steps still to read it.
+    std::map<int, int> readers;
     std::vector<MixStep> mix;
     std::vector<GatherInput> gather_inputs;
     std::vector<float> mix_init;
@@ -1611,8 +1982,23 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         free_regs.erase(free_regs.begin());
         return r;
     };
-    const auto read_done = [&](const std::string& key) {
-        if (--readers[key] == 0) free_regs.insert(chains.at(key).reg);
+    const auto read_done = [&](int reg) {
+        if (--readers[reg] == 0) free_regs.insert(reg);
+    };
+    const auto expect_readers = [&](int reg, int count) {
+        readers[reg] = count;
+        if (count == 0) free_regs.insert(reg);
+    };
+    const float master_gain = chains.at("master").doc->value("gain", 1.0f);
+    const auto values_of = [&](const Chain& c, float send) {
+        return MixValues{c.fader, c.mute, c.pan, send, master_gain};
+    };
+
+    const auto add_pair = [&](unsigned of, const MixValues& v) {
+        const u16 left = static_cast<u16>(mix_init.size());
+        mix_init.push_back(gain_of(of, v, false));
+        mix_init.push_back(gain_of(of, v, true));
+        return left;
     };
 
     struct CompiledInsert {
@@ -1627,34 +2013,51 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         if (!c.live) continue;
         const std::string chain_where = where + "/" + key;
 
-        std::vector<std::string> inputs_read;
+        // A stage is a Gather of one input, the chain's own bus, scaled by its pair.
+        const auto run_stage = [&](Chain::Stage& stage) {
+            stage.reg = add_pair(stage.of, values_of(c, 1.0f));
+            const u16 first = static_cast<u16>(gather_inputs.size());
+            gather_inputs.push_back(
+                {static_cast<u16>(c.reg), static_cast<u16>(stage.reg), static_cast<u16>(stage.reg + 1), 0});
+            const int from = c.reg;
+            c.reg = new_reg();
+            mix.push_back({static_cast<u8>(MixOp::Gather), 0, task, first, static_cast<u16>(c.reg), 1, kNone});
+            read_done(from);
+        };
+
+        std::vector<int> inputs_read;
         if (c.kind == Chain::TrackChain) {
             c.reg = new_reg();
             mix.push_back({static_cast<u8>(MixOp::RunVoices), 0, task, static_cast<u16>(compiled_track_index.at(key)),
                            static_cast<u16>(c.reg), 0, kNone});
         } else {
             const u16 first = static_cast<u16>(gather_inputs.size());
-            const float scale = c.kind == Chain::MasterChain ? c.doc->value("gain", 1.0f) : 1.0f;
             for (const std::string& source_key : order) {
                 Chain& source = chains.at(source_key);
                 if (!source.live) continue;
                 for (auto& o : source.outputs) {
                     if (o.to != key) continue;
-                    const u16 gain_left = static_cast<u16>(mix_init.size());
-                    o.reg = gain_left;
-                    mix_init.push_back(o.gain_left * scale);
-                    mix_init.push_back(o.gain_right * scale);
-                    source.mix.push_back({{"to", key}, {"left", gain_left}, {"right", gain_left + 1}});
+                    o.reg = add_pair(o.of, values_of(source, o.send));
+                    json route = {{"to", key}, {"left", o.reg}, {"right", o.reg + 1}, {"of", factor_names(o.of)}};
+                    if (o.pre) route["pre"] = true;
+                    source.mix.push_back(std::move(route));
+                    const int from = o.pre ? source.pre_reg : source.reg;
                     gather_inputs.push_back(
-                        {static_cast<u16>(source.reg), gain_left, static_cast<u16>(gain_left + 1), 0});
-                    inputs_read.push_back(source_key);
+                        {static_cast<u16>(from), static_cast<u16>(o.reg), static_cast<u16>(o.reg + 1), 0});
+                    inputs_read.push_back(from);
                 }
             }
             c.reg = new_reg();
             mix.push_back({static_cast<u8>(MixOp::Gather), 0, task, first, static_cast<u16>(c.reg),
                            static_cast<u16>(gather_inputs.size() - first), kNone});
         }
-        for (const std::string& source : inputs_read) read_done(source);
+        for (const int source : inputs_read) read_done(source);
+        if (c.kind == Chain::MasterChain) {
+            for (Chain::Stage& stage : c.stages) {
+                expect_readers(c.reg, 1);
+                run_stage(stage);
+            }
+        }
 
         for (const json& i : c.doc->value("inserts", json::array())) {
             const std::string id = i.at("patch").get<std::string>();
@@ -1667,19 +2070,40 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
             desc.patch = patch;
             add_inits(i, 1, static_cast<u16>(insert_table.size()));
             u16 key_reg = kNone;
-            std::string key_source;
+            int key_from = -1;
             if (i.contains("key") && chains.at(i.at("key").get<std::string>()).live) {
                 if (p.inputs < 2) throw CompileError(chain_where, "insert patch '" + id + "' has no sidechain input");
-                key_source = i.at("key").get<std::string>();
-                key_reg = static_cast<u16>(chains.at(key_source).reg);
+                key_from = chains.at(i.at("key").get<std::string>()).pre_reg;
+                key_reg = static_cast<u16>(key_from);
             }
             mix.push_back({static_cast<u8>(MixOp::RunInsert), 0, task, static_cast<u16>(insert_table.size()),
                            static_cast<u16>(c.reg), static_cast<u16>(c.reg), key_reg});
             compiled_inserts[desc.id] = {static_cast<u16>(insert_table.size()), &p, i.value("params", json::object())};
             insert_table.push_back(desc);
-            if (!key_source.empty()) read_done(key_source);
+            if (key_from >= 0) read_done(key_from);
         }
         c.step = static_cast<int>(mix.size()) - 1;
+        c.pre_reg = c.reg;
+        if (c.kind != Chain::MasterChain) {
+            // Who reads this chain: a sidechain and a pre-fader send read it before its stages, everything else after.
+            int before = 0, after = 0;
+            for (const auto& o : c.outputs) {
+                if (chains.at(o.to).live) ++(o.pre ? before : after);
+            }
+            for (const std::string& other : order) {
+                if (!chains.at(other).live) continue;
+                for (const std::string& k : chains.at(other).keys) before += k == key;
+            }
+            if (c.stages.empty()) {
+                expect_readers(c.reg, before + after);
+            } else {
+                expect_readers(c.reg, before + 1);
+                for (std::size_t s = 0; s < c.stages.size(); ++s) {
+                    run_stage(c.stages[s]);
+                    expect_readers(c.reg, s + 1 == c.stages.size() ? after : 1);
+                }
+            }
+        }
         ++task;
     }
     if (next_reg > static_cast<int>(kMaxRegisters)) throw CompileError(where, "the mixer needs too many buses");
@@ -1724,8 +2148,8 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         }
     };
     const auto global_name = [](u16 id) { return "global param " + std::to_string(id); };
-    // A mix register holds fader, pan and send multiplied together, so a lane on one has to use the others' values, and
-    // those can only be the fixed ones. Two controls in one register therefore can't both move.
+    // A mix register holds the product of its factors, so a lane on one writes that product with the others' fixed
+    // values in it, and only one of them may move.
     std::map<int, std::string> register_control;
     struct MixWrite {
         u16 reg;
@@ -1737,7 +2161,6 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
             if (i.contains("id")) declared_inserts.insert(i.at("id").get<int>());
         }
     }
-    const float master_gain = chains.at("master").doc->value("gain", 1.0f);
     const auto mix_writes = [&](const json& target, float value, const std::string& at) {
         for (const auto& [name, field] : target.items()) {
             if (name != "mix" && name != "track" && name != "bus" && name != "master" && name != "to") {
@@ -1768,40 +2191,109 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
 
         std::vector<MixWrite> writes;
         const std::string name = control + " of " + key;
-        const auto write = [&](const Chain::Output& o) {
-            if (o.reg < 0) return;  // Nothing plays through it
-            const float scale = on_master ? value : o.to == "master" ? master_gain : 1.0f;
-            const float fader = !on_master && control == "fader" ? value : o.fader;
-            const float pan = control == "pan" ? value : o.pan;
-            const float send = control == "send" ? value : o.send;
-            const float base = fader * o.mute;
-            writes.push_back({static_cast<u16>(o.reg), base * pan_left(pan) * send * scale});
-            writes.push_back({static_cast<u16>(o.reg + 1), base * pan_right(pan) * send * scale});
+        const unsigned factor = on_master            ? kMasterFactor
+                                : control == "fader" ? kFaderFactor
+                                : control == "pan"   ? kPanFactor
+                                                     : kSendFactor;
+        const auto write = [&](const Chain& c, int reg, unsigned of, float send) {
+            if (reg < 0 || !(of & factor)) return;  // Nothing plays through it, or it doesn't hold this control
+            MixValues v = values_of(c, send);
+            (factor == kFaderFactor  ? v.fader
+             : factor == kPanFactor  ? v.pan
+             : factor == kSendFactor ? v.send
+                                     : v.master) = value;
+            writes.push_back({static_cast<u16>(reg), gain_of(of, v, false)});
+            writes.push_back({static_cast<u16>(reg + 1), gain_of(of, v, true)});
         };
         if (on_master) {
             for (const std::string& source : chain_order) {
                 for (const auto& o : chains.at(source).outputs) {
-                    if (o.to == "master") write(o);
+                    if (o.to == "master") write(chains.at(source), o.reg, o.of, o.send);
                 }
             }
         } else {
-            bool found = false;
-            for (const auto& o : chains.at(key).outputs) {
-                if (control == "send" && (!o.is_send || o.to != to)) continue;
-                found = true;
-                write(o);
+            const Chain& c = chains.at(key);
+            if (control == "send" && std::none_of(c.outputs.begin(), c.outputs.end(),
+                                                  [&](const Chain::Output& o) { return o.is_send && o.to == to; })) {
+                throw CompileError(at, key + " has no send to " + to);
             }
-            if (!found) throw CompileError(at, key + " has no send to " + to);
+            for (const auto& o : c.outputs) {
+                if (control == "send" && (!o.is_send || o.to != to)) continue;
+                write(c, o.reg, o.of, o.send);
+            }
         }
+        for (const auto& s : chains.at(key).stages) write(chains.at(key), s.reg, s.of, 1.0f);
+        // Stages keep two controls that move out of one pair, so this would be the compiler's own mistake.
         for (const MixWrite& w : writes) {
             const auto [it, added] = register_control.try_emplace(w.reg, name);
             if (!added && it->second != name) {
-                throw CompileError(at, name + " and " + it->second +
-                                           " share a mix register, so only one can move here. "
-                                           "Automate the other with a gain or pan insert");
+                throw CompileError(at, name + " and " + it->second + " share a mix register");
             }
         }
         return writes;
+    };
+
+    // How many notes a track holds at once while it plays poly, which is how many voices it needs before the oldest is
+    // cut short to make room, and the first tick it has too few. A release rings on after its note, so it can need
+    // more.
+    std::map<std::string, std::pair<u32, u64>> notes_at_once;
+    constexpr u64 kNever = ~u64{0};
+    const auto peak_notes = [&](const TrackWork& work, const json& d) -> std::pair<u32, u64> {
+        struct Edge {
+            u64 tick;
+            int kind;  // ends before mode changes, and those before starts, as the engine takes them
+            u32 note;
+            bool poly;
+        };
+        std::vector<Edge> edges;
+        u32 notes = 0;
+        for (const Placed& placed : placements_of.at(work.key)) {
+            const json clip_notes = placed.clip->value("notes", json::array());
+            const json plays = placed.clip->value("play", json::array());
+            for (u32 k = 0; k < placed.repeat; ++k) {
+                const u64 base = placed.tick + static_cast<u64>(k) * placed.length;
+                const json* chased = nullptr;
+                for (const json& p : plays) {
+                    const u32 t = p.at("tick").get<u32>();
+                    const bool poly = p.value("mode", std::string{"poly"}) == "poly";
+                    if (t < placed.start) {
+                        if (!chased || chased->at("tick").get<u32>() <= t) chased = &p;
+                    } else if (placed.plays(t)) {
+                        edges.push_back({base + t - placed.start, 1, 0, poly});
+                    }
+                }
+                if (chased) edges.push_back({base, 1, 0, chased->value("mode", std::string{"poly"}) == "poly"});
+                for (const json& n : clip_notes) {
+                    const u32 t = n.at("tick").get<u32>();
+                    if (!placed.plays(t)) continue;
+                    edges.push_back({base + t - placed.start, 2, notes, false});
+                    edges.push_back({base + t - placed.start + n.at("dur").get<u32>(), 0, notes, false});
+                    ++notes;
+                }
+                if (edges.size() > (1u << 21)) return {0, kNever};  // Too many to be worth counting
+            }
+        }
+        std::stable_sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b) {
+            return std::tie(a.tick, a.kind) < std::tie(b.tick, b.kind);
+        });
+        const u32 voices = d.value("voices", 4u);
+        bool poly = !d.contains("play") || d.at("play").value("mode", std::string{"poly"}) == "poly";
+        std::vector<bool> counted(notes, false);
+        u32 held = 0, peak = 0;
+        u64 first = kNever;
+        for (const Edge& e : edges) {
+            if (e.kind == 1) {
+                poly = e.poly;
+            } else if (e.kind == 2) {
+                if (!poly) continue;
+                counted[e.note] = true;
+                peak = std::max(peak, ++held);
+                if (held > voices && first == kNever) first = e.tick;
+            } else if (counted[e.note]) {
+                --held;
+            }
+        }
+        return {peak, first};
     };
 
     // The clips and streams the track pass left. Their order is what it always was, so nothing that compiled before
@@ -1862,7 +2354,8 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
 
         const auto play_instruction = [&](const json& play, const std::string& at) -> Instruction {
             for (const auto& [name, field] : play.items()) {
-                if (name != "mode" && name != "priority" && name != "glide" && name != "tick") {
+                if (name != "mode" && name != "priority" && name != "glide" && name != "tick" &&
+                    name != "slur_velocity") {
                     throw CompileError(at, "play has no '" + name + "'");
                 }
             }
@@ -1881,24 +2374,91 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                 throw CompileError(at, "priority chooses among held notes, and poly plays them all");
             }
             if (!(glide >= 0.0f && glide <= kMaxGlideSeconds)) throw CompileError(at, "glide must be 0 to 60 seconds");
-            return {static_cast<u8>(Instr::PlayMode), static_cast<u8>(kind), static_cast<u16>(order),
+            // A slurred note brings its velocity, which only a legato line has notes slurring into.
+            const bool slur_velocity = play.value("slur_velocity", false);
+            if (slur_velocity && kind != PlayKind::Legato)
+                throw CompileError(at, "only legato slurs, so only it has slur_velocity");
+            const PlayKind played = slur_velocity ? PlayKind::LegatoVelocity : kind;
+            return {static_cast<u8>(Instr::PlayMode), static_cast<u8>(played), static_cast<u16>(order),
                     std::bit_cast<u32>(glide)};
         };
 
-        // A clip's slots depend on the track, so a clip compiles per track and identical results merge.
-        const auto compile_clip = [&](const json& clip, u32 placed_at) {
+        // Where a lane's target starts from, before any lane in the song has moved it.
+        const auto lane_start = [&](const json& point) -> double {
+            // A parameter whose slots start apart has no one start, which is only an error if something needs it.
+            if (!point.contains("target")) {
+                try {
+                    return param_start(static_cast<u16>(point.at("param").get<int>()));
+                } catch (const CompileError&) {
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+            }
+            const json& target = point.at("target");
+            if (!target.is_object()) return 0.0;  // The lane itself says what is wrong with it
+            if (target.contains("insert")) {
+                if (!target.at("insert").is_number_integer() || !point.contains("param")) return 0.0;
+                const auto found = compiled_inserts.find(target.at("insert").get<int>());
+                if (found == compiled_inserts.end()) return 0.0;  // Nothing plays through it, so nothing reads this
+                const int param = point.at("param").get<int>();
+                const auto info = std::find_if(found->second.patch->params.begin(), found->second.patch->params.end(),
+                                               [&](const ParamInfo& p) { return p.id == param; });
+                if (info == found->second.patch->params.end()) return 0.0;
+                if (info->scope == ParamScope::Global) return globals.at(static_cast<u16>(param)).value;
+                const std::string key = std::to_string(param);
+                return found->second.params.contains(key) ? found->second.params.at(key).get<float>() : info->def;
+            }
+            if (!target.contains("mix") || !target.at("mix").is_string()) return 0.0;
+            const std::string control = target.at("mix").get<std::string>();
+            if (target.contains("master")) return master_gain;
+            const std::string owner = target.contains("track") ? "track:" + target.at("track").dump()
+                                      : target.contains("bus") && target.at("bus").is_string()
+                                          ? "bus:" + target.at("bus").get<std::string>()
+                                          : std::string{};
+            if (!chains.count(owner)) return 0.0;
+            const Chain& c = chains.at(owner);
+            if (control == "pan") return c.pan;
+            if (control != "send") return c.fader;
+            for (const auto& o : c.outputs) {
+                if (o.is_send && target.contains("to") && target.at("to").is_string() &&
+                    o.to == "bus:" + target.at("to").get<std::string>()) {
+                    return o.send;
+                }
+            }
+            return 0.0;
+        };
+
+        // Where a target stands, which a curve or a window starting part way through a clip needs to know.
+        const auto needed = [&](double value, const json& point) {
+            if (std::isnan(value)) (void)param_start(static_cast<u16>(point.at("param").get<int>()));  // throws
+            return value;
+        };
+
+        // A clip's slots depend on the track, so a clip compiles per track and identical results merge. So does each
+        // window a placement plays of it, at each repeat whose start differs: `lanes` is where each target stands at
+        // the window's start, and it is left where they stand at its end.
+        const auto compile_clip = [&](const Placed& placed, u32 window_at, LaneStates& lanes) {
             enum class ItemKind { Lane, Note, Play };
+            // What a lane does at a tick: set its target, or ramp it in a straight line.
+            struct LaneEvent {
+                const json* point;
+                float value;
+                u32 ramp;
+            };
             struct Item {
                 u32 tick;
                 int order;
                 int key;
                 const json* doc;
                 ItemKind kind;
+                LaneEvent lane = {};
+                int note = 0, velocity = 0;
             };
             std::vector<Item> items;
+            const json& clip = *placed.clip;
             const u32 length = clip.at("length").get<u32>();
             const std::string clip_where = track_where + "/clip:" + clip.at("id").get<std::string>();
             if (length == 0) throw CompileError(clip_where, "clip has no length");
+            const u32 window = placed.length;
             const json notes = clip.value("notes", json::array());
             const json automation = clip.value("automation", json::array());
             const json plays = clip.value("play", json::array());
@@ -1906,27 +2466,171 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                 const u32 tick = n.at("tick").get<u32>();
                 if (tick >= length) throw CompileError(clip_where, "a note starts after the clip ends");
                 if (n.at("dur").get<u32>() == 0) throw CompileError(clip_where, "a note has no duration");
-                items.push_back({tick, 1, n.at("note").get<int>(), &n, ItemKind::Note});
+                if (!placed.plays(tick)) continue;
+                const int note = n.at("note").get<int>() + placed.transpose;
+                const int velocity = n.value("vel", 100);
+                if (note < 0 || note > 127) {
+                    throw CompileError(clip_where, placed.transpose ? "a placement transposes a note out of 0 to 127"
+                                                                    : "note or velocity out of range");
+                }
+                if (velocity < 0 || velocity > 127) throw CompileError(clip_where, "note or velocity out of range");
+                const int scaled =
+                    placed.velocity == 1.0
+                        ? velocity
+                        : static_cast<int>(std::min(127.0, std::floor(velocity * placed.velocity + 0.5)));
+                Item item{tick - placed.start, 1, note, &n, ItemKind::Note};
+                item.note = note;
+                item.velocity = scaled;
+                items.push_back(item);
             }
-            for (const json& a : automation) {
+
+            // Lanes, a target at a time, in the order they move it. A point before the window only moves where its
+            // target stands when the window starts, which the window then sets, so it sounds as it would have.
+            std::vector<std::string> keys;
+            std::map<std::string, std::vector<std::size_t>> lane_points;
+            for (std::size_t i = 0; i < automation.size(); ++i) {
+                const json& a = automation[i];
                 const u32 tick = a.at("tick").get<u32>();
                 if (tick >= length) throw CompileError(clip_where, "automation starts after the clip ends");
-                if (a.contains("target")) {
-                    items.push_back({tick, 0, a.value("param", 0), &a, ItemKind::Lane});
-                    continue;
+                const std::string curve = a.value("curve", std::string{"linear"});
+                if (curve != "linear" && curve != "exp") {
+                    throw CompileError(clip_where, "a lane's curve is linear or exp, not '" + curve + "'");
                 }
-                const int param = a.at("param").get<int>();
-                if (!has_param(static_cast<u16>(param))) {
-                    throw CompileError(
-                        clip_where, "automates param " + std::to_string(param) + ", which no patch on this track has");
+                if (!a.contains("target")) {
+                    const int param = a.at("param").get<int>();
+                    if (!has_param(static_cast<u16>(param))) {
+                        throw CompileError(clip_where, "automates param " + std::to_string(param) +
+                                                           ", which no patch on this track has");
+                    }
                 }
-                items.push_back({tick, 0, param, &a, ItemKind::Lane});
+                const std::string key =
+                    (a.contains("target") ? a.at("target").dump() : "") + "#" + std::to_string(a.value("param", -1));
+                if (!lane_points.count(key)) keys.push_back(key);
+                lane_points[key].push_back(i);
             }
+            // Ordered as the clip lists its points, so a lane that only sets and ramps compiles as it always has.
+            std::vector<std::tuple<long, std::size_t, Item>> lane_items;
+            const auto add_lane = [&](long rank, u32 tick, const json& point, double value, u32 ramp) {
+                Item item{tick, 0, point.contains("target") ? point.value("param", 0) : point.at("param").get<int>(),
+                          &point, ItemKind::Lane};
+                item.lane = {&point, static_cast<float>(value), ramp};
+                lane_items.emplace_back(rank, lane_items.size(), item);
+            };
+            for (const std::string& key : keys) {
+                std::vector<std::size_t> order_of = lane_points.at(key);
+                std::stable_sort(order_of.begin(), order_of.end(), [&](std::size_t a, std::size_t b) {
+                    return automation[a].at("tick").get<u32>() < automation[b].at("tick").get<u32>();
+                });
+                LaneState state;
+                if (lanes.count(key)) {
+                    state = lanes.at(key);
+                } else {
+                    const double start = lane_start(automation[order_of.front()]);
+                    state = {start, start, 0.0, 0.0, false};
+                }
+                struct Move {
+                    long rank;
+                    const json* point;
+                    double tick, from, to;
+                    u32 ramp;
+                    bool curved;
+                };
+                std::vector<Move> in_window;
+                const json* chased = nullptr;
+                for (const std::size_t i : order_of) {
+                    const json& a = automation[i];
+                    const double tick = static_cast<double>(a.at("tick").get<u32>()) - placed.start;
+                    if (tick >= window) break;
+                    const double from = state.at(tick), to = a.at("value").get<double>();
+                    const u32 ramp = a.value("ramp", 0u);
+                    const bool curved = a.value("curve", std::string{}) == "exp" && ramp > 0;
+                    if (curved && (needed(from, a) < 0.0 || to < 0.0)) {
+                        throw CompileError(clip_where, "an exp curve moves by ratios, so it needs values of 0 or more");
+                    }
+                    state =
+                        ramp ? LaneState{from, to, tick, tick + ramp, curved} : LaneState{to, to, tick, tick, false};
+                    if (tick < 0.0) {
+                        chased = &a;
+                        continue;
+                    }
+                    in_window.push_back({static_cast<long>(i), &a, tick, from, to, ramp, curved});
+                }
+                if (chased) {
+                    // Where the target stood when the window started, and where it was going.
+                    const LaneState at_start = [&] {
+                        LaneState s = lanes.count(key) ? lanes.at(key) : LaneState{};
+                        if (!lanes.count(key)) {
+                            const double start = lane_start(*chased);
+                            s = {start, start, 0.0, 0.0, false};
+                        }
+                        for (const std::size_t i : order_of) {
+                            const json& a = automation[i];
+                            const double tick = static_cast<double>(a.at("tick").get<u32>()) - placed.start;
+                            if (tick >= 0.0) break;
+                            const double from = s.at(tick), to = a.at("value").get<double>();
+                            const u32 ramp = a.value("ramp", 0u);
+                            const bool curved = a.value("curve", std::string{}) == "exp" && ramp > 0;
+                            s = ramp ? LaneState{from, to, tick, tick + ramp, curved}
+                                     : LaneState{to, to, tick, tick, false};
+                        }
+                        return s;
+                    }();
+                    const double now = needed(at_start.at(0.0), *chased);
+                    std::vector<Move> head{{-1, chased, 0.0, now, now, 0, false}};
+                    if (at_start.end > 0.0) {
+                        head.push_back({-1, chased, 0.0, at_start.at(0.0), at_start.to, static_cast<u32>(at_start.end),
+                                        at_start.curved});
+                    }
+                    in_window.insert(in_window.begin(), head.begin(), head.end());
+                }
+                for (std::size_t m = 0; m < in_window.size(); ++m) {
+                    const Move& move = in_window[m];
+                    const u32 tick = static_cast<u32>(move.tick);
+                    if (!move.curved) {
+                        add_lane(move.rank, tick, *move.point, move.to, move.ramp);
+                        continue;
+                    }
+                    // A curve is straight segments, each heading where the curve is at its end. It stops at the next
+                    // point, and one that runs past the window finishes in a straight line from the last segment it
+                    // could start, since nothing after the window's end can be in it.
+                    const double next = m + 1 < in_window.size() ? in_window[m + 1].tick : 1e18;
+                    const double end = move.tick + move.ramp;
+                    const u32 steps = std::min(curve_steps(move.from, move.to), move.ramp);
+                    for (u32 k = 0; k < steps; ++k) {
+                        const u32 at = tick + static_cast<u32>(static_cast<u64>(move.ramp) * k / steps);
+                        const u32 to = tick + static_cast<u32>(static_cast<u64>(move.ramp) * (k + 1) / steps);
+                        if (at >= next || at >= window) break;
+                        if (to >= window && next >= window && to < end) {
+                            add_lane(move.rank, at, *move.point, move.to, static_cast<u32>(end) - at);
+                            if (m + 1 == in_window.size()) {
+                                state = {curve_at(move.from, move.to, (at - move.tick) / move.ramp), move.to,
+                                         static_cast<double>(at), end, false};
+                            }
+                            break;
+                        }
+                        add_lane(move.rank, at, *move.point, curve_at(move.from, move.to, (to - move.tick) / move.ramp),
+                                 to - at);
+                    }
+                }
+                lanes[key] = state;
+            }
+            std::stable_sort(lane_items.begin(), lane_items.end(), [](const auto& a, const auto& b) {
+                return std::tie(std::get<0>(a), std::get<1>(a)) < std::tie(std::get<0>(b), std::get<1>(b));
+            });
+            for (const auto& entry : lane_items) items.push_back(std::get<2>(entry));
+
+            const json* chased_play = nullptr;
             for (const json& p : plays) {
                 const u32 tick = p.at("tick").get<u32>();
                 if (tick >= length) throw CompileError(clip_where, "a play change comes after the clip ends");
-                items.push_back({tick, -1, 0, &p, ItemKind::Play});
+                if (tick < placed.start) {
+                    if (!chased_play || chased_play->at("tick").get<u32>() <= tick) chased_play = &p;
+                    continue;
+                }
+                if (!placed.plays(tick)) continue;
+                items.push_back({tick - placed.start, -1, 0, &p, ItemKind::Play});
             }
+            if (chased_play) items.insert(items.begin(), Item{0, -1, 0, chased_play, ItemKind::Play});
             std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
                 return std::tie(a.tick, a.order, a.key) < std::tie(b.tick, b.order, b.key);
             });
@@ -1935,10 +2639,8 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                 if (to > from) body.push_back({static_cast<u8>(Instr::Wait), 0, 0, to - from});
             };
             // What a lane with a target does. Each one also notes what it moved, so the stream can put it back.
-            const auto target_lane = [&](const json& a) {
+            const auto target_lane = [&](const json& a, float value, u32 ramp) {
                 const json& target = a.at("target");
-                const u32 ramp = a.value("ramp", 0u);
-                const float value = a.at("value").get<float>();
                 if (!target.is_object()) throw CompileError(clip_where, "a lane's target is an object");
                 if (target.contains("mix")) {
                     if (a.contains("param")) throw CompileError(clip_where, "a mix lane has no param");
@@ -2005,28 +2707,23 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                 now = item.tick;
                 if (item.kind == ItemKind::Note) {
                     const json& n = *item.doc;
-                    const int note = n.at("note").get<int>(), velocity = n.value("vel", 100);
-                    if (note < 0 || note > 127 || velocity < 0 || velocity > 127) {
-                        throw CompileError(clip_where, "note or velocity out of range");
-                    }
                     const int slot = slot_map.at(n.value("slot", 0));
                     if (slot != current_slot && slot_map.size() > 1) {
                         body.push_back({static_cast<u8>(Instr::SetPatch), static_cast<u8>(slot), 0, 0});
                     }
                     current_slot = slot;
-                    body.push_back({static_cast<u8>(Instr::NoteOn), static_cast<u8>(note), static_cast<u16>(velocity),
-                                    n.at("dur").get<u32>()});
+                    body.push_back({static_cast<u8>(Instr::NoteOn), static_cast<u8>(item.note),
+                                    static_cast<u16>(item.velocity), n.at("dur").get<u32>()});
                 } else if (item.kind == ItemKind::Play) {
                     body.push_back(play_instruction(*item.doc, clip_where));
                 } else if (item.doc->contains("target")) {
-                    target_lane(*item.doc);
+                    target_lane(*item.doc, item.lane.value, item.lane.ramp);
                 } else {
-                    const json& a = *item.doc;
-                    const u32 value = std::bit_cast<u32>(a.at("value").get<float>());
-                    const u16 param = static_cast<u16>(a.at("param").get<int>());
-                    const u32 ramp = a.value("ramp", 0u);
+                    const u32 value = std::bit_cast<u32>(item.lane.value);
+                    const u16 param = static_cast<u16>(item.doc->at("param").get<int>());
+                    const u32 ramp = item.lane.ramp;
                     if (is_global(param)) claim(global_name(param), work.key, clip_where);
-                    moved_params.try_emplace(param, placed_at == 0 && item.tick == 0 && ramp == 0);
+                    moved_params.try_emplace(param, window_at == 0 && item.tick == 0 && ramp == 0);
                     if (ramp) {
                         body.push_back({static_cast<u8>(Instr::Ramp), 0, param, value});
                         body.push_back({static_cast<u8>(Instr::RampArg), 0, 0, ramp});
@@ -2035,10 +2732,10 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                     }
                 }
             }
-            wait_to(now, length);
+            wait_to(now, window);
 
             Writer key_bytes;
-            key_bytes.put(length);
+            key_bytes.put(window);
             key_bytes.put_all(body);
             const auto cached = clip_cache.find(key_bytes.bytes);
             if (cached != clip_cache.end()) return cached->second;
@@ -2047,31 +2744,63 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
             for (const Instruction& i : body) {
                 if (i.op == static_cast<u8>(Instr::SetPatch)) used_slots = std::max<u32>(used_slots, i.a + 1u);
             }
-            clip_table.push_back({static_cast<u32>(code.size()), static_cast<u32>(body.size()), length, used_slots});
+            clip_table.push_back({static_cast<u32>(code.size()), static_cast<u32>(body.size()), window, used_slots});
             code.insert(code.end(), body.begin(), body.end());
             clip_cache.emplace(std::move(key_bytes.bytes), index);
             return index;
         };
 
+        // A repeat compiles the same as the last once it starts with every target where the last one did, which is
+        // usually the second. A curve still on its way when its window ends can keep that from ever being exact, so
+        // after a few the rest take the last.
+        constexpr u32 kMaxRepeatCompiles = 8;
+        LaneStates lanes;
+        u32 origin = 0;  // the tick `lanes` is seen from
+        const auto move_to = [&](u32 tick) {
+            for (auto& [key, state] : lanes) state = state.later(static_cast<double>(tick) - origin);
+            origin = tick;
+        };
         std::vector<Instruction> placed_stream;
         u32 cursor = 0;
-        for (const json& placed : work.placements) {
-            const json& clip = *clips.at(placed.at("clip").get<std::string>());
-            const u32 tick = placed.at("tick").get<u32>();
-            const u32 repeat = placed.value("repeat", 1u);
-            if (repeat == 0) throw CompileError(track_where, "a placement repeats 0 times");
-            if (tick < cursor) throw CompileError(track_where, "clips overlap on this track");
-            const u16 index = compile_clip(clip, tick);
-            if (tick > cursor) placed_stream.push_back({static_cast<u8>(Instr::Wait), 0, 0, tick - cursor});
-            placed_stream.push_back({static_cast<u8>(Instr::Call), 0, index, repeat});
-            cursor = tick + repeat * clip.at("length").get<u32>();
+        for (const Placed& placed : placements_of.at(work.key)) {
+            if (placed.tick < cursor) throw CompileError(track_where, "clips overlap on this track");
+            if (placed.tick > cursor)
+                placed_stream.push_back({static_cast<u8>(Instr::Wait), 0, 0, placed.tick - cursor});
+            std::vector<std::pair<u16, u32>> calls;
+            for (u32 k = 0; k < placed.repeat;) {
+                move_to(placed.tick + k * placed.length);
+                const LaneStates before = lanes;
+                const u16 index = compile_clip(placed, origin, lanes);
+                ++k;
+                if (!calls.empty() && calls.back().first == index) {
+                    ++calls.back().second;
+                } else {
+                    calls.emplace_back(index, 1);
+                }
+                move_to(origin + placed.length);
+                if (lanes == before || k >= kMaxRepeatCompiles) {
+                    calls.back().second += placed.repeat - k;
+                    origin = placed.tick + placed.span();
+                    break;
+                }
+            }
+            for (const auto& [index, count] : calls) {
+                placed_stream.push_back({static_cast<u8>(Instr::Call), 0, index, count});
+            }
+            cursor = placed.tick + placed.span();
         }
         placed_stream.push_back({static_cast<u8>(Instr::End), 0, 0, 0});
         length_ticks = std::max(length_ticks, cursor);
+        notes_at_once[work.key] = peak_notes(work, d);
 
         // The head of the stream. A locate replays from here, so every target a lane moved returns to where it started
         // and then chases forward, which is what lets a loop or a jump back sound the same as playing from the top.
         std::vector<Instruction> stream;
+        // A stolen voice fades out when the track asks, which costs fade slots, so cutting it is the default that every
+        // document before this had.
+        const std::string steal = d.value("steal", std::string{"cut"});
+        if (steal != "cut" && steal != "fade") throw CompileError(track_where, "steal is cut or fade");
+        if (steal == "fade") stream.push_back({static_cast<u8>(Instr::Steal), 1, 0, 0});
         if (d.contains("play")) {
             const Instruction play = play_instruction(d.at("play"), track_where);
             const Instruction poly{static_cast<u8>(Instr::PlayMode), 0, 0, std::bit_cast<u32>(0.0f)};
@@ -2096,6 +2825,17 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         code.insert(code.end(), stream.begin(), stream.end());
     }
 
+    // A stage's pair, for an editor to write as a control moves by hand.
+    const auto stages_report = [](const Chain& c) {
+        json list = json::array();
+        for (const Chain::Stage& stage : c.stages) {
+            if (stage.reg >= 0) {
+                list.push_back({{"left", stage.reg}, {"right", stage.reg + 1}, {"of", factor_names(stage.of)}});
+            }
+        }
+        return list;
+    };
+    json warnings = json::array();
     for (const auto& [key, c] : chains) {
         if (c.kind == Chain::TrackChain && compiled_track_index.count(key)) {
             json t;
@@ -2103,15 +2843,27 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
             t["name"] = c.doc->value("name", std::string{});
             t["index"] = compiled_track_index.at(key);
             t["step"] = c.step;
-            t["bus"] = c.reg;
+            t["bus"] = c.pre_reg;
             t["mix"] = c.mix;
+            t["stages"] = stages_report(c);
+            const auto [peak, first] = notes_at_once.at(key);
+            const u32 voices = track_table[static_cast<std::size_t>(compiled_track_index.at(key))].voices;
+            t["notes_at_once"] = peak;
+            if (first != kNever) {
+                warnings.push_back(
+                    {{"where", where + "/" + key},
+                     {"tick", first},
+                     {"message", "holds up to " + std::to_string(peak) + " notes at once with " +
+                                     std::to_string(voices) + " voices, so the oldest are cut short to make room"}});
+            }
             report_tracks.push_back(std::move(t));
         } else if (c.kind == Chain::BusChain && c.live) {
             json b;
             b["id"] = c.doc->at("id");
             b["step"] = c.step;
-            b["bus"] = c.reg;
+            b["bus"] = c.pre_reg;
             b["mix"] = c.mix;
+            b["stages"] = stages_report(c);
             report_buses.push_back(std::move(b));
         }
     }
@@ -2197,6 +2949,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     for (const Instruction& i : code) {
         if (i.op == static_cast<u8>(Instr::RampMix)) h.features |= kFeatureMixRamps;
         if (i.op == static_cast<u8>(Instr::PlayMode)) h.features |= kFeaturePlayModes;
+        if (i.op == static_cast<u8>(Instr::Steal)) h.features |= kFeatureStealFades;
     }
 
     Writer w;
@@ -2229,7 +2982,10 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     for (const auto& [id, insert] : compiled_inserts) {
         report["inserts"].push_back({{"id", id}, {"index", insert.index}});
     }
-    report["master"] = {{"step", chains.at("master").step}, {"bus", chains.at("master").reg}};
+    report["master"] = {{"step", chains.at("master").step},
+                        {"bus", chains.at("master").reg},
+                        {"stages", stages_report(chains.at("master"))}};
+    report["warnings"] = std::move(warnings);
     json used_patches = json::array();
     for (std::size_t i = 0; i < patch_ids.size(); ++i) {
         used_patches.push_back({{"id", patch_ids[i]}, {"hash", hex(patch_hashes[i])}});
@@ -2268,6 +3024,10 @@ inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& order
                 const u8 op = program.instruction(i).op;
                 if (op < static_cast<u8>(Instr::kCount)) {
                     needs_revision = std::max(needs_revision, instr_revision(static_cast<Instr>(op)));
+                }
+                if (op == static_cast<u8>(Instr::PlayMode) &&
+                    program.instruction(i).a == static_cast<u8>(PlayKind::LegatoVelocity)) {
+                    needs_revision = std::max(needs_revision, kLegatoVelocityRevision);
                 }
             }
         }

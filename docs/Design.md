@@ -1,7 +1,7 @@
-# modsynth design, revision 16
+# modsynth design, revision 17
 
 Status: Milestones 1 to 4 and 6 are implemented, along with the harnesses of Milestone 7. Milestone 5 waits for the board.
-The wire format is frozen at version 1, now at revision 6. `docs/Format.md` is its specification, and where this document and that one differ, that
+The wire format is frozen at version 1, now at revision 7. `docs/Format.md` is its specification, and where this document and that one differ, that
 one is right. This document replaces all earlier revisions, and everything needed from them is included here. Sections about later milestones are
 still proposals. Section 24 lists what is agreed but not built, and what is still undecided.
 
@@ -140,14 +140,36 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
   which is what makes a locate or a loop sound the same as playing from the top. A lane with no target that opens with a plain value at tick 0 already does
   that, so it adds nothing to the stream. A `SetParam` reaches every slot of a track, so where a parameter has to go back and its slots start from
   different values, the compiler refuses it and asks for a track value or a value at tick 0.
-- A mix register holds fader, pan and send multiplied together, and a lane has to work out what to write from the others' fixed values. So
-  two controls that share a register can't both move, and the compiler refuses that and points to a gain or pan insert, whose
-  parameter can. One track owns a target, because a locate replays one stream after another and playback interleaves them. A global parameter is a
+- A mix register holds the product of its factors: fader with mute, pan, a send's gain, and the master fader on the way into master. A lane
+  writes that product with the others' fixed values in it, so two factors that move can't share a register. When a song would make them, the
+  compiler moves one to a **stage**, a Gather of one input that scales the chain's bus by a pair of its own: the master fader first, before
+  master's inserts where it always applied, then a chain's fader, then its pan, until no pair holds two that move. So any controls can move at
+  once, with no new op, and a song that never needed a stage compiles to the bytes it always did [measured: all 77 shipped requests that compile
+  gave identical images]. A send can be pre-fader, which reads the chain before its fader and pan, so a chain with one applies those in a stage.
+  The report gives every pair with what it holds, which is what the editor writes as a fader is dragged. One track owns a target, because a locate replays one stream after another and playback interleaves them. A global parameter is a
   target too, however a lane reaches it, because it belongs to the Program and not to a track. A lane on a track that never plays is an error if it reaches
   past that track, which a target or a global does, because it would otherwise vanish without a sound. A lane on an insert or chain that nothing plays
   through is dropped, because nothing can hear it.
+- A lane point's ramp can be `"curve": "exp"`, which moves by equal ratios: evenly in decibels for a gain, and in pitch for a frequency. 0 has no
+  ratio, so a curve to or from 0 runs to or from 60 dB below its other end and lands on 0. The engine ramps in straight lines, so as with tempo
+  the compiler writes a curve as one segment per decibel it spans, none more than 0.015 dB from it, and works the values out with log and exp
+  written from IEEE operations, because they enter a hash and libm differs between hosts. A curve needs to know where it starts, so the compiler
+  follows each target's value through a track's placements. One that runs past its clip's end finishes in a straight line from its last segment.
+- A placement plays a window of its clip, `start` and `length` in the clip's ticks, transposed and with its velocities scaled. Each window
+  compiles as a clip body of its own and merges with any identical one. It starts with every lane target and play mode where the clip had them
+  at its start, so a trimmed placement sounds like that part of the clip. A repeat compiles again only while the targets it starts from differ
+  from the last repeat's, which is usually only the first.
+- Every field of a timeline the compiler doesn't know is refused, as a lane's target always was, so a misspelt field is an error rather than
+  its default, and a newer document read by an older compiler can't play without what it asked for.
+- The report gives each track the most notes it holds at once while it plays poly, and warns, with the first tick, when that is more than its
+  voices. A track can fade a stolen voice out over 2 ms instead of cutting it, from revision 7: its sound moves to a fade slot, a quarter as
+  many as its voices, by swapping memory, so a steal copies nothing and the new note still starts on its own sample. Cutting stays the default,
+  because every document must compile as it did, and a track the editor adds fades. The count of held notes can't see a release still ringing,
+  so a track can steal without a warning [measured: Für Elise holds at most 19 notes on its 24 voices, and its pedal still makes it take a
+  ringing voice in 57 places, where fading moves the render by at most 0.023 against a peak of 0.45, so it now fades; of the shipped examples
+  only the VoiceStealing recipe, which steals on purpose, is warned].
 - Play modes are per track and carried in the stream, so a song can change them midway: poly, mono or legato, with note priority and a glide
-  time. A patch can't do this itself, because it is one voice and can't see the others. Glide moves the voice's note scalar a step per frame, so
+  time. Legato can also bring each slurred note's velocity, from revision 7, moving the velocity scalar over the glide or 5 ms. A patch can't do this itself, because it is one voice and can't see the others. Glide moves the voice's note scalar a step per frame, so
   every patch follows it with no new op. `Tone` latches its pitch at note start and does not. Format.md section 7 has the rules, and a Program
   that uses no play mode sets aside nothing for them.
 - All tracks share one tick clock. A conductor stream carries tempo changes, and ticks convert to samples through an
@@ -191,6 +213,10 @@ An Asset is a new chunk kind, separate from power-of-two wavetables.
   glide or a legato change slide one recording. It adds a start offset, reverse, and a tail, where a loop runs while the note is held and plays
   on to the end after release. A loop with no tail does not hold a voice open, so a note ends with its envelope. `Sample` is frozen and stays as it
   was, and in a graph `"mode": "zones"` on a `sample` node selects `Sample2`.
+- `Sample3`, from revision 7, is `Sample2` for up to two recordings a note, from zones of twice the width. A zone can take its turn in a round
+  robin, counted by the NoteOns its track's stream passes, played or chased, so a locate picks what playing through would have. It can
+  crossfade with another in velocity. And with `"release": true` a node plays its zones when the note is let go, once through, which a patch
+  routes around its envelope. A graph gets `Sample3` only if it uses one of these, so a patch that doesn't is the bytes it always was.
 - In-memory playback is in scope now. Disk streaming and compressed assets are deferred, and the header reserves a flag.
   An L476 with about 900 KB of flash spare holds about 9.6 seconds of mono i16 at 48 kHz, or twice that at 24 kHz.
 
@@ -707,8 +733,10 @@ old ones, and as in the graph editor these decide little about what is legal: ov
 deleting a bus takes its sends, outputs, sidechains and lanes with it. Placements stay in tick order, because the compiler takes one that goes backwards for an overlap. The grid is 4/4, and nothing stores that:
 a document holds ticks, so a time signature would change how it is drawn and not how it plays.
 
-A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. A register holds fader, mute, pan, send and, on
-the way into master, the master fader multiplied together, and the page works that product out the way the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip.
+A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
+a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
+gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. Export WAV renders the song as it compiles now, in a
+worker with the worklet's engine, to its end and on until its voices stop and a tenth of a second stays below -100 dB, as the Python binding's render does.
 
 Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the image and its keys are silent until it has one. `live` keeps unused tracks, so it could pass a document
 that an export refuses, and an editor that previews one thing and exports another is worse than a silent key. The page says so when it happens.
@@ -878,6 +906,13 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 - Events off the frame boundary, section 6.
 - Whole-image delivery to a device, section 10.
 
+**Built from the second review of the pieces** (revision 17). Each of these was a gap a review of the four pieces found, and section 6 or 7
+describes what it became: a placement's window, transposition and velocity scale; stages, so any mix controls can move at once, and
+pre-fader sends; exp curves and a cubic fader; a report of notes held at once, and steals that fade; legato that brings velocity; WAV export;
+velocity tools in the piano roll; `Sample3`'s round robins, crossfades and release samples; and refusing unknown fields. Choices made there that
+the user hasn't weighed in on: cut stays the default for steals, with a new track fading; a pre-fader send also ignores pan and still mutes; a
+fade slot is a quarter of a track's voices; a round robin counts every note on the track rather than each key's.
+
 **Still undecided.** A recommendation here is only that.
 
 | # | Question | Position so far |
@@ -885,7 +920,7 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 | 9 | What stops a finite blow-up reaching speakers? | A direction, not final: a volume limiter on desktop, and on embedded a render that validates the image when it is built on a desktop. To keep the target rule, the limiter would sit in the host after the engine, the validation ceiling at or below its threshold, and the NaN guards stay on every target. |
 | 10 | Should graphs get feedback shorter than a frame? | Recommended no. Keep it inside ops such as `OscMod`. Frame 32 already raises the limit to 1500 Hz. |
 | 11 | How far do events go off the frame boundary? | Recommended: live notes on their sample, and new ops that start on it. Changing a parameter within a frame would mean splitting frames, and frame 32 may make that unnecessary. |
-| 12 | MPE, polyphonic aftertouch and per-note bend? | Nothing prevents them. A voice would remember its NoteOn's channel, and events would address that. Held voices would need per-voice smoothing. Recommended: leave out unless MPE is a goal. The pieces found a need short of MPE: a brass or string note can't swell once it starts, so the chorale shapes its phrases by velocity, and the Grieg's crescendo moves each section's fader in ramps of four to eight bars. |
+| 12 | MPE, polyphonic aftertouch and per-note bend? | Nothing prevents them. A voice would remember its NoteOn's channel, and events would address that. Held voices would need per-voice smoothing. Recommended: leave out unless MPE is a goal. The pieces found a need short of MPE: a brass or string note can't swell once it starts, so the chorale shapes its phrases by velocity, and the Grieg's crescendo moves each section's fader in ramps of four to eight bars. Revision 7 lets a legato line bring each slurred note's velocity, which covers a phrase on one voice and not a swell within a note. |
 | 13 | Microtuning? | Recommended later. It needs a key-map Table and a new op. Without it the harpsichord in `BachPreludeInC` plays Bach in equal temperament. |
 | 14 | Envelope curves and looping envelopes? | Recommended later, as an `Env2` with a Table, because curves don't fit in 4 inputs. |
 | 15 | A live arpeggiator? | Recommended: leave it to the host, so the engine holds no keys. |

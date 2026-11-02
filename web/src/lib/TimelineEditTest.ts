@@ -44,6 +44,16 @@ import {
 	renameClip,
 	resizeNotes,
 	routeGains,
+	curveAt,
+	faderGain,
+	faderPosition,
+	humanize,
+	placementSpan,
+	quantize,
+	rampVelocities,
+	scaleVelocities,
+	setSend,
+	windowOf,
 	setInsertPatch,
 	setPlacement,
 	setPlay,
@@ -483,7 +493,7 @@ describe('settling after a swap', () => {
 		doc.tracks[0] = { ...doc.tracks[0], params: { '1': 0.9 } };
 		doc.globals = { '9': 0.125 };
 		const { mix, params, inserts } = settlingWrites(doc, program, patches);
-		expect(mix.map((w) => w.register)).toEqual([4, 5, 0, 1, 2, 3]);
+		expect(mix.map((w) => w.register)).toEqual([0, 1, 2, 3, 4, 5]);
 		expect(params).toEqual([
 			{ track: 0, param: 1, value: 0.9 },
 			{ track: 0, param: 9, value: 0.125 }
@@ -499,7 +509,7 @@ describe('settling after a swap', () => {
 
 	it('leaves alone a chain a lane is moving, all of whose routes share its fader', () => {
 		const doc = withLane(song(), { target: { mix: 'fader', track: 1 } });
-		expect(registers(doc)).toEqual([4, 5, 2, 3]);
+		expect(registers(doc)).toEqual([2, 3, 4, 5]);
 		const panned = withLane(song(), { target: { mix: 'pan', bus: 'room' } });
 		expect(registers(panned)).toEqual([0, 1, 2, 3]);
 	});
@@ -640,5 +650,141 @@ describe('reading a document', () => {
 	it('adds notes without disturbing the ones there', () => {
 		const clip = addNote(clipNamed('c', 960, [{ tick: 0 }]), { tick: 120, note: 62, vel: 90, dur: 60 });
 		expect(clip.notes.map((n) => n.note)).toEqual([60, 62]);
+	});
+});
+
+describe('the gaps the pieces found', () => {
+	it('refuse a field the compiler would refuse, rather than drop it', () => {
+		const doc = song();
+		const typo = { ...doc, clips: [{ ...doc.clips[0], notes: [{ tick: 0, note: 60, dur: 10, velocity: 30 }] }] };
+		expect(timelineSchema.safeParse(typo).success).toBe(false);
+		expect(timelineSchema.safeParse({ ...doc, swing: 0.6 }).success).toBe(false);
+		const placed = { ...doc.tracks[0], placements: [{ clip: 'a', tick: 0, transpose: 12, velocity: 0.5, start: 10 }] };
+		expect(timelineSchema.safeParse({ ...doc, tracks: [placed] }).success).toBe(true);
+	});
+
+	it('play a window of a clip, and last as long as its repeats of it', () => {
+		const doc = song(); // clip a is 1920 ticks
+		expect(windowOf(doc, { clip: 'a', tick: 0, repeat: 1 })).toEqual({ start: 0, length: 1920 });
+		expect(windowOf(doc, { clip: 'a', tick: 0, repeat: 1, start: 480 })).toEqual({ start: 480, length: 1440 });
+		expect(placementSpan(doc, { clip: 'a', tick: 0, repeat: 3, start: 480, length: 240 })).toBe(720);
+		const trimmed = setPlacement(doc, 1, 1, { length: 240, repeat: 2 });
+		expect(songLength(trimmed)).toBe(3840 + 480);
+	});
+
+	it('say only what differs from playing the whole clip as it is', () => {
+		const doc = setPlacement(song(), 1, 0, { transpose: 0, velocity: 1, start: 0, length: 1920 });
+		expect(doc.tracks[0].placements[0]).toEqual({ clip: 'a', tick: 0, repeat: 2 });
+		const moved = setPlacement(song(), 1, 0, { transpose: -12, start: 480 });
+		expect(moved.tracks[0].placements[0]).toEqual({ clip: 'a', tick: 0, repeat: 2, transpose: -12, start: 480 });
+	});
+
+	it('write a stage when the control it holds moves by hand', () => {
+		const program = {
+			tracks: [
+				{
+					id: 1,
+					mix: [
+						{ to: 'master', left: 0, right: 1, of: ['pan' as const] },
+						{ to: 'bus:room', left: 2, right: 3, of: ['mute' as const, 'send' as const], pre: true }
+					],
+					stages: [{ left: 8, right: 9, of: ['fader' as const] }]
+				}
+			],
+			buses: [{ id: 'room', mix: [{ to: 'master', left: 4, right: 5, of: ['fader' as const, 'pan' as const] }] }],
+			master: { stages: [{ left: 6, right: 7, of: ['master' as const] }] }
+		};
+		const doc = song();
+		expect(mixWrites(doc, program, trackKey(1)).map((w) => w.register)).toEqual([0, 1, 2, 3, 8, 9]);
+		expect(mixWrites(doc, program, MASTER)).toEqual([
+			{ register: 6, value: 0.5 },
+			{ register: 7, value: 0.5 }
+		]);
+		const fader = mixWrites(
+			{ ...doc, tracks: [{ ...doc.tracks[0], gain: 0.25 }, doc.tracks[1]] },
+			program,
+			trackKey(1)
+		);
+		expect(fader.find((w) => w.register === 8)?.value).toBe(0.25);
+		expect(fader.find((w) => w.register === 2)?.value).toBe(0.5); // A pre-fader send holds its own gain only
+	});
+
+	it('leave a pair to a lane only if the pair holds what the lane moves', () => {
+		const program = {
+			tracks: [
+				{
+					id: 1,
+					index: 0,
+					mix: [
+						{ to: 'master', left: 0, right: 1 },
+						{ to: 'bus:room', left: 2, right: 3 }
+					]
+				}
+			],
+			buses: [],
+			inserts: []
+		};
+		const withSend = {
+			...song(),
+			clips: song().clips.map((c) => (c.id === 'a' ? lane(c, { mix: 'send', track: 1, to: 'room' }) : c))
+		};
+		expect(settlingWrites(withSend, program, []).mix.map((w) => w.register)).toEqual([0, 1]);
+	});
+
+	it('trace an exp ramp by equal ratios, and stop it at the next point', () => {
+		expect(curveAt(1, 0.01, 0.5)).toBeCloseTo(0.1, 12);
+		expect(curveAt(1, 0, 0.5)).toBeCloseTo(Math.sqrt(0.001), 12);
+		expect(curveAt(1, 0, 1)).toBe(0);
+		let clip = addPoint(clipNamed('c'), { param: 1 }, 0, 1);
+		clip = addPoint(clip, { param: 1 }, 100, 0.01);
+		clip = setPoint(clip, 1, { ramp: 200, curve: 'exp' });
+		clip = addPoint(clip, { param: 1 }, 200, 1);
+		const curve = laneCurve(lanesOf(clip)[0], 1920);
+		const middle = curve.find((p) => p.tick === 200 - 0 && p.value < 1);
+		expect(middle?.value).toBeCloseTo(0.1, 6); // Halfway along it when the next point cuts it off
+		expect(setPoint(clip, 1, { ramp: 0 }).automation[1].curve).toBeUndefined();
+	});
+
+	it('move a fader evenly through what is heard', () => {
+		expect(faderGain(1)).toBeCloseTo(2, 12);
+		expect(faderGain(0)).toBe(0);
+		expect(faderPosition(1)).toBeCloseTo(0.794, 3);
+		expect(20 * Math.log10(faderGain(0.368))).toBeCloseTo(-20, 0);
+		for (const gain of [0, 0.01, 0.5, 1, 2, 3]) expect(faderGain(faderPosition(gain))).toBeCloseTo(gain, 12);
+	});
+
+	it("fade a new track's stolen voices, and bring a slur's velocity only in legato", () => {
+		const { doc } = addTrack(song());
+		expect(doc.tracks.at(-1)?.steal).toBe('fade');
+		expect(song().tracks[0].steal).toBeUndefined();
+		const legato = setPlay(song(), 1, { mode: 'legato', slur_velocity: true });
+		expect(legato.tracks[0].play?.slur_velocity).toBe(true);
+		expect(setPlay(legato, 1, { mode: 'mono' }).tracks[0].play).not.toHaveProperty('slur_velocity');
+	});
+
+	it('mark a send pre-fader and back without leaving the field behind', () => {
+		const pre = setSend(song(), trackKey(1), 0, { pre: true });
+		expect(pre.tracks[0].sends[0]).toEqual({ bus: 'room', gain: 0.5, pre: true });
+		expect(setSend(pre, trackKey(1), 0, { pre: undefined }).tracks[0].sends[0]).toEqual({ bus: 'room', gain: 0.5 });
+	});
+
+	it('shape the velocities of chosen notes', () => {
+		const clip = {
+			...clipNamed('c'),
+			notes: [0, 480, 960, 1440].map((tick, i) => ({ tick, note: 60, vel: 100 - i * 10, dur: 100 }))
+		};
+		const all = new Set([0, 1, 2, 3]);
+		expect(rampVelocities(clip, all, 40, 100).notes.map((n) => n.vel)).toEqual([40, 60, 80, 100]);
+		expect(scaleVelocities(clip, new Set([0, 3]), 0.5).notes.map((n) => n.vel)).toEqual([50, 90, 80, 35]);
+		expect(scaleVelocities(clip, all, 9).notes.every((n) => n.vel === 127)).toBe(true);
+		const nudged = humanize(clip, all, 30, 8, 7);
+		expect(humanize(clip, all, 30, 8, 7)).toEqual(nudged); // The same seed, the same nudge
+		nudged.notes.forEach((n, i) => {
+			expect(Math.abs(n.tick - clip.notes[i].tick)).toBeLessThanOrEqual(30);
+			expect(Math.abs(n.vel - clip.notes[i].vel)).toBeLessThanOrEqual(8);
+		});
+		const loose = { ...clip, notes: [{ tick: 130, note: 60, vel: 90, dur: 10 }] };
+		expect(quantize(loose, new Set([0]), 120).notes[0].tick).toBe(120);
+		expect(quantize(loose, new Set([0]), 120, 0.5).notes[0].tick).toBe(125);
 	});
 });

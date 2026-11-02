@@ -105,21 +105,23 @@ class Bits {
     u32 words_[kMaxRegisters / 32] = {};
 };
 
-// True if a Sample2 can use this table. It is the table's job to be finite, and that was checked before any patch.
-[[nodiscard]] inline bool zones_ok(const ChunkRef& table, const Bits& asset_refs, u32 refs) {
+// True if a Sample2, or with `wide` a Sample3, can use this table. It is the table's job to be finite, and that was
+// checked before any patch.
+[[nodiscard]] inline bool zones_ok(const ChunkRef& table, const Bits& asset_refs, u32 refs, bool wide = false) {
     const auto whole_in = [](float x, float low, float high) {
         return x >= low && x <= high && x == static_cast<float>(static_cast<std::int32_t>(x));
     };
+    const u32 fields = wide ? kZone3Fields : kZoneFields;
     const u32 length = load<TableHeader>(table.data).length;
-    if (length % kZoneFields != 0 || length / kZoneFields > kMaxZones) return false;
-    for (u32 row = 0; row < length / kZoneFields; ++row) {
-        float f[kZoneFields];
-        for (u32 i = 0; i < kZoneFields; ++i) {
-            f[i] = load<float>(table.data + sizeof(TableHeader) + (row * kZoneFields + i) * sizeof(float));
+    if (length % fields != 0 || length / fields > kMaxZones) return false;
+    for (u32 row = 0; row < length / fields; ++row) {
+        float f[kZone3Fields] = {};
+        for (u32 i = 0; i < fields; ++i) {
+            f[i] = load<float>(table.data + sizeof(TableHeader) + (row * fields + i) * sizeof(float));
         }
         if (f[kZoneLowKey] > f[kZoneHighKey]) {  // Padding, and only in its one form
             if (f[kZoneLowKey] != 1.0f || f[kZoneHighKey] != 0.0f) return false;
-            for (u32 i = kZoneLowVelocity; i < kZoneFields; ++i) {
+            for (u32 i = kZoneLowVelocity; i < fields; ++i) {
                 if (f[i] != 0.0f) return false;
             }
             continue;
@@ -130,7 +132,16 @@ class Bits {
         if (!(f[kZoneRoot] >= 0.0f && f[kZoneRoot] <= 127.0f)) return false;
         if (!whole_in(f[kZoneRef], 0.0f, static_cast<float>(refs) - 1.0f)) return false;
         if (!asset_refs.get(static_cast<u32>(f[kZoneRef]))) return false;
-        for (u32 i = kZoneRoot + 1; i < kZoneFields; ++i) {
+        u32 unused = kZoneRoot + 1;
+        if (wide) {
+            if (!whole_in(f[kZoneSeqLength], 0.0f, static_cast<float>(kMaxZones))) return false;
+            if (!whole_in(f[kZoneSeqPosition], 0.0f, std::max(0.0f, f[kZoneSeqLength] - 1.0f))) return false;
+            const float span = f[kZoneHighVelocity] - f[kZoneLowVelocity];
+            if (!(f[kZoneFadeIn] >= 0.0f && f[kZoneFadeIn] <= span)) return false;
+            if (!(f[kZoneFadeOut] >= 0.0f && f[kZoneFadeOut] <= span)) return false;
+            unused = kZoneFadeOut + 1;
+        }
+        for (u32 i = unused; i < fields; ++i) {
             if (f[i] != 0.0f) return false;
         }
     }
@@ -191,7 +202,7 @@ class Bits {
         if (port >= h.buffers) return false;
         buffers.set(port);
     }
-    Bits asset_refs, zones_checked;
+    Bits asset_refs, zones_checked, wide_zones_checked;  // A table two ops share is checked for each one's rows
     for (u32 i = 0; i < h.refs; ++i) {
         const u64 hash = p.ref(i);
         if (chunks.find(hash, ChunkKind::Asset)) {
@@ -285,6 +296,10 @@ class Bits {
                 if (static_cast<Op>(s.op) == Op::Sample2 && !zones_checked.get(s.resource)) {
                     if (!detail::zones_ok(*table, asset_refs, h.refs)) return false;
                     zones_checked.set(s.resource);
+                }
+                if (static_cast<Op>(s.op) == Op::Sample3 && !wide_zones_checked.get(s.resource)) {
+                    if (!detail::zones_ok(*table, asset_refs, h.refs, true)) return false;
+                    wide_zones_checked.set(s.resource);
                 }
                 break;
             }
@@ -426,7 +441,9 @@ struct StreamTotals {
             }
             case Instr::PlayMode: {
                 const float glide = std::bit_cast<float>(in.c);
-                if (conductor || in.a > static_cast<u8>(PlayKind::Legato)) return false;
+                if (conductor || in.a > static_cast<u8>(PlayKind::LegatoVelocity)) return false;
+                if (in.a == static_cast<u8>(PlayKind::LegatoVelocity) && revision < kLegatoVelocityRevision)
+                    return false;
                 if (in.b > static_cast<u16>(NotePriority::Low) || !(glide >= 0.0f && glide <= kMaxGlideSeconds))
                     return false;
                 if (in.a == static_cast<u8>(PlayKind::Poly) && in.b != 0)
@@ -434,6 +451,10 @@ struct StreamTotals {
                 t.features |= kFeaturePlayModes;
                 break;
             }
+            case Instr::Steal:
+                if (conductor || in.a > 1) return false;
+                t.features |= kFeatureStealFades;
+                break;
             case Instr::Call: {
                 // Clips cannot nest, and a repeat must spend time, so no stream can spin without a Wait.
                 if (kind != Stream::Track || in.b >= p.h.clips || in.c == 0) return false;

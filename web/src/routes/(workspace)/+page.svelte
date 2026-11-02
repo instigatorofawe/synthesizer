@@ -15,7 +15,8 @@
 	import Browser from '#lib/Browser.svelte';
 	import BundleDialog from '#lib/BundleDialog.svelte';
 	import { Compiler, type Compiled } from '#lib/Compiler.ts';
-	import { downloadImage } from '#lib/Download.ts';
+	import { downloadBytes, downloadImage } from '#lib/Download.ts';
+	import { renderWav } from '#lib/Render.ts';
 	import { nodeOfError } from '#lib/GraphEdit.ts';
 	import Meter from '#lib/Meter.svelte';
 	import PatchPanel from '#lib/PatchPanel.svelte';
@@ -208,6 +209,8 @@
 	let songTick = 0; // Where the song was when a patch on its own took over
 
 	let compiler: Compiler | undefined;
+	let rendering = $state<number | null>(null); // How far a WAV export has got
+	let renderProblem = $state('');
 	let song = $state.raw<Compiled | null>(null);
 	let goodSong = $state.raw<Compiled | null>(null);
 	let alone = $state.raw<Compiled | null>(null);
@@ -278,6 +281,23 @@
 		asked[source]++;
 		compiling[source] = true;
 		timers[source] = setTimeout(() => compile(source), 250);
+	}
+
+	// The song as it last compiled, rendered to its end and its tail, then downloaded.
+	async function exportWav() {
+		const compiled = goodSong;
+		const program = compiled?.report.programs[0];
+		if (!compiled || !program || rendering !== null) return;
+		rendering = 0;
+		renderProblem = '';
+		try {
+			const wav = await renderWav(compiled.image, program.length_ticks, (fraction) => (rendering = fraction));
+			downloadBytes(wav, `${recipe?.entry.name ?? (timelineName || 'song')}.wav`, 'audio/wav');
+		} catch (error) {
+			renderProblem = error instanceof Error ? error.message : String(error);
+		} finally {
+			rendering = null;
+		}
 	}
 
 	// Sends an image to the engine, which plays it once it has loaded.
@@ -752,6 +772,7 @@
 		{#if busy}<span class="muted">Compiling…</span>{/if}
 		{#if form?.message}<span class="problem">{form.message}</span>{/if}
 		{#if form?.saved}<span class="muted">Saved.</span>{/if}
+		{#if renderProblem}<span class="problem">WAV export: {renderProblem}</span>{/if}
 		{#if rejected}<span class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</span
 			>{/if}
 		{#if timelineParsed.error}<span class="problem">Timeline JSON: {timelineParsed.error}</span>{/if}
@@ -811,8 +832,16 @@
 			<input type="hidden" name="back" value={search} />
 			<button>Delete timeline</button>
 		</form>
-		<span class="divider"></span>
 	{/if}
+	{#if recipe || saved}
+		<button
+			type="button"
+			disabled={!goodSong || rendering !== null}
+			title="Render the song as it now compiles to a WAV file"
+			onclick={exportWav}>{rendering === null ? 'Export WAV' : `Rendering ${Math.round(rendering * 100)}%`}</button
+		>
+	{/if}
+	{#if saved && !recipe}<span class="divider"></span>{/if}
 {/snippet}
 
 {#snippet json()}

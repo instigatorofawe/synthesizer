@@ -80,6 +80,7 @@ struct RunContext {
     u32 seed = 1;
     u8 note = 0;  // what the voice was started with, which a glide doesn't move. 0 in an insert.
     u8 velocity = 0;
+    u32 ordinal = 0;       // how many notes its track had started before this one, which a round robin counts
     bool busy = false;     // an Env or Sample is still sounding
     bool stopped = false;  // the transport is not playing, which only a control step is told
 };
@@ -129,6 +130,17 @@ struct Kernels {
         u32 zone;
         u8 started, done, released, reserved;
     };
+    struct Sample3Head {
+        u64 position;  // 32.32
+        float semitones, ratio;
+        float gain;
+        u32 zone;  // the row it plays, or the row count for none
+        u32 done;
+    };
+    struct Sample3State {
+        Sample3Head heads[kZone3Heads];
+        u8 started, released, reserved[2];
+    };
     struct CombState {
         float low;
     };
@@ -163,6 +175,8 @@ struct Kernels {
                 return sizeof(SampleState);
             case Op::Sample2:
                 return sizeof(Sample2State);
+            case Op::Sample3:
+                return sizeof(Sample3State);
             case Op::Comb:
                 return sizeof(CombState);
             case Op::Follow:
@@ -237,6 +251,9 @@ struct Kernels {
                 break;
             case Op::Sample2:
                 sample2(s, c);
+                break;
+            case Op::Sample3:
+                sample3(s, c);
                 break;
             case Op::Mul:
                 B::mul(buffer(c, s.in[0]), buffer(c, s.in[1]), buffer(c, s.out[0]), N);
@@ -964,6 +981,136 @@ struct Kernels {
         std::fill(left + std::min(i, N), left + N, 0.0f);
         std::fill(right + std::min(i, N), right + N, 0.0f);
         if (!st.done && !(looping && !tail)) c.busy = true;
+    }
+
+    // The rows of a Sample3's table that sound for this note, at most two, in table order, and the gain of each.
+    static void pick_zones3(const BoundTable& zones, u8 note, u8 velocity, u32 ordinal, Sample3State& st) {
+        const u32 rows = zones.length / kZone3Fields;
+        const float key = static_cast<float>(note), level = static_cast<float>(velocity);
+        u32 found = 0;
+        for (u32 z = 0; z < rows && found < kZone3Heads; ++z) {
+            const float* row = zones.data + z * kZone3Fields;
+            if (!(key >= row[kZoneLowKey] && key <= row[kZoneHighKey])) continue;
+            if (!(level >= row[kZoneLowVelocity] && level <= row[kZoneHighVelocity])) continue;
+            const u32 length = static_cast<u32>(row[kZoneSeqLength]);
+            if (length != 0 && ordinal % length != static_cast<u32>(row[kZoneSeqPosition])) continue;
+            float gain = 1.0f;
+            if (row[kZoneFadeIn] > 0.0f) gain *= std::min(1.0f, (level - row[kZoneLowVelocity]) / row[kZoneFadeIn]);
+            if (row[kZoneFadeOut] > 0.0f) gain *= std::min(1.0f, (row[kZoneHighVelocity] - level) / row[kZoneFadeOut]);
+            if (!(gain > 0.0f)) continue;
+            st.heads[found++] = {0, 0.0f, 0.0f, gain, z, 0};
+        }
+        for (u32 h = found; h < kZone3Heads; ++h) st.heads[h] = {0, 0.0f, 0.0f, 0.0f, rows, 1};
+    }
+
+    // Sample2's playback, for up to two recordings at once, each with its gain. A note picks them by its key and
+    // velocity, as Sample2 does, and by its ordinal on the track for a round robin. In release mode it is silent while
+    // its note is held, and when the note is released it picks its recordings and plays them once through from there,
+    // loops and all ignored, which keeps its voice alive until they end.
+    static void sample3(const DecodedStep& s, RunContext& c) {
+        const BoundTable& zones = c.resources[s.resource].table;
+        auto& st = state<Sample3State>(c, s);
+        float* left = buffer(c, s.out[0]);
+        float* right = buffer(c, s.out[1]);
+        const bool on_release = (s.mode & kSampleRelease) != 0;
+        const bool reverse = (s.mode & kSampleReverse) != 0;
+        const bool tail = (s.mode & kSampleTail) != 0;
+        std::fill(left, left + N, 0.0f);
+        std::fill(right, right + N, 0.0f);
+
+        u32 from = 0;  // where the recordings start in this frame, if they start in it
+        bool starting = false;
+        if (!on_release && !st.started) {
+            st.started = 1;
+            starting = true;
+            from = c.gate.on < N ? c.gate.on : 0;
+        }
+        if (on_release && !st.started) {
+            if (c.gate.off >= N) {
+                c.busy = true;  // Its sound is still to come
+                return;
+            }
+            st.started = 1;
+            starting = true;
+            from = c.gate.off;
+        }
+        if (starting) pick_zones3(zones, c.note, c.velocity, c.ordinal, st);
+
+        const u32 rows = zones.length / kZone3Fields;
+        const float pitch = clamp(scalar(c, s.in[0]), -48.0f, 200.0f);
+        const float start = clamp(scalar(c, s.in[1]), 0.0f, 1.0f);
+        bool busy = false;
+        const bool was_released = st.released != 0;
+        for (Sample3Head& head : st.heads) {
+            // A live swap carries state from a patch whose table may be shorter, or have padding here.
+            const float* row = head.zone < rows ? zones.data + head.zone * kZone3Fields : nullptr;
+            if (!row || row[kZoneLowKey] > row[kZoneHighKey]) head.done = 1;
+            if (head.done) continue;
+            const BoundAsset& a = c.resources[static_cast<u32>(row[kZoneRef])].asset;
+            const u64 frames = static_cast<u64>(a.frames) << 32;
+            if (starting) {
+                const float last = static_cast<float>(a.frames - 1);
+                head.position = static_cast<u64>((reverse ? 1.0f - start : start) * last * 4294967296.0f);
+            }
+            const float semitones = pitch - row[kZoneRoot];
+            if (semitones != head.semitones || head.ratio == 0.0f) {
+                head.semitones = semitones;
+                head.ratio = pow2(semitones / 12.0f);
+            }
+            const float step = clamp(head.ratio, 0.0f, 256.0f) * a.native_rate * c.inverse_rate;
+            u64 inc = static_cast<u64>(std::min(step, 65536.0f) * 4294967296.0f);
+            const bool looping = a.loop_end != 0 && !on_release;
+            const u64 loop_start = static_cast<u64>(a.loop_start) << 32;
+            const u64 loop_end = static_cast<u64>(a.loop_end) << 32;
+            const u64 loop_length = loop_end - loop_start;
+            if (looping && inc >= loop_length) inc = loop_length - 1;
+            if (reverse && head.position >= frames) head.position = frames - 1;
+
+            u32 i = from;
+            bool released = was_released;
+            const auto until = [&](u32 end) {
+                const bool in_loop = looping && !(tail && released);
+                if (in_loop && !reverse && head.position >= loop_end) head.position = loop_start;
+                if (in_loop && reverse && head.position < loop_start) head.position = loop_end - 1;
+                const u64 floor = in_loop ? loop_start : 0;
+                for (; i < end && !head.done; ++i) {
+                    const u32 idx = static_cast<u32>(head.position >> 32);
+                    if (idx >= a.frames) {
+                        head.done = 1;
+                        break;
+                    }
+                    const float frac = static_cast<float>(static_cast<u32>(head.position)) * 2.3283064e-10f;
+                    const float l0 = read(a, idx, 0), l1 = read(a, idx + 1, 0);
+                    float value = l0 + (l1 - l0) * frac;
+                    float other = value;
+                    if (a.channels == 2) {
+                        const float r0 = read(a, idx, 1), r1 = read(a, idx + 1, 1);
+                        other = r0 + (r1 - r0) * frac;
+                    }
+                    if constexpr (C.channels == 1) value = other = (value + other) * 0.5f;
+                    left[i] += value * head.gain;
+                    right[i] += other * head.gain;
+                    if (!reverse) {
+                        head.position += inc;
+                        if (in_loop && head.position >= loop_end) head.position -= loop_length;
+                    } else if (head.position - floor >= inc) {
+                        head.position -= inc;
+                    } else if (in_loop) {
+                        head.position += loop_length - inc;
+                    } else {
+                        head.done = 1;
+                    }
+                }
+            };
+            if (!on_release && c.gate.off < N && c.gate.off >= from) {
+                until(c.gate.off);
+                released = true;
+            }
+            until(N);
+            if (!head.done && !(looping && !tail)) busy = true;
+        }
+        if (!on_release && c.gate.off < N) st.released = 1;
+        if (busy) c.busy = true;
     }
 
     [[nodiscard]] static float read(const BoundAsset& a, u32 frame, u32 channel) {

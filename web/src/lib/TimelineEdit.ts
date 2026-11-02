@@ -10,6 +10,7 @@ export type Master = Timeline['master'];
 export type Clip = Timeline['clips'][number];
 export type Note = Clip['notes'][number];
 export type Point = Clip['automation'][number];
+export type Placement = Track['placements'][number];
 export type PlayChange = Clip['play'][number];
 export type LaneTarget = NonNullable<Point['target']>;
 export type Insert = Track['inserts'][number];
@@ -43,13 +44,20 @@ export const snapTick = (tick: number, grid: number) => Math.max(0, Math.round(t
 
 const clipOf = (doc: Timeline, id: string) => doc.clips.find((clip) => clip.id === id);
 
+// The window of its clip a placement plays, in the clip's ticks: all of it unless it says otherwise.
+export function windowOf(doc: Timeline, placed: Placement): { start: number; length: number } {
+	const start = placed.start ?? 0;
+	return { start, length: placed.length ?? Math.max(0, (clipOf(doc, placed.clip)?.length ?? 0) - start) };
+}
+
+// How long a placement lasts, every repeat of its window.
+export const placementSpan = (doc: Timeline, placed: Placement) => placed.repeat * windowOf(doc, placed).length;
+
 // Where the last placement ends. The compiler reports this too, but only for a document that compiles.
 export function songLength(doc: Timeline): number {
 	let end = 0;
 	for (const track of doc.tracks) {
-		for (const placed of track.placements) {
-			end = Math.max(end, placed.tick + placed.repeat * (clipOf(doc, placed.clip)?.length ?? 0));
-		}
+		for (const placed of track.placements) end = Math.max(end, placed.tick + placementSpan(doc, placed));
 	}
 	return end;
 }
@@ -93,59 +101,120 @@ export const setChain = (doc: Timeline, key: ChainKey, change: Partial<Track> | 
 
 const eachChain = (doc: Timeline): Chain[] => [...doc.tracks, ...doc.buses, doc.master];
 
-// What goes into the mix registers for one route, which is what the compiler writes for them: a fader, its mute and its pan,
-// a send's own gain if this is a send, and the master fader if it lands on master.
-export function routeGains(doc: Timeline, chain: Track | Bus, to: ChainKey) {
-	const send = to === chain.output ? 1 : (chain.sends.find((s) => busKey(s.bus) === to)?.gain ?? 0);
-	const gain = chain.gain * (chain.mute ? 0 : 1) * send * (to === MASTER ? doc.master.gain : 1);
+// What a mix register pair can hold. It holds their product, and a fader holds its chain's mute with it.
+export type MixFactor = 'fader' | 'mute' | 'pan' | 'send' | 'master';
+
+export interface ReportedPair {
+	left: number;
+	right: number;
+	of?: MixFactor[];
+}
+
+export interface ReportedRoute extends ReportedPair {
+	to: string;
+	pre?: boolean;
+}
+
+interface ReportedChain {
+	id: number | string;
+	mix: ReportedRoute[];
+	stages?: ReportedPair[]; // Factors applied to the whole chain by a step of their own
+}
+
+interface ReportedMixer {
+	tracks: ReportedChain[];
+	buses: ReportedChain[];
+	master?: { stages?: ReportedPair[] };
+}
+
+// What a route holds when a report doesn't say, which is what every route held before stages.
+function routeFactors(chain: Track | Bus, route: ReportedRoute): MixFactor[] {
+	if (route.of) return route.of;
+	const factors: MixFactor[] = ['fader', 'pan'];
+	if (route.to !== chain.output) factors.push('send');
+	if (route.to === MASTER) factors.push('master');
+	return factors;
+}
+
+// The gains a pair holds, which is what the compiler writes for it.
+export function pairGains(doc: Timeline, chain: Track | Bus | Master, of: MixFactor[], send = 1) {
+	const mute = 'mute' in chain && chain.mute ? 0 : 1;
+	let gain = 1;
+	if (of.includes('fader')) gain = chain.gain * mute;
+	else if (of.includes('mute')) gain = mute;
+	if (of.includes('send')) gain *= send;
+	if (of.includes('master')) gain *= doc.master.gain;
+	if (!of.includes('pan') || !('pan' in chain)) return { left: gain, right: gain };
 	return {
 		left: gain * Math.sin(((1 - chain.pan) * Math.PI) / 4),
 		right: gain * Math.sin(((1 + chain.pan) * Math.PI) / 4)
 	};
 }
 
-interface ReportedChain {
-	id: number | string;
-	mix: { to: string; left: number; right: number }[];
+const sendGain = (chain: Track | Bus, to: ChainKey) =>
+	to === chain.output ? 1 : (chain.sends.find((s) => busKey(s.bus) === to)?.gain ?? 0);
+
+// What goes into the mix registers for one route, as every route was before stages: a fader, its mute and its pan, a send's
+// own gain if this is a send, and the master fader if it lands on master.
+export function routeGains(doc: Timeline, chain: Track | Bus, to: ChainKey) {
+	return pairGains(doc, chain, routeFactors(chain, { to, left: 0, right: 0 }), sendGain(chain, to));
+}
+
+// Every register pair of a Program, with the chain whose controls it holds and what it holds of them.
+function eachPair(doc: Timeline, program: ReportedMixer) {
+	const pairs: {
+		key: ChainKey;
+		chain: Track | Bus | Master;
+		pair: ReportedPair;
+		of: MixFactor[];
+		send: number;
+		to?: string;
+	}[] = [];
+	const add = (key: ChainKey, chain: Track | Bus | undefined, reported: ReportedChain) => {
+		if (!chain) return;
+		for (const route of reported.mix) {
+			const send = sendGain(chain, route.to);
+			pairs.push({ key, chain, pair: route, of: routeFactors(chain, route), send, to: route.to });
+		}
+		for (const stage of reported.stages ?? []) pairs.push({ key, chain, pair: stage, of: stage.of ?? [], send: 1 });
+	};
+	for (const reported of program.tracks) {
+		add(
+			trackKey(reported.id as number),
+			doc.tracks.find((t) => t.id === reported.id),
+			reported
+		);
+	}
+	for (const reported of program.buses) {
+		add(
+			busKey(String(reported.id)),
+			doc.buses.find((b) => b.id === reported.id),
+			reported
+		);
+	}
+	for (const stage of program.master?.stages ?? []) {
+		pairs.push({ key: MASTER, chain: doc.master, pair: stage, of: stage.of ?? ['master'], send: 1 });
+	}
+	return pairs;
 }
 
 // The register writes that make a change to this chain audible before the compile that follows it. The master fader is in
-// every route into master, so moving it writes all of those.
-export function mixWrites(
-	doc: Timeline,
-	program: { tracks: ReportedChain[]; buses: ReportedChain[] },
-	key: ChainKey
-): { register: number; value: number }[] {
+// every route into master, or in a stage of its own, so moving it writes those.
+export function mixWrites(doc: Timeline, program: ReportedMixer, key: ChainKey): { register: number; value: number }[] {
 	const writes: { register: number; value: number }[] = [];
-	const add = (chain: Track | Bus | undefined, routes: ReportedChain['mix'], only: ChainKey | null) => {
-		if (!chain) return;
-		for (const route of routes) {
-			if (only !== null && route.to !== only) continue;
-			const { left, right } = routeGains(doc, chain, route.to);
-			writes.push({ register: route.left, value: left }, { register: route.right, value: right });
-		}
-	};
-	const onMaster = key === MASTER;
-	for (const reported of program.tracks) {
-		if (onMaster || trackKey(reported.id as number) === key) {
-			add(
-				doc.tracks.find((t) => t.id === reported.id),
-				reported.mix,
-				onMaster ? MASTER : null
-			);
-		}
-	}
-	for (const reported of program.buses) {
-		if (onMaster || busKey(String(reported.id)) === key) {
-			add(
-				doc.buses.find((b) => b.id === reported.id),
-				reported.mix,
-				onMaster ? MASTER : null
-			);
-		}
+	for (const { key: owner, chain, pair, of, send } of eachPair(doc, program)) {
+		if (key === MASTER ? !of.includes('master') : owner !== key) continue;
+		const { left, right } = pairGains(doc, chain, of, send);
+		writes.push({ register: pair.left, value: left }, { register: pair.right, value: right });
 	}
 	return writes;
 }
+
+// A fader's travel, from 0 to 1, against its gain. Cubic, so 0 dB sits at 79% with +6 dB at the top, -20 dB at 37% and -40 dB
+// at 17%, and a hand moves evenly through what it hears.
+const TOP = Math.cbrt(2);
+export const faderGain = (position: number) => (position * TOP) ** 3;
+export const faderPosition = (gain: number) => Math.cbrt(Math.max(0, gain)) / TOP;
 
 export function addSend(doc: Timeline, key: ChainKey, bus: string): Timeline {
 	return mapChain(doc, key, (chain) =>
@@ -154,8 +223,13 @@ export function addSend(doc: Timeline, key: ChainKey, bus: string): Timeline {
 }
 
 export function setSend(doc: Timeline, key: ChainKey, index: number, change: Partial<Send>): Timeline {
+	const changed = (send: Send) => {
+		const next = { ...send, ...change };
+		if (!next.pre) delete next.pre;
+		return next;
+	};
 	return mapChain(doc, key, (chain) =>
-		'sends' in chain ? { ...chain, sends: chain.sends.map((s, i) => (i === index ? { ...s, ...change } : s)) } : chain
+		'sends' in chain ? { ...chain, sends: chain.sends.map((s, i) => (i === index ? changed(s) : s)) } : chain
 	);
 }
 
@@ -289,7 +363,8 @@ export function addTrack(doc: Timeline, slot?: string): { doc: Timeline; id: num
 		mute: false,
 		output: MASTER,
 		sends: [],
-		inserts: []
+		inserts: [],
+		steal: 'fade' // A new track fades a stolen voice. A document from before says nothing, and cuts.
 	};
 	return { doc: { ...doc, tracks: [...doc.tracks, track] }, id };
 }
@@ -403,14 +478,24 @@ export function movePlacement(doc: Timeline, track: number, index: number, toTra
 	});
 }
 
-export function setPlacement(
-	doc: Timeline,
-	track: number,
-	index: number,
-	change: Partial<Track['placements'][number]>
-) {
+// A placement says only what differs from playing its whole clip as it is, so a document stays as it was until someone
+// transposes or trims one.
+function tidyPlacement(doc: Timeline, placed: Placement): Placement {
+	const { transpose, velocity, start, length, ...rest } = placed;
+	const tidy: Placement = { ...rest };
+	if (transpose) tidy.transpose = transpose;
+	if (velocity !== undefined && velocity !== 1) tidy.velocity = velocity;
+	if (start) tidy.start = start;
+	const whole = (clipOf(doc, placed.clip)?.length ?? 0) - (start ?? 0);
+	if (length !== undefined && length !== whole) tidy.length = length;
+	return tidy;
+}
+
+export function setPlacement(doc: Timeline, track: number, index: number, change: Partial<Placement>) {
 	return mapPlacements(doc, (t) =>
-		t.id === track ? inOrder(t.placements.map((p, i) => (i === index ? { ...p, ...change } : p))) : t.placements
+		t.id === track
+			? inOrder(t.placements.map((p, i) => (i === index ? tidyPlacement(doc, { ...p, ...change }) : p)))
+			: t.placements
 	);
 }
 
@@ -457,6 +542,63 @@ export function resizeNotes(clip: Clip, indices: Set<number>, ticks: number, sho
 
 export function setNotes(clip: Clip, indices: Set<number>, change: Partial<Note>): Clip {
 	return { ...clip, notes: clip.notes.map((n, i) => (indices.has(i) ? { ...n, ...change } : n)) };
+}
+
+const velocityOf = (value: number) => Math.min(127, Math.max(1, Math.round(value)));
+
+// Velocities on a straight line from the earliest chosen note to the latest, as a crescendo or a diminuendo is written.
+export function rampVelocities(clip: Clip, indices: Set<number>, from: number, to: number): Clip {
+	const ticks = clip.notes.filter((_, i) => indices.has(i)).map((n) => n.tick);
+	if (!ticks.length) return clip;
+	const first = Math.min(...ticks);
+	const last = Math.max(...ticks);
+	return {
+		...clip,
+		notes: clip.notes.map((n, i) => {
+			if (!indices.has(i)) return n;
+			const t = last > first ? (n.tick - first) / (last - first) : 0;
+			return { ...n, vel: velocityOf(from + (to - from) * t) };
+		})
+	};
+}
+
+// Each chosen velocity times `factor`, so their shape stays and the whole of it gets louder or softer.
+export function scaleVelocities(clip: Clip, indices: Set<number>, factor: number): Clip {
+	return {
+		...clip,
+		notes: clip.notes.map((n, i) => (indices.has(i) ? { ...n, vel: velocityOf(n.vel * factor) } : n))
+	};
+}
+
+// Small, even nudges of up to `ticks` and `velocity` either way. They come from `seed`, so the same nudge of the same notes
+// gives the same result.
+export function humanize(clip: Clip, indices: Set<number>, ticks: number, velocity: number, seed = 1): Clip {
+	let state = seed >>> 0 || 1;
+	const next = () => {
+		state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+		return state / 2 ** 32;
+	};
+	return {
+		...clip,
+		notes: clip.notes.map((n, i) => {
+			const dt = Math.round((next() * 2 - 1) * ticks);
+			const dv = Math.round((next() * 2 - 1) * velocity);
+			if (!indices.has(i)) return n;
+			return { ...n, tick: Math.min(clip.length - 1, Math.max(0, n.tick + dt)), vel: velocityOf(n.vel + dv) };
+		})
+	};
+}
+
+// Each chosen note's start moved `strength` of the way to the nearest line of the grid.
+export function quantize(clip: Clip, indices: Set<number>, grid: number, strength = 1): Clip {
+	return {
+		...clip,
+		notes: clip.notes.map((n, i) => {
+			if (!indices.has(i)) return n;
+			const tick = Math.round(n.tick + (snapTick(n.tick, grid) - n.tick) * strength);
+			return { ...n, tick: Math.min(clip.length - 1, tick) };
+		})
+	};
 }
 
 // The copies follow straight after the selection and come back chosen, so that repeating this builds a pattern.
@@ -597,6 +739,7 @@ export function setPoint(clip: Clip, index: number, change: Partial<Point>): Cli
 			if (i !== index) return point;
 			const next: Point = { ...point, ...change };
 			if (next.ramp === 0 || next.ramp === undefined) delete next.ramp;
+			if (next.curve === 'linear' || next.curve === undefined || next.ramp === undefined) delete next.curve;
 			return next;
 		})
 	};
@@ -610,19 +753,45 @@ export function removeLane(clip: Clip, key: string): Clip {
 	return { ...clip, automation: clip.automation.filter((p) => laneKey(p.param, p.target) !== key) };
 }
 
-// The polyline a lane traces. A value holds until the next point's tick, and a ramp then runs from there to that point's value.
+// Where an exp ramp stands a fraction of the way along it, as the compiler works it out: by equal ratios, and to or from 0
+// by way of 60 dB below the other end.
+export function curveAt(from: number, to: number, t: number): number {
+	if (t >= 1) return to;
+	if (t <= 0) return from;
+	const a = from > 0 ? from : to * 0.001;
+	const b = to > 0 ? to : from * 0.001;
+	if (!(a > 0 && b > 0)) return from + (to - from) * t;
+	return a * (b / a) ** t;
+}
+
+// The polyline a lane traces. A value holds until the next point's tick, and a ramp then runs from there to that point's value,
+// in a straight line or along its curve. A ramp the next point interrupts stops where it had got to.
 export function laneCurve(lane: Lane, length: number): { tick: number; value: number }[] {
 	const curve: { tick: number; value: number }[] = [];
-	for (const { point } of lane.points) {
+	const points = lane.points.map(({ point }) => point);
+	points.forEach((point, i) => {
 		const last = curve.at(-1);
-		if (last) curve.push({ tick: point.tick, value: last.value });
-		if (point.ramp) {
-			if (last) curve.push({ tick: point.tick + point.ramp, value: point.value });
-			else curve.push({ tick: point.tick, value: point.value });
-		} else {
+		if (last && last.tick < point.tick) curve.push({ tick: point.tick, value: last.value });
+		if (!point.ramp || !last) {
 			curve.push({ tick: point.tick, value: point.value });
+			return;
 		}
-	}
+		const from = last.value;
+		const stop = Math.min(point.tick + point.ramp, points[i + 1]?.tick ?? Infinity);
+		const at = (tick: number) => {
+			const t = (tick - point.tick) / point.ramp!;
+			return point.curve === 'exp' ? curveAt(from, point.value, t) : from + (point.value - from) * t;
+		};
+		const steps = point.curve === 'exp' ? 32 : 1;
+		for (let k = 1; k <= steps; ++k) {
+			const tick = point.tick + (point.ramp * k) / steps;
+			if (tick >= stop) {
+				curve.push({ tick: stop, value: at(stop) });
+				break;
+			}
+			curve.push({ tick, value: at(tick) });
+		}
+	});
 	const last = curve.at(-1);
 	if (last && last.tick < length) curve.push({ tick: length, value: last.value });
 	return curve;
@@ -675,7 +844,7 @@ export interface Settling {
 	inserts: { insert: number; param: number; value: number }[];
 }
 
-interface ReportedProgram {
+interface ReportedProgram extends ReportedMixer {
 	tracks: (ReportedChain & { index?: number })[];
 	buses: ReportedChain[];
 	inserts: { id: number; index: number }[];
@@ -684,38 +853,29 @@ interface ReportedProgram {
 // What to write after a swap so that the sound is the document. A swap carries live values across, because a fader moved by
 // hand should survive an edit somewhere else, and the engine can't tell a value moved by hand from one left by a lane. So
 // without this, a deleted lane's last value stays for as long as the page does, and a value changed in the document is ignored
-// because the old one carried over it. A lane still in the document owns what it moves, so those are left alone.
+// because the old one carried over it. A lane still in the document owns what it moves, so a pair holding that is left alone.
 export function settlingWrites(doc: Timeline, program: ReportedProgram, patches: PatchLike[]): Settling {
 	const placed = (track: Track) => track.placements.flatMap((p) => clipOf(doc, p.clip)?.automation ?? []);
 	const lanes = doc.tracks.flatMap(placed);
-	const moved = (key: ChainKey) =>
-		lanes.some(
-			({ target: t }) =>
-				t && 'mix' in t && (('track' in t && trackKey(t.track) === key) || ('bus' in t && busKey(t.bus) === key))
-		);
-	const masterMoved = lanes.some(({ target: t }) => t && 'mix' in t && 'master' in t);
+	const moved = (key: ChainKey, of: MixFactor[], to: string | undefined) =>
+		lanes.some(({ target: t }) => {
+			if (!t || !('mix' in t)) return false;
+			if ('master' in t) return of.includes('master');
+			if (('track' in t ? trackKey(t.track) : busKey(t.bus)) !== key) return false;
+			if (t.mix === 'send') return of.includes('send') && 'to' in t && to === busKey(t.to);
+			return of.includes(t.mix);
+		});
 
 	const settling: Settling = { mix: [], params: [], inserts: [] };
-	const route = (chain: Track | Bus | undefined, key: ChainKey, reported: ReportedChain) => {
-		if (!chain || moved(key)) return;
-		for (const { to, left, right } of reported.mix) {
-			if (to === MASTER && masterMoved) continue;
-			const gains = routeGains(doc, chain, to);
-			settling.mix.push({ register: left, value: gains.left }, { register: right, value: gains.right });
-		}
-	};
-	for (const reported of program.buses) {
-		route(
-			doc.buses.find((b) => b.id === reported.id),
-			busKey(String(reported.id)),
-			reported
-		);
+	for (const { key, chain, pair, of, send, to } of eachPair(doc, program)) {
+		if (moved(key, of, to)) continue;
+		const gains = pairGains(doc, chain, of, send);
+		settling.mix.push({ register: pair.left, value: gains.left }, { register: pair.right, value: gains.right });
 	}
 
 	const globalsDone = new Set<number>();
 	for (const reported of program.tracks) {
 		const track = doc.tracks.find((t) => t.id === reported.id);
-		route(track, trackKey(reported.id as number), reported);
 		if (!track || reported.index === undefined) continue;
 		const own = placed(track);
 		const done = new Set<number>();
@@ -756,6 +916,7 @@ export function setPlay(doc: Timeline, id: number, change: Partial<NonNullable<T
 		if (track.id !== id) return track;
 		const play = { mode: 'poly' as const, priority: 'last' as const, glide: 0, ...track.play, ...change };
 		if (play.mode === 'poly') play.priority = 'last';
+		if (play.mode !== 'legato' || !play.slur_velocity) delete play.slur_velocity;
 		if (play.mode !== 'poly' || play.glide !== 0) return { ...track, play };
 		const { play: _, ...rest } = track;
 		return rest;

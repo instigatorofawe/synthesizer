@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { expect, test as base, type Page } from '@playwright/test';
 
 // A page load waits until the page has hydrated: what is typed into it before then is lost, and a slow machine shows it.
@@ -1012,7 +1013,7 @@ test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);
 });
 
-test('an insert lane compiles, and two lanes on one mix register are refused where they are', async ({ page }) => {
+test('an insert lane compiles, and a fader and a pan lane on one track both move', async ({ page }) => {
 	await trackWithClip(page, 'Insert lanes');
 	await addNoteAt(page, 0, 60);
 	await tab(page, 'Mixer');
@@ -1023,10 +1024,12 @@ test('an insert lane compiles, and two lanes on one mix register are refused whe
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[0].target).toEqual({ insert: 1 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
+	// They share a mix register, so the compiler gives the fader a step of its own.
 	await page.getByLabel('Add a lane').selectOption({ label: 'Fader' });
 	await page.getByLabel('Add a lane').selectOption({ label: 'Pan' });
-	await expect(page.getByTestId('compile-error')).toBeVisible();
-	await expect(page.getByTestId('track-1')).toHaveClass(/problem/);
+	await expect(page.getByTestId('lane-2')).toBeVisible();
+	await settled(page);
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
 	// Taking the insert away takes its lane, so that doesn't become an error of its own.
 	await page.getByRole('button', { name: 'Remove lane Pan' }).click();
@@ -1106,6 +1109,77 @@ test('a mute silences a track, and buses, sends and inserts are wired from the m
 	expect(doc.tracks[1].output).toBe('master');
 	expect(doc.tracks[0].sends.map((s: { bus: string }) => s.bus)).toEqual(['room']);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+});
+
+test('a placement plays a window of its clip, transposed and softer', async ({ page }) => {
+	await trackWithClip(page, 'Placed');
+	await addNoteAt(page, 0, 60);
+	await addNoteAt(page, 480, 64);
+	await page.getByTestId('placement-1-0').locator('rect').first().click();
+	for (const [label, value] of [
+		['Transpose', '12'],
+		['Velocity scale', '0.5'],
+		['Window start', '480']
+	]) {
+		await page.getByLabel(label, { exact: true }).fill(value);
+		await page.getByLabel(label, { exact: true }).blur();
+	}
+	await expect
+		.poll(async () => (await timelineDoc(page)).tracks[0].placements[0])
+		.toMatchObject({ transpose: 12, velocity: 0.5, start: 480 });
+	await expect(page.getByTestId('placement-1-0')).toContainText('+12');
+	await settled(page);
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+});
+
+test('the velocities of chosen notes are ramped, scaled and quantized', async ({ page }) => {
+	await trackWithClip(page, 'Shaped');
+	for (const tick of [0, 480, 960]) await addNoteAt(page, tick, 60);
+	await expect(page.getByTestId('note-2')).toBeVisible();
+	await page.getByTestId('roll').focus();
+	await page.keyboard.press('ControlOrMeta+a');
+	await page.getByLabel('Ramp velocities from').fill('30');
+	await page.getByLabel('Ramp velocities to').fill('90');
+	await page.getByRole('button', { name: 'Ramp', exact: true }).click();
+	const velocities = () => Promise.all([0, 1, 2].map((i) => page.getByTestId(`note-${i}`).getAttribute('data-vel')));
+	await expect.poll(velocities).toEqual(['30', '60', '90']);
+	await page.getByLabel('Scale velocities by').fill('0.5');
+	await page.getByRole('button', { name: 'Scale', exact: true }).click();
+	await expect.poll(velocities).toEqual(['15', '30', '45']);
+	await page.getByRole('button', { name: 'Humanize', exact: true }).click();
+	await page.getByRole('button', { name: 'Quantize', exact: true }).click();
+	await expect
+		.poll(() => Promise.all([0, 1, 2].map((i) => page.getByTestId(`note-${i}`).getAttribute('data-tick'))))
+		.toEqual(['0', '480', '960']);
+});
+
+test('a send goes before the fader from the mixer', async ({ page }) => {
+	await page.setViewportSize({ width: 1440, height: 1500 });
+	await page.goto('/?timeline=song');
+	await tab(page, 'Mixer');
+	const pre = page.getByRole('button', { name: 'Send from Lead to room before the fader' });
+	await pre.click();
+	await expect(pre).toHaveAttribute('aria-pressed', 'true');
+	expect((await timelineDoc(page)).tracks[0].sends[0].pre).toBe(true);
+	await settled(page);
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+});
+
+test('a song exports as a WAV file, to its end and its tail', async ({ page }) => {
+	await page.goto('/?recipe=Kick808');
+	const button = page.getByRole('button', { name: 'Export WAV' });
+	await expect(button).toBeEnabled({ timeout: 10000 });
+	const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), button.click()]);
+	expect(download.suggestedFilename()).toBe('Kick808.wav');
+	const bytes = await readFile(await download.path());
+	expect(bytes.subarray(0, 4).toString()).toBe('RIFF');
+	expect(bytes.subarray(8, 12).toString()).toBe('WAVE');
+	expect(bytes.readUInt32LE(24)).toBe(48000);
+	const seconds = (bytes.length - 44) / (48000 * 2 * 3);
+	expect(seconds).toBeGreaterThan(0.5);
+	let peak = 0;
+	for (let at = 44; at + 3 <= bytes.length; at += 3) peak = Math.max(peak, Math.abs(bytes.readIntLE(at, 3)));
+	expect(peak / 8388607).toBeGreaterThan(0.05);
 });
 
 async function savedPatch(page: Page, name: string, graph: object) {

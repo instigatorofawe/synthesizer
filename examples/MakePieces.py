@@ -550,6 +550,7 @@ class Song:
         lanes: list[dict] | None = None,
         inserts: list[str] | None = None,
         slot_of=None,
+        steal: str = "cut",
     ) -> int:
         """Adds a track whose notes and fader lane are cut into one clip per section they fall in."""
         id = len(self.tracks) + 1
@@ -604,6 +605,7 @@ class Song:
                     for i, p in enumerate(inserts or [])
                 ],
             }
+            | ({"steal": steal} if steal != "cut" else {})
         )
         return id
 
@@ -864,8 +866,15 @@ def elise() -> tuple[dict, str]:
     song.patch("tremolo", "Stereo tremolo", tremolo(4.2, 0.45))
     song.patch("room", "Room", hall(0.82, 0.3, 0.08))
     song.bus("room", "room")
+    # The pedal keeps every voice busy, so a new note takes one still ringing: fading it out spares a click.
     song.track(
-        "Piano", ["piano"], notes, voices=24, sends={"room": 0.3}, inserts=["tremolo"]
+        "Piano",
+        ["piano"],
+        notes,
+        voices=24,
+        sends={"room": 0.3},
+        inserts=["tremolo"],
+        steal="fade",
     )
     listen = (
         "Für Elise on a tine electric piano swaying between the speakers, pedalled bar by bar, broadening into each "

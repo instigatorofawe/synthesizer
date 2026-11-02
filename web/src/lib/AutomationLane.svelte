@@ -124,6 +124,20 @@
 					onchange={(e) => field('ramp', e.currentTarget.value)}
 				/>
 			</label>
+			{#if current.ramp}
+				<label title="Exp moves by equal ratios: evenly in decibels for a gain, and in pitch for a frequency">
+					curve
+					<select
+						aria-label={`${label} point curve`}
+						value={current.curve ?? 'linear'}
+						onchange={(e) =>
+							chosen !== null && onchange(setPoint(clip, chosen, { curve: e.currentTarget.value as 'linear' | 'exp' }))}
+					>
+						<option value="linear">linear</option>
+						<option value="exp">exp</option>
+					</select>
+				</label>
+			{/if}
 		</fieldset>
 	{/if}
 	<span class="grow"></span>

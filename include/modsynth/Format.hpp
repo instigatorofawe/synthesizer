@@ -35,7 +35,7 @@ template <class T>
 
 inline constexpr u32 kChunkMagic = 0x4B43534D;  // "MSCK"
 inline constexpr u8 kFormatVersion = 1;         // Changes only if an old engine must not even try to read an image
-inline constexpr u32 kFormatRevision = 6;       // The newest additions this engine understands
+inline constexpr u32 kFormatRevision = 7;       // The newest additions this engine understands
 inline constexpr u32 kChunkAlign = 8;
 inline constexpr u16 kNone = 0xFFFF;
 
@@ -173,6 +173,14 @@ enum class MathMode : u8 { Min, Max, Abs, Clip, Floor, Divide, Compare, Select }
 // key matches nothing and is {1, 0, 0, 0, 0, 0, 0, 0}, which is how a table reaches a power of two.
 enum ZoneField : u32 { kZoneLowKey, kZoneHighKey, kZoneLowVelocity, kZoneHighVelocity, kZoneRef, kZoneRoot };
 inline constexpr u32 kZoneFields = 8;
+// A Sample3's rows are twice as wide. They add a place in a round robin: a row plays only on the notes whose ordinal
+// on the track, counted from 0, is `position` modulo `length`, with a length of 0 meaning always. And they add
+// crossfades in velocity: a row's gain rises from 0 at its low velocity to 1 at low + fade in, and falls from 1 at
+// high - fade out to 0 at its high velocity. A width of 0 is a hard edge. At most two rows sound at once.
+enum Zone3Field : u32 { kZoneSeqPosition = 6, kZoneSeqLength, kZoneFadeIn, kZoneFadeOut };
+inline constexpr u32 kZone3Fields = 16;
+inline constexpr u32 kZone3Heads = 2;
+inline constexpr u8 kSampleRelease = 4;  // Sample3 is silent until its note is released, and then plays its zone
 
 enum class Arg : u8 { None, Buffer, Scalar, Either };  // Either takes a buffer or any scalar
 enum class Resource : u8 { None, Table, Asset, Delay };
@@ -204,7 +212,8 @@ struct OpSignature {
 // The revision that added an opcode. An image must declare it, so an older engine reports "needs a newer engine" and
 // not "damaged". Lines in Opcodes.def can't carry this, as they never change. A revision adding an opcode adds a line.
 [[nodiscard]] constexpr u32 op_revision(Op op) {
-    return op >= Op::OscMod    ? 6
+    return op >= Op::Sample3   ? 7
+           : op >= Op::OscMod  ? 6
            : op >= Op::KLfo2   ? 5
            : op >= Op::Sample2 ? 4
            : op >= Op::Tone    ? 2
@@ -277,13 +286,15 @@ struct InstrFields {
 }
 
 // The same rule for instructions.
-[[nodiscard]] constexpr u32 instr_revision(Instr instr) { return instr >= Instr::SetInsert ? 4 : 0; }
+[[nodiscard]] constexpr u32 instr_revision(Instr instr) {
+    return instr >= Instr::Steal ? 7 : instr >= Instr::SetInsert ? 4 : 0;
+}
 
 // Wait: c ticks. NoteOn: a note, b velocity 0..127, c duration in ticks. SetPatch: a slot. SetParam: b param id, c
 // value bits. Ramp: b param id, c value bits, followed by RampArg. RampArg: c ticks. Call: b clip, c repeats. Tempo: c
 // microseconds per quarter, conductor stream only. SetInsert and RampInsert: a insert, then as SetParam and Ramp.
 // SetMix and RampMix: b mix register, c value bits, RampMix followed by RampArg. PlayMode: a PlayKind, b NotePriority,
-// c glide seconds bits.
+// c glide seconds bits. Steal: a 1 to fade a stolen voice out, 0 to cut it.
 struct Instruction {
     u8 op;
     u8 a;
@@ -292,7 +303,13 @@ struct Instruction {
 };
 static_assert(sizeof(Instruction) == 8);
 
-enum class PlayKind : u8 { Poly = 0, Mono = 1, Legato = 2 };
+// LegatoVelocity is legato in which a note that takes over brings its velocity too, since revision 7.
+enum class PlayKind : u8 { Poly = 0, Mono = 1, Legato = 2, LegatoVelocity = 3 };
+inline constexpr u32 kLegatoVelocityRevision = 7;
+// Steal: a 0 cuts a stolen voice off, 1 fades it out over kStealFadeSeconds.
+inline constexpr float kStealFadeSeconds = 0.002f;
+// A legato note brings its velocity over its glide, or over this if the glide is shorter.
+inline constexpr float kVelocityGlideSeconds = 0.005f;
 enum class NotePriority : u8 { Last = 0, High = 1, Low = 2 };
 
 struct TrackDesc {
@@ -357,9 +374,12 @@ struct GlobalDesc {
 
 // What a Program's streams use that costs memory at run time, so a Program that uses neither pays for neither. These
 // are exactly what its code uses, and the validator refuses anything else.
-inline constexpr u32 kFeatureMixRamps = 1;   // a RampMix
-inline constexpr u32 kFeaturePlayModes = 2;  // a PlayMode
-inline constexpr u32 kKnownFeatures = kFeatureMixRamps | kFeaturePlayModes;
+inline constexpr u32 kFeatureMixRamps = 1;    // a RampMix
+inline constexpr u32 kFeaturePlayModes = 2;   // a PlayMode
+inline constexpr u32 kFeatureStealFades = 4;  // a Steal, since revision 7. Each track gets fade slots.
+inline constexpr u32 kKnownFeatures = kFeatureMixRamps | kFeaturePlayModes | kFeatureStealFades;
+// The voices a track with fading steals sets aside to fade in, which a stolen voice's sound moves to.
+[[nodiscard]] constexpr u32 fade_slots(u32 voices) { return voices / 4 > 1 ? voices / 4 : 1; }
 
 // The body after this header, in order: u64 patches[patches], TrackDesc[tracks], u16 slots[slots], ClipDesc[clips],
 // InsertDesc[inserts], MixStep[mix_steps], GatherInput[gather_inputs], f32 mix_init[mix_regs], GlobalDesc[globals] with

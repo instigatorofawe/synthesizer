@@ -27,6 +27,7 @@ struct KernelCase {
     float to = 0.0f;   // and the value it alternates with
     u32 stage = 0;     // The stage an Env is held in
     Recording recording = Recording::None;
+    u32 rows = 1;  // How many recordings a Sample3 plays at once: two for a velocity crossfade
 };
 
 inline constexpr u8 kLowPass = static_cast<u8>(BiquadMode::LowPass);
@@ -61,6 +62,12 @@ inline constexpr KernelCase kKernelCases[] = {
     {.name = "Sample, stereo i16", .op = Op::Sample, .in = {1.19f}, .recording = Recording::StereoI16},
     {.name = "Sample2, mono i16", .op = Op::Sample2, .in = {64.0f, 0.0f}, .recording = Recording::MonoI16},
     {.name = "Sample2, stereo i16", .op = Op::Sample2, .in = {64.0f, 0.0f}, .recording = Recording::StereoI16},
+    {.name = "Sample3, mono i16", .op = Op::Sample3, .in = {64.0f, 0.0f}, .recording = Recording::MonoI16},
+    {.name = "Sample3, crossfade, mono i16",
+     .op = Op::Sample3,
+     .in = {64.0f, 0.0f},
+     .recording = Recording::MonoI16,
+     .rows = 2},
     {.name = "Mul", .op = Op::Mul},
     {.name = "MulS", .op = Op::MulS, .in = {0.0f, 0.5f}},
     {.name = "Add", .op = Op::Add},
@@ -148,7 +155,7 @@ class KernelRig {
         }
         bind(op_signature(k.op));
         for (u32 f = 0; f < kWarmup; ++f)
-            frame();  // A one-off cost, such as Sample2 choosing its zone, isn't what's measured
+            frame();  // A one-off cost, such as a sampler choosing its zone, isn't what's measured
     }
 
     void frame() {
@@ -211,6 +218,19 @@ class KernelRig {
             resources_[0].table = {zones_, kZoneFields, 0};
             resources_[1].asset = asset();
         }
+        if (k.op == Op::Sample3) {
+            // Rows that each cover everything, and with two they cross over, so both sound at velocity 100.
+            for (u32 r = 0; r < k.rows; ++r) {
+                float* row = zones_ + r * kZone3Fields;
+                row[kZoneHighKey] = 127.0f;
+                row[kZoneHighVelocity] = 127.0f;
+                row[kZoneRef] = 1.0f;
+                row[kZoneRoot] = 60.0f;
+                if (k.rows > 1) row[r == 0 ? kZoneFadeOut : kZoneFadeIn] = 127.0f;
+            }
+            resources_[0].table = {zones_, k.rows * kZone3Fields, 0};
+            resources_[1].asset = asset();
+        }
         line_ = {line_data_, kLine, 0, kLine};  // Full, so reads do their work rather than returning silence
         context_.buffers = buffers_;
         context_.banks[static_cast<u32>(Bank::Const)] = constants_;
@@ -230,7 +250,7 @@ class KernelRig {
     float constants_[4] = {};
     float voice_[2] = {};
     float track_[2] = {};
-    float zones_[kZoneFields] = {};
+    float zones_[2 * kZone3Fields] = {};
     float table_[kTable + 1] = {};
     float floats_[2 * (kRecording + 1)] = {};
     std::int16_t whole_[2 * (kRecording + 1)] = {};

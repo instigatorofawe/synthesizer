@@ -1393,7 +1393,8 @@
        {"clip": "piano-a-last", "tick": 74400}
       ],
       "sends": [{"bus": "room", "gain": 0.3}],
-      "inserts": [{"id": 54, "patch": "tremolo"}]
+      "inserts": [{"id": 54, "patch": "tremolo"}],
+      "steal": "fade"
      }
     ],
     "buses": [{"id": "room", "gain": 1.0, "inserts": [{"id": 100, "patch": "room"}]}],

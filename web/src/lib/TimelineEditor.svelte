@@ -38,6 +38,7 @@
 		setTrack,
 		snapTick,
 		songLength,
+		windowOf,
 		ticksPerBar,
 		type Clip,
 		type PatchLike
@@ -119,8 +120,9 @@
 
 	const playhead = $derived.by(() => {
 		if (!clip || !placed || placed.clip !== clip.id) return null;
+		const { start, length } = windowOf(doc, placed);
 		const into = tick - placed.tick;
-		return into >= 0 && into < clip.length * placed.repeat ? into % clip.length : null;
+		return into >= 0 && length > 0 && into < length * placed.repeat ? start + (into % length) : null;
 	});
 
 	const number = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
@@ -405,6 +407,14 @@
 							onchange={(e) => commit(setTrack(doc, track.id, { voices: number(e) }))}
 						/></label
 					>
+					{@const held = program?.tracks.find((t) => t.id === track.id)?.notes_at_once}
+					{@const short = program?.warnings?.find((w) => placeOfError(w.where).track === track.id)}
+					{#if held !== undefined}
+						<p class="muted" class:short data-testid="notes-at-once">
+							Holds up to {held} at once{#if short && short.tick !== undefined}, so with {track.voices} the oldest are cut
+								short from bar {barOf(short.tick, doc.ppq)}{/if}.
+						</p>
+					{/if}
 					{#each track.slots as slot, index (index)}
 						<div class="line">
 							<select
@@ -478,6 +488,30 @@
 							onchange={(e) => commit(setPlay(doc, track.id, { glide: number(e) }))}
 						/></label
 					>
+					{#if track.play?.mode === 'legato'}
+						<label title="A slurred note brings its velocity, over the glide or 5 ms">
+							<input
+								type="checkbox"
+								aria-label="Slurs bring their velocity"
+								checked={track.play.slur_velocity ?? false}
+								onchange={(e) =>
+									commit(setPlay(doc, track.id, { slur_velocity: e.currentTarget.checked || undefined }))}
+							/>
+							slurs bring velocity
+						</label>
+					{/if}
+					<label title="What happens to a note whose voice a new one takes: cut off, or faded out over 2 ms">
+						stolen voices
+						<select
+							aria-label="Stolen voices"
+							value={track.steal ?? 'cut'}
+							onchange={(e) =>
+								commit(setTrack(doc, track.id, { steal: e.currentTarget.value === 'fade' ? 'fade' : undefined }))}
+						>
+							<option value="cut">cut</option>
+							<option value="fade">fade</option>
+						</select>
+					</label>
 					{#if !readonly}<button type="button" onclick={deleteTrack}>Delete track</button>{/if}
 				{/if}
 
@@ -524,6 +558,50 @@
 								onchange={(e) => commit(setPlacement(doc, at.track, at.index, { repeat: number(e) }))}
 							/></label
 						>
+						{@const window = windowOf(doc, placed)}
+						<div class="placement" role="group" aria-label="What this placement plays">
+							<label title="Plays the clip from this tick of it"
+								>from <input
+									type="number"
+									min="0"
+									max={clip.length - 1}
+									aria-label="Window start"
+									value={window.start}
+									onchange={(e) =>
+										commit(setPlacement(doc, at.track, at.index, { start: number(e), length: undefined }))}
+								/></label
+							>
+							<label title="For this many ticks, each repeat"
+								>for <input
+									type="number"
+									min="1"
+									aria-label="Window length"
+									value={window.length}
+									onchange={(e) => commit(setPlacement(doc, at.track, at.index, { length: number(e) }))}
+								/></label
+							>
+							<label
+								>transpose <input
+									type="number"
+									min="-127"
+									max="127"
+									aria-label="Transpose"
+									value={placed.transpose ?? 0}
+									onchange={(e) => commit(setPlacement(doc, at.track, at.index, { transpose: number(e) }))}
+								/></label
+							>
+							<label title="Multiplies every note's velocity"
+								>velocity × <input
+									type="number"
+									min="0"
+									max="4"
+									step="0.05"
+									aria-label="Velocity scale"
+									value={placed.velocity ?? 1}
+									onchange={(e) => commit(setPlacement(doc, at.track, at.index, { velocity: number(e) }))}
+								/></label
+							>
+						</div>
 					{/if}
 					{#if uses > 1}<p class="muted" data-testid="clip-uses">
 							Placed {uses} times. An edit changes all of them.
@@ -621,6 +699,14 @@
 </section>
 
 <style>
+	.short {
+		color: var(--warn, #e3b341);
+	}
+	.placement {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem 0.75rem;
+	}
 	.timeline {
 		display: flex;
 		flex-direction: column;

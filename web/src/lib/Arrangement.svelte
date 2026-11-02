@@ -8,6 +8,7 @@
 		snapTick,
 		songLength,
 		ticksPerBar,
+		windowOf,
 		type Clip,
 		type Track
 	} from '#lib/TimelineEdit.ts';
@@ -93,6 +94,9 @@
 		repeat: number;
 		name: string;
 		clip: Clip | undefined;
+		start: number; // The window of its clip it plays
+		length: number;
+		transpose: number;
 		ghost: boolean;
 	}
 
@@ -110,6 +114,8 @@
 					repeat: placed.repeat,
 					name: placed.clip,
 					clip,
+					...windowOf(doc, placed),
+					transpose: placed.transpose ?? 0,
 					ghost: false
 				};
 				const held = gesture && gesture.kind !== 'loop' && gesture.track === track.id && gesture.index === index;
@@ -128,29 +134,37 @@
 		return list;
 	});
 
-	function sketch(clip: Clip | undefined, repeat: number) {
-		if (!clip?.notes.length) return '';
-		const pitches = clip.notes.map((note) => note.note);
+	// The notes a block plays, each repeat of its window.
+	function sketch(block: Block) {
+		const notes = block.clip?.notes.filter((n) => n.tick >= block.start && n.tick < block.start + block.length) ?? [];
+		if (!notes.length) return '';
+		const pitches = notes.map((note) => note.note);
 		const low = Math.min(...pitches);
 		const span = Math.max(Math.max(...pitches) - low, 12);
 		const usable = BLOCK - 18;
 		let d = '';
-		for (let r = 0; r < Math.min(repeat, MOST_REPEATS_DRAWN); ++r) {
-			for (const note of clip.notes) {
-				const x = (r * clip.length + note.tick) * perTick;
+		for (let r = 0; r < Math.min(block.repeat, MOST_REPEATS_DRAWN); ++r) {
+			for (const note of notes) {
+				const at = note.tick - block.start;
+				const x = (r * block.length + at) * perTick;
 				const y = 15 + usable - ((note.note - low) / span) * usable;
-				d += `M${x.toFixed(1)} ${y.toFixed(1)}h${Math.max(1, Math.min(note.dur, clip.length - note.tick) * perTick).toFixed(1)}`;
+				d += `M${x.toFixed(1)} ${y.toFixed(1)}h${Math.max(1, Math.min(note.dur, block.length - at) * perTick).toFixed(1)}`;
 			}
 		}
 		return d;
 	}
 
-	function joins(clip: Clip | undefined, repeat: number) {
-		if (!clip) return '';
+	function joins(block: Block) {
+		if (!block.clip) return '';
 		let d = '';
-		for (let r = 1; r < Math.min(repeat, MOST_REPEATS_DRAWN); ++r)
-			d += `M${(r * clip.length * perTick).toFixed(1)} 0v${BLOCK}`;
+		for (let r = 1; r < Math.min(block.repeat, MOST_REPEATS_DRAWN); ++r)
+			d += `M${(r * block.length * perTick).toFixed(1)} 0v${BLOCK}`;
 		return d;
+	}
+
+	function title(block: Block) {
+		const shift = block.transpose ? ` ${block.transpose > 0 ? '+' : ''}${block.transpose}` : '';
+		return `${block.name}${shift}${block.repeat > 1 ? ` x${block.repeat}` : ''}`;
 	}
 
 	function startMove(event: PointerEvent, block: Block) {
@@ -172,13 +186,13 @@
 	function startRepeat(event: PointerEvent, block: Block) {
 		event.stopPropagation();
 		onselect({ track: block.track.id, placement: block.index });
-		if (readonly || !block.clip) return;
+		if (readonly || !block.clip || !block.length) return;
 		gesture = {
 			kind: 'repeat',
 			track: block.track.id,
 			index: block.index,
 			start: block.tick,
-			length: block.clip.length,
+			length: block.length,
 			repeat: block.repeat
 		};
 	}
@@ -321,7 +335,7 @@
 			{/each}
 
 			{#each blocks as block (block.key)}
-				{@const span = (block.clip?.length ?? 0) * block.repeat * perTick}
+				{@const span = (block.clip ? block.length : 0) * block.repeat * perTick}
 				<g
 					class="block"
 					class:ghost={block.ghost}
@@ -345,9 +359,9 @@
 							if (event.key === 'Enter') onselect({ track: block.track.id, placement: block.index });
 						}}
 					/>
-					<path class="join" d={joins(block.clip, block.repeat)} />
-					<path class="sketch" d={sketch(block.clip, block.repeat)} />
-					<text class="name" x="5" y="12">{block.name}{block.repeat > 1 ? ` x${block.repeat}` : ''}</text>
+					<path class="join" d={joins(block)} />
+					<path class="sketch" d={sketch(block)} />
+					<text class="name" x="5" y="12">{title(block)}</text>
 					{#if !readonly}
 						<rect
 							class="handle"

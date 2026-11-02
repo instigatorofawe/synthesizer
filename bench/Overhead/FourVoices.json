@@ -1,0 +1,113 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "params": [],
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "saw",
+      "mode": "naive"
+     },
+     {
+      "id": 4,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "held",
+      "length": 48000,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 48,
+        "vel": 100,
+        "dur": 48000
+       },
+       {
+        "tick": 0,
+        "note": 55,
+        "vel": 100,
+        "dur": 48000
+       },
+       {
+        "tick": 0,
+        "note": 60,
+        "vel": 100,
+        "dur": 48000
+       },
+       {
+        "tick": 0,
+        "note": 64,
+        "vel": 100,
+        "dur": 48000
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 4,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "held",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.25
+    }
+   }
+  }
+ ]
+}

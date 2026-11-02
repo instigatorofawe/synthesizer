@@ -49,6 +49,7 @@ jobs:
       - run: cmake -B build -DMODSYNTH_BUILD_BENCH=ON
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
+      - run: build/modsynth_bench --benchmark_min_time=1x
       - run: cmake --install build --prefix install
 
   wasm:
@@ -74,6 +75,7 @@ jobs:
         env:
           FUZZ_SECONDS: 60
           FUZZ_RANDOM: ${{ github.run_id }}
+      - run: tools/Bench.py m4
 
   # Coverage-guided, with sanitizers, from the golden images. Each run takes a new random seed, and prints it, so CI explores
   # further every time and a failure prints a recipe that replays anywhere.

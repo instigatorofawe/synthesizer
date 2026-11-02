@@ -632,18 +632,41 @@ export function laneCurve(lane: Lane, length: number): { tick: number; value: nu
 
 const byTick = (tempo: Tempo[]) => [...tempo].sort((a, b) => a.tick - b.tick);
 
+// In order, and marked as a ramp only where a later change gives it somewhere to go, which the compiler insists on.
+function tidy(tempo: Tempo[]): Tempo[] {
+	const sorted = byTick(tempo);
+	const last = sorted.at(-1)?.tick;
+	return sorted.map(({ ramp, ...change }) => (ramp && change.tick !== last ? { ...change, ramp } : change));
+}
+
+// The tempo at a tick, as the compiler plays it: a change holds until the next, and a ramp glides to the next, linearly in
+// bpm over ticks. The engine takes the ramp in steps of a 1/32 note, which this doesn't show. Before the first change it is
+// the engine's own 120.
+export function tempoAt(tempo: Tempo[], tick: number): number {
+	const sorted = byTick(tempo);
+	const at = sorted.findLastIndex((t) => t.tick <= tick);
+	if (at < 0) return 120;
+	const from = sorted[at];
+	const to = sorted[at + 1];
+	if (!from.ramp || !to) return from.bpm;
+	return from.bpm + ((to.bpm - from.bpm) * (tick - from.tick)) / (to.tick - from.tick);
+}
+
+// A change added inside a ramp carries it on, so at the tempo the ramp had there, it leaves the curve as it was.
 export function addTempo(doc: Timeline, tick: number, bpm: number): Timeline {
 	if (doc.tempo.some((t) => t.tick === tick)) return doc;
-	return { ...doc, tempo: byTick([...doc.tempo, { tick, bpm }]) };
+	const before = byTick(doc.tempo).findLast((t) => t.tick < tick);
+	const added: Tempo = before?.ramp ? { tick, bpm, ramp: true } : { tick, bpm };
+	return { ...doc, tempo: tidy([...doc.tempo, added]) };
 }
 
 export function setTempo(doc: Timeline, index: number, change: Partial<Tempo>): Timeline {
-	return { ...doc, tempo: byTick(doc.tempo.map((t, i) => (i === index ? { ...t, ...change } : t))) };
+	return { ...doc, tempo: tidy(doc.tempo.map((t, i) => (i === index ? { ...t, ...change } : t))) };
 }
 
 // The first one sets the tempo the song opens at, so it stays.
 export function removeTempo(doc: Timeline, index: number): Timeline {
-	return doc.tempo.length > 1 ? { ...doc, tempo: doc.tempo.filter((_, i) => i !== index) } : doc;
+	return doc.tempo.length > 1 ? { ...doc, tempo: tidy(doc.tempo.filter((_, i) => i !== index)) } : doc;
 }
 
 export interface Settling {

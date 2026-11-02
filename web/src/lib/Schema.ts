@@ -154,7 +154,10 @@ const distinct = (ids: unknown[]) => new Set(ids).size === ids.length;
 export const timelineSchema = z
 	.object({
 		ppq: z.number().int().min(1).max(65535).default(480),
-		tempo: z.array(z.object({ tick, bpm: z.number().min(1).max(1000) })).default([{ tick: 0, bpm: 120 }]),
+		// A change marked `ramp` glides to the next one, linearly in bpm over ticks, rather than holding until it.
+		tempo: z
+			.array(z.object({ tick, bpm: z.number().min(1).max(1000), ramp: z.boolean().optional() }))
+			.default([{ tick: 0, bpm: 120 }]),
 		clips: z.array(clipSchema).default([]),
 		tracks: z.array(trackSchema).default([]),
 		buses: z.array(busSchema).default([]),

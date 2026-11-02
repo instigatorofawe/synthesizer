@@ -2118,28 +2118,58 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     std::sort(report_tracks.begin(), report_tracks.end(),
               [](const json& a, const json& b) { return a.at("index") < b.at("index"); });
 
-    // The conductor.
-    std::vector<std::pair<u32, float>> tempo;
+    // The conductor. A change marked `ramp` glides to the next one, linearly in bpm over ticks. The engine has no ramp,
+    // so it gets steps: one every 1/32 note, each at the tempo halfway through it, and longer ones for a ramp long
+    // enough to need more than kMaxRampSteps. Each step rounds to its sample, as any change does.
+    constexpr u32 kMaxRampSteps = 1024;  // 32 bars of 4/4 in 1/32 notes, and 16 KiB of conductor
+    struct TempoChange {
+        u32 tick;
+        float bpm;
+        bool ramp;
+    };
+    std::vector<TempoChange> tempo;
     for (const json& t : doc.value("tempo", json::array())) {
-        tempo.emplace_back(t.at("tick").get<u32>(), t.at("bpm").get<float>());
+        tempo.push_back({t.at("tick").get<u32>(), t.at("bpm").get<float>(), t.value("ramp", false)});
     }
-    std::stable_sort(tempo.begin(), tempo.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::stable_sort(tempo.begin(), tempo.end(), [](const auto& a, const auto& b) { return a.tick < b.tick; });
     const auto uspq_of = [&](float bpm) {
         if (!(bpm >= 1.0f && bpm <= 1000.0f)) throw CompileError(where, "tempo must be 1 to 1000 bpm");
         return static_cast<u32>(60000000.0f / bpm);
     };
+    std::vector<std::pair<u32, u32>> changes;  // tick, microseconds per quarter
+    for (std::size_t i = 0; i < tempo.size(); ++i) {
+        const TempoChange& from = tempo[i];
+        const u32 uspq = uspq_of(from.bpm);
+        if (!from.ramp || (i + 1 < tempo.size() && tempo[i + 1].tick == from.tick)) {
+            changes.emplace_back(from.tick, uspq);
+            continue;
+        }
+        if (i + 1 == tempo.size()) throw CompileError(where, "a tempo ramp needs a later change to ramp to");
+        const TempoChange& to = tempo[i + 1];
+        const u32 span = to.tick - from.tick;
+        const u32 step = std::max({1u, ppq / 8u, (span + kMaxRampSteps - 1) / kMaxRampSteps});
+        u32 last = 0;
+        for (u32 at = from.tick; at < to.tick;) {
+            const u32 end = at + std::min(step, to.tick - at);
+            const double middle = (static_cast<double>(at) + end) / 2.0 - from.tick;
+            const u32 u = uspq_of(static_cast<float>(from.bpm + (to.bpm - from.bpm) * middle / span));
+            if (u != last) changes.emplace_back(at, u);  // A ramp between equal tempos is one change
+            last = u;
+            at = end;
+        }
+    }
     u32 initial_uspq = 500000;
     std::vector<Instruction> conductor;
     {
         u32 now = 0;
-        for (const auto& [tick, bpm] : tempo) {
+        for (const auto& [tick, uspq] : changes) {
             if (tick == 0) {
-                initial_uspq = uspq_of(bpm);
+                initial_uspq = uspq;
                 continue;
             }
             if (tick > now) conductor.push_back({static_cast<u8>(Instr::Wait), 0, 0, tick - now});
             now = tick;
-            conductor.push_back({static_cast<u8>(Instr::Tempo), 0, 0, uspq_of(bpm)});
+            conductor.push_back({static_cast<u8>(Instr::Tempo), 0, 0, uspq});
         }
         conductor.push_back({static_cast<u8>(Instr::End), 0, 0, 0});
     }

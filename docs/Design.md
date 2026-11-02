@@ -1,4 +1,4 @@
-# modsynth design, revision 14
+# modsynth design, revision 15
 
 Status: Milestones 1 to 4 and 6 are implemented, along with the harnesses of Milestone 7. Milestone 5 waits for the board.
 The wire format is frozen at version 1, now at revision 6. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -152,6 +152,12 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
   that uses no play mode sets aside nothing for them.
 - All tracks share one tick clock. A conductor stream carries tempo changes, and ticks convert to samples through an
   exact rational accumulator at the run-time rate [measured: no drift over 10 minutes].
+- A tempo change can ramp to the next one, linearly in bpm over ticks. The engine has no ramp: the compiler writes one as
+  a change every 1/32 note, at the tempo halfway through it, and in longer steps for a ramp that would need more than 1,024.
+  So a ramp needs no new instruction and plays the same on every target. Each step rounds to its sample, as any change does
+  [measured: a four-bar ramp from 120 to 60 bpm ended 79 samples, 1.6 ms, after the exact curve, counting to the end of a
+  32-sample frame]. A parameter or mix ramp converts its length in ticks to time at the tempo where it starts, so one that
+  overlaps a tempo ramp ends a little early or late, as one already does across an ordinary change.
 - Transport (play, stop, locate, loop range) is engine state, so dragging a loop brace does not recompile. A locate replays
   the streams silently from the start, which chases held notes and parameters. That costs time proportional to the Program
   in the frame it happens, so a tick-to-offset index will replace it when a real Program makes it too slow.

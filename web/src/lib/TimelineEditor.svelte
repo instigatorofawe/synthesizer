@@ -34,6 +34,7 @@
 		setPlayChange,
 		setSlot,
 		setTempo,
+		tempoAt,
 		setTrack,
 		snapTick,
 		songLength,
@@ -352,6 +353,17 @@
 								value={change.bpm}
 								onchange={(e) => commit(setTempo(doc, index, { bpm: number(e) }))}
 							/>
+							{#if doc.tempo.some((t) => t.tick > change.tick)}
+								<label class="ramp" title="Glide to the next change's tempo, instead of holding this one until it">
+									<input
+										type="checkbox"
+										aria-label={`Ramp from bar ${barOf(change.tick, doc.ppq)}`}
+										checked={change.ramp ?? false}
+										onchange={(e) => commit(setTempo(doc, index, { ramp: e.currentTarget.checked }))}
+									/>
+									ramp
+								</label>
+							{/if}
 							{#if index > 0 && !readonly}
 								<button
 									type="button"
@@ -364,7 +376,10 @@
 					{#if !readonly}
 						<button
 							type="button"
-							onclick={() => commit(addTempo(doc, snapTick(tick, ticksPerBar(doc)), doc.tempo.at(-1)?.bpm ?? 120))}
+							onclick={() => {
+								const at = snapTick(tick, ticksPerBar(doc));
+								commit(addTempo(doc, at, Math.round(tempoAt(doc.tempo, at) * 100) / 100));
+							}}
 						>
 							Add a change at the playhead
 						</button>
@@ -726,6 +741,17 @@
 	}
 	.inspector .line select {
 		flex: 1;
+	}
+	.ramp {
+		display: flex;
+		align-items: center;
+		gap: 0.2rem;
+		font-size: 0.75rem;
+		color: var(--muted);
+	}
+	.inspector .ramp input {
+		width: auto;
+		margin: 0;
 	}
 	.inspector button {
 		padding: 0.1rem 0.4rem;

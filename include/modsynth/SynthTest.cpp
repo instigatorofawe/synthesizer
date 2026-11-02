@@ -1369,7 +1369,7 @@ std::vector<std::byte> live_image(const char* patch) {
 
 template <class R>
 void hold_note(R& rig) {
-    rig.engine.send({.kind = EventKind::NoteOn, .target = 0, .note = 60, .velocity = 100});
+    rig.engine.send({.kind = EventKind::NoteOn, .note = 60, .velocity = 100});
 }
 
 // Stop ends a held note, so this plays another to go on hearing the LFO. For the frame the two share they are both

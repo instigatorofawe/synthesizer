@@ -19,7 +19,7 @@ checked against committed renders in [golden](golden).
 | `web` | The SvelteKit app, with Drizzle over SQLite |
 | `examples/Demo.json` | The project every target renders. `MakeDemo.py` regenerates it. |
 | `examples/Listen.py` | Plays each oscillator and mode through the sound card, with `uv run examples/Listen.py`. `--list` shows the recipes. |
-| `examples/Recipes` | 59 standalone projects, from a supersaw to a drum loop, that `Listen.py` plays. |
+| `examples/Recipes` | 61 standalone projects, from a supersaw to a drum loop, that `Listen.py` plays. |
 
 ## Native
 

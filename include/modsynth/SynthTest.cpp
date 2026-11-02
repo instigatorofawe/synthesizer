@@ -1945,3 +1945,123 @@ TEST(Probes, ABusTapReplacesOne) {
     (void)next_block(rig);
     for (const float sample : next_block(rig)) EXPECT_NE(sample, 69.0f);
 }
+
+// Revision 7: a stolen voice can fade, a legato line can bring its notes' velocities, and Sample3.
+
+TEST(Steal, AFadingStealPlaysTheOldNoteOnAndOutWhileTheNewOneStarts) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 1920}, {"tick": 480, "note": 64, "dur": 960}])");
+    const auto heard = [&](const char* steal) {
+        Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, {{"voices", 1}, {"steal", steal}})).image);
+        EXPECT_EQ(rig.engine.load_error(), LoadError::None);
+        play(rig);
+        return samples_of(rig, frame_at(700));
+    };
+    const auto cut = heard("cut"), faded = heard("fade");
+    const u32 at = 480 * 50;  // The sample the second note starts on
+    EXPECT_NEAR(cut[at - 1], 0.60f, 1e-5f);
+    EXPECT_NEAR(cut[at], 0.64f, 1e-5f) << "cut, the old note stops on the sample the new one starts";
+    EXPECT_NEAR(faded[at - 1], 0.60f, 1e-5f);
+    EXPECT_NEAR(faded[at], 0.64f + 0.60f * (1.0f - 1.0f / 96.0f), 1e-4f) << "faded, both sound";
+    EXPECT_NEAR(faded[at + 48], 0.64f + 0.60f * (1.0f - 49.0f / 96.0f), 1e-4f);
+    EXPECT_NEAR(faded[at + 96], 0.64f, 1e-5f) << "2 ms later the old note is gone";
+    EXPECT_NEAR(faded[at + 200], cut[at + 200], 1e-6f);
+}
+
+TEST(Steal, ATrackFadesInAQuarterOfItsVoicesAndAChordOfStealsTakesThemAll) {
+    // Eight held notes on eight voices, then four more at once: two fade slots, so two fade and two are cut.
+    json notes = json::array();
+    for (int i = 0; i < 8; ++i) notes.push_back({{"tick", 0}, {"note", 40 + i}, {"dur", 1920}});
+    for (int i = 0; i < 4; ++i) notes.push_back({{"tick", 480}, {"note", 80 + i}, {"dur", 960}});
+    Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, {{"voices", 8}, {"steal", "fade"}})).image);
+    play(rig);
+    (void)samples_of(rig, frame_at(480) + 1);
+    EXPECT_EQ(rig.engine.active_voices(), 10u);
+    (void)samples_of(rig, 8);
+    EXPECT_EQ(rig.engine.active_voices(), 8u);
+}
+
+TEST(Steal, ALocateSilencesWhatIsFading) {
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "dur": 1920}, {"tick": 480, "note": 64, "dur": 960}])");
+    Rig<kStereo> rig(compile_image(one_track(kPitch, {{"notes", notes}}, {{"voices", 1}, {"steal", "fade"}})).image);
+    play(rig);
+    (void)samples_of(rig, frame_at(480) + 1);
+    rig.engine.send({.kind = EventKind::Locate, .tick = 0});
+    (void)samples_of(rig, 1);
+    EXPECT_EQ(rig.engine.active_voices(), 1u);
+}
+
+TEST(Play, ASlurBringsItsVelocityWhenAsked) {
+    constexpr char kVelocityOut[] = R"({"nodes": [{"id": 1, "type": "note"}, {"id": 2, "type": "out"}],
+        "edges": [{"from": 1, "port": "velocity", "to": 2, "input": "l"}]})";
+    const json notes = json::parse(R"([{"tick": 0, "note": 60, "vel": 20, "dur": 960},
+        {"tick": 480, "note": 64, "vel": 127, "dur": 960}])");
+    const auto heard = [&](bool bring) {
+        json play_mode = {{"mode", "legato"}};
+        if (bring) play_mode["slur_velocity"] = true;
+        Rig<kStereo> rig(compile_image(one_track(kVelocityOut, {{"notes", notes}}, {{"play", play_mode}})).image);
+        EXPECT_EQ(rig.engine.load_error(), LoadError::None);
+        play(rig);
+        return levels(rig, {100, 482, 720});
+    };
+    expect_near(heard(false), {20.0f / 127.0f, 20.0f / 127.0f, 20.0f / 127.0f});
+    const auto brought = heard(true);
+    EXPECT_NEAR(brought[0], 20.0f / 127.0f, 1e-6f);
+    EXPECT_GT(brought[1], 20.0f / 127.0f) << "on its way";
+    EXPECT_LT(brought[1], 1.0f);
+    EXPECT_NEAR(brought[2], 1.0f, 1e-6f) << "and there after 5 ms";
+}
+
+TEST(Sample3, ARoundRobinTakesTurnsByTheTracksNotes) {
+    json assets = {{"a", asset(std::vector<float>(64, 0.1f))},
+                   {"b", asset(std::vector<float>(64, 0.2f))},
+                   {"c", asset(std::vector<float>(64, 0.3f))}};
+    json sample;
+    sample["zones"] = json::parse(R"([{"asset": "a", "round_robin": [1, 3]}, {"asset": "b", "round_robin": [2, 3]},
+        {"asset": "c", "round_robin": [3, 3]}])");
+    json notes = json::array();
+    for (int i = 0; i < 4; ++i) notes.push_back({{"tick", i * 240}, {"note", 60}, {"dur", 10}});
+    const auto image = compile_image(sampled(sample, assets, notes)).image;
+    Rig<kStereo> rig(image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    expect_near(levels(rig, {1, 241, 481, 721}), {0.1f, 0.2f, 0.3f, 0.1f}, 1e-6f);
+
+    // A locate counts the notes it passes, so it picks what playing through would have.
+    Rig<kStereo> jumped(image);
+    play(jumped);
+    jumped.engine.send({.kind = EventKind::Locate, .tick = 400});
+    expect_near(levels(jumped, {81, 321}), {0.3f, 0.1f}, 1e-6f);
+}
+
+TEST(Sample3, LayersCrossfadeInVelocity) {
+    json assets = {{"soft", asset(std::vector<float>(64, 0.2f))}, {"loud", asset(std::vector<float>(64, 0.6f))}};
+    json sample;
+    sample["zones"] = json::parse(R"([{"asset": "soft", "velocities": [0, 100], "fade": [0, 40]},
+        {"asset": "loud", "velocities": [60, 127], "fade": [40, 0]}])");
+    const auto level = [&](int velocity) {
+        json notes = json::array({{{"tick", 0}, {"note", 60}, {"vel", velocity}, {"dur", 960}}});
+        Rig<kStereo> rig(compile_image(sampled(sample, assets, notes)).image);
+        EXPECT_EQ(rig.engine.load_error(), LoadError::None);
+        play(rig);
+        return first_samples(rig, 2)[0];
+    };
+    EXPECT_NEAR(level(40), 0.2f, 1e-6f);
+    EXPECT_NEAR(level(70), 0.2f * 0.75f + 0.6f * 0.25f, 1e-6f);
+    EXPECT_NEAR(level(80), 0.4f, 1e-6f);
+    EXPECT_NEAR(level(120), 0.6f, 1e-6f);
+}
+
+TEST(Sample3, AReleaseSamplePlaysWhenItsNoteIsLetGoAndKeepsItsVoiceUntilItEnds) {
+    json assets = {{"thud", asset(std::vector<float>(4800, 0.5f))}};
+    json sample = {{"release", true}, {"zones", json::parse(R"([{"asset": "thud"}])")}};
+    Rig<kStereo> rig(compile_image(sampled(sample, assets, one_note(480))).image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    const auto audio = samples_of(rig, frame_at(800));
+    EXPECT_EQ(audio[480 * 50 - 1], 0.0f) << "silent while held";
+    EXPECT_NEAR(audio[480 * 50], 0.5f, 1e-6f) << "from the sample it is released on";
+    EXPECT_NEAR(audio[480 * 50 + 4799], 0.5f, 1e-6f);
+    EXPECT_EQ(audio[480 * 50 + 4800], 0.0f);
+    (void)samples_of(rig, 4);
+    EXPECT_EQ(rig.engine.active_voices(), 0u);
+}

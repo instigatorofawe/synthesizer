@@ -102,7 +102,8 @@ const automationSchema = z.strictObject({
 const playFields = {
 	mode: z.enum(['poly', 'mono', 'legato']).default('poly'),
 	priority: z.enum(['last', 'high', 'low']).default('last'),
-	glide: z.number().min(0).max(60).default(0)
+	glide: z.number().min(0).max(60).default(0),
+	slur_velocity: z.boolean().optional() // Legato only: a slurred note brings its velocity
 };
 const playSchema = z.strictObject(playFields);
 const playChangeSchema = z.strictObject({ tick, ...playFields });
@@ -158,6 +159,7 @@ const trackSchema = z.strictObject({
 	params: z.record(z.string(), z.number()).default({}),
 	placements: z.array(placementSchema).default([]),
 	play: playSchema.optional(),
+	steal: z.enum(['cut', 'fade']).optional(), // What happens to a note whose voice a new one takes
 	...routing
 });
 

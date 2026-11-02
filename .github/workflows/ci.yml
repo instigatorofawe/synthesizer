@@ -45,7 +45,7 @@ jobs:
         run: |
           python3 tools/ReadImage.py --coverage \
             golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image golden/Tones.image \
-            golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image golden/Lanes.image golden/Zones.image golden/Hold.image golden/Mods.image
+            golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image golden/Lanes.image golden/Zones.image golden/Hold.image golden/Mods.image golden/Steals.image
           python3 tools/ReadImage.py --example golden/Minimal.image
 
   native:
@@ -121,7 +121,7 @@ jobs:
       - run: >-
           ${{ matrix.binary }} 90 ${{ github.run_id }}
           golden/AllOps.image golden/Demo.image golden/Waves.image golden/Tones.image
-          golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image golden/Lanes.image golden/Zones.image golden/Hold.image golden/Mods.image
+          golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image golden/Lanes.image golden/Zones.image golden/Hold.image golden/Mods.image golden/Steals.image
         env:
           ASAN_OPTIONS: detect_leaks=0
 

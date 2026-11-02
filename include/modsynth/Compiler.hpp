@@ -177,6 +177,18 @@ struct Ir {
     int ins = 0;
 };
 
+// A field that isn't one of these is refused, not ignored. A misspelt one would otherwise play as its default, and a
+// newer document read by an older compiler would play without what it asked for.
+inline void check_keys(const json& object, std::initializer_list<const char*> known, const std::string& where,
+                       const std::string& what) {
+    if (!object.is_object()) throw CompileError(where, what + " is an object");
+    for (const auto& [name, value] : object.items()) {
+        if (std::none_of(known.begin(), known.end(), [&](const char* k) { return name == k; })) {
+            throw CompileError(where, what + " has no '" + name + "'");
+        }
+    }
+}
+
 struct InputSpec {
     const char* name;
     float def;
@@ -915,7 +927,7 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
                 return found;
             };
             if (mode == "plain") {
-                for (const char* key : {"zones", "reverse", "tail"}) {
+                for (const char* key : {"zones", "reverse", "tail", "release"}) {
                     if (n.config.contains(key)) {
                         throw CompileError(node_where(id), std::string("only a sample in zones mode has ") + key);
                     }
@@ -937,7 +949,14 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
                 if (zones.empty() || zones.size() > kMaxZones) {
                     throw CompileError(node_where(id), "a sample has 1 to 256 zones");
                 }
-                std::vector<std::array<float, kZoneFields>> rows;
+                // A round robin, a crossfade or a release needs Sample3's wider rows. Without them it is Sample2, so a
+                // patch that uses none of them is the bytes it always was.
+                const bool release = n.config.value("release", false);
+                const bool wide = release || std::any_of(zones.begin(), zones.end(), [](const json& zone) {
+                                      return zone.contains("round_robin") || zone.contains("fade");
+                                  });
+                const u32 fields = wide ? kZone3Fields : kZoneFields;
+                std::vector<std::array<float, kZone3Fields>> rows;
                 const auto range = [&](const json& zone, const char* key) {
                     const json pair = zone.value(key, json::array({0, 127}));
                     const int low = pair.at(0).get<int>(), high = pair.at(1).get<int>();
@@ -948,6 +967,8 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
                     return std::pair(static_cast<float>(low), static_cast<float>(high));
                 };
                 for (const json& zone : zones) {
+                    check_keys(zone, {"asset", "root", "keys", "velocities", "round_robin", "fade"}, node_where(id),
+                               "a zone");
                     const std::string asset = zone.at("asset").get<std::string>();
                     const json* found = find_asset(asset);
                     const u16 ref = add_ref(make_asset(*found, node_where(id)));
@@ -956,21 +977,50 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
                         throw CompileError(node_where(id), "zone root must be 0 to 127");
                     const auto [low_key, high_key] = range(zone, "keys");
                     const auto [low_velocity, high_velocity] = range(zone, "velocities");
-                    rows.push_back({low_key, high_key, low_velocity, high_velocity, static_cast<float>(ref), root});
+                    std::array<float, kZone3Fields> row{
+                        low_key, high_key, low_velocity, high_velocity, static_cast<float>(ref), root};
+                    if (zone.contains("round_robin")) {
+                        // Which of how many, counting from 1: [2, 3] plays on the second note of every three.
+                        const json rr = zone.at("round_robin");
+                        const int position = rr.at(0).get<int>(), length = rr.at(1).get<int>();
+                        if (rr.size() != 2 || length < 1 || length > static_cast<int>(kMaxZones) || position < 1 ||
+                            position > length) {
+                            throw CompileError(node_where(id), "a zone's round_robin is [which, of how many], from 1");
+                        }
+                        row[kZoneSeqPosition] = static_cast<float>(position - 1);
+                        row[kZoneSeqLength] = static_cast<float>(length);
+                    }
+                    if (zone.contains("fade")) {
+                        const json fade = zone.at("fade");
+                        const float in = fade.at(0).get<float>(), out = fade.at(1).get<float>();
+                        const float span = high_velocity - low_velocity;
+                        if (fade.size() != 2 || !(in >= 0.0f && in <= span) || !(out >= 0.0f && out <= span)) {
+                            throw CompileError(node_where(id),
+                                               "a zone's fade is [in, out] in velocity, each within its velocities");
+                        }
+                        row[kZoneFadeIn] = in;
+                        row[kZoneFadeOut] = out;
+                    }
+                    rows.push_back(row);
                 }
                 while (!std::has_single_bit(rows.size())) rows.push_back({1.0f});
                 Writer table;
-                table.put(TableHeader{static_cast<u32>(rows.size()) * kZoneFields, 0});
+                table.put(TableHeader{static_cast<u32>(rows.size()) * fields, 0});
                 for (const auto& row : rows) {
-                    for (const float value : row) table.put(value);
+                    for (u32 f = 0; f < fields; ++f) table.put(row[f]);
                 }
                 table.put(0.0f);  // guard
                 const u16 ref = add_ref(make_chunk(ChunkKind::Table, std::move(table.bytes)));
                 const bool literal = n.literals.count("note") != 0;
                 const Value note = input(n, "note") || literal ? scalar_in(n, "note") : Value{Bank::Voice, kScalarNote};
-                const u8 flags = static_cast<u8>((n.config.value("reverse", false) ? kSampleReverse : 0) |
-                                                 (n.config.value("tail", false) ? kSampleTail : 0));
-                const Ir ir = audio_step(Op::Sample2, {note, scalar_in(n, "start")}, 2, state, flags, ref);
+                const u8 flags =
+                    static_cast<u8>((n.config.value("reverse", false) ? kSampleReverse : 0) |
+                                    (n.config.value("tail", false) ? kSampleTail : 0) | (release ? kSampleRelease : 0));
+                if (release && n.config.value("tail", false)) {
+                    throw CompileError(node_where(id), "a release sample plays once through, so it has no tail");
+                }
+                const Ir ir =
+                    audio_step(wide ? Op::Sample3 : Op::Sample2, {note, scalar_in(n, "start")}, 2, state, flags, ref);
                 set("l", ir.out[0]);
                 set("r", ir.out[1]);
             } else {
@@ -1447,18 +1497,6 @@ struct Chain {
     json mix = json::array();
 };
 
-// A field that isn't one of these is refused, not ignored. A misspelt one would otherwise play as its default, and a
-// newer document read by an older compiler would play without what it asked for.
-inline void check_keys(const json& object, std::initializer_list<const char*> known, const std::string& where,
-                       const std::string& what) {
-    if (!object.is_object()) throw CompileError(where, what + " is an object");
-    for (const auto& [name, value] : object.items()) {
-        if (std::none_of(known.begin(), known.end(), [&](const char* k) { return name == k; })) {
-            throw CompileError(where, what + " has no '" + name + "'");
-        }
-    }
-}
-
 // Values by parameter id, as a track's, an insert's and the globals are.
 inline void check_param_values(const json& values, const std::string& where, const std::string& what) {
     if (!values.is_object()) throw CompileError(where, what + " is an object");
@@ -1494,7 +1532,7 @@ inline void check_timeline(const json& doc, const std::string& where) {
             check_keys(a, {"param", "target", "tick", "value", "ramp", "curve"}, at, "a lane");
         }
         for (const json& p : list(clip, "play", at)) {
-            check_keys(p, {"tick", "mode", "priority", "glide"}, at, "a play change");
+            check_keys(p, {"tick", "mode", "priority", "glide", "slur_velocity"}, at, "a play change");
         }
     }
     const auto chain = [&](const json& d, const std::string& at) {
@@ -1507,8 +1545,8 @@ inline void check_timeline(const json& doc, const std::string& where) {
     for (const json& t : list(doc, "tracks", where)) {
         const std::string at = where + "/track:" + (t.is_object() && t.contains("id") ? t.at("id").dump() : "");
         check_keys(t,
-                   {"id", "name", "voices", "slots", "params", "placements", "play", "gain", "pan", "mute", "output",
-                    "sends", "inserts"},
+                   {"id", "name", "voices", "slots", "params", "placements", "play", "steal", "gain", "pan", "mute",
+                    "output", "sends", "inserts"},
                    at, "a track");
         for (const json& p : list(t, "placements", at)) {
             check_keys(p, {"clip", "tick", "repeat", "transpose", "velocity", "start", "length"}, at, "a placement");
@@ -2316,7 +2354,8 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
 
         const auto play_instruction = [&](const json& play, const std::string& at) -> Instruction {
             for (const auto& [name, field] : play.items()) {
-                if (name != "mode" && name != "priority" && name != "glide" && name != "tick") {
+                if (name != "mode" && name != "priority" && name != "glide" && name != "tick" &&
+                    name != "slur_velocity") {
                     throw CompileError(at, "play has no '" + name + "'");
                 }
             }
@@ -2335,7 +2374,12 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                 throw CompileError(at, "priority chooses among held notes, and poly plays them all");
             }
             if (!(glide >= 0.0f && glide <= kMaxGlideSeconds)) throw CompileError(at, "glide must be 0 to 60 seconds");
-            return {static_cast<u8>(Instr::PlayMode), static_cast<u8>(kind), static_cast<u16>(order),
+            // A slurred note brings its velocity, which only a legato line has notes slurring into.
+            const bool slur_velocity = play.value("slur_velocity", false);
+            if (slur_velocity && kind != PlayKind::Legato)
+                throw CompileError(at, "only legato slurs, so only it has slur_velocity");
+            const PlayKind played = slur_velocity ? PlayKind::LegatoVelocity : kind;
+            return {static_cast<u8>(Instr::PlayMode), static_cast<u8>(played), static_cast<u16>(order),
                     std::bit_cast<u32>(glide)};
         };
 
@@ -2752,6 +2796,11 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         // The head of the stream. A locate replays from here, so every target a lane moved returns to where it started
         // and then chases forward, which is what lets a loop or a jump back sound the same as playing from the top.
         std::vector<Instruction> stream;
+        // A stolen voice fades out when the track asks, which costs fade slots, so cutting it is the default that every
+        // document before this had.
+        const std::string steal = d.value("steal", std::string{"cut"});
+        if (steal != "cut" && steal != "fade") throw CompileError(track_where, "steal is cut or fade");
+        if (steal == "fade") stream.push_back({static_cast<u8>(Instr::Steal), 1, 0, 0});
         if (d.contains("play")) {
             const Instruction play = play_instruction(d.at("play"), track_where);
             const Instruction poly{static_cast<u8>(Instr::PlayMode), 0, 0, std::bit_cast<u32>(0.0f)};
@@ -2900,6 +2949,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     for (const Instruction& i : code) {
         if (i.op == static_cast<u8>(Instr::RampMix)) h.features |= kFeatureMixRamps;
         if (i.op == static_cast<u8>(Instr::PlayMode)) h.features |= kFeaturePlayModes;
+        if (i.op == static_cast<u8>(Instr::Steal)) h.features |= kFeatureStealFades;
     }
 
     Writer w;
@@ -2974,6 +3024,10 @@ inline std::vector<std::byte> write_image(const std::vector<const Chunk*>& order
                 const u8 op = program.instruction(i).op;
                 if (op < static_cast<u8>(Instr::kCount)) {
                     needs_revision = std::max(needs_revision, instr_revision(static_cast<Instr>(op)));
+                }
+                if (op == static_cast<u8>(Instr::PlayMode) &&
+                    program.instruction(i).a == static_cast<u8>(PlayKind::LegatoVelocity)) {
+                    needs_revision = std::max(needs_revision, kLegatoVelocityRevision);
                 }
             }
         }

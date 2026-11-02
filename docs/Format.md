@@ -29,7 +29,7 @@ Three kinds of change are possible after this freeze, and nothing else is.
 Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
 can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
 damaged. A compiler writes the lowest revision that covers what it actually used, so an image that uses nothing new keeps
-loading on old engines. This document describes revision 6. The opcode table says which revision added each opcode.
+loading on old engines. This document describes revision 7. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
 version so far, and no such change is planned. A version above the engine's in the manifest, which comes first, gets the same refusal. In any later chunk
@@ -159,7 +159,8 @@ An 8-byte header, then `length + 1` f32 samples, all finite. The extra sample is
 
 The payload size must match exactly.
 
-A table that a Sample2 uses is a **zone table**: rows of 8 f32, and at most 256 of them, so `length` is a multiple of 8.
+A table that a Sample2 uses is a **zone table**: rows of 8 f32, and at most 256 of them, so `length` is a multiple of 8. A Sample3's is a
+**wide zone table**, whose rows are 16 f32 and are described after these.
 
 | Field | Name | Meaning |
 |---|---|---|
@@ -173,7 +174,21 @@ A table that a Sample2 uses is a **zone table**: rows of 8 f32, and at most 256 
 
 The first row whose ranges hold a note and its velocity is that note's zone. A row of `1, 0, 0, 0, 0, 0, 0, 0` matches nothing, which is how a
 table reaches a power of two, and no other row may have `low_key` above `high_key`. `ref` is an index and not a hash, so a zone table means
-something only with its Patch. The validator checks it once for each Patch that uses it.
+something only with its Patch. The validator checks it once for each Patch that uses it, and once more for each kind of step that does.
+
+A wide zone table, since revision 7, has fields 0 to 5 as above, then:
+
+| Field | Name | Meaning |
+|---|---|---|
+| 6 | `seq_position` | a whole number below `seq_length`, or 0 when that is 0 |
+| 7 | `seq_length` | a whole number, 0 to 256. 0 is no round robin. |
+| 8 | `fade_in` | 0 to `high_velocity - low_velocity` |
+| 9 | `fade_out` | likewise |
+| 10 to 15 | | must be 0 |
+
+A row with a round robin plays only on a note whose ordinal on its track, modulo `seq_length`, is `seq_position`. A row's gain is 1, times
+`min(1, (velocity - low_velocity) / fade_in)` if `fade_in` is above 0, times `min(1, (high_velocity - velocity) / fade_out)` if `fade_out` is
+above 0, all in f32, so two rows that overlap can cross over in velocity. Padding is `1` followed by fifteen `0`.
 
 ## 6. Patch chunk (kind 3)
 
@@ -307,6 +322,7 @@ samples.
 | 30 | Math | B | E a, E b, E c | 0 min, 1 max, 2 abs, 3 clip, 4 floor, 5 divide, 6 compare, 7 select | | voice | 6 |
 | 31 | KMath | S | S a, S b, S c | 0 min, 1 max, 2 abs, 3 clip, 4 floor, 5 divide, 6 compare, 7 select | | either | 6 |
 | 32 | Shape | B | B in | | Table | voice | 6 |
+| 33 | Sample3 | B left, B right | S note, S start | bit 0 reverse, bit 1 tail, bit 2 release | Table | voice | 7 |
 
 What each one does:
 
@@ -366,6 +382,14 @@ What each one does:
     bit it leaves the loop at the sample of the release and plays to the end of the recording in its direction, and the voice lasts until then.
   - A live edit can carry a position or a zone that no longer fits. A zone past the table's end or on a padding row is done. In reverse a position
     past the last frame goes to just below it.
+- **Sample3.** Sample2 for up to two recordings at once, from a wide zone table. A note's rows are the first two, in table order, that hold its
+  key and velocity, that its ordinal plays if they have a round robin, and whose gain is above 0. A key or velocity here is the one that started
+  the voice, and the **ordinal** is how many NoteOns its track had reached before it, counting every one a stream passes, played or chased, and
+  every live note, from 0 when the stream starts. Each row plays as Sample2's one recording does, with its own position, root and loop, and its
+  samples times its gain are added. It is done when both are, and it holds a voice open while either would hold Sample2's.
+  - With the release bit it writes 0 while its note is held. On the sample the note is released it picks its rows, by the note, velocity and
+    ordinal that started the voice, and plays them from there once through: loops and the tail bit play no part, and it is done when both
+    rows end. Until it is released it holds its voice open.
 - **Mul, MulS, Add, AddS.** Per sample. An output may be the same register as an input.
 - **Pan.** `left = in * (1 - p) / 2` and `right = in * (1 + p) / 2`, with `p` clamped to −1 to 1. This law is linear, so `left + right`
   is always `in`, whatever `p` is.
@@ -472,7 +496,7 @@ silence if it is not finite.
 - `out_left` and `out_right` name buffers that have been written.
 - No step uses an opcode added after the manifest's revision.
 - Each reference names a Table or an Asset that exists, and each step's resource is in range and of the right kind.
-- A Sample2's Table is a zone table, as section 5 describes.
+- A Sample2's Table is a zone table, and a Sample3's a wide zone table, as section 5 describes.
 
 ## 7. Program chunk (kind 4)
 
@@ -500,7 +524,7 @@ A Program is the compiled form of a timeline. Each track has an Instruction stre
 | 42 | u16 | `globals` | |
 | 44 | u16 | `inits` | |
 | 46 | u16 | `master` | the bus register that is the output |
-| 48 | u32 | `features` | bit 0 if any stream has a RampMix, bit 1 if any has a PlayMode, and no other bits. It must say exactly that, and it decides what an engine sets aside for them, so a Program pays for neither unless it uses it. |
+| 48 | u32 | `features` | bit 0 if any stream has a RampMix, bit 1 if any has a PlayMode, bit 2 if any has a Steal, and no other bits. It must say exactly that, and it decides what an engine sets aside for them, so a Program pays for none of them unless it uses it. |
 
 ### Body
 
@@ -586,7 +610,8 @@ Applied at load, then clamped to the parameter's range. An `id` no patch has doe
 | 10 | RampInsert | insert | param id | target, f32 bits, finite | Tracks and clips, then RampArg | 4 |
 | 11 | SetMix | | mix register | value, f32 bits, finite | Tracks and clips | 4 |
 | 12 | RampMix | | mix register | target, f32 bits, finite | Tracks and clips, then RampArg | 4 |
-| 13 | PlayMode | 0 poly, 1 mono, 2 legato | 0 last, 1 high, 2 low. 0 with poly. | glide seconds, f32 bits, 0 to 60 | Tracks and clips | 4 |
+| 13 | PlayMode | 0 poly, 1 mono, 2 legato, 3 legato with velocity | 0 last, 1 high, 2 low. 0 with poly. | glide seconds, f32 bits, 0 to 60 | Tracks and clips | 4 |
+| 14 | Steal | 0 cut, 1 fade | | | Tracks and clips | 7 |
 
 A field left blank must be 0. A track's stream and the conductor's must each end in one End, and contain no other. A clip must not
 contain an End, because it returns to its caller. Calls do not nest, and a clip's `ticks` is at least 1, so a stream cannot run
@@ -619,6 +644,10 @@ started. One at the head of a stream, before any Wait or Call, is in force from 
   with `voices` above 1 a release tail rings under it.
 - **Legato.** One note sounds. When another note takes over from a note still sounding, on the same slot, it keeps that voice: its note scalar
   changes, and its gate, velocity and state do not. Otherwise it starts as in mono.
+- **Legato with velocity**, since revision 7. Legato, except that a note taking over a voice brings its velocity too. The voice's velocity
+  becomes the note's, and its velocity scalar moves to `velocity / 127` in `n = max(trunc(max(glide, 0.005) * rate / N), 1)` equal steps, one
+  each frame, the first in the frame the note takes over, landing exactly on it. A note that starts a voice of its own starts with its own
+  velocity, as in any mode.
 
 A track in mono or legato keeps a list of the notes it is holding, of at most 16, in the order they started. Whenever one starts or ends, priority
 chooses one of them: the newest for last, the highest for high and the lowest for low, with ties going to the newest. If that is not the note
@@ -637,6 +666,20 @@ frame, the first in the frame it starts, and lands exactly on its note. The step
 - in legato with nothing sounding, nothing, so it starts on its note.
 
 The first note a track plays has nothing to slide from. A locate replays the stream, so it restores the mode and the last note as well.
+
+### Stolen voices
+
+A note that finds every voice of its track busy takes one: the oldest released voice, or the oldest if none is released. Steal says what
+becomes of the sound that voice was making, from the next note on, and a track starts with 0. A locate replays it with the stream.
+
+- **0, cut.** It stops on the frame the new note starts, before the new note's first sample.
+- **1, fade**, since revision 7. It moves to a **fade slot**, where it plays on unchanged up to the sample the new note starts on, and then
+  falls in a straight line: its `k`th sample from there is multiplied by `1 - (k + 1) / L`, and by 0 from `L` on, with `L = max(trunc(0.002 *
+  rate), 1)`. It is added to the track's bus after the track's voices, in slot order, and its slot is free again after the frame in which its
+  fade ends, or in which its own sound ends. The voice starts its new note on that note's sample as usual.
+
+A Program with a Steal gives every track `max(voices / 4, 1)` fade slots, rounded down, each the size of one of its voices. A steal into a
+track whose slots are all fading cuts short the one furthest through its fade. Nothing in a fade slot is carried across a live edit.
 
 ### Time
 
@@ -766,7 +809,7 @@ is what the per-op cost limit in the design is for.
 
 ## 10. Golden images
 
-`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, `Lanes` and `Zones` from revision 4, `Hold` from revision 5, and `Mods` from revision 6, each with its render on a stereo and a mono engine. They are the
+`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, `Lanes` and `Zones` from revision 4, `Hold` from revision 5, `Mods` from revision 6, and `Steals` from revision 7, each with its render on a stereo and a mono engine. They are the
 contract in executable form.
 
 - A golden image and its render never change, and CI fails a pull request that edits or removes one.

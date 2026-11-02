@@ -1567,6 +1567,75 @@ std::string zone_error(const char* node) { return lane_error(zone_project(json::
 
 }  // namespace
 
+TEST(Revision7, AStealThatFadesAndASlurThatBringsItsVelocityNeedRevisionSeven) {
+    const auto compiled = [](const json& track) {
+        json request = lane_project(json::array());
+        request["programs"][0]["timeline"]["tracks"][0].update(track);
+        return compile_image(request).image;
+    };
+    const auto revision = [](const std::vector<std::byte>& image) {
+        return load<ManifestHeader>(image.data() + sizeof(ChunkHeader)).revision;
+    };
+    EXPECT_EQ(revision(compiled({{"steal", "cut"}})), kFrameSizeRevision) << "cut is what every track always did";
+    const auto fading = compiled({{"steal", "fade"}});
+    EXPECT_EQ(revision(fading), 7u);
+    const Decoded d = decode(fading);
+    EXPECT_EQ(d.h.features, kFeatureStealFades);
+    EXPECT_EQ(d.stream(0)[0].op, static_cast<u8>(Instr::Steal));
+    EXPECT_EQ(d.stream(0)[0].a, 1u);
+
+    const auto slurred = compiled({{"play", {{"mode", "legato"}, {"slur_velocity", true}}}});
+    EXPECT_EQ(revision(slurred), 7u);
+    EXPECT_EQ(decode(slurred).stream(0)[0].a, static_cast<u8>(PlayKind::LegatoVelocity));
+    EXPECT_EQ(revision(compiled({{"play", {{"mode", "legato"}}}})), 4u);
+
+    json bad = lane_project(json::array());
+    bad["programs"][0]["timeline"]["tracks"][0]["play"] = {{"mode", "mono"}, {"slur_velocity", true}};
+    EXPECT_NE(lane_error(bad).find("only legato slurs"), std::string::npos);
+    bad["programs"][0]["timeline"]["tracks"][0]["play"] = {{"mode", "poly"}};
+    bad["programs"][0]["timeline"]["tracks"][0]["steal"] = "soft";
+    EXPECT_NE(lane_error(bad).find("cut or fade"), std::string::npos);
+}
+
+TEST(Revision7, ZonesWithARoundRobinAFadeOrARelease) {
+    const auto op_of = [](const char* node) {
+        const LoadedImage loaded(compile_image(zone_project(json::parse(node))).image);
+        EXPECT_EQ(loaded.loader.status(), LoadStatus::Ready);
+        for (u32 i = 0; i < loaded.table.size(); ++i) {
+            const ChunkRef& c = loaded.storage[i];
+            if (c.kind != static_cast<u8>(ChunkKind::Patch)) continue;
+            PatchView v;
+            EXPECT_TRUE(parse_patch({c.data, c.size}, v));
+            for (u32 s = 0; s < v.h.voice_steps; ++s) {
+                const WireStep step = v.step(v.h.control_steps + s);
+                if (step.op == static_cast<u8>(Op::Sample2) || step.op == static_cast<u8>(Op::Sample3)) {
+                    return std::pair<int, int>(step.op, step.mode);
+                }
+            }
+        }
+        return std::pair<int, int>(0, 0);
+    };
+    EXPECT_EQ(op_of(R"({"mode": "zones", "zones": [{"asset": "a"}]})").first, static_cast<int>(Op::Sample2));
+    EXPECT_EQ(op_of(R"({"mode": "zones", "zones": [{"asset": "a", "round_robin": [1, 2]}]})").first,
+              static_cast<int>(Op::Sample3));
+    EXPECT_EQ(op_of(R"({"mode": "zones", "zones": [{"asset": "a", "velocities": [0, 100], "fade": [0, 30]}]})").first,
+              static_cast<int>(Op::Sample3));
+    EXPECT_EQ(op_of(R"({"mode": "zones", "release": true, "zones": [{"asset": "a"}]})"),
+              std::make_pair(static_cast<int>(Op::Sample3), static_cast<int>(kSampleRelease)));
+
+    EXPECT_NE(zone_error(R"({"mode": "zones", "zones": [{"asset": "a", "round_robin": [3, 2]}]})").find("which, of"),
+              std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "zones", "zones": [{"asset": "a", "velocities": [0, 10], "fade": [0, 30]}]})")
+                  .find("within its velocities"),
+              std::string::npos);
+    EXPECT_NE(
+        zone_error(R"({"mode": "zones", "release": true, "tail": true, "zones": [{"asset": "a"}]})").find("no tail"),
+        std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "zones", "zones": [{"asset": "a", "volume": 2}]})").find("no 'volume'"),
+              std::string::npos);
+    EXPECT_NE(zone_error(R"({"asset": "a", "release": true})").find("only a sample in zones mode"), std::string::npos);
+}
+
 TEST(Sample2, TheModesKeepTheirOwnInputs) {
     EXPECT_EQ(zone_error(R"({"mode": "zones", "zones": [{"asset": "a"}], "reverse": true, "tail": true})"), "");
     EXPECT_EQ(zone_error(R"({"asset": "a"})"), "");

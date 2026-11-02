@@ -86,6 +86,7 @@ class Synth {
     explicit Synth(Memory memory, E exec = E{}) : exec_(static_cast<E&&>(exec)) {
         rate_ = clamp(memory.rate, 1000.0f, 384000.0f);
         inverse_rate_ = 1.0f / rate_;
+        fade_length_ = std::max<u32>(static_cast<u32>(kStealFadeSeconds * rate_), 1);
         int_rate_ = static_cast<u32>(rate_ + 0.5f);
 
         std::byte* fast = memory.fast.data();
@@ -250,6 +251,7 @@ class Synth {
         for (u32 t = 0; t < live_->program.h.tracks; ++t) {
             const Track& track = live_->tracks[t];
             for (u32 v = 0; v < track.desc.voices; ++v) n += track.voices[v].active;
+            for (u32 v = 0; v < track.fade_count; ++v) n += track.fades[v].active;
         }
         return n;
     }
@@ -354,6 +356,7 @@ class Synth {
         float* bulk;
         u32 age;
         u32 off_tick;
+        u32 ordinal;  // how many notes its track had started before this one, for a round robin
         GateEvents gate;
         u8 note;
         u8 velocity;
@@ -375,6 +378,7 @@ class Synth {
     // A note a mono or legato track is holding. Only one of them sounds, and the rest wait for it to end.
     struct Held {
         u32 off_tick;  // kNoTick for a live note, which waits for its NoteOff
+        u32 ordinal;
         u8 note;
         u8 velocity;
         bool sounding;
@@ -385,6 +389,17 @@ class Synth {
         float target;
         float step;
         u32 frames;
+        // A legato note bringing its velocity, which moves the velocity scalar the same way.
+        float velocity_target;
+        float velocity_step;
+        u32 velocity_frames;
+    };
+
+    // A stolen voice's sound, playing on in a fade slot of its own while the voice plays its new note.
+    struct Fade {
+        u32 index;  // the voice it came from, whose seed it keeps
+        u32 from;   // where in its first frame the fade begins
+        u32 done;   // samples faded so far
     };
 
     struct MixRamp {
@@ -399,6 +414,9 @@ class Synth {
         Voice* voices;
         Held* held;     // kMaxHeldNotes, or null in a Program with no PlayMode
         Glide* glides;  // one for each voice, likewise
+        Voice* fades;   // fade_slots(voices) of them, or none in a Program with no Steal
+        Fade* fading;
+        u32 fade_count;
         Cursor cursor;
         u32 age;
         u32 notes;
@@ -410,6 +428,8 @@ class Synth {
         u8 held_count;
         u8 play;      // PlayKind
         u8 priority;  // NotePriority
+        u8 steal;     // 1 if a stolen voice fades out
+        u32 ordinal;  // NoteOns its stream has passed, played or chased, and live notes
     };
 
     struct Insert {
@@ -560,12 +580,18 @@ class Synth {
             const bool plays = (h.features & kFeaturePlayModes) != 0;
             auto* held = fast.template array<Held>(plays ? kMaxHeldNotes : 0);
             auto* glides = fast.template array<Glide>(plays ? d.voices : 0);
+            const u32 fade_count = (h.features & kFeatureStealFades) != 0 ? fade_slots(d.voices) : 0;
+            auto* fades = fast.template array<Voice>(fade_count);
+            auto* fading = fast.template array<Fade>(fade_count);
             if constexpr (!Dry) {
                 tracks[t].desc = d;
                 tracks[t].slots = slots;
                 tracks[t].voices = voices;
                 tracks[t].held = plays ? held : nullptr;
                 tracks[t].glides = plays ? glides : nullptr;
+                tracks[t].fades = fades;
+                tracks[t].fading = fading;
+                tracks[t].fade_count = fade_count;
             }
             u32 scalars = 0, state = 0;  // sized for the largest slot, per section 6
             u64 floats = 0;
@@ -579,6 +605,7 @@ class Synth {
                 reserve_slot(patch, Dry ? nullptr : &slots[s]);
             }
             for (u32 i = 0; i < d.voices; ++i) reserve_voice(Dry ? nullptr : &voices[i], scalars, state, floats);
+            for (u32 i = 0; i < fade_count; ++i) reserve_voice(Dry ? nullptr : &fades[i], scalars, state, floats);
         }
         for (u32 i = 0; i < h.inserts; ++i) {
             const InsertDesc d = p.insert(i);
@@ -776,6 +803,7 @@ class Synth {
             t.voices[v].gate = {};
             if (t.glides) t.glides[v] = {};
         }
+        for (u32 v = 0; v < t.fade_count; ++v) t.fades[v].active = false;
     }
 
     void init_insert(Generation& g, Insert& i) {
@@ -1143,9 +1171,14 @@ class Synth {
     static void update_glides(Track& t) {
         for (u32 v = 0; v < t.desc.voices; ++v) {
             Glide& glide = t.glides[v];
-            if (glide.frames == 0) continue;
-            float& note = t.voices[v].scalars[kScalarNote];
-            note = --glide.frames == 0 ? glide.target : note + glide.step;
+            if (glide.frames != 0) {
+                float& note = t.voices[v].scalars[kScalarNote];
+                note = --glide.frames == 0 ? glide.target : note + glide.step;
+            }
+            if (glide.velocity_frames != 0) {
+                float& velocity = t.voices[v].scalars[kScalarVelocity];
+                velocity = --glide.velocity_frames == 0 ? glide.velocity_target : velocity + glide.velocity_step;
+            }
         }
     }
 
@@ -1177,7 +1210,10 @@ class Synth {
         const ProgramHeader& h = g.program.h;
         switch (e.kind) {
             case EventKind::NoteOn:
-                if (e.target < h.tracks) note_on(g, g.tracks[e.target], e.note, e.velocity, 0, kNoTick);
+                if (e.target < h.tracks) {
+                    Track& t = g.tracks[e.target];
+                    note_on(g, t, e.note, e.velocity, 0, kNoTick, t.ordinal++);
+                }
                 break;
             case EventKind::NoteOff:
                 if (e.target < h.tracks) {
@@ -1365,13 +1401,19 @@ class Synth {
             case Instr::Wait:
                 c.tick += in.c;
                 break;
-            case Instr::NoteOn:
+            case Instr::NoteOn: {
+                // Counted whether or not it plays, so a round robin after a locate picks what it would have.
+                const u32 ordinal = t.ordinal++;
                 if (!chase ||
                     (start_notes && c.tick + in.c > target)) {  // Chasing, that is a note held across the point
-                    note_on(g, t, in.a, static_cast<u8>(in.b), offset, c.tick + in.c);
+                    note_on(g, t, in.a, static_cast<u8>(in.b), offset, c.tick + in.c, ordinal);
                 } else {
                     t.last_note = static_cast<float>(in.a);  // So a glide after a locate starts where it would have
                 }
+                break;
+            }
+            case Instr::Steal:
+                t.steal = in.a;
                 break;
             case Instr::SetPatch:
                 t.slot = in.a;
@@ -1462,6 +1504,7 @@ class Synth {
         if (kill) {
             for (u32 t = 0; t < h.tracks; ++t) {
                 for (u32 v = 0; v < g.tracks[t].desc.voices; ++v) g.tracks[t].voices[v].active = false;
+                for (u32 v = 0; v < g.tracks[t].fade_count; ++v) g.tracks[t].fades[v].active = false;
             }
         }
         g.clock.tick = tick;
@@ -1518,11 +1561,14 @@ class Synth {
         return oldest_released ? *oldest_released : *oldest;
     }
 
+    // What a stream sets up from its start, which a locate replays.
     static void reset_play(Track& t) {
         t.play = static_cast<u8>(PlayKind::Poly);
         t.priority = static_cast<u8>(NotePriority::Last);
         t.glide = 0.0f;
         t.last_note = -1.0f;
+        t.steal = 0;
+        t.ordinal = 0;
     }
 
     // Applies to the next note, as SetPatch does. Going back to poly leaves the voice sounding to end at its own tick.
@@ -1549,16 +1595,16 @@ class Synth {
         v.scalars[kScalarNote] = from;
     }
 
-    void note_on(Generation& g, Track& t, u8 note, u8 velocity, u32 offset, u32 off_tick) {
+    void note_on(Generation& g, Track& t, u8 note, u8 velocity, u32 offset, u32 off_tick, u32 ordinal) {
         if (!t.held) {
-            start_note(g, t, note, velocity, offset, off_tick);
+            start_note(g, t, note, velocity, offset, off_tick, ordinal);
         } else if (t.play == static_cast<u8>(PlayKind::Poly)) {
             const float from = t.last_note;
-            begin_glide(t, start_note(g, t, note, velocity, offset, off_tick), from, static_cast<float>(note));
+            begin_glide(t, start_note(g, t, note, velocity, offset, off_tick, ordinal), from, static_cast<float>(note));
             t.last_note = static_cast<float>(note);
         } else {
             if (t.held_count == kMaxHeldNotes) remove_held(t, t.held[0].sounding ? 1 : 0);
-            t.held[t.held_count++] = {off_tick, note, velocity, false};
+            t.held[t.held_count++] = {off_tick, ordinal, note, velocity, false};
             choose_line(g, t, offset);
         }
     }
@@ -1583,7 +1629,8 @@ class Synth {
         const Held next = t.held[best];
 
         Voice* line = t.line != kNone && t.voices[t.line].active && t.voices[t.line].held ? &t.voices[t.line] : nullptr;
-        const bool legato = t.play == static_cast<u8>(PlayKind::Legato);
+        const bool legato =
+            t.play == static_cast<u8>(PlayKind::Legato) || t.play == static_cast<u8>(PlayKind::LegatoVelocity);
         // Legato slides only across an overlap. Mono slides from the last note even over a gap.
         const float from = line ? line->scalars[kScalarNote] : legato ? -1.0f : t.last_note;
         const float pitch = static_cast<float>(next.note);
@@ -1593,10 +1640,11 @@ class Synth {
             line->note = next.note;
             line->off_tick = next.off_tick;
             begin_glide(t, *line, from, pitch);
+            if (t.play == static_cast<u8>(PlayKind::LegatoVelocity)) bring_velocity(t, *line, next.velocity);
             return;
         }
         if (line) release(*line, offset);
-        Voice& v = start_note(g, t, next.note, next.velocity, offset, next.off_tick);
+        Voice& v = start_note(g, t, next.note, next.velocity, offset, next.off_tick, next.ordinal);
         t.line = static_cast<u16>(&v - t.voices);
         begin_glide(t, v, from, pitch);
     }
@@ -1623,8 +1671,51 @@ class Synth {
         return false;
     }
 
-    Voice& start_note(Generation& g, Track& t, u8 note, u8 velocity, u32 offset, u32 off_tick) {
+    // Moves a legato line's velocity to a new note's, over its glide or kVelocityGlideSeconds, whichever is longer, so
+    // a patch reading it doesn't jump.
+    void bring_velocity(Track& t, Voice& v, u8 velocity) {
+        Glide& glide = t.glides[&v - t.voices];
+        v.velocity = velocity;
+        glide.velocity_frames = std::max<u32>(
+            static_cast<u32>(std::max(t.glide, kVelocityGlideSeconds) * rate_ / static_cast<float>(N)), 1);
+        glide.velocity_target = static_cast<float>(velocity) / 127.0f;
+        glide.velocity_step =
+            (glide.velocity_target - v.scalars[kScalarVelocity]) / static_cast<float>(glide.velocity_frames);
+    }
+
+    // Moves a stolen voice's sound to a fade slot, where it plays on and fades out from the sample the new note starts
+    // on. Its memory goes with it, so nothing is copied: the voice takes the slot's, and the new note starts there.
+    // With every slot fading, the one furthest through is cut short.
+    void fade_out(Track& t, Voice& v, u32 offset) {
+        u32 pick = 0;
+        for (u32 i = 0; i < t.fade_count; ++i) {
+            if (!t.fades[i].active) {
+                pick = i;
+                break;
+            }
+            if (t.fading[i].done > t.fading[pick].done) pick = i;
+        }
+        Voice& f = t.fades[pick];
+        std::swap(f.scalars, v.scalars);
+        std::swap(f.state, v.state);
+        std::swap(f.bulk, v.bulk);
+        f.age = v.age;
+        f.off_tick = v.off_tick;
+        f.ordinal = v.ordinal;
+        f.gate = v.gate;
+        f.note = v.note;
+        f.velocity = v.velocity;
+        f.slot = v.slot;
+        f.active = true;
+        f.held = false;
+        t.fading[pick] = {static_cast<u32>(&v - t.voices), offset, 0};
+    }
+
+    Voice& start_note(Generation& g, Track& t, u8 note, u8 velocity, u32 offset, u32 off_tick, u32 ordinal) {
         Voice& v = pick_voice(t);
+        if (v.active && t.steal && t.fade_count) fade_out(t, v, offset);
+        if (t.glides) t.glides[&v - t.voices].velocity_frames = 0;
+        v.ordinal = ordinal;
         const u32 slot = t.slot < t.desc.slot_count ? t.slot : 0;
         init_instance(*t.slots[slot].binding, t.slots[slot], v, 0);
         v.scalars[kScalarNote] = static_cast<float>(note);
@@ -1780,6 +1871,7 @@ class Synth {
             c.gate = v.gate;
             c.note = v.note;
             c.velocity = v.velocity;
+            c.ordinal = v.ordinal;
             c.seed = (static_cast<u32>(t.desc.id) << 16) ^ (n << 8) ^ v.age;
             if constexpr (C.tap_slots > 0) {
                 if (n == followed) {
@@ -1802,9 +1894,48 @@ class Synth {
             mix_output(g, dst, left, right, b.view.h.out_left == b.view.h.out_right);
             if (!v.held && (!b.ends || !c.busy)) v.active = false;
         }
+        for (u32 n = 0; n < t.fade_count; ++n) run_fade(g, t, n, dst, scratch);
         if constexpr (C.tap_slots > 0) {
             if (tapping) finish_probes(g, t);
         }
+    }
+
+    // A stolen voice's sound, at full level up to the sample its voice was taken on and then falling in a straight line
+    // to nothing over fade_length_ samples. It also ends if its own sound does.
+    void run_fade(Generation& g, Track& t, u32 n, u32 dst, float* scratch) {
+        Voice& v = t.fades[n];
+        if (!v.active) return;
+        Fade& f = t.fading[n];
+        const Slot& slot = t.slots[v.slot];
+        const Binding& b = *slot.binding;
+        RunContext c = context(g, b, slot, &v, scratch);
+        c.state = v.state;
+        c.lines = reinterpret_cast<DelayLine*>(v.state);
+        c.gate = v.gate;
+        c.note = v.note;
+        c.velocity = v.velocity;
+        c.ordinal = v.ordinal;
+        c.seed = (static_cast<u32>(t.desc.id) << 16) ^ (f.index << 8) ^ v.age;
+        K::run(b.voice, b.view.h.voice_steps, c);
+        v.gate = {};
+        float* left = scratch + operand_index(b.view.h.out_left) * N;
+        float* right = scratch + operand_index(b.view.h.out_right) * N;
+        if (!K::finite(left) || !K::finite(right)) {
+            v.active = false;
+            ++t.guard_trips;
+            return;
+        }
+        const bool same = b.view.h.out_left == b.view.h.out_right;
+        for (u32 i = f.from; i < N; ++i) {
+            const float gain =
+                f.done < fade_length_ ? 1.0f - static_cast<float>(f.done + 1) / static_cast<float>(fade_length_) : 0.0f;
+            ++f.done;
+            left[i] *= gain;
+            if (!same) right[i] *= gain;
+        }
+        f.from = 0;
+        mix_output(g, dst, left, right, same);
+        if (f.done >= fade_length_ || (b.ends && !c.busy)) v.active = false;
     }
 
     // A stereo source on a mono build folds to (L + R) / 2. A patch with one output pays nothing for this.
@@ -1973,6 +2104,7 @@ class Synth {
     [[no_unique_address]] E exec_;
     float rate_ = 48000.0f;
     float inverse_rate_ = 1.0f / 48000.0f;
+    u32 fade_length_ = 96;  // samples a stolen voice takes to fade out
     u32 int_rate_ = 48000;
     u64 sample_index_ = 0;
     Region regions_[C.generations];

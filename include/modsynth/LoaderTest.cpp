@@ -534,7 +534,7 @@ void prepend(HandProgram& p, std::initializer_list<Instruction> code) {
 }
 
 const ProgramCase kProgramCases[] = {
-    {"a feature no revision defines", [](HandProgram& p) { p.header.features = 4; }},
+    {"a feature no revision defines", [](HandProgram& p) { p.header.features = 8; }},
     {"a feature its code does not use", [](HandProgram& p) { p.header.features = kFeatureMixRamps; }},
     {"a wrong length", [](HandProgram& p) { p.header.length_ticks = 1; }},
     {"no end to a stream", [](HandProgram& p) { p.code[0] = instr(Instr::Wait, 0, 0, 1); }},
@@ -705,7 +705,7 @@ const ProgramCase kProgramCases[] = {
     {"a play mode that does not exist",
      [](HandProgram& p) {
          p.header.features = kFeaturePlayModes;
-         prepend(p, {instr(Instr::PlayMode, 3, 0, 0)});
+         prepend(p, {instr(Instr::PlayMode, 4, 0, 0)});
      }},
     {"a priority that does not exist",
      [](HandProgram& p) {
@@ -774,8 +774,8 @@ TEST(Rules, EveryProgramRuleRefusesItsCase) {
     }
 }
 
-// A Sample2 over a table of these rows, with the asset at ref 0 and the table at ref 1.
-LoadError zone_error(std::vector<float> rows) {
+// A Sample2, or a Sample3, over a table of these rows, with the asset at ref 0 and the table at ref 1.
+LoadError zone_error(std::vector<float> rows, Op op = Op::Sample2) {
     compiler::detail::Writer table, sound;
     table.put(TableHeader{static_cast<u32>(rows.size()), 0});
     rows.push_back(0.0f);
@@ -795,7 +795,7 @@ LoadError zone_error(std::vector<float> rows) {
     hand.patch.header.buffers = 2;
     hand.patch.consts = {60.0f, 0.0f};
     WireStep step{};
-    step.op = static_cast<u8>(Op::Sample2);
+    step.op = static_cast<u8>(op);
     step.resource = 1;
     step.out[0] = operand(Bank::Buffer, 0);
     step.out[1] = operand(Bank::Buffer, 1);
@@ -845,6 +845,67 @@ TEST(Rules, AZoneTableIsCheckedForTheStepThatUsesIt) {
     other_padding = padding;
     other_padding[kZoneRef] = 1;
     EXPECT_EQ(zone_error(other_padding), LoadError::BadPatch);
+}
+
+TEST(Rules, ASample3TableIsCheckedForItsWiderRows) {
+    std::vector<float> good(kZone3Fields, 0.0f);
+    good[kZoneHighKey] = 127;
+    good[kZoneLowVelocity] = 20;
+    good[kZoneHighVelocity] = 100;
+    good[kZoneRoot] = 60;
+    good[kZoneSeqPosition] = 1;
+    good[kZoneSeqLength] = 3;
+    good[kZoneFadeIn] = 30;
+    good[kZoneFadeOut] = 80;
+    EXPECT_EQ(zone_error(good, Op::Sample3), LoadError::None);
+    EXPECT_EQ(zone_error({0, 127, 0, 127, 0, 60, 0, 0}, Op::Sample3), LoadError::BadPatch) << "a Sample2's rows";
+    std::vector<float> padding(kZone3Fields, 0.0f);
+    padding[kZoneLowKey] = 1;
+    std::vector<float> two = good;
+    two.insert(two.end(), padding.begin(), padding.end());
+    EXPECT_EQ(zone_error(two, Op::Sample3), LoadError::None);
+
+    const auto with = [&](u32 field, float value) {
+        std::vector<float> row = good;
+        row[field] = value;
+        return zone_error(row, Op::Sample3);
+    };
+    EXPECT_EQ(with(kZoneSeqPosition, 3), LoadError::BadPatch) << "past its round robin";
+    EXPECT_EQ(with(kZoneSeqPosition, 0.5f), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneSeqLength, 257), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneFadeIn, 81), LoadError::BadPatch) << "wider than its velocities";
+    EXPECT_EQ(with(kZoneFadeOut, -1), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneFadeOut + 1, 1), LoadError::BadPatch);
+    EXPECT_EQ(with(kZone3Fields - 1, 1), LoadError::BadPatch);
+    std::vector<float> lone = good;
+    lone[kZoneSeqLength] = 0;
+    EXPECT_EQ(zone_error(lone, Op::Sample3), LoadError::BadPatch) << "with no round robin it is the first";
+    lone[kZoneSeqPosition] = 0;
+    EXPECT_EQ(zone_error(lone, Op::Sample3), LoadError::None);
+}
+
+TEST(Rules, AStealAndALegatoThatBringsVelocityAreRevisionSeven) {
+    const auto load_with = [](u32 features, std::initializer_list<Instruction> code) {
+        Hand hand;
+        hand.program = minimal_program(0);
+        hand.fresh_program = false;
+        hand.program.header.features = features;
+        prepend(hand.program, code);
+        return hand.bytes();
+    };
+    const u32 half = std::bit_cast<u32>(0.5f);
+    EXPECT_EQ(load_error(load_with(kFeatureStealFades, {instr(Instr::Steal, 1, 0, 0)})), LoadError::None);
+    EXPECT_EQ(load_error(load_with(kFeatureStealFades, {instr(Instr::Steal, 0, 0, 0)})), LoadError::None);
+    EXPECT_EQ(load_error(load_with(kFeatureStealFades, {instr(Instr::Steal, 2, 0, 0)})), LoadError::BadProgram);
+    EXPECT_EQ(load_error(load_with(0, {instr(Instr::Steal, 1, 0, 0)})), LoadError::BadProgram) << "undeclared";
+    EXPECT_EQ(load_error(load_with(kFeatureStealFades, {})), LoadError::BadProgram) << "declared, unused";
+    EXPECT_EQ(load_error(load_with(kFeatureStealFades, {instr(Instr::Steal, 1, 1, 0)})), LoadError::BadProgram);
+
+    const auto slur = load_with(kFeaturePlayModes, {instr(Instr::PlayMode, 3, 0, half)});
+    EXPECT_EQ(load_error(slur), LoadError::None);
+    const u32 six = 6;
+    EXPECT_EQ(load_error(with_manifest(slur, offsetof(ManifestHeader, revision), &six, 4)), LoadError::BadProgram);
+    EXPECT_EQ(load_error(load_with(kFeaturePlayModes, {instr(Instr::PlayMode, 4, 0, half)})), LoadError::BadProgram);
 }
 
 // The cases above break one rule each, which proves nothing unless the same shape loads without it.

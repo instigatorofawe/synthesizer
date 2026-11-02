@@ -753,6 +753,15 @@ describe('the gaps the pieces found', () => {
 		for (const gain of [0, 0.01, 0.5, 1, 2, 3]) expect(faderGain(faderPosition(gain))).toBeCloseTo(gain, 12);
 	});
 
+	it("fade a new track's stolen voices, and bring a slur's velocity only in legato", () => {
+		const { doc } = addTrack(song());
+		expect(doc.tracks.at(-1)?.steal).toBe('fade');
+		expect(song().tracks[0].steal).toBeUndefined();
+		const legato = setPlay(song(), 1, { mode: 'legato', slur_velocity: true });
+		expect(legato.tracks[0].play?.slur_velocity).toBe(true);
+		expect(setPlay(legato, 1, { mode: 'mono' }).tracks[0].play).not.toHaveProperty('slur_velocity');
+	});
+
 	it('mark a send pre-fader and back without leaving the field behind', () => {
 		const pre = setSend(song(), trackKey(1), 0, { pre: true });
 		expect(pre.tracks[0].sends[0]).toEqual({ bus: 'room', gain: 0.5, pre: true });

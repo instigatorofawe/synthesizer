@@ -363,7 +363,8 @@ export function addTrack(doc: Timeline, slot?: string): { doc: Timeline; id: num
 		mute: false,
 		output: MASTER,
 		sends: [],
-		inserts: []
+		inserts: [],
+		steal: 'fade' // A new track fades a stolen voice. A document from before says nothing, and cuts.
 	};
 	return { doc: { ...doc, tracks: [...doc.tracks, track] }, id };
 }
@@ -915,6 +916,7 @@ export function setPlay(doc: Timeline, id: number, change: Partial<NonNullable<T
 		if (track.id !== id) return track;
 		const play = { mode: 'poly' as const, priority: 'last' as const, glide: 0, ...track.play, ...change };
 		if (play.mode === 'poly') play.priority = 'last';
+		if (play.mode !== 'legato' || !play.slur_velocity) delete play.slur_velocity;
 		if (play.mode !== 'poly' || play.glide !== 0) return { ...track, play };
 		const { play: _, ...rest } = track;
 		return rest;

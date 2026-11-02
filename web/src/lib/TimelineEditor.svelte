@@ -488,6 +488,30 @@
 							onchange={(e) => commit(setPlay(doc, track.id, { glide: number(e) }))}
 						/></label
 					>
+					{#if track.play?.mode === 'legato'}
+						<label title="A slurred note brings its velocity, over the glide or 5 ms">
+							<input
+								type="checkbox"
+								aria-label="Slurs bring their velocity"
+								checked={track.play.slur_velocity ?? false}
+								onchange={(e) =>
+									commit(setPlay(doc, track.id, { slur_velocity: e.currentTarget.checked || undefined }))}
+							/>
+							slurs bring velocity
+						</label>
+					{/if}
+					<label title="What happens to a note whose voice a new one takes: cut off, or faded out over 2 ms">
+						stolen voices
+						<select
+							aria-label="Stolen voices"
+							value={track.steal ?? 'cut'}
+							onchange={(e) =>
+								commit(setTrack(doc, track.id, { steal: e.currentTarget.value === 'fade' ? 'fade' : undefined }))}
+						>
+							<option value="cut">cut</option>
+							<option value="fade">fade</option>
+						</select>
+					</label>
 					{#if !readonly}<button type="button" onclick={deleteTrack}>Delete track</button>{/if}
 				{/if}
 

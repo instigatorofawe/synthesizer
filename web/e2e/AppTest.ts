@@ -28,7 +28,7 @@ test('a timeline plays in an AudioWorklet and the scopes see every bus', async (
 	await expect(page.getByTestId('voices')).not.toHaveText('0');
 	await expect(page.getByText('Master', { exact: true })).toBeVisible();
 	await expect(page.getByText('Lead', { exact: true }).first()).toBeVisible();
-	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(3);
+	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(4);
 	const before = Number(await page.getByTestId('tick').textContent());
 	await page.waitForTimeout(400);
 	expect(Number(await page.getByTestId('tick').textContent())).toBeGreaterThan(before);
@@ -45,7 +45,7 @@ test('editing during playback swaps generations without stopping', async ({ page
 	await expect(page.getByTestId('generation')).toHaveText('2', { timeout: 8000 });
 	expect(Number(await page.getByTestId('tick').textContent())).toBeGreaterThanOrEqual(before);
 	// Taps were re-pointed at the new program's registers.
-	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(3);
+	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(4);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	expect(problems).toEqual([]);
 });
@@ -79,7 +79,7 @@ test('rapid edits settle on the newest image, with scopes on its registers', asy
 		await page.waitForTimeout(280); // Just past the debounce, so each compile starts while the last may be loading
 	}
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(3);
+	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(4);
 });
 
 test('a broken edit shows where it failed and the old image keeps playing', async ({ page }) => {
@@ -315,6 +315,53 @@ test('a recipe with recordings keeps them when it is added', async ({ page }) =>
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+});
+
+test('a recipe shows the patch it is made of, with nothing to change', async ({ page }) => {
+	await page.goto('/recipes/Kick808');
+	await expect(page.getByTestId('graph')).toBeVisible();
+	await expect(page.locator('path.wire.audio').first()).toBeAttached();
+	await expect(page.locator('path.wire.control').first()).toBeAttached();
+	await expect(page.getByTestId('patch-use')).toContainText('the voice of track 1');
+	await expect(page.getByRole('button', { name: 'Add node' })).toHaveCount(0);
+
+	const node = page.locator('g.node:has(text:has-text("osc"))').first();
+	await node.locator('rect.title').click();
+	await expect(page.locator('aside.inspector select').first()).toBeDisabled();
+	await expect(page.getByRole('button', { name: 'Delete node' })).toHaveCount(0);
+
+	const before = await page.getByLabel('Graph JSON').inputValue();
+	await page.keyboard.press('Delete');
+	await expect(page.getByTestId('graph').locator('g.node')).not.toHaveCount(0);
+	expect(await page.getByLabel('Graph JSON').inputValue()).toBe(before);
+});
+
+test('a recipe with several patches shows each, and says what it does', async ({ page }) => {
+	await page.goto('/recipes/SidechainDucking');
+	const buttons = page.getByRole('group', { name: 'Patches in this recipe' }).getByRole('button');
+	await expect(buttons).not.toHaveCount(0);
+	const count = await buttons.count();
+	expect(count).toBeGreaterThan(1);
+	const uses = new Set<string>();
+	for (let index = 0; index < count; ++index) {
+		await buttons.nth(index).click();
+		await expect(buttons.nth(index)).toHaveAttribute('aria-pressed', 'true');
+		await expect(page.locator('path.wire').first()).toBeAttached();
+		uses.add((await page.getByTestId('patch-use').textContent()) ?? '');
+	}
+	expect(uses.size).toBe(count);
+	expect([...uses].join()).toContain('an insert on');
+});
+
+test('a probe in a recipe reads the voice of the patch on screen', async ({ page }) => {
+	await page.goto('/recipes/Kick808');
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	const node = page.locator('g.node:has(text:has-text("env"))').first();
+	await node.locator('rect.title').click();
+	await page.getByRole('button', { name: 'Probe out' }).click();
+	await expect.poll(async () => (await peaks(page)).length, { timeout: 8000 }).toBe(3); // Master, the track and the probe
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	await expect.poll(async () => Math.max(0, ...(await peaks(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
 });
 
 test('an unknown recipe is a 404', async ({ page }) => {

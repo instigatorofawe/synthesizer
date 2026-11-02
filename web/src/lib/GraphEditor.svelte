@@ -38,6 +38,7 @@
 		errors,
 		probes,
 		maxProbes,
+		readonly = false,
 		onchange,
 		onprobes
 	}: {
@@ -51,6 +52,7 @@
 		errors: Map<number, string>;
 		probes: Probe[];
 		maxProbes: number;
+		readonly?: boolean; // For looking at: a node can be chosen and probed, and nothing changes
 		onchange: (graph: Graph) => void;
 		onprobes: (probes: Probe[]) => void;
 	} = $props();
@@ -157,6 +159,7 @@
 	function startMove(event: PointerEvent, node: GraphNode) {
 		event.stopPropagation();
 		selected = node.id;
+		if (readonly) return;
 		const at = positionOf(node);
 		const pointer = toCanvas(event);
 		gesture = { kind: 'move', id: node.id, at, offset: { x: pointer.x - at.x, y: pointer.y - at.y } };
@@ -164,6 +167,7 @@
 
 	function startWire(event: PointerEvent, node: GraphNode, port: string) {
 		event.stopPropagation();
+		if (readonly) return;
 		const start = outputPoint(node, port);
 		gesture = { kind: 'wire', from: node.id, port, start, at: start };
 	}
@@ -239,7 +243,7 @@
 
 	function keydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
-		if (target.closest('input, textarea, select')) return;
+		if (readonly || target.closest('input, textarea, select')) return;
 		if ((event.key === 'Delete' || event.key === 'Backspace') && selected !== null) {
 			event.preventDefault();
 			removeSelected();
@@ -305,14 +309,18 @@
 <svelte:window onkeydown={keydown} onpointerup={pointerUp} />
 
 <div class="toolbar">
-	<select bind:value={adding} aria-label="Node type">
-		{#each types as type}<option value={type}>{type}</option>{/each}
-	</select>
-	<button type="button" onclick={add}>Add node</button>
-	<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
-	<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
+	{#if !readonly}
+		<select bind:value={adding} aria-label="Node type">
+			{#each types as type}<option value={type}>{type}</option>{/each}
+		</select>
+		<button type="button" onclick={add}>Add node</button>
+		<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
+		<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
+	{/if}
 	<button type="button" onclick={fit}>Fit</button>
-	<span class="muted">Drag from an output to an input to wire them. Green wires are audio, blue are read once a frame.</span>
+	<span class="muted">
+		{readonly ? '' : 'Drag from an output to an input to wire them.'} Green wires are audio, blue are read once a frame.
+	</span>
 </div>
 
 <div class="editor">
@@ -404,6 +412,7 @@
 		{#if chosen}
 			<h3>{chosen.id} {chosen.type}</h3>
 			{#if errors.get(chosen.id)}<p class="problem" data-testid="node-error">{errors.get(chosen.id)}</p>{/if}
+			<fieldset class="bare" disabled={readonly}>
 			{#if chosen.type === 'shape'}
 				<label>
 					curve
@@ -482,6 +491,7 @@
 					{/if}
 				</div>
 			{/each}
+			</fieldset>
 			{#if outputsOf(chosen, catalog, library).length}<h4>Outputs</h4>{/if}
 			{#each outputsOf(chosen, catalog, library) as port (port)}
 				<div class="input">
@@ -497,11 +507,11 @@
 					</button>
 				</div>
 			{/each}
-			<button type="button" onclick={removeSelected}>Delete node</button>
+			{#if !readonly}<button type="button" onclick={removeSelected}>Delete node</button>{/if}
 		{:else}
 			<h3>Parameters</h3>
 			{#each laid.params as param, index (param.id)}
-				<fieldset>
+				<fieldset disabled={readonly}>
 					<legend>{param.id}</legend>
 					{#each paramFields as field}
 						<label>
@@ -524,13 +534,15 @@
 							<option value="global">global</option>
 						</select>
 					</label>
-					<button type="button" onclick={() => commit({ ...laid, params: laid.params.filter((_, i) => i !== index) })}>
-						Remove
-					</button>
+					{#if !readonly}
+						<button type="button" onclick={() => commit({ ...laid, params: laid.params.filter((_, i) => i !== index) })}>
+							Remove
+						</button>
+					{/if}
 				</fieldset>
 			{/each}
-			<button type="button" onclick={addParam}>Add parameter</button>
-			<p class="muted">Select a node to change it.</p>
+			{#if !readonly}<button type="button" onclick={addParam}>Add parameter</button>{/if}
+			<p class="muted">Select a node to {readonly ? 'see how it is set up' : 'change it'}.</p>
 		{/if}
 	</aside>
 </div>
@@ -679,5 +691,11 @@
 		border-radius: 4px;
 		margin: 0 0 0.4rem;
 		padding: 0.3rem 0.4rem;
+		min-width: 0;
+	}
+	fieldset.bare {
+		border: 0;
+		margin: 0;
+		padding: 0;
 	}
 </style>

@@ -214,6 +214,12 @@
 	let goodAlone = $state.raw<Compiled | null>(null);
 	const sent: Record<Source, string> = { song: '', alone: '' };
 	const timers: Partial<Record<Source, ReturnType<typeof setTimeout>>> = {};
+	// An edit not yet compiled, and an image sent to the engine that isn't playing yet. The status bar says so until both are
+	// done, so what is heard is known to be the newest edit.
+	const asked: Record<Source, number> = { song: 0, alone: 0 };
+	let compiling = $state<Record<Source, boolean>>({ song: false, alone: false });
+	let loading = $state.raw<CompileReport | null>(null);
+	const busy = $derived(compiling.song || compiling.alone || loading !== null);
 	const sourceOf = new WeakMap<CompileReport, Source>();
 	const compiledFrom = new WeakMap<CompileReport, Timeline>(); // Which document each song report came from
 
@@ -269,19 +275,32 @@
 
 	function schedule(source: Source) {
 		clearTimeout(timers[source]);
+		asked[source]++;
+		compiling[source] = true;
 		timers[source] = setTimeout(() => compile(source), 250);
 	}
 
+	// Sends an image to the engine, which plays it once it has loaded.
+	function load(compiled: Compiled) {
+		rejected = '';
+		loading = compiled.report;
+		engine.load(compiled.image, compiled.report);
+	}
+
 	async function compile(source: Source) {
+		const mine = asked[source];
+		const done = () => {
+			if (asked[source] === mine) compiling[source] = false;
+		};
 		const request = source === 'alone' ? aloneRequest() : null;
 		const built: { request: string; doc?: Timeline } | null =
 			source === 'song' ? songRequest() : request ? { request } : null;
-		if (!built || built.request === sent[source]) return;
+		if (!built || built.request === sent[source]) return done();
 		sent[source] = built.request;
 		const from = openKey;
 		compiler ??= new Compiler();
 		const result = await compiler.compile(built.request, source);
-		if (!result || (source === 'song' && from !== openKey)) return;
+		if (!result || (source === 'song' && from !== openKey)) return done();
 		sourceOf.set(result.report, source);
 		if (source === 'song') {
 			if (built.doc) compiledFrom.set(result.report, built.doc);
@@ -291,10 +310,8 @@
 			alone = result;
 			if (result.report.ok) goodAlone = result;
 		}
-		if (result.report.ok && started && want === source) {
-			rejected = '';
-			engine.load(result.image, result.report);
-		}
+		if (result.report.ok && started && want === source) load(result);
+		done();
 	}
 
 	// Another song resets what belonged to the last one, and the transport goes back to its start.
@@ -350,10 +367,7 @@
 			want = source;
 			waiting = source === 'song' ? [() => engine.locate(songTick)] : [];
 			const good = source === 'song' ? goodSong : goodAlone;
-			if (started && good) {
-				rejected = '';
-				engine.load(good.image, good.report);
-			}
+			if (started && good) load(good);
 		}
 		if (then) {
 			if (live === want) then();
@@ -368,7 +382,7 @@
 		await engine.start();
 		started = true;
 		const good = want === 'song' ? goodSong : goodAlone;
-		if (good) engine.load(good.image, good.report);
+		if (good) load(good);
 	}
 
 	function settle(report: CompileReport) {
@@ -565,8 +579,12 @@
 		};
 		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start);
 		engine.onTargets = (t) => (targets = t);
-		engine.onRejected = (reason) => (rejected = reason);
+		engine.onRejected = (reason) => {
+			rejected = reason;
+			loading = null;
+		};
 		engine.onLive = (report) => {
+			if (report === loading) loading = null;
 			live = sourceOf.get(report) ?? null;
 			if (live === 'song') settle(report);
 			if (live === want) {
@@ -731,7 +749,8 @@
 		</main>
 	</div>
 
-	<footer class="status" aria-live="polite">
+	<footer class="status" aria-live="polite" aria-busy={busy} data-testid="status">
+		{#if busy}<span class="muted">Compiling…</span>{/if}
 		{#if form?.message}<span class="problem">{form.message}</span>{/if}
 		{#if form?.saved}<span class="muted">Saved.</span>{/if}
 		{#if rejected}<span class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</span
@@ -741,13 +760,10 @@
 		{#each errors as problem (`${problem.where} ${problem.message}`)}
 			<span class="problem" data-testid="compile-error"><code>{problem.where}</code> {problem.message}</span>
 		{/each}
-		{#if !form?.message && !form?.saved && !rejected && !errors.length && !timelineParsed.error && !patchProblem}
-			<span class="muted">
-				{goodSong ? `${(goodSong.report.image_bytes / 1024).toFixed(1)} KB image` : 'Compiling…'}{started
-					? ''
-					: '. Audio starts with Play, a key, or Start audio.'}
-			</span>
+		{#if goodSong && !busy && !form?.message && !form?.saved && !rejected && !errors.length && !timelineParsed.error && !patchProblem}
+			<span class="muted">{(goodSong.report.image_bytes / 1024).toFixed(1)} KB image</span>
 		{/if}
+		{#if !started}<span class="muted">Audio starts with Play, a key, or Start audio.</span>{/if}
 	</footer>
 </div>
 

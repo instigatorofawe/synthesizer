@@ -686,6 +686,9 @@ changes it. A fresh visit opens the timeline saved last, and the old addresses r
   timeline switches back, to where the song was. The two compile on separate channels, so neither cancels the other, and a
   request that hasn't changed isn't compiled again, so opening something new swaps nothing. An insert has no keys and is
   compiled on its own only for its errors and dead nodes.
+- The status bar says Compiling from an edit until the image made from it is playing, so what is heard is known to be the
+  newest edit. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the
+  image slot does, and the image before it plays on.
 - Keys belong to the panel used last, so Delete and undo act on the graph or the timeline, not both.
 
 **The graph editor.** A graph's document is still what is saved and compiled. The editor adds `x` and `y` to its nodes, which the compiler ignores, so moving a node

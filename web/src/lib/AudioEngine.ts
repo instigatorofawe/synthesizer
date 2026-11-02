@@ -174,7 +174,9 @@ export class AudioEngine {
 			this.applyTargets();
 			this.onState(this.state);
 		} else if (message.type === 'load-rejected') {
-			this.onRejected(message.reason as string);
+			// The worklet explains an image it won't start. One the engine fails while loading comes as the engine's error.
+			const error = LOAD_ERRORS[message.error as number] || 'image has no program to play';
+			this.onRejected((message.reason as string | undefined) ?? error);
 		} else if (message.type === 'tap') {
 			const buffer = message.buffer as ArrayBuffer;
 			const samples = new Float32Array(buffer);

@@ -47,6 +47,28 @@ const peaksIn = (scope: ReturnType<Page['getByRole']>) =>
 const mixerPeaks = (page: Page) => peaksIn(page.getByRole('tabpanel'));
 const patchPeaks = (page: Page) => peaksIn(patchEditor(page));
 
+// Every edit has compiled, and the image made from the last one is playing.
+const settled = (page: Page) =>
+	expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
+
+// Each of the song's four mixer strips shows a level at some point: the pluck is silent between its notes, so not all at once. The
+// song lasts seven seconds, and a slow machine can play past its end before this, so it starts again from the beginning first.
+async function everyStripHeard(page: Page) {
+	await tab(page, 'Mixer');
+	const ruler = (await page.getByTestId('ruler').boundingBox())!;
+	await page.mouse.click(ruler.x + 1, ruler.y + ruler.height / 2);
+	const heard = new Set<number>();
+	await expect
+		.poll(
+			async () => {
+				for (const [strip, peak] of (await mixerPeaks(page)).entries()) if (peak > 0.01) heard.add(strip);
+				return heard.size;
+			},
+			{ timeout: 8000, intervals: [100] }
+		)
+		.toBe(4);
+}
+
 test('the seeded library lists patches, timelines and a bundle', async ({ page }) => {
 	await page.goto('/');
 	await expect(browser(page).getByRole('link', { name: 'Stereo lead' })).toBeVisible();
@@ -69,7 +91,7 @@ test('a timeline plays in an AudioWorklet and the scopes see every bus', async (
 	await tab(page, 'Mixer');
 	await expect(page.getByRole('heading', { name: 'Master' })).toBeVisible();
 	await expect(page.getByText('Lead', { exact: true }).first()).toBeVisible();
-	await expect.poll(async () => (await mixerPeaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(4);
+	await everyStripHeard(page);
 	await expect
 		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
 		.toBeGreaterThan(0.01);
@@ -89,8 +111,8 @@ test('editing during playback swaps generations without stopping', async ({ page
 	await expect(page.getByTestId('generation')).toHaveText('2', { timeout: 8000 });
 	expect(Number(await page.getByTestId('tick').textContent())).toBeGreaterThanOrEqual(before);
 	// Taps were re-pointed at the new program's registers.
-	await tab(page, 'Mixer');
-	await expect.poll(async () => (await mixerPeaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(4);
+	await settled(page);
+	await everyStripHeard(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	expect(problems).toEqual([]);
 });
@@ -123,9 +145,67 @@ test('rapid edits settle on the newest image, with scopes on its registers', asy
 		await editor.fill(version);
 		await page.waitForTimeout(280); // Just past the debounce, so each compile starts while the last may be loading
 	}
+	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await tab(page, 'Mixer');
-	await expect.poll(async () => (await mixerPeaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(4);
+	await everyStripHeard(page);
+});
+
+test('the status bar says an edit is compiling until its image plays', async ({ page }) => {
+	// Slow every reply from the compiler, and every image on its way to the engine, so the edit is seen waiting for each.
+	await page.addInitScript(() => {
+		window.Worker = class extends window.Worker {
+			set onmessage(handler: (event: MessageEvent) => void) {
+				super.onmessage = (event) => setTimeout(() => handler(event), 1200);
+			}
+		};
+		const post = MessagePort.prototype.postMessage;
+		MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
+			if ((args[0] as { type?: string })?.type === 'load') setTimeout(() => post.apply(this, args), 1200);
+			else post.apply(this, args);
+		};
+	});
+	await startPlaying(page);
+	await settled(page);
+	const status = page.getByTestId('status');
+	await expect(status).toContainText('KB image');
+	const editor = await timelineJson(page);
+	await editor.fill((await editor.inputValue()).replace('"gain": 0.8', '"gain": 0.4'));
+	await expect(status).toHaveAttribute('aria-busy', 'true');
+	await expect(status).toContainText('Compiling…');
+	expect(await page.getByTestId('generation').textContent()).toBe('1');
+	// Not just compiled: the moment it stops saying so, the new image is the one playing.
+	await settled(page);
+	expect(await page.getByTestId('generation').textContent()).toBe('2');
+	await expect(status).not.toContainText('Compiling…');
+	await expect(status).toContainText('KB image');
+});
+
+test('an image the engine fails to load is explained, nothing waits on it, and the old one plays on', async ({
+	page
+}) => {
+	// Damages the next image on its way to the engine, which then fails it while loading rather than refusing it outright.
+	await page.addInitScript(() => {
+		const post = MessagePort.prototype.postMessage;
+		MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
+			const message = args[0] as { type?: string; image?: ArrayBuffer };
+			const page = window as unknown as { damage?: boolean };
+			if (message?.type === 'load' && page.damage && message.image) {
+				const bytes = new Uint8Array(message.image);
+				bytes[bytes.length >> 1] ^= 0xff;
+			}
+			post.apply(this, args);
+		};
+	});
+	await startPlaying(page);
+	await settled(page);
+	await page.evaluate(() => ((window as unknown as { damage: boolean }).damage = true));
+	const editor = await timelineJson(page);
+	await editor.fill((await editor.inputValue()).replace('"gain": 0.8', '"gain": 0.4'));
+	await expect(page.getByTestId('load-rejected')).toContainText('The engine refused this image: chunk hash mismatch.');
+	await settled(page);
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	expect(await page.getByTestId('generation').textContent()).toBe('1');
+	await expect(page.getByTestId('voices')).not.toHaveText('0');
 });
 
 test('the JSON stays open while it is typed into, and an edit survives opening something else', async ({ page }) => {

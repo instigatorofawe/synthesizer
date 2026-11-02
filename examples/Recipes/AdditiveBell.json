@@ -1,0 +1,718 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 0.56
+      }
+     },
+     {
+      "id": 4,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 5,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 1.1,
+       "sustain": 0.0,
+       "release": 1.1
+      }
+     },
+     {
+      "id": 6,
+      "type": "mul"
+     },
+     {
+      "id": 7,
+      "type": "mul",
+      "inputs": {
+       "b": 0.2
+      }
+     },
+     {
+      "id": 8,
+      "type": "mul",
+      "inputs": {
+       "b": 0.92
+      }
+     },
+     {
+      "id": 9,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 10,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.9,
+       "sustain": 0.0,
+       "release": 0.9
+      }
+     },
+     {
+      "id": 11,
+      "type": "mul"
+     },
+     {
+      "id": 12,
+      "type": "mul",
+      "inputs": {
+       "b": 0.134
+      }
+     },
+     {
+      "id": 13,
+      "type": "add"
+     },
+     {
+      "id": 14,
+      "type": "mul",
+      "inputs": {
+       "b": 1.19
+      }
+     },
+     {
+      "id": 15,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 16,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.65,
+       "sustain": 0.0,
+       "release": 0.65
+      }
+     },
+     {
+      "id": 17,
+      "type": "mul"
+     },
+     {
+      "id": 18,
+      "type": "mul",
+      "inputs": {
+       "b": 0.2
+      }
+     },
+     {
+      "id": 19,
+      "type": "add"
+     },
+     {
+      "id": 20,
+      "type": "mul",
+      "inputs": {
+       "b": 1.71
+      }
+     },
+     {
+      "id": 21,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 22,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.55,
+       "sustain": 0.0,
+       "release": 0.55
+      }
+     },
+     {
+      "id": 23,
+      "type": "mul"
+     },
+     {
+      "id": 24,
+      "type": "mul",
+      "inputs": {
+       "b": 0.134
+      }
+     },
+     {
+      "id": 25,
+      "type": "add"
+     },
+     {
+      "id": 26,
+      "type": "mul",
+      "inputs": {
+       "b": 2.0
+      }
+     },
+     {
+      "id": 27,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 28,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.35,
+       "sustain": 0.0,
+       "release": 0.35
+      }
+     },
+     {
+      "id": 29,
+      "type": "mul"
+     },
+     {
+      "id": 30,
+      "type": "mul",
+      "inputs": {
+       "b": 0.18000000000000002
+      }
+     },
+     {
+      "id": 31,
+      "type": "add"
+     },
+     {
+      "id": 32,
+      "type": "mul",
+      "inputs": {
+       "b": 2.74
+      }
+     },
+     {
+      "id": 33,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 34,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.3,
+       "sustain": 0.0,
+       "release": 0.3
+      }
+     },
+     {
+      "id": 35,
+      "type": "mul"
+     },
+     {
+      "id": 36,
+      "type": "mul",
+      "inputs": {
+       "b": 0.1
+      }
+     },
+     {
+      "id": 37,
+      "type": "add"
+     },
+     {
+      "id": 38,
+      "type": "mul",
+      "inputs": {
+       "b": 3.76
+      }
+     },
+     {
+      "id": 39,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 40,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.2,
+       "sustain": 0.0,
+       "release": 0.2
+      }
+     },
+     {
+      "id": 41,
+      "type": "mul"
+     },
+     {
+      "id": 42,
+      "type": "mul",
+      "inputs": {
+       "b": 0.1
+      }
+     },
+     {
+      "id": 43,
+      "type": "add"
+     },
+     {
+      "id": 44,
+      "type": "mul",
+      "inputs": {
+       "b": 4.07
+      }
+     },
+     {
+      "id": 45,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 46,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.15,
+       "sustain": 0.0,
+       "release": 0.15
+      }
+     },
+     {
+      "id": 47,
+      "type": "mul"
+     },
+     {
+      "id": 48,
+      "type": "mul",
+      "inputs": {
+       "b": 0.06
+      }
+     },
+     {
+      "id": 49,
+      "type": "add"
+     },
+     {
+      "id": 50,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "freq"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "b"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "freq"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "port": "out",
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 11,
+      "port": "out",
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 13,
+      "input": "a"
+     },
+     {
+      "from": 12,
+      "port": "out",
+      "to": 13,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 14,
+      "input": "a"
+     },
+     {
+      "from": 14,
+      "port": "out",
+      "to": 15,
+      "input": "freq"
+     },
+     {
+      "from": 15,
+      "port": "out",
+      "to": 17,
+      "input": "a"
+     },
+     {
+      "from": 16,
+      "port": "out",
+      "to": 17,
+      "input": "b"
+     },
+     {
+      "from": 17,
+      "port": "out",
+      "to": 18,
+      "input": "a"
+     },
+     {
+      "from": 13,
+      "port": "out",
+      "to": 19,
+      "input": "a"
+     },
+     {
+      "from": 18,
+      "port": "out",
+      "to": 19,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 20,
+      "input": "a"
+     },
+     {
+      "from": 20,
+      "port": "out",
+      "to": 21,
+      "input": "freq"
+     },
+     {
+      "from": 21,
+      "port": "out",
+      "to": 23,
+      "input": "a"
+     },
+     {
+      "from": 22,
+      "port": "out",
+      "to": 23,
+      "input": "b"
+     },
+     {
+      "from": 23,
+      "port": "out",
+      "to": 24,
+      "input": "a"
+     },
+     {
+      "from": 19,
+      "port": "out",
+      "to": 25,
+      "input": "a"
+     },
+     {
+      "from": 24,
+      "port": "out",
+      "to": 25,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 26,
+      "input": "a"
+     },
+     {
+      "from": 26,
+      "port": "out",
+      "to": 27,
+      "input": "freq"
+     },
+     {
+      "from": 27,
+      "port": "out",
+      "to": 29,
+      "input": "a"
+     },
+     {
+      "from": 28,
+      "port": "out",
+      "to": 29,
+      "input": "b"
+     },
+     {
+      "from": 29,
+      "port": "out",
+      "to": 30,
+      "input": "a"
+     },
+     {
+      "from": 25,
+      "port": "out",
+      "to": 31,
+      "input": "a"
+     },
+     {
+      "from": 30,
+      "port": "out",
+      "to": 31,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 32,
+      "input": "a"
+     },
+     {
+      "from": 32,
+      "port": "out",
+      "to": 33,
+      "input": "freq"
+     },
+     {
+      "from": 33,
+      "port": "out",
+      "to": 35,
+      "input": "a"
+     },
+     {
+      "from": 34,
+      "port": "out",
+      "to": 35,
+      "input": "b"
+     },
+     {
+      "from": 35,
+      "port": "out",
+      "to": 36,
+      "input": "a"
+     },
+     {
+      "from": 31,
+      "port": "out",
+      "to": 37,
+      "input": "a"
+     },
+     {
+      "from": 36,
+      "port": "out",
+      "to": 37,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 38,
+      "input": "a"
+     },
+     {
+      "from": 38,
+      "port": "out",
+      "to": 39,
+      "input": "freq"
+     },
+     {
+      "from": 39,
+      "port": "out",
+      "to": 41,
+      "input": "a"
+     },
+     {
+      "from": 40,
+      "port": "out",
+      "to": 41,
+      "input": "b"
+     },
+     {
+      "from": 41,
+      "port": "out",
+      "to": 42,
+      "input": "a"
+     },
+     {
+      "from": 37,
+      "port": "out",
+      "to": 43,
+      "input": "a"
+     },
+     {
+      "from": 42,
+      "port": "out",
+      "to": 43,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 44,
+      "input": "a"
+     },
+     {
+      "from": 44,
+      "port": "out",
+      "to": 45,
+      "input": "freq"
+     },
+     {
+      "from": 45,
+      "port": "out",
+      "to": 47,
+      "input": "a"
+     },
+     {
+      "from": 46,
+      "port": "out",
+      "to": 47,
+      "input": "b"
+     },
+     {
+      "from": 47,
+      "port": "out",
+      "to": 48,
+      "input": "a"
+     },
+     {
+      "from": 43,
+      "port": "out",
+      "to": 49,
+      "input": "a"
+     },
+     {
+      "from": 48,
+      "port": "out",
+      "to": 49,
+      "input": "b"
+     },
+     {
+      "from": 49,
+      "port": "out",
+      "to": 50,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 2580,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 72,
+        "vel": 110,
+        "dur": 300
+       },
+       {
+        "tick": 480,
+        "note": 79,
+        "vel": 90,
+        "dur": 300
+       },
+       {
+        "tick": 960,
+        "note": 76,
+        "vel": 100,
+        "dur": 300
+       },
+       {
+        "tick": 1440,
+        "note": 84,
+        "vel": 110,
+        "dur": 900
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 4,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.605
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,939 @@
+{
+ "patches": {
+  "kick": {
+   "name": "kick",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0001,
+       "decay": 0.035,
+       "sustain": 0.0,
+       "release": 0.035
+      }
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 170.0
+      }
+     },
+     {
+      "id": 4,
+      "type": "add",
+      "inputs": {
+       "b": 46.0
+      }
+     },
+     {
+      "id": 5,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 6,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0002,
+       "decay": 0.32,
+       "sustain": 0.0,
+       "release": 0.32
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul"
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "out"
+     },
+     {
+      "id": 10,
+      "type": "snap"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "to": 5,
+      "input": "freq"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "l"
+     },
+     {
+      "from": 4,
+      "to": 10,
+      "input": "in",
+      "port": "out"
+     }
+    ]
+   }
+  },
+  "snare": {
+   "name": "snare",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.03,
+       "sustain": 0.0,
+       "release": 0.03
+      }
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 110.0
+      }
+     },
+     {
+      "id": 4,
+      "type": "add",
+      "inputs": {
+       "b": 175.0
+      }
+     },
+     {
+      "id": 5,
+      "type": "osc",
+      "wave": "triangle"
+     },
+     {
+      "id": 6,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.07,
+       "sustain": 0.0,
+       "release": 0.07
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul"
+     },
+     {
+      "id": 8,
+      "type": "noise"
+     },
+     {
+      "id": 9,
+      "type": "biquad",
+      "mode": "bandpass",
+      "inputs": {
+       "cutoff": 3200.0,
+       "q": 0.6
+      }
+     },
+     {
+      "id": 10,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "decay": 0.11,
+       "sustain": 0.0,
+       "release": 0.11
+      }
+     },
+     {
+      "id": 11,
+      "type": "mul"
+     },
+     {
+      "id": 12,
+      "type": "mul",
+      "inputs": {
+       "b": 0.9
+      }
+     },
+     {
+      "id": 13,
+      "type": "mul",
+      "inputs": {
+       "b": 1.2
+      }
+     },
+     {
+      "id": 14,
+      "type": "add"
+     },
+     {
+      "id": 15,
+      "type": "mul"
+     },
+     {
+      "id": 16,
+      "type": "out"
+     },
+     {
+      "id": 17,
+      "type": "snap"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 17,
+      "to": 5,
+      "input": "freq"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "in"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "port": "out",
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 11,
+      "port": "out",
+      "to": 13,
+      "input": "a"
+     },
+     {
+      "from": 12,
+      "port": "out",
+      "to": 14,
+      "input": "a"
+     },
+     {
+      "from": 13,
+      "port": "out",
+      "to": 14,
+      "input": "b"
+     },
+     {
+      "from": 14,
+      "port": "out",
+      "to": 15,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 15,
+      "input": "b"
+     },
+     {
+      "from": 15,
+      "port": "out",
+      "to": 16,
+      "input": "l"
+     },
+     {
+      "from": 4,
+      "to": 17,
+      "input": "in",
+      "port": "out"
+     }
+    ]
+   }
+  },
+  "hat": {
+   "name": "hat",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "noise"
+     },
+     {
+      "id": 3,
+      "type": "biquad",
+      "mode": "highpass",
+      "inputs": {
+       "cutoff": 7500.0,
+       "q": 0.9
+      }
+     },
+     {
+      "id": 4,
+      "type": "mul",
+      "inputs": {
+       "b": 0.02
+      }
+     },
+     {
+      "id": 5,
+      "type": "add",
+      "inputs": {
+       "b": -1.0
+      }
+     },
+     {
+      "id": 6,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0005,
+       "sustain": 0.0
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul"
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "decay"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "release"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "clap": {
+   "name": "clap",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0003,
+       "decay": 0.006,
+       "sustain": 0.0,
+       "release": 0.006
+      }
+     },
+     {
+      "id": 3,
+      "type": "delay",
+      "max": 0.012,
+      "inputs": {
+       "time": 0.0105
+      }
+     },
+     {
+      "id": 4,
+      "type": "delay",
+      "max": 0.025,
+      "inputs": {
+       "time": 0.0215
+      }
+     },
+     {
+      "id": 5,
+      "type": "env",
+      "inputs": {
+       "attack": 0.0003,
+       "decay": 0.09,
+       "sustain": 0.0,
+       "release": 0.09
+      }
+     },
+     {
+      "id": 6,
+      "type": "delay",
+      "max": 0.04,
+      "inputs": {
+       "time": 0.032
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul",
+      "inputs": {
+       "b": 0.8
+      }
+     },
+     {
+      "id": 8,
+      "type": "add"
+     },
+     {
+      "id": 9,
+      "type": "mul",
+      "inputs": {
+       "b": 0.7
+      }
+     },
+     {
+      "id": 10,
+      "type": "add"
+     },
+     {
+      "id": 11,
+      "type": "add"
+     },
+     {
+      "id": 12,
+      "type": "noise"
+     },
+     {
+      "id": 13,
+      "type": "biquad",
+      "mode": "bandpass",
+      "inputs": {
+       "cutoff": 1500.0,
+       "q": 1.3
+      }
+     },
+     {
+      "id": 14,
+      "type": "mul"
+     },
+     {
+      "id": 15,
+      "type": "mul"
+     },
+     {
+      "id": 16,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 4,
+      "input": "in"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 10,
+      "input": "a"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 10,
+      "input": "b"
+     },
+     {
+      "from": 10,
+      "port": "out",
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 12,
+      "port": "out",
+      "to": 13,
+      "input": "in"
+     },
+     {
+      "from": 13,
+      "port": "out",
+      "to": 14,
+      "input": "a"
+     },
+     {
+      "from": 11,
+      "port": "out",
+      "to": 14,
+      "input": "b"
+     },
+     {
+      "from": 14,
+      "port": "out",
+      "to": 15,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 15,
+      "input": "b"
+     },
+     {
+      "from": 15,
+      "port": "out",
+      "to": 16,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "kick",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 36,
+        "vel": 127,
+        "dur": 120
+       },
+       {
+        "tick": 720,
+        "note": 36,
+        "vel": 100,
+        "dur": 120
+       },
+       {
+        "tick": 960,
+        "note": 36,
+        "vel": 120,
+        "dur": 120
+       },
+       {
+        "tick": 1920,
+        "note": 36,
+        "vel": 127,
+        "dur": 120
+       },
+       {
+        "tick": 2640,
+        "note": 36,
+        "vel": 110,
+        "dur": 120
+       },
+       {
+        "tick": 2880,
+        "note": 36,
+        "vel": 120,
+        "dur": 120
+       }
+      ]
+     },
+     {
+      "id": "snare",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 480,
+        "note": 60,
+        "vel": 110,
+        "dur": 200
+       },
+       {
+        "tick": 1440,
+        "note": 60,
+        "vel": 120,
+        "dur": 200
+       },
+       {
+        "tick": 2400,
+        "note": 60,
+        "vel": 110,
+        "dur": 200
+       },
+       {
+        "tick": 3360,
+        "note": 60,
+        "vel": 120,
+        "dur": 200
+       },
+       {
+        "tick": 3600,
+        "note": 60,
+        "vel": 70,
+        "dur": 100
+       }
+      ]
+     },
+     {
+      "id": "hat",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 51,
+        "vel": 100,
+        "dur": 60
+       },
+       {
+        "tick": 240,
+        "note": 51,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 480,
+        "note": 51,
+        "vel": 100,
+        "dur": 60
+       },
+       {
+        "tick": 720,
+        "note": 51,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 960,
+        "note": 51,
+        "vel": 100,
+        "dur": 60
+       },
+       {
+        "tick": 1200,
+        "note": 51,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 1440,
+        "note": 57,
+        "vel": 100,
+        "dur": 60
+       },
+       {
+        "tick": 1680,
+        "note": 51,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 1920,
+        "note": 51,
+        "vel": 100,
+        "dur": 60
+       },
+       {
+        "tick": 2160,
+        "note": 51,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 2400,
+        "note": 51,
+        "vel": 100,
+        "dur": 60
+       },
+       {
+        "tick": 2640,
+        "note": 51,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 2880,
+        "note": 51,
+        "vel": 100,
+        "dur": 60
+       },
+       {
+        "tick": 3120,
+        "note": 51,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 3360,
+        "note": 57,
+        "vel": 100,
+        "dur": 60
+       },
+       {
+        "tick": 3600,
+        "note": 51,
+        "vel": 70,
+        "dur": 60
+       }
+      ]
+     },
+     {
+      "id": "clap",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 1440,
+        "note": 60,
+        "vel": 90,
+        "dur": 300
+       },
+       {
+        "tick": 3360,
+        "note": 60,
+        "vel": 90,
+        "dur": 300
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 4,
+      "gain": 1.0,
+      "slots": [
+       "kick"
+      ],
+      "placements": [
+       {
+        "clip": "kick",
+        "tick": 0
+       }
+      ]
+     },
+     {
+      "id": 2,
+      "voices": 4,
+      "gain": 0.6,
+      "slots": [
+       "snare"
+      ],
+      "placements": [
+       {
+        "clip": "snare",
+        "tick": 0
+       }
+      ]
+     },
+     {
+      "id": 3,
+      "voices": 4,
+      "gain": 0.45,
+      "slots": [
+       "hat"
+      ],
+      "placements": [
+       {
+        "clip": "hat",
+        "tick": 0
+       }
+      ]
+     },
+     {
+      "id": 4,
+      "voices": 4,
+      "gain": 0.5,
+      "slots": [
+       "clap"
+      ],
+      "placements": [
+       {
+        "clip": "clap",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.4286
+    }
+   }
+  }
+ ]
+}

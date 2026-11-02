@@ -1,0 +1,853 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "triangle"
+     },
+     {
+      "id": 4,
+      "type": "env",
+      "inputs": {
+       "attack": 0.002,
+       "decay": 0.12,
+       "sustain": 0.0,
+       "release": 0.08
+      }
+     },
+     {
+      "id": 5,
+      "type": "mul"
+     },
+     {
+      "id": 6,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "room": {
+   "name": "room",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "in",
+      "index": 0
+     },
+     {
+      "id": 2,
+      "type": "add"
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 0.5
+      }
+     },
+     {
+      "id": 4,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0297,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 5,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0371,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 6,
+      "type": "add"
+     },
+     {
+      "id": 7,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0411,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 8,
+      "type": "add"
+     },
+     {
+      "id": 9,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0437,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 10,
+      "type": "add"
+     },
+     {
+      "id": 11,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0253,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 12,
+      "type": "add"
+     },
+     {
+      "id": 13,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0269,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 14,
+      "type": "add"
+     },
+     {
+      "id": 15,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.029,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 16,
+      "type": "add"
+     },
+     {
+      "id": 17,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0307,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 18,
+      "type": "add"
+     },
+     {
+      "id": 19,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.0126,
+       "feedback": 0.5
+      }
+     },
+     {
+      "id": 20,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.01,
+       "feedback": 0.5
+      }
+     },
+     {
+      "id": 21,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.0077,
+       "feedback": 0.5
+      }
+     },
+     {
+      "id": 22,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.0051,
+       "feedback": 0.5
+      }
+     },
+     {
+      "id": 23,
+      "type": "mul",
+      "inputs": {
+       "b": 0.08
+      }
+     },
+     {
+      "id": 24,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0302,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 25,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0376,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 26,
+      "type": "add"
+     },
+     {
+      "id": 27,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0416,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 28,
+      "type": "add"
+     },
+     {
+      "id": 29,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0442,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 30,
+      "type": "add"
+     },
+     {
+      "id": 31,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0258,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 32,
+      "type": "add"
+     },
+     {
+      "id": 33,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.0274,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 34,
+      "type": "add"
+     },
+     {
+      "id": 35,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.029500000000000002,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 36,
+      "type": "add"
+     },
+     {
+      "id": 37,
+      "type": "comb",
+      "max": 0.05,
+      "inputs": {
+       "time": 0.031200000000000002,
+       "feedback": 0.84,
+       "damp": 0.25
+      }
+     },
+     {
+      "id": 38,
+      "type": "add"
+     },
+     {
+      "id": 39,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.0131,
+       "feedback": 0.5
+      }
+     },
+     {
+      "id": 40,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.0105,
+       "feedback": 0.5
+      }
+     },
+     {
+      "id": 41,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.0082,
+       "feedback": 0.5
+      }
+     },
+     {
+      "id": 42,
+      "type": "allpass",
+      "max": 0.02,
+      "inputs": {
+       "time": 0.005600000000000001,
+       "feedback": 0.5
+      }
+     },
+     {
+      "id": 43,
+      "type": "mul",
+      "inputs": {
+       "b": 0.08
+      }
+     },
+     {
+      "id": 44,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "l",
+      "to": 2,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "port": "r",
+      "to": 2,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 5,
+      "input": "in"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 6,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 7,
+      "input": "in"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 9,
+      "input": "in"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 10,
+      "input": "a"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 10,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 11,
+      "input": "in"
+     },
+     {
+      "from": 10,
+      "port": "out",
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 11,
+      "port": "out",
+      "to": 12,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 13,
+      "input": "in"
+     },
+     {
+      "from": 12,
+      "port": "out",
+      "to": 14,
+      "input": "a"
+     },
+     {
+      "from": 13,
+      "port": "out",
+      "to": 14,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 15,
+      "input": "in"
+     },
+     {
+      "from": 14,
+      "port": "out",
+      "to": 16,
+      "input": "a"
+     },
+     {
+      "from": 15,
+      "port": "out",
+      "to": 16,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 17,
+      "input": "in"
+     },
+     {
+      "from": 16,
+      "port": "out",
+      "to": 18,
+      "input": "a"
+     },
+     {
+      "from": 17,
+      "port": "out",
+      "to": 18,
+      "input": "b"
+     },
+     {
+      "from": 18,
+      "port": "out",
+      "to": 19,
+      "input": "in"
+     },
+     {
+      "from": 19,
+      "port": "out",
+      "to": 20,
+      "input": "in"
+     },
+     {
+      "from": 20,
+      "port": "out",
+      "to": 21,
+      "input": "in"
+     },
+     {
+      "from": 21,
+      "port": "out",
+      "to": 22,
+      "input": "in"
+     },
+     {
+      "from": 22,
+      "port": "out",
+      "to": 23,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 24,
+      "input": "in"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 25,
+      "input": "in"
+     },
+     {
+      "from": 24,
+      "port": "out",
+      "to": 26,
+      "input": "a"
+     },
+     {
+      "from": 25,
+      "port": "out",
+      "to": 26,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 27,
+      "input": "in"
+     },
+     {
+      "from": 26,
+      "port": "out",
+      "to": 28,
+      "input": "a"
+     },
+     {
+      "from": 27,
+      "port": "out",
+      "to": 28,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 29,
+      "input": "in"
+     },
+     {
+      "from": 28,
+      "port": "out",
+      "to": 30,
+      "input": "a"
+     },
+     {
+      "from": 29,
+      "port": "out",
+      "to": 30,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 31,
+      "input": "in"
+     },
+     {
+      "from": 30,
+      "port": "out",
+      "to": 32,
+      "input": "a"
+     },
+     {
+      "from": 31,
+      "port": "out",
+      "to": 32,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 33,
+      "input": "in"
+     },
+     {
+      "from": 32,
+      "port": "out",
+      "to": 34,
+      "input": "a"
+     },
+     {
+      "from": 33,
+      "port": "out",
+      "to": 34,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 35,
+      "input": "in"
+     },
+     {
+      "from": 34,
+      "port": "out",
+      "to": 36,
+      "input": "a"
+     },
+     {
+      "from": 35,
+      "port": "out",
+      "to": 36,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 37,
+      "input": "in"
+     },
+     {
+      "from": 36,
+      "port": "out",
+      "to": 38,
+      "input": "a"
+     },
+     {
+      "from": 37,
+      "port": "out",
+      "to": 38,
+      "input": "b"
+     },
+     {
+      "from": 38,
+      "port": "out",
+      "to": 39,
+      "input": "in"
+     },
+     {
+      "from": 39,
+      "port": "out",
+      "to": 40,
+      "input": "in"
+     },
+     {
+      "from": 40,
+      "port": "out",
+      "to": 41,
+      "input": "in"
+     },
+     {
+      "from": 41,
+      "port": "out",
+      "to": 42,
+      "input": "in"
+     },
+     {
+      "from": 42,
+      "port": "out",
+      "to": 43,
+      "input": "a"
+     },
+     {
+      "from": 23,
+      "port": "out",
+      "to": 44,
+      "input": "l"
+     },
+     {
+      "from": 43,
+      "port": "out",
+      "to": 44,
+      "input": "r"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "c",
+      "length": 2880,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 60,
+        "vel": 100,
+        "dur": 90
+       },
+       {
+        "tick": 120,
+        "note": 64,
+        "vel": 90,
+        "dur": 90
+       },
+       {
+        "tick": 240,
+        "note": 67,
+        "vel": 100,
+        "dur": 90
+       },
+       {
+        "tick": 960,
+        "note": 62,
+        "vel": 100,
+        "dur": 90
+       },
+       {
+        "tick": 1080,
+        "note": 65,
+        "vel": 90,
+        "dur": 90
+       },
+       {
+        "tick": 1200,
+        "note": 69,
+        "vel": 100,
+        "dur": 90
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 4,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "c",
+        "tick": 0
+       }
+      ],
+      "sends": [
+       {
+        "bus": "room",
+        "gain": 0.8
+       }
+      ]
+     }
+    ],
+    "buses": [
+     {
+      "id": "room",
+      "inserts": [
+       {
+        "id": 2,
+        "patch": "room"
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.3173
+    }
+   }
+  }
+ ]
+}

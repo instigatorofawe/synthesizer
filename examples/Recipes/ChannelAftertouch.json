@@ -1,0 +1,269 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "param",
+      "param": 1
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 48.0
+      }
+     },
+     {
+      "id": 4,
+      "type": "add",
+      "inputs": {
+       "b": 72.0
+      }
+     },
+     {
+      "id": 5,
+      "type": "mtof"
+     },
+     {
+      "id": 6,
+      "type": "mtof"
+     },
+     {
+      "id": 7,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 8,
+      "type": "add",
+      "inputs": {
+       "b": 0.08
+      }
+     },
+     {
+      "id": 9,
+      "type": "mtof"
+     },
+     {
+      "id": 10,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 11,
+      "type": "add"
+     },
+     {
+      "id": 12,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "q": 1.5
+      }
+     },
+     {
+      "id": 13,
+      "type": "env",
+      "inputs": {
+       "attack": 0.02,
+       "decay": 0.2,
+       "sustain": 0.9,
+       "release": 0.2
+      }
+     },
+     {
+      "id": 14,
+      "type": "mul"
+     },
+     {
+      "id": 15,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "port": "out",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "port": "out",
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "port": "out",
+      "to": 5,
+      "input": "in"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 6,
+      "input": "in"
+     },
+     {
+      "from": 6,
+      "port": "out",
+      "to": 7,
+      "input": "freq"
+     },
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "port": "out",
+      "to": 9,
+      "input": "in"
+     },
+     {
+      "from": 9,
+      "port": "out",
+      "to": 10,
+      "input": "freq"
+     },
+     {
+      "from": 7,
+      "port": "out",
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "port": "out",
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 5,
+      "port": "out",
+      "to": 12,
+      "input": "cutoff"
+     },
+     {
+      "from": 11,
+      "port": "out",
+      "to": 12,
+      "input": "in"
+     },
+     {
+      "from": 12,
+      "port": "out",
+      "to": 14,
+      "input": "a"
+     },
+     {
+      "from": 13,
+      "port": "out",
+      "to": 14,
+      "input": "b"
+     },
+     {
+      "from": 14,
+      "port": "out",
+      "to": 15,
+      "input": "l"
+     }
+    ],
+    "params": [
+     {
+      "id": 1,
+      "name": "pressure",
+      "scope": "track",
+      "min": 0,
+      "max": 1,
+      "default": 0.0,
+      "smooth_ms": 25
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 120
+     }
+    ],
+    "clips": [
+     {
+      "id": "phrase",
+      "length": 2640,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 52,
+        "vel": 90,
+        "dur": 2400
+       },
+       {
+        "tick": 0,
+        "note": 59,
+        "vel": 90,
+        "dur": 2400
+       },
+       {
+        "tick": 0,
+        "note": 64,
+        "vel": 90,
+        "dur": 2400
+       }
+      ],
+      "automation": [
+       {
+        "tick": 240,
+        "param": 1,
+        "value": 1.0,
+        "ramp": 960
+       },
+       {
+        "tick": 1560,
+        "param": 1,
+        "value": 0.0,
+        "ramp": 720
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 3,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "phrase",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.1295
+    }
+   }
+  }
+ ]
+}

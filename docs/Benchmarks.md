@@ -59,7 +59,7 @@ Instructions are per sample, stereo and scalar unless named. Peak is the worst f
 | CubicSaturation | effects | 0.6 | 1.7 | 2 | 223 | 263 | 267 | 234 | 262 | 19 | yes | 8.1 | 0.4 / 24.8 |
 | PingPongDelay | effects | 0.7 | 227.8 | 1 | 193 | 248 | 257 | 231 | 255 | 18 | RAM | 7.1 | 0.8 / 81.7 |
 | VelocityFilterAmp | filters | 0.6 | 1.7 | 2 | 220 | 245 | 245 | 212 | 242 | 18 | yes | 10.4 | 0.5 / 56.1 |
-| FormantVowels | filters | 0.8 | 1.9 | 1 | 187 | 198 | 241 | 214 | 238 | 17 | yes | 9.1 | 0.5 / 39.9 |
+| FormantVowels | filters | 0.9 | 1.9 | 1 | 187 | 198 | 241 | 214 | 238 | 17 | yes | 9.1 | 0.5 / 39.9 |
 | PrecutGrainCloud | effects | 154.9 | 5.4 | 2 | 136 | 238 | 239 | 211 | 238 | 17 | yes | 4.2 | 0.3 / 68.9 |
 | StepSequencer | modulation | 0.6 | 1.6 | 2 | 211 | 238 | 239 | 206 | 237 | 17 | yes | 10.4 | 0.5 / 38.0 |
 | RingModulation | combinations | 8.6 | 1.6 | 2 | 212 | 231 | 239 | 206 | 238 | 17 | yes | 7.6 | 0.4 / 17.8 |
@@ -72,7 +72,7 @@ Instructions are per sample, stereo and scalar unless named. Peak is the worst f
 | VibratoModWheel | modulation | 0.6 | 1.6 | 1 | 145 | 148 | 166 | 140 | 166 | 12 | yes | 7.2 | 0.4 / 52.5 |
 | Wind | filters | 0.6 | 1.7 | 1 | 145 | 150 | 163 | 137 | 163 | 12 | yes | 7.5 | 0.4 / 44.9 |
 | LegatoPortamento | modulation | 0.6 | 1.5 | 1 | 131 | 139 | 160 | 134 | 159 | 12 | yes | 6.4 | 0.3 / 42.6 |
-| PitchBend | modulation | 0.5 | 1.7 | 1 | 138 | 142 | 155 | 129 | 154 | 11 | yes | 6.5 | 0.3 / 21.9 |
+| PitchBend | modulation | 0.6 | 1.7 | 1 | 138 | 142 | 155 | 129 | 154 | 11 | yes | 6.5 | 0.3 / 21.9 |
 
 ## Engine
 

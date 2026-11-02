@@ -66,7 +66,8 @@ template <SynthConfig C = SynthConfig{}, Backend B = ScalarBackend, Executor E =
 class Synth {
     static_assert(C.channels == 1 || C.channels == 2, "SynthConfig::channels must be 1 or 2");
     static_assert(C.generations == 1 || C.generations == 2, "SynthConfig::generations must be 1 or 2");
-    static_assert(C.frame_size >= 8 && C.frame_size <= 4096);
+    static_assert(std::has_single_bit(C.frame_size) && C.frame_size >= kMinFrameSize && C.frame_size <= kMaxFrameSize,
+                  "SynthConfig::frame_size must be a power of two from 8 to 1024, or no image could name it");
 
    public:
     static constexpr u32 frame_size = C.frame_size;
@@ -151,7 +152,10 @@ class Synth {
                     error_ = loader_.error();
                     load_phase_ = LoadPhase::Idle;
                 } else if (status == LoadStatus::Ready) {
-                    if (program_index_ >= loader_.programs()) {
+                    if (loader_.programs() == 0) {
+                        load_phase_ =
+                            LoadPhase::Idle;  // A library: its chunks are in the table, and nothing is to bind
+                    } else if (program_index_ >= loader_.programs()) {
                         error_ = LoadError::BadProgram;
                         load_phase_ = LoadPhase::Idle;
                     } else {
@@ -1009,6 +1013,71 @@ class Synth {
                 copy_slot(o.slot, n.slot);
                 copy_state(*o.slot.binding, o.instance.state, *n.slot.binding, n.instance.state, false);
                 break;
+            }
+        }
+        carry_globals(from, to);
+        if (same_mixer(from.program, to.program)) carry_mix(from, to);
+    }
+
+    // A global lives in the Program and not in a slot, so it doesn't carry with one. Every patch that declares it has
+    // its own range, and the value has to fit them all, as it would have to if it had been set here.
+    static void carry_globals(const Generation& from, Generation& to) {
+        for (u32 n = 0; n < to.program.h.globals; ++n) {
+            const u16 id = to.program.global(n).id;
+            for (u32 k = 0; k < from.program.h.globals; ++k) {
+                if (from.program.global(k).id != id) continue;
+                float value = from.globals[k];
+                for (u32 p = 0; p < to.program.h.patches; ++p) {
+                    const PatchView& v = to.bindings[p].view;
+                    for (u32 i = 0; i < v.h.params; ++i) {
+                        const ParamDesc d = v.param(i);
+                        if (d.id == id && d.scope == static_cast<u8>(ParamScope::Global)) {
+                            value = clamp(value, d.min, d.max);
+                        }
+                    }
+                }
+                to.globals[n] = value;
+                break;
+            }
+        }
+    }
+
+    // A mix register has no id. What it means is where the mixer reads it, so two Programs' registers line up only if
+    // their mixers are the same, down to the tracks and inserts they run.
+    [[nodiscard]] static bool same_mixer(const ProgramView& a, const ProgramView& b) {
+        const ProgramHeader& x = a.h;
+        const ProgramHeader& y = b.h;
+        if (x.mix_regs != y.mix_regs || x.mix_steps != y.mix_steps || x.gather_inputs != y.gather_inputs ||
+            x.tracks != y.tracks || x.inserts != y.inserts || x.master != y.master) {
+            return false;
+        }
+        for (u32 i = 0; i < x.tracks; ++i) {
+            if (a.track(i).id != b.track(i).id) return false;
+        }
+        for (u32 i = 0; i < x.inserts; ++i) {
+            if (a.insert(i).id != b.insert(i).id) return false;
+        }
+        for (u32 i = 0; i < x.mix_steps; ++i) {
+            const MixStep s = a.mix_step(i), t = b.mix_step(i);
+            if (std::memcmp(&s, &t, sizeof(MixStep)) != 0) return false;
+        }
+        for (u32 i = 0; i < x.gather_inputs; ++i) {
+            const GatherInput s = a.gather_input(i), t = b.gather_input(i);
+            if (std::memcmp(&s, &t, sizeof(GatherInput)) != 0) return false;
+        }
+        return true;
+    }
+
+    // An edit that changes where a register starts has moved that fader, and the new value is what it asked for.
+    static void carry_mix(const Generation& from, Generation& to) {
+        for (u32 i = 0; i < to.program.h.mix_regs; ++i) {
+            if (from.program.mix_value(i) != to.program.mix_value(i)) continue;
+            to.mix[i] = from.mix[i];
+            if (!from.mix_ramps || from.mix_ramps[i].frames == 0) continue;
+            if (to.mix_ramps) {
+                to.mix_ramps[i] = from.mix_ramps[i];
+            } else {
+                to.mix[i] = from.mix_ramps[i].target;  // Nothing here can finish the slide
             }
         }
     }

@@ -1268,6 +1268,18 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     }
     if (next_reg > static_cast<int>(kMaxRegisters)) throw CompileError(where, "the mixer needs too many buses");
 
+    // A global belongs to the Program, so a lane on one reaches past its track as much as a lane with a target does.
+    const auto names_global = [&](const json& track, int param) {
+        for (const json& slot : track.value("slots", json::array())) {
+            const std::string id = slot.get<std::string>();
+            if (!image.patches->contains(id)) continue;
+            for (const json& p : image.patches->at(id).at("graph").value("params", json::array())) {
+                if (p.value("id", -1) == param && p.value("scope", "track") == "global") return true;
+            }
+        }
+        return false;
+    };
+
     // A track that doesn't compile doesn't run, and a lane that reaches past its own track would be lost without a
     // sound.
     for (const std::string& key : chain_order) {
@@ -1276,7 +1288,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         for (const json& placed : c.doc->value("placements", json::array())) {
             for (const json& lane :
                  clips.at(placed.at("clip").get<std::string>())->value("automation", json::array())) {
-                if (lane.contains("target")) {
+                if (lane.contains("target") || names_global(*c.doc, lane.value("param", -1))) {
                     throw CompileError(where + "/" + key,
                                        "this track never plays, so its lanes would not run. Put the "
                                        "lane in a clip on a track that does");
@@ -1295,6 +1307,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                                it->second + " and " + track + " both automate " + target + ". One track must own it");
         }
     };
+    const auto global_name = [](u16 id) { return "global param " + std::to_string(id); };
     // A mix register holds fader, pan and send multiplied together, so a lane on one has to use the others' values, and
     // those can only be the fixed ones. Two controls in one register therefore can't both move.
     std::map<int, std::string> register_control;
@@ -1383,6 +1396,9 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         const json& d = *chains.at(work.key).doc;
         std::set<u16> moved_registers;
         std::map<std::pair<u16, u16>, float> moved_inserts;  // insert and parameter, and the value each starts from
+        // Whether a lane with no target sets its parameter outright at tick 0. Then the stream puts it back unaided, so
+        // a Program that opens that way pays for nothing.
+        std::map<u16, bool> moved_params;
 
         const auto has_param = [&](u16 id) {
             for (const CompiledPatch* p : work.patches) {
@@ -1391,6 +1407,41 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                 }
             }
             return false;
+        };
+        const auto is_global = [&](u16 id) {
+            for (const CompiledPatch* p : work.patches) {
+                for (const ParamInfo& info : p->params) {
+                    if (info.id == id && info.scope == ParamScope::Global) return true;
+                }
+            }
+            return false;
+        };
+
+        // Where a lane with no target starts from. A SetParam reaches every slot with that id, and each clamps it to
+        // its own range, as it does an initial value, so one value has to do for them all.
+        const auto param_start = [&](u16 id) {
+            const json params = d.value("params", json::object());
+            const std::string key = std::to_string(id);
+            const auto start_on = [&](const ParamInfo& info) {
+                if (info.scope == ParamScope::Global) return globals.at(id).value;
+                return params.contains(key) ? params.at(key).get<float>() : info.def;
+            };
+            std::vector<const ParamInfo*> declared;
+            for (const CompiledPatch* p : work.patches) {
+                for (const ParamInfo& info : p->params) {
+                    if (info.id == id) declared.push_back(&info);
+                }
+            }
+            for (const ParamInfo* candidate : declared) {
+                const float value = start_on(*candidate);
+                const auto puts_back = [&](const ParamInfo* info) {
+                    return std::clamp(value, info->min, info->max) == std::clamp(start_on(*info), info->min, info->max);
+                };
+                if (std::all_of(declared.begin(), declared.end(), puts_back)) return value;
+            }
+            throw CompileError(work.where, "param " + key +
+                                               " starts from different values on this track's slots, so a lane can't "
+                                               "put it back. Give the track a value for it, or set it at tick 0");
         };
 
         const auto play_instruction = [&](const json& play, const std::string& at) -> Instruction {
@@ -1419,7 +1470,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         };
 
         // A clip's slots depend on the track, so a clip compiles per track and identical results merge.
-        const auto compile_clip = [&](const json& clip) {
+        const auto compile_clip = [&](const json& clip, u32 placed_at) {
             enum class ItemKind { Lane, Note, Play };
             struct Item {
                 u32 tick;
@@ -1510,12 +1561,17 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                 if (info->scope == ParamScope::Voice) {
                     throw CompileError(clip_where, "param " + std::to_string(param) + " of insert " +
                                                        std::to_string(id) +
-                                                       " has voice scope, which only reaches a new note, and an insert "
-                                                       "never starts one");
+                                                       " has voice scope, which an insert reads once, at load, so a "
+                                                       "lane can't move it");
                 }
-                claim("param " + std::to_string(param) + " of insert " + std::to_string(id), work.key, clip_where);
+                const bool global = info->scope == ParamScope::Global;
+                claim(global ? global_name(static_cast<u16>(param))
+                             : "param " + std::to_string(param) + " of insert " + std::to_string(id),
+                      work.key, clip_where);
                 const std::string key = std::to_string(param);
-                const float start = insert.params.contains(key) ? insert.params.at(key).get<float>() : info->def;
+                const float start = global                        ? globals.at(static_cast<u16>(param)).value
+                                    : insert.params.contains(key) ? insert.params.at(key).get<float>()
+                                                                  : info->def;
                 moved_inserts.try_emplace({insert.index, static_cast<u16>(param)}, start);
                 const u32 bits = std::bit_cast<u32>(value);
                 const u8 index = static_cast<u8>(insert.index);
@@ -1553,6 +1609,8 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
                     const u32 value = std::bit_cast<u32>(a.at("value").get<float>());
                     const u16 param = static_cast<u16>(a.at("param").get<int>());
                     const u32 ramp = a.value("ramp", 0u);
+                    if (is_global(param)) claim(global_name(param), work.key, clip_where);
+                    moved_params.try_emplace(param, placed_at == 0 && item.tick == 0 && ramp == 0);
                     if (ramp) {
                         body.push_back({static_cast<u8>(Instr::Ramp), 0, param, value});
                         body.push_back({static_cast<u8>(Instr::RampArg), 0, 0, ramp});
@@ -1587,7 +1645,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
             const u32 repeat = placed.value("repeat", 1u);
             if (repeat == 0) throw CompileError(track_where, "a placement repeats 0 times");
             if (tick < cursor) throw CompileError(track_where, "clips overlap on this track");
-            const u16 index = compile_clip(clip);
+            const u16 index = compile_clip(clip, tick);
             if (tick > cursor) placed_stream.push_back({static_cast<u8>(Instr::Wait), 0, 0, tick - cursor});
             placed_stream.push_back({static_cast<u8>(Instr::Call), 0, index, repeat});
             cursor = tick + repeat * clip.at("length").get<u32>();
@@ -1609,6 +1667,10 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         for (const auto& [where_at, start] : moved_inserts) {
             stream.push_back({static_cast<u8>(Instr::SetInsert), static_cast<u8>(where_at.first), where_at.second,
                               std::bit_cast<u32>(start)});
+        }
+        for (const auto& [param, opens_at_zero] : moved_params) {
+            if (opens_at_zero) continue;
+            stream.push_back({static_cast<u8>(Instr::SetParam), 0, param, std::bit_cast<u32>(param_start(param))});
         }
         stream.insert(stream.end(), placed_stream.begin(), placed_stream.end());
 
@@ -1832,7 +1894,12 @@ inline ImageResult compile_image(const json& request) {
 
     json programs = json::array();
     const json& entries = request.at("programs");
-    if (entries.empty()) throw CompileError("request", "an image needs at least one program");
+    if (entries.empty()) {
+        // A library, sent ahead of the Programs that will use it. Nothing chooses among its patches, so all of them go.
+        for (const auto& [id, patch] : context.patches->items()) (void)compiled_patch(context, id, 0, "patch:" + id);
+        context.users.clear();  // Nothing uses them yet
+        if (context.chunks.empty()) throw CompileError("request", "an image needs a program or a patch");
+    }
     std::vector<u64> program_hashes;
     for (std::size_t i = 0; i < entries.size(); ++i) {
         json report = compile_program(context, entries[i], i, keep_unused);

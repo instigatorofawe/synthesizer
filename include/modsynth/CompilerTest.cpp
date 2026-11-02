@@ -601,6 +601,66 @@ std::string error_of_lane(const char* lane) { return lane_error(lane_project(jso
 
 }  // namespace
 
+TEST(CompileImage, ALibraryHoldsEveryPatchAndNoProgram) {
+    json request = lane_project(json::array());
+    request["programs"] = json::array();
+    const auto result = compile_image(request);
+
+    const LoadedImage loaded(result.image);
+    ASSERT_EQ(loaded.loader.status(), LoadStatus::Ready);
+    EXPECT_EQ(loaded.loader.programs(), 0u);
+    EXPECT_EQ(result.report.at("programs").size(), 0u);
+    u32 patches = 0;
+    for (const json& chunk : result.report.at("chunks")) {
+        patches += chunk.at("kind") == "patch";
+        EXPECT_EQ(chunk.at("programs"), 0);
+    }
+    EXPECT_EQ(patches, 2u);
+}
+
+TEST(CompileImage, AThinImageRunsOnWhatALibrarySentAhead) {
+    json library = lane_project(json::array());
+    library["programs"] = json::array();
+    const auto sent = Rig<kStereo>::aligned(compile_image(library).image);
+    const std::size_t sent_size = compile_image(library).image.size();
+
+    json thin = lane_project(json::array());
+    json omit = json::array();
+    for (const json& chunk : compile_image(thin).report.at("chunks")) {
+        if (chunk.at("kind") == "patch") omit.push_back(chunk.at("hash"));
+    }
+    thin["omit"] = omit;
+    const auto program = Rig<kStereo>::aligned(compile_image(thin).image);
+    const std::size_t program_size = compile_image(thin).image.size();
+
+    std::vector<std::byte> fast(8 << 20), bulk(8 << 20);
+    std::vector<ChunkRef> storage(kMaxChunks);
+    ChunkTable table{std::span(storage)};
+    Rig<kStereo>::Engine engine({fast, bulk, kRate});
+    engine.load(table, {reinterpret_cast<const std::byte*>(sent.data()), sent_size});
+    while (engine.pump(1 << 16)) {
+    }
+    EXPECT_EQ(engine.load_error(), LoadError::None) << "a library has nothing to bind, which is no error";
+    EXPECT_EQ(engine.generation(), 0u);
+
+    engine.load(table, {reinterpret_cast<const std::byte*>(program.data()), program_size});
+    float left[kFrame], right[kFrame];
+    for (u32 i = 0; i < 64 && engine.generation() == 0; ++i) {
+        while (engine.pump(1 << 16) && engine.generation() == 0 && engine.load_error() == LoadError::None) {
+            engine.render({left, right});
+        }
+    }
+    EXPECT_EQ(engine.load_error(), LoadError::None);
+    EXPECT_EQ(engine.generation(), 1u);
+}
+
+TEST(CompileImage, AnImageNeedsSomethingInIt) {
+    json request = lane_project(json::array());
+    request["programs"] = json::array();
+    request["patches"] = json::object();
+    EXPECT_NE(lane_error(request).find("a program or a patch"), std::string::npos);
+}
+
 TEST(Lanes, EveryTargetTheFormatCanReachCompilesAndLoads) {
     for (const char* lane : {R"({"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5, "ramp": 10})",
                              R"({"target": {"insert": 2}, "param": 1, "tick": 0, "value": 0.5})",
@@ -679,6 +739,151 @@ TEST(Lanes, ATrackThatNeverPlaysCannotCarryALane) {
     request["programs"][0]["timeline"]["clips"][0]["notes"] = json::array();
     const std::string error = lane_error(request);
     EXPECT_NE(error.find("never plays"), std::string::npos) << error;
+}
+
+namespace {
+
+// A track of two patches that share parameter 1, which a test gives whatever scope and starting values it wants.
+json shared_param_project(const json& first, const json& second, const json& automation) {
+    const auto graph = [](const json& param) {
+        json g = json::parse(R"({"nodes": [{"id": 1, "type": "param", "param": 1}, {"id": 2, "type": "out"}],
+            "edges": [{"from": 1, "to": 2, "input": "l"}]})");
+        g["params"] = json::array({param});
+        return g;
+    };
+    json request = json::parse(R"({"programs": [{"id": "a", "name": "a", "timeline": {"ppq": 480,
+        "clips": [{"id": "c", "length": 960, "notes": [{"tick": 0, "note": 60, "dur": 480, "slot": 0},
+                                                       {"tick": 480, "note": 60, "dur": 480, "slot": 1}]},
+                  {"id": "plain", "length": 960, "notes": [{"tick": 0, "note": 60, "dur": 480}]}],
+        "tracks": [{"id": 1, "slots": ["one", "two"], "placements": [{"clip": "c", "tick": 0}]}]}}]})");
+    request["patches"]["one"] = {{"name", "one"}, {"graph", graph(first)}};
+    request["patches"]["two"] = {{"name", "two"}, {"graph", graph(second)}};
+    request["programs"][0]["timeline"]["clips"][0]["automation"] = automation;
+    return request;
+}
+
+// The instructions before a stream's first Call, which is where it puts back what its lanes moved.
+std::vector<Instruction> stream_head(const std::vector<std::byte>& image) {
+    const LoadedImage loaded(image);
+    EXPECT_EQ(loaded.loader.status(), LoadStatus::Ready);
+    ProgramView v;
+    const ChunkRef* c = loaded.table.find(loaded.loader.program_hash(0));
+    EXPECT_TRUE(parse_program({c->data, c->size}, v));
+    const TrackDesc track = v.track(0);
+    std::vector<Instruction> head;
+    for (u32 i = 0; i < track.stream_length; ++i) {
+        const Instruction in = v.instruction(track.stream_begin + i);
+        if (in.op == static_cast<u8>(Instr::Call) || in.op == static_cast<u8>(Instr::Wait)) break;
+        head.push_back(in);
+    }
+    return head;
+}
+
+}  // namespace
+
+TEST(Lanes, TheStreamPutsBackALaneWithNoTarget) {
+    const json param = json::parse(R"({"id": 1, "min": 0, "max": 1, "default": 0.25})");
+    const auto head = [&](const char* automation, const json& track = json::object(), const json& globals = {}) {
+        json request = shared_param_project(param, param, json::parse(automation));
+        json& timeline = request["programs"][0]["timeline"];
+        timeline["tracks"][0].update(track);
+        if (!globals.is_null()) timeline["globals"] = globals;
+        return stream_head(compile_image(request).image);
+    };
+    const auto expect_restores = [](const std::vector<Instruction>& instructions, float value) {
+        ASSERT_EQ(instructions.size(), 1u);
+        EXPECT_EQ(instructions[0].op, static_cast<u8>(Instr::SetParam));
+        EXPECT_EQ(instructions[0].b, 1u);
+        EXPECT_EQ(std::bit_cast<float>(instructions[0].c), value);
+    };
+
+    expect_restores(head(R"([{"param": 1, "tick": 10, "value": 1}])"), 0.25f);
+    expect_restores(head(R"([{"param": 1, "tick": 0, "value": 1, "ramp": 10}])"), 0.25f);
+    expect_restores(head(R"([{"param": 1, "tick": 10, "value": 1}])", {{"params", {{"1", 0.5}}}}), 0.5f);
+    EXPECT_TRUE(head(R"([{"param": 1, "tick": 0, "value": 1}, {"param": 1, "tick": 10, "value": 0}])").empty())
+        << "it opens with a value, so the stream already puts it back";
+
+    json placed_later = shared_param_project(param, param, json::parse(R"([{"param": 1, "tick": 0, "value": 1}])"));
+    placed_later["programs"][0]["timeline"]["tracks"][0]["placements"] = json::parse(R"([{"clip": "plain", "tick": 0},
+        {"clip": "c", "tick": 960}])");
+    expect_restores(stream_head(compile_image(placed_later).image), 0.25f);
+}
+
+TEST(Lanes, AGlobalStartsFromTheProgramsValue) {
+    const json param = json::parse(R"({"id": 1, "scope": "global", "min": 0, "max": 1, "default": 0.25})");
+    json request = shared_param_project(param, param, json::parse(R"([{"param": 1, "tick": 10, "value": 1}])"));
+    request["programs"][0]["timeline"]["globals"] = {{"1", 0.75}};
+    const auto head = stream_head(compile_image(request).image);
+    ASSERT_EQ(head.size(), 1u);
+    EXPECT_EQ(std::bit_cast<float>(head[0].c), 0.75f);
+}
+
+TEST(Lanes, SlotsThatStartApartNeedAValueToReturnTo) {
+    const json low = json::parse(R"({"id": 1, "min": 0, "max": 1, "default": 0.25})");
+    const json high = json::parse(R"({"id": 1, "min": 0, "max": 1, "default": 0.75})");
+    const json moved = json::parse(R"([{"param": 1, "tick": 10, "value": 1}])");
+
+    EXPECT_NE(lane_error(shared_param_project(low, high, moved)).find("different values"), std::string::npos);
+
+    json named = shared_param_project(low, high, moved);
+    named["programs"][0]["timeline"]["tracks"][0]["params"] = {{"1", 0.5}};
+    EXPECT_EQ(lane_error(named), "");
+    EXPECT_EQ(lane_error(shared_param_project(low, high, json::parse(R"([{"param": 1, "tick": 0, "value": 1}])"))), "");
+
+    // A SetParam clamps on each slot, so a value past one slot's range can still be right for both.
+    const json narrow = json::parse(R"({"id": 1, "min": 0, "max": 0.25, "default": 0.25})");
+    EXPECT_EQ(lane_error(shared_param_project(narrow, high, moved)), "");
+    EXPECT_EQ(lane_error(shared_param_project(high, narrow, moved)), "");
+}
+
+TEST(Lanes, OneTrackOwnsAGlobal) {
+    const json param = json::parse(R"({"id": 1, "scope": "global", "min": 0, "max": 1, "default": 0.25})");
+    json request = shared_param_project(param, param, json::parse(R"([{"param": 1, "tick": 0, "value": 1}])"));
+    json& timeline = request["programs"][0]["timeline"];
+    timeline["tracks"].push_back(
+        json::parse(R"({"id": 2, "slots": ["one"], "placements": [{"clip": "c", "tick": 0}]})"));
+    timeline["clips"][0]["notes"] = json::parse(R"([{"tick": 0, "note": 60, "dur": 480}])");
+    const std::string error = lane_error(request);
+    EXPECT_NE(error.find("both automate global param 1"), std::string::npos) << error;
+}
+
+TEST(Lanes, AGlobalHasOneOwnerHoweverALaneReachesIt) {
+    const json param = json::parse(R"({"id": 1, "scope": "global", "min": 0, "max": 1, "default": 0.25})");
+    json request = shared_param_project(param, param, json::parse(R"([{"param": 1, "tick": 0, "value": 1}])"));
+    json graph = request["patches"]["one"]["graph"];
+    graph["nodes"] = json::parse(R"([{"id": 1, "type": "in"}, {"id": 2, "type": "param", "param": 1},
+        {"id": 3, "type": "mul"}, {"id": 4, "type": "out"}])");
+    graph["edges"] =
+        json::parse(R"([{"from": 1, "port": "l", "to": 3, "input": "a"}, {"from": 2, "to": 3, "input": "b"},
+        {"from": 3, "to": 4, "input": "l"}])");
+    request["patches"]["gain"] = {{"name", "gain"}, {"graph", graph}};
+    json& timeline = request["programs"][0]["timeline"];
+    timeline["clips"].push_back(
+        json::parse(R"({"id": "other", "length": 960, "notes": [{"tick": 0, "note": 60, "dur": 9}],
+        "automation": [{"target": {"insert": 5}, "param": 1, "tick": 0, "value": 0}]})"));
+    timeline["clips"][0]["notes"] = json::parse(R"([{"tick": 0, "note": 60, "dur": 480}])");
+    timeline["tracks"].push_back(
+        json::parse(R"({"id": 2, "slots": ["one"], "placements": [{"clip": "other", "tick": 0}],
+        "inserts": [{"id": 5, "patch": "gain"}]})"));
+    const std::string error = lane_error(request);
+    EXPECT_NE(error.find("both automate global param 1"), std::string::npos) << error;
+}
+
+TEST(Lanes, ATrackThatNeverPlaysCannotMoveAGlobal) {
+    const json scoped = json::parse(R"({"id": 1, "scope": "global", "min": 0, "max": 1, "default": 0.25})");
+    json global = shared_param_project(scoped, scoped, json::parse(R"([{"param": 1, "tick": 0, "value": 1}])"));
+    global["programs"][0]["timeline"]["tracks"].push_back(
+        json::parse(R"({"id": 2, "slots": ["one"], "placements": [{"clip": "plain", "tick": 0}]})"));
+    global["programs"][0]["timeline"]["clips"][0]["notes"] = json::array();
+    EXPECT_NE(lane_error(global).find("never plays"), std::string::npos);
+
+    // A track's own parameter reaches nothing past it, so a silent track's lane on one is only silent.
+    const json plain = json::parse(R"({"id": 1, "min": 0, "max": 1, "default": 0.25})");
+    json own = shared_param_project(plain, plain, json::parse(R"([{"param": 1, "tick": 0, "value": 1}])"));
+    own["programs"][0]["timeline"]["tracks"].push_back(
+        json::parse(R"({"id": 2, "slots": ["one"], "placements": [{"clip": "plain", "tick": 0}]})"));
+    own["programs"][0]["timeline"]["clips"][0]["notes"] = json::array();
+    EXPECT_EQ(lane_error(own), "");
 }
 
 TEST(Lanes, ALaneComesBeforeANoteAtItsTickAndAPlayChangeBeforeBoth) {

@@ -672,7 +672,8 @@ index, persisting knob moves made during playback, and validating a Patch or Pro
 ## 22. Milestones
 
 Each milestone lands as one squashed pull request into `main`. Work reaches a branch as it goes, and only those pull
-requests run CI, so checks run locally before a push.
+requests run CI, so checks run locally before a push. One that changes only Markdown skips CI, unless it changes `docs/Format.md`, which
+`tools/ReadImage.py` reads.
 
 1. **Vertical slice, format explicitly unstable.** A stereo voice with filter envelope and knob, one sampled voice, a send
    reverb with one sidechain, a two-track Program with seek, one edit during playback, and an oscilloscope on the master

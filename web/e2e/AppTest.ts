@@ -1,4 +1,19 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test as base, type Page } from '@playwright/test';
+
+// A page load waits until the page has hydrated: what is typed into it before then is lost, and a slow machine shows it.
+const test = base.extend({
+	page: async ({ page }, use) => {
+		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
+			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
+			return response;
+		};
+		const goto = page.goto.bind(page);
+		const reload = page.reload.bind(page);
+		page.goto = async (...args) => hydrated(await goto(...args));
+		page.reload = async (...args) => hydrated(await reload(...args));
+		await use(page);
+	}
+});
 
 // Leaving with unsaved edits asks first, and a test that leaves means to.
 test.beforeEach(({ page }) => {

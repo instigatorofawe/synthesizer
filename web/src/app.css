@@ -28,6 +28,10 @@ main {
 	max-width: 1100px;
 	margin: 0 auto;
 }
+/* An editor with a time axis wants all the width there is. */
+main:has(.wide) {
+	max-width: none;
+}
 a {
 	color: var(--accent);
 }

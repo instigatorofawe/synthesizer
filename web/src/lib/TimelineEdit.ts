@@ -628,6 +628,41 @@ export function removeTempo(doc: Timeline, index: number): Timeline {
 	return doc.tempo.length > 1 ? { ...doc, tempo: doc.tempo.filter((_, i) => i !== index) } : doc;
 }
 
+// ---------------------------------------------------------------------------------------------------------- play modes
+
+// Poly plays every held note, so it has no priority to choose, and the compiler refuses one. A track with nothing to say
+// about its mode says nothing, which keeps the Program from setting aside room for play modes it doesn't use.
+export function setPlay(doc: Timeline, id: number, change: Partial<NonNullable<Track['play']>>): Timeline {
+	const tracks = doc.tracks.map((track) => {
+		if (track.id !== id) return track;
+		const play = { mode: 'poly' as const, priority: 'last' as const, glide: 0, ...track.play, ...change };
+		if (play.mode === 'poly') play.priority = 'last';
+		if (play.mode !== 'poly' || play.glide !== 0) return { ...track, play };
+		const { play: _, ...rest } = track;
+		return rest;
+	});
+	return { ...doc, tracks };
+}
+
+export function addPlayChange(clip: Clip, tick: number): Clip {
+	return { ...clip, play: [...clip.play, { tick, mode: 'mono', priority: 'last', glide: 0 }] };
+}
+
+export function setPlayChange(clip: Clip, index: number, change: Partial<PlayChange>): Clip {
+	return {
+		...clip,
+		play: clip.play.map((item, i) => {
+			if (i !== index) return item;
+			const next = { ...item, ...change };
+			return next.mode === 'poly' ? { ...next, priority: 'last' as const } : next;
+		})
+	};
+}
+
+export function removePlayChange(clip: Clip, index: number): Clip {
+	return { ...clip, play: clip.play.filter((_, i) => i !== index) };
+}
+
 // ------------------------------------------------------------------------------------------------------------ the rest
 
 // Where a patch is used in a timeline, for telling someone what they are looking at and where a probe can reach it.

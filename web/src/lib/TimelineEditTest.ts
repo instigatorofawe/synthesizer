@@ -5,6 +5,7 @@ import {
 	addClip,
 	addInsert,
 	addNote,
+	addPlayChange,
 	addPoint,
 	addSend,
 	addTempo,
@@ -35,6 +36,7 @@ import {
 	removeLane,
 	removeNotes,
 	removePlacement,
+	removePlayChange,
 	removePoint,
 	removeSend,
 	removeTempo,
@@ -44,6 +46,8 @@ import {
 	routeGains,
 	setInsertPatch,
 	setPlacement,
+	setPlay,
+	setPlayChange,
 	setPoint,
 	setTempo,
 	snapTick,
@@ -448,6 +452,27 @@ describe('tempo', () => {
 		const doc = removeTempo(song(), 0);
 		expect(doc.tempo).toHaveLength(1);
 		expect(removeTempo(addTempo(doc, 960, 90), 1).tempo).toHaveLength(1);
+	});
+});
+
+describe('play modes', () => {
+	it('say nothing on a track that plays the default way', () => {
+		const mono = setPlay(song(), 1, { mode: 'mono', priority: 'high' });
+		expect(mono.tracks[0].play).toEqual({ mode: 'mono', priority: 'high', glide: 0 });
+		expect(setPlay(mono, 1, { mode: 'poly' }).tracks[0]).not.toHaveProperty('play');
+	});
+
+	it('keep a glide on a poly track, and never a priority', () => {
+		const doc = setPlay(setPlay(song(), 1, { mode: 'mono', priority: 'low' }), 1, { mode: 'poly', glide: 0.1 });
+		expect(doc.tracks[0].play).toEqual({ mode: 'poly', priority: 'last', glide: 0.1 });
+	});
+
+	it('change partway through a clip', () => {
+		let clip = addPlayChange(clipNamed('c'), 480);
+		clip = setPlayChange(clip, 0, { priority: 'low' });
+		expect(clip.play).toEqual([{ tick: 480, mode: 'mono', priority: 'low', glide: 0 }]);
+		expect(setPlayChange(clip, 0, { mode: 'poly' }).play[0].priority).toBe('last');
+		expect(removePlayChange(clip, 0).play).toEqual([]);
 	});
 });
 

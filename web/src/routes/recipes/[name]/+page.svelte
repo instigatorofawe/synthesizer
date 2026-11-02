@@ -7,6 +7,7 @@
 	import Scope from '#lib/Scope.svelte';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { patchUses, type PatchUse } from '#lib/TimelineEdit.ts';
+	import TimelineEditor from '#lib/TimelineEditor.svelte';
 
 	let { data, form } = $props();
 
@@ -111,11 +112,19 @@
 	{/if}
 </div>
 
-<div class="scopes">
-	{#each targets as target (target.slot)}
-		<Scope label={target.label} ring={rings[target.slot]} />
-	{/each}
-</div>
+<h2>Timeline</h2>
+<TimelineEditor
+	doc={data.timeline}
+	patches={data.patches}
+	program={program ?? null}
+	errors={[]}
+	tick={engineState?.tick ?? 0}
+	{targets}
+	{rings}
+	{engine}
+	readonly
+	onchange={() => {}}
+/>
 
 <h2>{data.patches.length === 1 ? 'Patch' : 'Patches'}</h2>
 {#if data.patches.length > 1}
@@ -129,6 +138,12 @@
 	{patch.name} is {uses.length ? uses.map(usedAs).join(' and ') : 'not used by the timeline'}.
 	{#if !voice && uses.length}Probes follow a voice, so an insert can't be probed.{/if}
 </p>
+
+<div class="scopes">
+	{#each targets.filter((target) => !target.chain) as target (target.slot)}
+		<Scope label={target.label} ring={rings[target.slot]} />
+	{/each}
+</div>
 
 {#key patch.id}
 	<GraphEditor

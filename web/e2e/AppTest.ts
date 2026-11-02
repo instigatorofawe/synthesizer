@@ -13,6 +13,11 @@ async function startPlaying(page: Page, timeline = 'song') {
 	return problems;
 }
 
+async function timelineJson(page: Page) {
+	await page.getByText('Timeline as JSON').click();
+	return page.getByLabel('Timeline JSON');
+}
+
 const peaks = (page: Page) =>
 	page.getByTestId('peak').evaluateAll((list) => list.map((e) => Number(e.getAttribute('data-peak'))));
 
@@ -26,7 +31,7 @@ test('the seeded library lists patches, timelines and a bundle', async ({ page }
 test('a timeline plays in an AudioWorklet and the scopes see every bus', async ({ page }) => {
 	const problems = await startPlaying(page);
 	await expect(page.getByTestId('voices')).not.toHaveText('0');
-	await expect(page.getByText('Master', { exact: true })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Master' })).toBeVisible();
 	await expect(page.getByText('Lead', { exact: true }).first()).toBeVisible();
 	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(4);
 	const before = Number(await page.getByTestId('tick').textContent());
@@ -38,7 +43,7 @@ test('a timeline plays in an AudioWorklet and the scopes see every bus', async (
 test('editing during playback swaps generations without stopping', async ({ page }) => {
 	const problems = await startPlaying(page);
 	await expect(page.getByTestId('voices')).not.toHaveText('0');
-	const editor = page.getByLabel('Timeline JSON');
+	const editor = await timelineJson(page);
 	const text = await editor.inputValue();
 	const before = Number(await page.getByTestId('tick').textContent());
 	await editor.fill(text.replace('"gain": 0.8', '"gain": 0.4'));
@@ -69,7 +74,7 @@ test('a compile from page load cannot race the first load', async ({ page }) => 
 test('rapid edits settle on the newest image, with scopes on its registers', async ({ page }) => {
 	await startPlaying(page);
 	await expect(page.getByTestId('voices')).not.toHaveText('0');
-	const editor = page.getByLabel('Timeline JSON');
+	const editor = await timelineJson(page);
 	const text = await editor.inputValue();
 	// A send moves bus registers, so scopes left on an older report would read the wrong bus.
 	const removed = text.replace(/"sends": \[[^\]]*\]/, '"sends": []');
@@ -82,9 +87,26 @@ test('rapid edits settle on the newest image, with scopes on its registers', asy
 	await expect.poll(async () => (await peaks(page)).filter((p) => p > 0.01).length, { timeout: 8000 }).toBe(4);
 });
 
+test('the JSON stays open while it is typed into', async ({ page }) => {
+	const editor = await timelineJson(await page.goto('/timelines/ballad').then(() => page));
+	await editor.fill(`${await editor.inputValue()} `);
+	await expect(editor).toBeVisible();
+	await editor.fill('{ not json');
+	await expect(editor).toBeVisible();
+	await expect(page.getByText('JSON at position').or(page.getByText('Expected'))).toBeVisible();
+
+	await page.goto('/patches/lead');
+	await page.getByText('Graph as JSON').click();
+	const graph = page.getByLabel('Graph JSON');
+	await graph.fill(`${await graph.inputValue()} `);
+	await expect(graph).toBeVisible();
+	await graph.fill('{ not json');
+	await expect(graph).toBeVisible();
+});
+
 test('a broken edit shows where it failed and the old image keeps playing', async ({ page }) => {
 	await startPlaying(page);
-	const editor = page.getByLabel('Timeline JSON');
+	const editor = await timelineJson(page);
 	const text = await editor.inputValue();
 	await editor.fill(text.replace('"slots": [\n    "lead"\n   ]', '"slots": [\n    "missing"\n   ]'));
 	await expect(page.getByTestId('compile-error')).toContainText("no patch 'missing'");

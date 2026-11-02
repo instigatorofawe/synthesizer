@@ -213,7 +213,7 @@
 		onprobes={probesChanged}
 	/>
 {/if}
-<details open={graph === null}>
+<details>
 	<summary>Graph as JSON</summary>
 	<textarea rows="24" bind:value={text} oninput={edited} aria-label="Graph JSON" spellcheck="false"></textarea>
 </details>

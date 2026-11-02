@@ -58,9 +58,16 @@ the GIL, so engines on separate threads render at once.
     pnpm build
     pnpm start     # http://127.0.0.1:5321
 
-A patch's page draws its graph, with wires dragged between nodes, errors on the nodes they belong to, and scopes on any node. `/recipes` plays the recipes as they are, and adding one
-copies it into the library. An empty database fills itself with the demo project on first start. `pnpm test` runs the unit tests and `pnpm e2e` drives
+The editor is one page, laid out like a DAW: a transport along the top, the patch editor above, the timeline below, and a
+browser down the side, which folds away, for the library and the examples. A patch draws as a graph, with wires dragged
+between nodes, errors on the nodes they belong to, and scopes on any node, and its keys play it in the song, or on its own
+when no track plays it. Choosing a track shows its patch. Edits to any number of patches and timelines stay while other
+things are opened, and Save writes them all at once. An example plays as it is, and adding one copies it into the library.
+An empty database fills itself with the demo project on first start. `pnpm test` runs the unit tests and `pnpm e2e` drives
 the built app in Chromium. There is no authentication, so keep it on loopback.
+
+`pnpm format` formats the web app with Prettier and `pnpm lint` checks it with Prettier and ESLint. The pre-commit hooks run
+both, with the versions the lockfile pins, so run `pnpm install` in `web/` before committing there.
 
 ## Firmware
 

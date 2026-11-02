@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AudioEngine, TapTarget } from '#lib/AudioEngine.ts';
+	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Param, Timeline } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
@@ -9,7 +9,6 @@
 		addInsert,
 		addSend,
 		busKey,
-		chainOf,
 		MASTER,
 		mixWrites,
 		moveInsert,
@@ -37,16 +36,18 @@
 		rings,
 		engine,
 		readonly = false,
-		onchange
+		onchange,
+		onopen = () => {}
 	}: {
 		doc: Timeline;
 		patches: PatchLike[];
 		program: ProgramReport | null;
 		targets: TapTarget[];
 		rings: Ring[];
-		engine: AudioEngine;
+		engine: SongControls;
 		readonly?: boolean;
 		onchange: (doc: Timeline) => void;
+		onopen?: (patch: string) => void; // Show an insert's patch in the patch editor
 	} = $props();
 
 	let newBus = $state('');
@@ -56,7 +57,8 @@
 
 	const patchOf = (id: string) => patches.find((patch) => patch.id === id);
 	const insertPatches = $derived(patches.filter((patch) => patch.graph.nodes.some((node) => node.type === 'in')));
-	const hasSidechain = (id: string) => patchOf(id)?.graph.nodes.some((node) => node.type === 'in' && node.index === 1) ?? false;
+	const hasSidechain = (id: string) =>
+		patchOf(id)?.graph.nodes.some((node) => node.type === 'in' && node.index === 1) ?? false;
 	const chainNames = $derived([
 		...doc.tracks.map((track) => ({ key: trackKey(track.id), name: track.name || `Track ${track.id}` })),
 		...doc.buses.map((bus) => ({ key: busKey(bus.id), name: bus.id }))
@@ -103,7 +105,9 @@
 
 	// A global belongs to the Program, and reaches it through any track that plays a patch declaring it.
 	function liveGlobal(param: Param, value: number) {
-		const owner = doc.tracks.find((track) => track.slots.some((slot) => patchOf(slot)?.graph.params.some((p) => p.id === param.id)));
+		const owner = doc.tracks.find((track) =>
+			track.slots.some((slot) => patchOf(slot)?.graph.params.some((p) => p.id === param.id))
+		);
 		const index = program?.tracks.find((t) => t.id === owner?.id)?.index;
 		if (index !== undefined) engine.setParam(index, param.id, value);
 	}
@@ -152,7 +156,7 @@
 
 {#snippet inserts(key: string, label: string, list: Insert[])}
 	<h5>Inserts</h5>
-	{#each list as insert, index}
+	{#each list as insert, index (index)}
 		{@const patch = patchOf(insert.patch)}
 		<div class="insert">
 			<select
@@ -165,9 +169,27 @@
 			</select>
 			{#if !readonly}
 				<div class="tools">
-					<button type="button" aria-label={`Move insert ${index + 1} on ${label} up`} onclick={() => onchange(moveInsert(doc, key, index, -1))}>↑</button>
-					<button type="button" aria-label={`Move insert ${index + 1} on ${label} down`} onclick={() => onchange(moveInsert(doc, key, index, 1))}>↓</button>
-					<button type="button" aria-label={`Remove insert ${index + 1} on ${label}`} onclick={() => onchange(removeInsert(doc, key, index))}>×</button>
+					<button
+						type="button"
+						aria-label={`Edit insert ${index + 1} on ${label}`}
+						title="Show this patch above"
+						onclick={() => onopen(insert.patch)}>Edit</button
+					>
+					<button
+						type="button"
+						aria-label={`Move insert ${index + 1} on ${label} up`}
+						onclick={() => onchange(moveInsert(doc, key, index, -1))}>↑</button
+					>
+					<button
+						type="button"
+						aria-label={`Move insert ${index + 1} on ${label} down`}
+						onclick={() => onchange(moveInsert(doc, key, index, 1))}>↓</button
+					>
+					<button
+						type="button"
+						aria-label={`Remove insert ${index + 1} on ${label}`}
+						onclick={() => onchange(removeInsert(doc, key, index))}>×</button
+					>
 				</div>
 			{/if}
 			{#if hasSidechain(insert.patch)}
@@ -253,7 +275,7 @@
 		</select>
 	</label>
 	{#if chain.sends.length || sendable(chain, key).length}<h5>Sends</h5>{/if}
-	{#each chain.sends as send, index}
+	{#each chain.sends as send, index (index)}
 		<label class="line">
 			<span>{send.bus}</span>
 			<input
@@ -268,7 +290,11 @@
 				onchange={(e) => onchange(setSend(doc, key, index, { gain: number(e) }))}
 			/>
 			{#if !readonly}
-				<button type="button" aria-label={`Remove send from ${label} to ${send.bus}`} onclick={() => onchange(removeSend(doc, key, index))}>×</button>
+				<button
+					type="button"
+					aria-label={`Remove send from ${label} to ${send.bus}`}
+					onclick={() => onchange(removeSend(doc, key, index))}>×</button
+				>
 			{/if}
 		</label>
 	{/each}

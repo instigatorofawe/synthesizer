@@ -1,6 +1,6 @@
 // Every read and write the actions need. better-sqlite3 is synchronous, so a transaction here is one uninterrupted unit.
 import { randomUUID } from 'node:crypto';
-import { asc, eq, inArray, and } from 'drizzle-orm';
+import { asc, desc, eq, inArray, and } from 'drizzle-orm';
 import type { Db } from '#lib/server/Db.ts';
 import {
 	assets,
@@ -123,14 +123,21 @@ function linkAssets(db: Db, id: string, graph: Graph) {
 	const wanted = referencedAssets(graph);
 	if (wanted.length) {
 		const known = new Set(
-			db.select({ id: assets.id }).from(assets).where(inArray(assets.id, wanted)).all().map((a) => a.id)
+			db
+				.select({ id: assets.id })
+				.from(assets)
+				.where(inArray(assets.id, wanted))
+				.all()
+				.map((a) => a.id)
 		);
 		const missing = wanted.filter((a) => !known.has(a));
 		if (missing.length) throw new NotFound(`no asset ${missing.join(', ')}`);
 	}
 	db.delete(patchAssets).where(eq(patchAssets.patchId, id)).run();
 	if (wanted.length) {
-		db.insert(patchAssets).values(wanted.map((assetId) => ({ patchId: id, assetId }))).run();
+		db.insert(patchAssets)
+			.values(wanted.map((assetId) => ({ patchId: id, assetId })))
+			.run();
 	}
 }
 
@@ -138,14 +145,21 @@ function linkSubpatches(db: Db, id: string, graph: Graph) {
 	const wanted = referencedSubpatches(graph);
 	if (wanted.length) {
 		const known = new Set(
-			db.select({ id: patches.id }).from(patches).where(inArray(patches.id, wanted)).all().map((p) => p.id)
+			db
+				.select({ id: patches.id })
+				.from(patches)
+				.where(inArray(patches.id, wanted))
+				.all()
+				.map((p) => p.id)
 		);
 		const missing = wanted.filter((p) => !known.has(p));
 		if (missing.length) throw new NotFound(`no patch ${missing.join(', ')}`);
 	}
 	db.delete(patchSubpatches).where(eq(patchSubpatches.patchId, id)).run();
 	if (wanted.length) {
-		db.insert(patchSubpatches).values(wanted.map((subpatchId) => ({ patchId: id, subpatchId }))).run();
+		db.insert(patchSubpatches)
+			.values(wanted.map((subpatchId) => ({ patchId: id, subpatchId })))
+			.run();
 	}
 }
 
@@ -190,6 +204,38 @@ export function listTimelines(db: Db) {
 		.all();
 }
 
+// The timeline saved last, which is the one a fresh visit opens.
+export function latestTimeline(db: Db): string | null {
+	return (
+		db
+			.select({ id: timelines.id })
+			.from(timelines)
+			.orderBy(desc(timelines.updatedAt), asc(timelines.name))
+			.limit(1)
+			.get()?.id ?? null
+	);
+}
+
+export interface Edits {
+	patches: { id: string; revision: number; name: string; graph: Graph }[];
+	timelines: { id: string; revision: number; name: string; doc: Timeline }[];
+}
+
+// Every unsaved document at once, in one transaction, so a timeline is never saved against a patch edit that was refused.
+// Patches go first, because a timeline's links are checked against them. Returns each document's new revision.
+export function saveEdits(db: Db, edits: Edits): Record<string, number> {
+	return db.transaction((tx) => {
+		const t = tx as unknown as Db;
+		const revisions: Record<string, number> = {};
+		for (const { id, revision, name, graph } of edits.patches)
+			revisions[`patch:${id}`] = savePatch(t, id, revision, name, graph);
+		for (const { id, revision, name, doc } of edits.timelines) {
+			revisions[`timeline:${id}`] = saveTimeline(t, id, revision, name, doc);
+		}
+		return revisions;
+	});
+}
+
 export function getTimeline(db: Db, id: string) {
 	const row = db.select().from(timelines).where(eq(timelines.id, id)).get();
 	if (!row) throw new NotFound(`no timeline ${id}`);
@@ -200,20 +246,28 @@ function linkPatches(db: Db, id: string, doc: Timeline) {
 	const wanted = referencedPatches(doc);
 	if (wanted.length) {
 		const known = new Set(
-			db.select({ id: patches.id }).from(patches).where(inArray(patches.id, wanted)).all().map((p) => p.id)
+			db
+				.select({ id: patches.id })
+				.from(patches)
+				.where(inArray(patches.id, wanted))
+				.all()
+				.map((p) => p.id)
 		);
 		const missing = wanted.filter((p) => !known.has(p));
 		if (missing.length) throw new NotFound(`no patch ${missing.join(', ')}`);
 	}
 	db.delete(timelinePatches).where(eq(timelinePatches.timelineId, id)).run();
 	if (wanted.length) {
-		db.insert(timelinePatches).values(wanted.map((patchId) => ({ timelineId: id, patchId }))).run();
+		db.insert(timelinePatches)
+			.values(wanted.map((patchId) => ({ timelineId: id, patchId })))
+			.run();
 	}
 }
 
 export function createTimeline(db: Db, name: string, doc: Timeline, id: string = randomUUID()) {
 	return db.transaction((tx) => {
-		tx.insert(timelines).values({ id, name, doc }).run();
+		// To the millisecond, as a save stamps it, so the one made last is the one a fresh visit opens.
+		tx.insert(timelines).values({ id, name, doc, updatedAt: new Date() }).run();
 		linkPatches(tx as unknown as Db, id, doc);
 		return id;
 	});
@@ -314,6 +368,17 @@ export function assetsFor(db: Db, patchIds: string[]): AssetEntry[] {
 
 export function listBundles(db: Db) {
 	return db.select().from(bundles).orderBy(asc(bundles.name)).all();
+}
+
+// Every bundle with its timelines in order, which is all the bundle dialog needs.
+export function bundlesWithMembers(db: Db) {
+	const members = db.select().from(bundleTimelines).orderBy(asc(bundleTimelines.position)).all();
+	return listBundles(db).map(({ id, name, revision }) => ({
+		id,
+		name,
+		revision,
+		timelines: members.filter((m) => m.bundleId === id).map((m) => m.timelineId)
+	}));
 }
 
 export function getBundle(db: Db, id: string) {

@@ -73,7 +73,7 @@
 		{#if !compact}
 			<label>
 				<select bind:value={timebase} aria-label="Timebase for {label}">
-					{#each TIMEBASES as t}
+					{#each TIMEBASES as t (t)}
 						<option value={t}>{t * 1000} ms</option>
 					{/each}
 				</select>

@@ -14,23 +14,11 @@ body {
 	background: var(--bg);
 	color: var(--text);
 }
-nav {
-	padding: 0.6rem 1.2rem;
-	border-bottom: 1px solid var(--line);
-}
-nav a {
-	color: var(--text);
-	text-decoration: none;
-	margin-right: 1rem;
-}
-main {
-	padding: 1rem 1.2rem 3rem;
-	max-width: 1100px;
-	margin: 0 auto;
-}
-/* An editor with a time axis wants all the width there is. */
-main:has(.wide) {
-	max-width: none;
+/* The editor is one page that fills the window, as a DAW does, and its panels scroll inside it. */
+html,
+body {
+	height: 100%;
+	overflow: hidden;
 }
 a {
 	color: var(--accent);

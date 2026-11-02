@@ -113,8 +113,10 @@ export function nodeHeight(node: GraphNode, catalog: CatalogEntry[], library: Li
 // What a node's title adds to its type, so that two oscillators can be told apart.
 export function detailOf(node: GraphNode, graph: Graph, library: LibraryPatch[]): string {
 	if (node.type === 'osc') return [node.wave ?? 'sine', node.mode].filter(Boolean).join(' ');
-	if (node.type === 'math' || node.type === 'biquad') return String(node.mode ?? (node.type === 'math' ? 'min' : 'lowpass'));
-	if (node.type === 'subpatch') return library.find((patch) => patch.id === node.patch)?.name ?? String(node.patch ?? '');
+	if (node.type === 'math' || node.type === 'biquad')
+		return String(node.mode ?? (node.type === 'math' ? 'min' : 'lowpass'));
+	if (node.type === 'subpatch')
+		return library.find((patch) => patch.id === node.patch)?.name ?? String(node.patch ?? '');
 	if (node.type === 'param') {
 		const param = graph.params.find((p) => p.id === node.param);
 		return param?.name || (node.param === undefined ? '' : `param ${node.param}`);
@@ -260,7 +262,12 @@ export function setField(graph: Graph, id: number, name: string, value: unknown)
 export function setZone(graph: Graph, id: number, index: number, change: Partial<Zone>): Graph {
 	const node = graph.nodes.find((candidate) => candidate.id === id);
 	if (!node) return graph;
-	return setField(graph, id, 'zones', zonesOf(node).map((zone, i) => (i === index ? { ...zone, ...change } : zone)));
+	return setField(
+		graph,
+		id,
+		'zones',
+		zonesOf(node).map((zone, i) => (i === index ? { ...zone, ...change } : zone))
+	);
 }
 
 export function addZone(graph: Graph, id: number, asset: string): Graph {
@@ -270,7 +277,14 @@ export function addZone(graph: Graph, id: number, asset: string): Graph {
 
 export function removeZone(graph: Graph, id: number, index: number): Graph {
 	const node = graph.nodes.find((candidate) => candidate.id === id);
-	return node ? setField(graph, id, 'zones', zonesOf(node).filter((_, i) => i !== index)) : graph;
+	return node
+		? setField(
+				graph,
+				id,
+				'zones',
+				zonesOf(node).filter((_, i) => i !== index)
+			)
+		: graph;
 }
 
 // Which of this patch's nodes an error belongs to. Inside a subpatch that is the subpatch's node, since that is what is on

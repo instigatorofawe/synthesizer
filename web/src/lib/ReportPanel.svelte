@@ -15,10 +15,10 @@
 			chunks shared between {report.programs.length} programs{/if}.
 		{#if report.omitted_bytes > 0}{kb(report.omitted_bytes)} left out for a receiver that already has it.{/if}
 	</p>
-	{#each report.programs as program}
+	{#each report.programs as program, index (index)}
 		<h4>{program.index}: {program.name}</h4>
 		<ul>
-			{#each program.patches as patch}
+			{#each program.patches as patch, index (index)}
 				<li><code>{patch.hash.slice(0, 8)}</code> {patch.id}</li>
 			{/each}
 		</ul>
@@ -26,7 +26,7 @@
 	<table>
 		<thead><tr><th>Kind</th><th>Hash</th><th>Size</th><th>Programs</th><th>In image</th></tr></thead>
 		<tbody>
-			{#each report.chunks as chunk}
+			{#each report.chunks as chunk, index (index)}
 				<tr class:thin={!chunk.present}>
 					<td>{chunk.kind}</td>
 					<td><code>{chunk.hash}</code></td>

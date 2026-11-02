@@ -3,8 +3,32 @@
 import { z } from 'zod';
 
 export const NODE_TYPES = [
-	'note', 'param', 'const', 'osc', 'noise', 'biquad', 'env', 'sample', 'mul', 'add', 'mtof', 'snap', 'ratio', 'pan',
-	'delay', 'comb', 'allpass', 'follow', 'lfo', 'math', 'shape', 'in', 'out', 'inlet', 'outlet', 'subpatch'
+	'note',
+	'param',
+	'const',
+	'osc',
+	'noise',
+	'biquad',
+	'env',
+	'sample',
+	'mul',
+	'add',
+	'mtof',
+	'snap',
+	'ratio',
+	'pan',
+	'delay',
+	'comb',
+	'allpass',
+	'follow',
+	'lfo',
+	'math',
+	'shape',
+	'in',
+	'out',
+	'inlet',
+	'outlet',
+	'subpatch'
 ] as const;
 
 const id16 = z.number().int().min(0).max(65535);
@@ -21,7 +45,11 @@ export const paramSchema = z.object({
 });
 
 const nodeSchema = z.looseObject({
-	id: z.number().int().min(0).max(1 << 20),
+	id: z
+		.number()
+		.int()
+		.min(0)
+		.max(1 << 20),
 	type: z.enum(NODE_TYPES),
 	inputs: z.record(z.string(), z.number()).optional()
 });

@@ -108,8 +108,10 @@ def test_workers_run_on_threads():
         engine.render(48000 * 20)
         return (time.process_time() - cpu) / (time.perf_counter() - wall)
 
+    # A render this short shares a busy runner's cores with whatever else is on it, which cost one trial of three workers
+    # half a core in CI. The best of three still can't pass an engine that keeps to one thread, which measures about 1.
     assert cores(1) < 1.2
-    assert cores(3) > 1.4
+    assert max(cores(3) for _ in range(3)) > 1.4
 
 
 def test_renders_of_any_length_continue_one_another():

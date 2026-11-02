@@ -1,4 +1,4 @@
-# modsynth design, revision 13
+# modsynth design, revision 14
 
 Status: Milestones 1 to 4 and 6 are implemented, along with the harnesses of Milestone 7. Milestone 5 waits for the board.
 The wire format is frozen at version 1, now at revision 6. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -279,7 +279,7 @@ carry only between Programs with the same mixer, down to its tracks and inserts,
 Any other edit to the mixer returns its registers to the document's values. Inserts crossfade. Embedded builds use a limit of 1, with no separate code path.
 
 The engine can't tell a value moved by hand from one a lane left behind, and carrying is right for both while a lane is still there: a fader automated down would otherwise jump back up on every edit.
-So the timeline page settles after each swap, writing the document's value to every mix register, parameter and global that no placed lane moves. Without that, a deleted lane's last value stays until
+So the editor settles after each swap to a song's image, writing the document's value to every mix register, parameter and global that no placed lane moves. Without that, a deleted lane's last value stays until
 the page reloads, even across a locate, and a value changed in the document is ignored because the old one carries over it. The engine's rule stays as it is, and only an editor that holds a document can do this.
 
 ## 12. Browser load path
@@ -653,9 +653,9 @@ and hardware still only ever sees image bytes.
 - Graphs and timeline documents are JSON columns, validated by one shared schema on save. Notes are never queried
   individually, so normalising them would add joins and no capability.
 - `timeline_patches` is derived from the document on every save, inside the same transaction. It exists so that the
-  database can refuse to delete a patch that is in use, and so that the patch page can say which timelines an edit
+  database can refuse to delete a patch that is in use, and so that the patch editor can say which timelines an edit
   affects. It is never the source of truth for compilation: section 20 walks the document.
-- `patch_subpatches` is derived the same way, from a graph on every save. It stops a patch being deleted while another expands it, tells a patch's page about timelines
+- `patch_subpatches` is derived the same way, from a graph on every save. It stops a patch being deleted while another expands it, tells the patch editor about timelines
   that reach it through another patch, and tells an export what to carry along. A graph can name itself, which only the compiler refuses, so walking these links
   keeps track of what it has seen.
 - `revision` is optimistic concurrency. A save names the revision it started from, and a stale save is refused rather
@@ -668,6 +668,28 @@ and hardware still only ever sees image bytes.
   `adapter-node` assumes HTTPS unless a proxy says otherwise, so a loopback server would fail SvelteKit's same-origin check
   on every form. The config trusts exactly the two loopback origins on that port, and a form posted from any other site is
   still refused. Serving it anywhere else needs authentication and a proxy that sets `PROTOCOL_HEADER`.
+
+**The editor.** The GUI is one page laid out like a DAW: a transport along the top, the patch editor above, the timeline
+below, both resizable, and a browser down the side, which folds away, for the library and the examples. Its address says
+what is open: `?timeline=` or `?recipe=` below, and `?patch=` above, which otherwise shows the chosen track's patch, so
+choosing a track shows its patch. Only the lower panel's parameters reach the server: a load reruns for the parameters it
+reads, so choosing a patch costs no round trip, and the library, which carries every sample, loads only when an action
+changes it. A fresh visit opens the timeline saved last, and the old addresses redirect to the same views.
+
+- Edits to any number of patches and timelines are kept as drafts while other things are opened, and Save writes them all
+  in one transaction, patches first, so a timeline is never saved against a patch edit that was refused. Each draft names
+  the revision it started from, so a stale one refuses the whole save and loses nothing. A draft edited back to what was
+  saved stops being one, and leaving with drafts asks first.
+- One engine plays one image: the song, compiled from the drafts, or the patch on screen on its own. A patch a track plays
+  is heard in the song, through that track's mix and inserts, so a patch edit is heard in context as it is made. A voice no
+  track plays is compiled on its own as above, and its keys switch the engine to it. Play, a locate, or a note from the
+  timeline switches back, to where the song was. The two compile on separate channels, so neither cancels the other, and a
+  request that hasn't changed isn't compiled again, so opening something new swaps nothing. An insert has no keys and is
+  compiled on its own only for its errors and dead nodes.
+- The status bar says Compiling from an edit until the image made from it is playing, so what is heard is known to be the
+  newest edit. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the
+  image slot does, and the image before it plays on.
+- Keys belong to the panel used last, so Delete and undo act on the graph or the timeline, not both.
 
 **The graph editor.** A graph's document is still what is saved and compiled. The editor adds `x` and `y` to its nodes, which the compiler ignores, so moving a node
 changes no hash. It takes its node table from the compiler's catalog, the table the compiler reads, so the two can't disagree. The compiler's report carries the debug sidecar
@@ -689,9 +711,9 @@ that an export refuses, and an editor that previews one thing and exports anothe
 A file's sampler chunk gives its root and loop, and failing that a name like `Piano_C4.wav` gives the root, and failing that it is 60. Keys split halfway between recordings, and several at one key become velocity layers, quietest first by peak, because
 only their levels say which is which. A bad file refuses the whole import, and one larger than an image can hold is refused there rather than failing on load. An asset can't be deleted while a patch names it.
 
-**Recipes.** `examples/Recipes` ships with the app as a read-only catalogue at `/recipes`, where any of them plays as it is and shows how it is made, in the same editors with nothing that changes anything: its arrangement, notes, lanes, mix and each patch's graph, which
+**Recipes.** `examples/Recipes` ships with the app as the read-only examples in the editor's browser, where any of them plays as it is and shows how it is made, in the same editors with nothing that changes anything: its arrangement, notes, lanes, mix and each patch's graph, which
 a probe can look inside. Adding one copies its patches, assets and timeline into the library under ids made from its name, and they are then ordinary rows. They are copies so that an edit can't change what ships. A recipe isn't seeded,
-because together they hold about 600 KB of samples and every patch page loads the library. Adding one twice changes nothing, so an edited copy survives. A test holds every
+because together they hold about 600 KB of samples and the editor loads the library. Adding one twice changes nothing, so an edited copy survives. A test holds every
 recipe to compiling to the same bytes from the library as from its file, which is what shows the schema dropped nothing.
 
 ## 20. Choosing what goes into an image
@@ -707,8 +729,8 @@ only by being reached.
 4. Each used patch adds the tables and assets it references.
 
 Muted tracks stay in, because mute is a mixer parameter that can change during playback. A browser preview passes `live`,
-which keeps every slot and track, so an empty track can still be played from the keyboard. The patch page also starts the transport, because a
-shared LFO waits for it and that page has no Play button. Exports never set it.
+which keeps every slot and track, so an empty track can still be played from the keyboard. A patch heard on its own is compiled with it, as one track
+with no notes, and the editor starts the transport for it, because a shared LFO waits for it. Exports never set it.
 
 Unused library patches cannot affect an image: changing them leaves its bytes identical, and CI asserts this.
 

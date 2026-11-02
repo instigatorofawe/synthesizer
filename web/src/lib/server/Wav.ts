@@ -94,7 +94,7 @@ export function decodeWav(bytes: Uint8Array): Wav {
 	let format: Format | null = null;
 	let data: { at: number; size: number } | null = null;
 	let sampler: { at: number; size: number } | null = null;
-	for (let at = 12; at + 8 <= bytes.length; ) {
+	for (let at = 12; at + 8 <= bytes.length;) {
 		const id = text(at);
 		const body = at + 8;
 		const size = Math.min(view.getUint32(at + 4, true), bytes.length - body); // A cut-off file reads as far as it goes
@@ -109,9 +109,7 @@ export function decodeWav(bytes: Uint8Array): Wav {
 
 	const frames = Math.floor(data.size / (format.sampleBytes * format.channels));
 	if (frames === 0) throw new WavError('it has no audio');
-	const { root, loop } = sampler
-		? readSampler(view, sampler.at, sampler.size, frames)
-		: { root: null, loop: null };
+	const { root, loop } = sampler ? readSampler(view, sampler.at, sampler.size, frames) : { root: null, loop: null };
 	return {
 		...convert(view, data.at, frames * format.channels, format),
 		channels: format.channels as 1 | 2,

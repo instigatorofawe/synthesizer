@@ -8,8 +8,14 @@ function sine(length: number, period: number, phase = 0) {
 describe('Ring', () => {
 	it('addresses samples by absolute index across the wrap', () => {
 		const ring = new Ring(100);
-		ring.push(Float32Array.from({ length: 80 }, (_, i) => i), 0);
-		ring.push(Float32Array.from({ length: 80 }, (_, i) => 80 + i), 80);
+		ring.push(
+			Float32Array.from({ length: 80 }, (_, i) => i),
+			0
+		);
+		ring.push(
+			Float32Array.from({ length: 80 }, (_, i) => 80 + i),
+			80
+		);
 		expect(ring.newest).toBe(160);
 		expect(ring.at(159)).toBe(159);
 		expect(ring.at(60)).toBe(60);

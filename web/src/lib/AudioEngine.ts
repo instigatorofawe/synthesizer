@@ -88,7 +88,9 @@ export const LOAD_ERRORS = [
 // out again for each image and never kept.
 export function tapTargets(program: ProgramReport): TapTarget[] {
 	const { master } = program;
-	const targets: TapTarget[] = [{ slot: 0, label: 'Master', step: master.step, bus: master.bus, channel: 0, chain: 'master' }];
+	const targets: TapTarget[] = [
+		{ slot: 0, label: 'Master', step: master.step, bus: master.bus, channel: 0, chain: 'master' }
+	];
 	const add = (label: string, chain: string, { step, bus }: { step: number; bus: number }) => {
 		if (targets.length < TAP_SLOTS) targets.push({ slot: targets.length, label, step, bus, channel: 0, chain });
 	};
@@ -110,6 +112,13 @@ export function probeTargets(nodes: NodesReport | undefined, probes: Probe[], fi
 	}
 	return targets;
 }
+
+// What the timeline's editors send while a song plays. The editor page hands them these rather than the engine, because the
+// engine may be playing a patch on its own just then.
+export type SongControls = Pick<
+	AudioEngine,
+	'noteOn' | 'noteOff' | 'locate' | 'setLoop' | 'setMix' | 'setParam' | 'setInsertParam'
+>;
 
 export class AudioEngine {
 	state: EngineState = {
@@ -165,7 +174,9 @@ export class AudioEngine {
 			this.applyTargets();
 			this.onState(this.state);
 		} else if (message.type === 'load-rejected') {
-			this.onRejected(message.reason as string);
+			// The worklet explains an image it won't start. One the engine fails while loading comes as the engine's error.
+			const error = LOAD_ERRORS[message.error as number] || 'image has no program to play';
+			this.onRejected((message.reason as string | undefined) ?? error);
 		} else if (message.type === 'tap') {
 			const buffer = message.buffer as ArrayBuffer;
 			const samples = new Float32Array(buffer);
@@ -198,7 +209,14 @@ export class AudioEngine {
 		}
 		for (const t of probes) {
 			const { track, slot } = this.voice;
-			this.send({ kind: EventKind.SetProbe, param: t.slot, target: track, channel: slot, tick: t.step, tickEnd: t.operand });
+			this.send({
+				kind: EventKind.SetProbe,
+				param: t.slot,
+				target: track,
+				channel: slot,
+				tick: t.step,
+				tickEnd: t.operand
+			});
 		}
 		for (let slot = buses.length + probes.length; slot < TAP_SLOTS; ++slot) {
 			this.send({ kind: EventKind.SetTap, param: slot, target: NO_TARGET });

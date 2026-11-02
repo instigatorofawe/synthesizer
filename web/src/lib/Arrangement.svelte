@@ -11,7 +11,9 @@
 		type Clip,
 		type Track
 	} from '#lib/TimelineEdit.ts';
+	import Meter from '#lib/Meter.svelte';
 	import type { Timeline } from '#lib/Schema.ts';
+	import type { Ring } from '#lib/ScopeMath.ts';
 
 	export interface Selection {
 		track: number | null;
@@ -28,6 +30,7 @@
 		readonly = false,
 		badTracks,
 		badClips,
+		meter = () => null,
 		onselect,
 		onchange,
 		onnew,
@@ -43,6 +46,7 @@
 		readonly?: boolean;
 		badTracks: Set<number>; // What the last compile complained about
 		badClips: Set<string>;
+		meter?: (track: number) => Ring | null; // What each track's level meter reads
 		onselect: (selection: Selection) => void;
 		onchange: (doc: Timeline, selection?: Selection) => void;
 		onnew: (track: number, tick: number) => void;
@@ -111,7 +115,8 @@
 				const held = gesture && gesture.kind !== 'loop' && gesture.track === track.id && gesture.index === index;
 				if (held && gesture?.kind === 'repeat') block.repeat = gesture.repeat;
 				if (held && gesture?.kind === 'move') {
-					if (gesture.copy) list.push({ ...block, key: `${block.key}:copy`, tick: gesture.tick, row: gesture.row, ghost: true });
+					if (gesture.copy)
+						list.push({ ...block, key: `${block.key}:copy`, tick: gesture.tick, row: gesture.row, ghost: true });
 					else {
 						block.tick = gesture.tick;
 						block.row = gesture.row;
@@ -143,7 +148,8 @@
 	function joins(clip: Clip | undefined, repeat: number) {
 		if (!clip) return '';
 		let d = '';
-		for (let r = 1; r < Math.min(repeat, MOST_REPEATS_DRAWN); ++r) d += `M${(r * clip.length * perTick).toFixed(1)} 0v${BLOCK}`;
+		for (let r = 1; r < Math.min(repeat, MOST_REPEATS_DRAWN); ++r)
+			d += `M${(r * clip.length * perTick).toFixed(1)} 0v${BLOCK}`;
 		return d;
 	}
 
@@ -152,7 +158,15 @@
 		onselect({ track: block.track.id, placement: block.index });
 		if (readonly) return;
 		const grab = ticksAt(canvas(event).x) - block.tick;
-		gesture = { kind: 'move', track: block.track.id, index: block.index, grab, tick: block.tick, row: block.row, copy: event.altKey };
+		gesture = {
+			kind: 'move',
+			track: block.track.id,
+			index: block.index,
+			grab,
+			tick: block.tick,
+			row: block.row,
+			copy: event.altKey
+		};
 	}
 
 	function startRepeat(event: PointerEvent, block: Block) {
@@ -196,7 +210,10 @@
 			? place(doc, to.id, placed.clip, held.tick)
 			: movePlacement(doc, held.track, held.index, to.id, held.tick);
 		const index = placementIndex(next, to.id, placed.clip, held.tick);
-		onchange(held.copy ? setPlacement(next, to.id, index, { repeat: placed.repeat }) : next, { track: to.id, placement: index });
+		onchange(held.copy ? setPlacement(next, to.id, index, { repeat: placed.repeat }) : next, {
+			track: to.id,
+			placement: index
+		});
 	}
 
 	function pointerUp() {
@@ -222,7 +239,9 @@
 	}
 
 	const shownLoop = $derived(
-		gesture?.kind === 'loop' ? { start: Math.min(gesture.from, gesture.to), end: Math.max(gesture.from, gesture.to) } : loop
+		gesture?.kind === 'loop'
+			? { start: Math.min(gesture.from, gesture.to), end: Math.max(gesture.from, gesture.to) }
+			: loop
 	);
 </script>
 
@@ -231,33 +250,26 @@
 <div class="arrangement">
 	<div class="heads" style:padding-top="{TOP}px">
 		{#each doc.tracks as track (track.id)}
-			<button
-				type="button"
-				class="head"
-				class:chosen={selection.track === track.id}
-				class:problem={badTracks.has(track.id)}
-				style:height="{ROW}px"
-				data-testid={`track-${track.id}`}
-				aria-pressed={selection.track === track.id}
-				onclick={() => onselect({ track: track.id, placement: null })}
-			>
-				<span class="title">{track.name || `Track ${track.id}`}</span>
-				<span class="muted">{track.slots.join(', ') || 'no patch'}{track.mute ? ', muted' : ''}</span>
-			</button>
+			<div class="head" class:chosen={selection.track === track.id} style:height="{ROW}px">
+				<button
+					type="button"
+					class:problem={badTracks.has(track.id)}
+					data-testid={`track-${track.id}`}
+					aria-pressed={selection.track === track.id}
+					onclick={() => onselect({ track: track.id, placement: null })}
+				>
+					<span class="title">{track.name || `Track ${track.id}`}</span>
+					<span class="muted">{track.slots.join(', ') || 'no patch'}{track.mute ? ', muted' : ''}</span>
+				</button>
+				<Meter ring={meter(track.id)} label={`Level of ${track.name || `Track ${track.id}`}`} />
+			</div>
 		{:else}
 			<p class="muted empty">No tracks yet.</p>
 		{/each}
 	</div>
 
 	<div class="scroller">
-		<svg
-			bind:this={svg}
-			{width}
-			{height}
-			role="application"
-			aria-label="Arrangement"
-			data-testid="arrangement"
-		>
+		<svg bind:this={svg} {width} {height} role="application" aria-label="Arrangement" data-testid="arrangement">
 			<rect
 				class="ruler"
 				{width}
@@ -360,35 +372,54 @@
 	.arrangement {
 		display: grid;
 		grid-template-columns: 150px minmax(0, 1fr);
+		align-items: start;
 		border: 1px solid var(--line);
 		border-radius: 6px;
-		overflow: hidden;
+		overflow: auto;
 		background: #0d1117;
 		min-width: 0;
+		min-height: 0;
+		height: 100%;
+		box-sizing: border-box;
 	}
 	.heads {
+		position: sticky;
+		left: 0;
+		z-index: 1;
 		background: var(--panel);
 		border-right: 1px solid var(--line);
 		box-sizing: border-box;
+		min-height: 100%;
 	}
 	.head {
+		display: flex;
+		flex-direction: column;
+		box-sizing: border-box;
+		border-top: 1px solid var(--line);
+		padding: 0 0.4rem 0.35rem 0;
+	}
+	.head button {
+		flex: 1;
+		min-height: 0;
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
 		width: 100%;
 		text-align: left;
-		box-sizing: border-box;
 		border: 0;
-		border-top: 1px solid var(--line);
 		border-radius: 0;
+		background: transparent;
 		font-size: 0.8rem;
 		overflow: hidden;
+	}
+	.head :global(.meter) {
+		margin-left: 0.6rem;
 	}
 	.head.chosen {
 		background: #1a212b;
 		box-shadow: inset 3px 0 0 var(--accent);
 	}
-	.head.problem {
+	.head button.problem {
 		box-shadow: inset 3px 0 0 #f85149;
 	}
 	.title {
@@ -408,7 +439,6 @@
 		font-size: 0.8rem;
 	}
 	.scroller {
-		overflow-x: auto;
 		min-width: 0;
 	}
 	svg {

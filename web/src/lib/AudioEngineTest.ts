@@ -42,6 +42,21 @@ describe('a load the worklet refuses', () => {
 		inside.receive({ type: 'load-rejected', reason: 'image is larger than the image slot' });
 		expect(reasons).toEqual(['image is larger than the image slot']);
 	});
+
+	it('or that the engine failed, explained by its error', () => {
+		const engine = new AudioEngine();
+		const reasons: string[] = [];
+		engine.onRejected = (reason) => reasons.push(reason);
+		const inside = engine as unknown as { receive: (message: Record<string, unknown>) => void };
+		inside.receive({ type: 'load-rejected', error: 3 });
+		inside.receive({ type: 'load-rejected', error: 10 });
+		inside.receive({ type: 'load-rejected', error: 0 }); // A library: its chunks loaded, and it has nothing to play
+		expect(reasons).toEqual([
+			'chunk hash mismatch',
+			'not enough memory for this program',
+			'image has no program to play'
+		]);
+	});
 });
 
 describe('a probe', () => {

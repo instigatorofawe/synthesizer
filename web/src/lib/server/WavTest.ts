@@ -64,7 +64,15 @@ const floats = (data: Uint8Array) => [...new Float32Array(data.slice().buffer)];
 describe('reading a WAV file', () => {
 	it('keeps 16-bit samples as they are', () => {
 		const decoded = decodeWav(wav(i16(0, 16384, -32768)));
-		expect(decoded).toMatchObject({ encoding: 'i16', channels: 1, rate: 48000, frames: 3, root: null, loop: null, peak: 1 });
+		expect(decoded).toMatchObject({
+			encoding: 'i16',
+			channels: 1,
+			rate: 48000,
+			frames: 3,
+			root: null,
+			loop: null,
+			peak: 1
+		});
 		expect([...new Int16Array(decoded.data.slice().buffer)]).toEqual([0, 16384, -32768]);
 	});
 

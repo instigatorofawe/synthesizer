@@ -142,8 +142,7 @@
 		else if (gesture.kind === 'velocity') {
 			const { indices, lane } = gesture;
 			gesture = { ...gesture, clip: setNotes(clip, indices, { vel: velocityFor(event, lane) }) };
-		}
-		else if (gesture.kind === 'length') {
+		} else if (gesture.kind === 'length') {
 			const length = Math.max(grid, snapTick(canvas(event).x / perTick, grid));
 			gesture = { ...gesture, clip: { ...clip, length } };
 		}
@@ -229,7 +228,10 @@
 
 	function slotChanged(text: string) {
 		const next = setNotes(clip, chosen, { slot: text === '' ? undefined : Number(text) });
-		onchange({ ...next, notes: next.notes.map(({ slot, ...note }) => (slot === undefined ? note : { ...note, slot })) });
+		onchange({
+			...next,
+			notes: next.notes.map(({ slot, ...note }) => (slot === undefined ? note : { ...note, slot }))
+		});
 	}
 
 	function addLane(key: string) {
@@ -260,30 +262,73 @@
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} />
 
 <div class="toolbar">
-	<button type="button" onclick={() => (beatWidth = Math.max(16, beatWidth / 1.5))} aria-label="Zoom the roll out">−</button>
-	<button type="button" onclick={() => (beatWidth = Math.min(400, beatWidth * 1.5))} aria-label="Zoom the roll in">+</button>
+	<button type="button" onclick={() => (beatWidth = Math.max(16, beatWidth / 1.5))} aria-label="Zoom the roll out"
+		>−</button
+	>
+	<button type="button" onclick={() => (beatWidth = Math.min(400, beatWidth * 1.5))} aria-label="Zoom the roll in"
+		>+</button
+	>
 	{#if one}
 		<fieldset disabled={readonly}>
 			<span class="muted">{chosen.size === 1 ? noteName(one.note) : `${chosen.size} notes`}</span>
 			{#if chosen.size === 1}
-				<label>tick <input type="number" min="0" aria-label="Note tick" value={one.tick} onchange={(e) => field('tick', e.currentTarget.value)} /></label>
-				<label>note <input type="number" min="0" max="127" aria-label="Note pitch" value={one.note} onchange={(e) => field('note', e.currentTarget.value)} /></label>
+				<label
+					>tick <input
+						type="number"
+						min="0"
+						aria-label="Note tick"
+						value={one.tick}
+						onchange={(e) => field('tick', e.currentTarget.value)}
+					/></label
+				>
+				<label
+					>note <input
+						type="number"
+						min="0"
+						max="127"
+						aria-label="Note pitch"
+						value={one.note}
+						onchange={(e) => field('note', e.currentTarget.value)}
+					/></label
+				>
 			{/if}
-			<label>length <input type="number" min="1" aria-label="Note length" value={one.dur} onchange={(e) => field('dur', e.currentTarget.value)} /></label>
-			<label>velocity <input type="number" min="0" max="127" aria-label="Note velocity" value={one.vel} onchange={(e) => field('vel', e.currentTarget.value)} /></label>
+			<label
+				>length <input
+					type="number"
+					min="1"
+					aria-label="Note length"
+					value={one.dur}
+					onchange={(e) => field('dur', e.currentTarget.value)}
+				/></label
+			>
+			<label
+				>velocity <input
+					type="number"
+					min="0"
+					max="127"
+					aria-label="Note velocity"
+					value={one.vel}
+					onchange={(e) => field('vel', e.currentTarget.value)}
+				/></label
+			>
 			{#if slots.length > 1}
 				<label>
 					slot
-					<select aria-label="Note slot" value={one.slot === undefined ? '' : String(one.slot)} onchange={(e) => slotChanged(e.currentTarget.value)}>
+					<select
+						aria-label="Note slot"
+						value={one.slot === undefined ? '' : String(one.slot)}
+						onchange={(e) => slotChanged(e.currentTarget.value)}
+					>
 						<option value="">first</option>
-						{#each slots as slot, index}<option value={String(index)}>{slot}</option>{/each}
+						{#each slots as slot, index (index)}<option value={String(index)}>{slot}</option>{/each}
 					</select>
 				</label>
 			{/if}
 		</fieldset>
 	{:else if !readonly}
 		<span class="muted">
-			Double-click to add a note, and on one to remove it. Drag to move, drag its end to resize, shift-drag to select. Arrows nudge.
+			Double-click to add a note, and on one to remove it. Drag to move, drag its end to resize, shift-drag to select.
+			Arrows nudge.
 		</span>
 	{/if}
 </div>
@@ -331,11 +376,31 @@
 				/>
 			{/each}
 			{#each { length: beats + 1 }, beat}
-				<line class:bar={beat % 4 === 0} class="beat" x1={beat * ppq * perTick} x2={beat * ppq * perTick} y1="0" y2={HEIGHT} />
+				<line
+					class:bar={beat % 4 === 0}
+					class="beat"
+					x1={beat * ppq * perTick}
+					x2={beat * ppq * perTick}
+					y1="0"
+					y2={HEIGHT}
+				/>
 			{/each}
-			<rect class="past" x={shown.length * perTick} width={Math.max(0, width - shown.length * perTick)} height={HEIGHT} />
+			<rect
+				class="past"
+				x={shown.length * perTick}
+				width={Math.max(0, width - shown.length * perTick)}
+				height={HEIGHT}
+			/>
 			{#each shown.notes as note, index (index)}
-				<g class="note" class:chosen={chosen.has(index)} data-testid={`note-${index}`} data-tick={note.tick} data-note={note.note} data-dur={note.dur} data-vel={note.vel}>
+				<g
+					class="note"
+					class:chosen={chosen.has(index)}
+					data-testid={`note-${index}`}
+					data-tick={note.tick}
+					data-note={note.note}
+					data-dur={note.dur}
+					data-vel={note.vel}
+				>
 					<rect
 						class="body"
 						x={note.tick * perTick}
@@ -446,12 +511,16 @@
 			<option value="">Add a lane…</option>
 			{#each free as choice (choice.key)}<option value={choice.key}>{choice.label}</option>{/each}
 		</select>
-		<span class="muted">Double-click a lane to add a point, and on a point to remove it. A point's ramp is how many ticks it takes to get there.</span>
+		<span class="muted"
+			>Double-click a lane to add a point, and on a point to remove it. A point's ramp is how many ticks it takes to get
+			there.</span
+		>
 	</div>
 {/if}
 
 <style>
 	.toolbar {
+		flex: none;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -475,8 +544,10 @@
 		width: 4.5rem;
 		padding: 0.05rem 0.25rem;
 	}
+	/* The roll takes the room its panel has, and scrolls inside it. */
 	.roll {
-		height: 340px;
+		flex: 1 1 200px;
+		min-height: 100px;
 		overflow: auto;
 		border: 1px solid var(--line);
 		border-radius: 6px 6px 0 0;
@@ -558,7 +629,10 @@
 		pointer-events: none;
 	}
 	.below {
+		flex: none;
+		max-height: 45%;
 		overflow-x: hidden;
+		overflow-y: auto;
 		border: 1px solid var(--line);
 		border-top: 0;
 		border-radius: 0 0 6px 6px;

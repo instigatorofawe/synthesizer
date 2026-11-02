@@ -19,6 +19,7 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		this.pool = [];
 		this.loadingId = 0; // Which load the engine is working on, and which one is live, so the main thread can match reports
 		this.liveId = 0;
+		this.awaiting = null; // The load the engine is working on, until the page has been told whether it went live
 		this.generation = 0;
 		this.tapStart = new Array(TAP_SLOTS).fill(null);
 		this.tapDropped = new Array(TAP_SLOTS).fill(0); // Blocks lost since this slot last sent one
@@ -61,7 +62,19 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		let i = 0;
 		for (; i < this.events.length; ++i) {
 			const e = this.events[i];
-			if (!m._ms_send(e.kind, e.note ?? 0, e.velocity ?? 0, e.channel ?? 0, e.target ?? 0, e.param ?? 0, e.value ?? 0, e.tick ?? 0, e.tickEnd ?? 0)) {
+			if (
+				!m._ms_send(
+					e.kind,
+					e.note ?? 0,
+					e.velocity ?? 0,
+					e.channel ?? 0,
+					e.target ?? 0,
+					e.param ?? 0,
+					e.value ?? 0,
+					e.tick ?? 0,
+					e.tickEnd ?? 0
+				)
+			) {
 				break; // Queue full: try the rest next quantum
 			}
 		}
@@ -88,6 +101,7 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			if (end === bytes.length) {
 				m._ms_load(bytes.length, program);
 				this.loadingId = id;
+				this.awaiting = id;
 				this.copy = null;
 			}
 		}
@@ -108,7 +122,14 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			this.tapStart[slot] ??= m.HEAPF32.subarray(offset, offset + this.tapBlock);
 			new Float32Array(buffer).set(this.tapStart[slot]);
 			this.port.postMessage(
-				{ type: 'tap', slot, buffer, start: m._ms_tap_start(), dropped: this.tapDropped[slot], generation: m._ms_generation() },
+				{
+					type: 'tap',
+					slot,
+					buffer,
+					start: m._ms_tap_start(),
+					dropped: this.tapDropped[slot],
+					generation: m._ms_generation()
+				},
 				[buffer]
 			);
 			this.tapDropped[slot] = 0;
@@ -126,6 +147,11 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		if (generation !== this.generation) {
 			this.generation = generation;
 			this.liveId = this.loadingId;
+		}
+		// The engine stops loading and swaps generations in one step, so a load that has stopped without going live failed.
+		if (this.awaiting !== null && !m._ms_loading()) {
+			if (this.liveId !== this.awaiting) this.port.postMessage({ type: 'load-rejected', error: m._ms_error() });
+			this.awaiting = null;
 		}
 		output[0].set(this.left);
 		if (output[1]) output[1].set(this.right);

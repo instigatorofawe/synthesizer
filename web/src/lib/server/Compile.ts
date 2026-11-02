@@ -22,8 +22,6 @@ export async function compileRequest(request: string) {
 export async function compileSnapshot(snapshot: Snapshot, options: RequestOptions = {}) {
 	compiler ??= createCompiler();
 	const module = await compiler;
-	const { report, image } = module.compile(
-		buildRequest(snapshot.patches, snapshot.assets, snapshot.programs, options)
-	);
+	const { report, image } = module.compile(buildRequest(snapshot.patches, snapshot.assets, snapshot.programs, options));
 	return { report: JSON.parse(report) as CompileReport, image };
 }

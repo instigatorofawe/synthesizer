@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { compileRequest, compileSnapshot } from '#lib/server/Compile.ts';
 import { openDatabase, type Db } from '#lib/server/Db.ts';
-import { addRecipe, readRecipe, RECIPES, recipeInLibrary, recipeTimelineId } from '#lib/server/Recipes.ts';
+import { addRecipe, GROUPS, readRecipe, RECIPES, recipeInLibrary, recipeTimelineId } from '#lib/server/Recipes.ts';
 import { deleteTimeline, getPatch, listPatches, listTimelines, savePatch, snapshot } from '#lib/server/Repository.ts';
 import { EMPTY_GRAPH } from '#lib/Schema.ts';
 
@@ -13,11 +13,22 @@ beforeEach(() => {
 });
 
 describe('the recipe catalogue', () => {
-	it('lists every file in examples/Recipes', () => {
-		const files = readdirSync(new URL('../../../../examples/Recipes', import.meta.url)).filter(
-			(f) => f !== 'Index.json'
+	it('lists every file in examples/Recipes and examples/Pieces', () => {
+		const files = ['Recipes', 'Pieces'].flatMap((folder) =>
+			readdirSync(new URL(`../../../../examples/${folder}`, import.meta.url)).filter(
+				(f) => f.endsWith('.json') && f !== 'Index.json'
+			)
 		);
 		expect(RECIPES.map((recipe) => recipe.file).sort()).toEqual(files.sort());
+	});
+
+	it('names each example once, since the copies in a library are named after it', () => {
+		expect(new Set(RECIPES.map((recipe) => recipe.name)).size).toBe(RECIPES.length);
+	});
+
+	it('shows the pieces first, and then the recipes by group', () => {
+		expect(GROUPS[0]).toBe('pieces');
+		expect(GROUPS.slice(1)).toEqual([...GROUPS.slice(1)].sort());
 	});
 
 	it('finds a recipe by name and nothing else', async () => {

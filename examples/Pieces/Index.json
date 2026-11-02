@@ -1,0 +1,30 @@
+[
+ {
+  "name": "BachPreludeInC",
+  "file": "BachPreludeInC.json",
+  "seconds": 132.75,
+  "group": "pieces",
+  "listen_for": "Bach's C major prelude on a two-choir harpsichord, each figure ringing on under the next, leaning into the bars where the harmony arrives and slowing into a rolled last chord."
+ },
+ {
+  "name": "PassionChorale",
+  "file": "PassionChorale.json",
+  "seconds": 84.25,
+  "group": "pieces",
+  "listen_for": "Bach's Passion Chorale for trumpet, flugelhorn, horn and trombone in a large church, every phrase slowing into its fermata and taking a breath, the repeat an echo of the first time."
+ },
+ {
+  "name": "FurElise",
+  "file": "FurElise.json",
+  "seconds": 177.0,
+  "group": "pieces",
+  "listen_for": "Für Elise on a tine electric piano swaying between the speakers, pedalled bar by bar, broadening into each cadence, pressing on over the drumming bass and slowing down the chromatic scale."
+ },
+ {
+  "name": "HallOfTheMountainKing",
+  "file": "HallOfTheMountainKing.json",
+  "seconds": 148.75,
+  "group": "pieces",
+  "listen_for": "Grieg's trolls, orchestrated from the piano score: bassoons and pizzicato basses tiptoe through the theme, which climbs, gathers the orchestra and speeds up until the trolls shriek over the timpani."
+ }
+]

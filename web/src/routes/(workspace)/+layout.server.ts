@@ -2,7 +2,7 @@
 // doesn't send it again: the library holds the samples, which can run to megabytes.
 import { nodeCatalog } from '#lib/server/Compile.ts';
 import { db } from '#lib/server/Db.ts';
-import { RECIPES } from '#lib/server/Recipes.ts';
+import { GROUPS, RECIPES } from '#lib/server/Recipes.ts';
 import {
 	allPatches,
 	assetsFor,
@@ -20,7 +20,6 @@ export const load = async () => {
 		revision: rows.get(patch.id)?.revision ?? 0,
 		users: patchUsers(db(), patch.id)
 	}));
-	const groups = [...new Set(RECIPES.map((recipe) => recipe.group))].sort();
 	return {
 		library: {
 			patches,
@@ -32,7 +31,7 @@ export const load = async () => {
 			),
 			bundles: bundlesWithMembers(db())
 		},
-		examples: groups.map((group) => ({
+		examples: GROUPS.map((group) => ({
 			name: group,
 			recipes: RECIPES.filter((recipe) => recipe.group === group).map(({ name, listen_for }) => ({ name, listen_for }))
 		})),

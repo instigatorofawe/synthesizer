@@ -9,7 +9,8 @@
 
 Each oscillator is a scale over six octaves, then a sweep up to the top of the keyboard. Aliasing is easiest to hear on the
 sweep, as tones that fall while the note rises. The recipes in examples/Recipes are short pieces made of the same parts, from
-a detuned supersaw to a drum loop. Turn your volume down before the first run.
+a detuned supersaw to a drum loop, and examples/Pieces holds longer ones, arrangements of music in the public domain.
+Turn your volume down before the first run.
 
     uv run examples/Listen.py                 # every oscillator, about 95 seconds
     uv run examples/Listen.py saw square      # only these
@@ -19,6 +20,7 @@ a detuned supersaw to a drum loop. Turn your volume down before the first run.
     uv run examples/Listen.py Kick808 Reverb  # any recipes or oscillators, by name
     uv run examples/Listen.py --group drums   # one group of recipes
     uv run examples/Listen.py --recipes       # all of them, about 4 minutes
+    uv run examples/Listen.py --group pieces  # the pieces, about 9 minutes
 
 It renders through the Python binding, which uv builds from this checkout on the first run.
 """
@@ -32,7 +34,7 @@ import numpy as np
 import soundcard
 
 ROOT = Path(__file__).resolve().parent.parent
-RECIPES = ROOT / "examples" / "Recipes"
+FOLDERS = [ROOT / "examples" / "Pieces", ROOT / "examples" / "Recipes"]
 RECIPE_PEAK = (
     0.45  # Each recipe is rendered to this, so --gain sets where its peak lands
 )
@@ -162,7 +164,7 @@ def render(sound: dict, mode: str | None, gain: float) -> np.ndarray:
 
 
 def render_recipe(recipe: dict, gain: float) -> np.ndarray:
-    image = modsynth.compile_image((RECIPES / recipe["file"]).read_text())
+    image = modsynth.compile_image((recipe["folder"] / recipe["file"]).read_text())
     return modsynth.render(image, recipe["seconds"], rate=RATE) * (gain / RECIPE_PEAK)
 
 
@@ -175,7 +177,11 @@ def list_recipes(recipes: list[dict]) -> None:
 
 
 def main() -> None:
-    recipes = json.loads((RECIPES / "Index.json").read_text())
+    recipes = [
+        entry | {"folder": folder}
+        for folder in FOLDERS
+        for entry in json.loads((folder / "Index.json").read_text())
+    ]
     by_name = {recipe["name"]: recipe for recipe in recipes}
     groups = sorted({recipe["group"] for recipe in recipes})
 
@@ -186,7 +192,9 @@ def main() -> None:
     parser.add_argument("--mode", choices=MODES, help="play only this mode")
     parser.add_argument("--gain", type=float, default=0.2, help="default 0.2")
     parser.add_argument("--list", action="store_true", help="list the recipes")
-    parser.add_argument("--recipes", action="store_true", help="play every recipe")
+    parser.add_argument(
+        "--recipes", action="store_true", help="play every recipe, without the pieces"
+    )
     parser.add_argument("--group", choices=groups, help="play one group of recipes")
     args = parser.parse_args()
     if unknown := set(args.sounds) - set(SOUNDS) - set(by_name):
@@ -196,7 +204,11 @@ def main() -> None:
         return
 
     chosen = [by_name[name] for name in args.sounds if name in by_name]
-    chosen += [r for r in recipes if args.recipes or r["group"] == args.group]
+    chosen += [
+        r
+        for r in recipes
+        if (args.recipes and r["folder"] == FOLDERS[1]) or r["group"] == args.group
+    ]
     named = [name for name in args.sounds if name in SOUNDS]
     oscillators = named or ([] if chosen else list(SOUNDS))
 

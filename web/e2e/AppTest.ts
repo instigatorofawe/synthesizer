@@ -665,6 +665,21 @@ test('a recipe plays from the examples without touching the library', async ({ p
 	expect(problems).toEqual([]);
 });
 
+test('the pieces come first among the examples, and play as they are', async ({ page }) => {
+	const problems: string[] = [];
+	page.on('pageerror', (e) => problems.push(e.message));
+	await page.goto('/');
+	const groups = browser(page).locator('h2:has-text("Examples") ~ details > summary');
+	await expect(groups.first()).toContainText('pieces');
+	await groups.first().click();
+	await browser(page).getByRole('link', { name: 'PassionChorale' }).click();
+	await expect(page).toHaveURL(/recipe=PassionChorale/);
+	await expect(timelineEditor(page).getByTestId('track-4')).toContainText('Trombone');
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	await expect.poll(async () => Math.max(0, ...(await patchPeaks(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
+	expect(problems).toEqual([]);
+});
+
 test('a recipe added to the library is an ordinary timeline and patch', async ({ page }) => {
 	await page.goto('/?recipe=PluckedString');
 	await page.getByRole('button', { name: 'Add to library' }).click();

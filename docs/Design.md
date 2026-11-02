@@ -1,4 +1,4 @@
-# modsynth design, revision 15
+# modsynth design, revision 16
 
 Status: Milestones 1 to 4 and 6 are implemented, along with the harnesses of Milestone 7. Milestone 5 waits for the board.
 The wire format is frozen at version 1, now at revision 6. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -722,6 +722,12 @@ a probe can look inside. Adding one copies its patches, assets and timeline into
 because together they hold about 600 KB of samples and the editor loads the library. Adding one twice changes nothing, so an edited copy survives. A test holds every
 recipe to compiling to the same bytes from the library as from its file, which is what shows the schema dropped nothing.
 
+**Pieces.** `examples/Pieces` holds four public-domain pieces arranged for the engine, two to three minutes each, and the browser lists them
+first among the examples. In every other way they are recipes. `MakePieces.py` writes them from the Mutopia Project's public-domain
+editions: the notes are the score's, and the instruments, rubato, dynamics, pedalling and mix are a performance written in code. They sit
+outside `examples/Recipes` because the benchmarks render every recipe in full, three times over on QEMU, and the pieces are 9 minutes of
+music against 3.8 for all 61 recipes. Writing them tested what a timeline can say, and what it couldn't is in section 24, opens 26 to 31.
+
 ## 20. Choosing what goes into an image
 
 The library is global and an image is not. Compiling starts from Programs and walks outward, so patches enter an image
@@ -879,8 +885,8 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 | 9 | What stops a finite blow-up reaching speakers? | A direction, not final: a volume limiter on desktop, and on embedded a render that validates the image when it is built on a desktop. To keep the target rule, the limiter would sit in the host after the engine, the validation ceiling at or below its threshold, and the NaN guards stay on every target. |
 | 10 | Should graphs get feedback shorter than a frame? | Recommended no. Keep it inside ops such as `OscMod`. Frame 32 already raises the limit to 1500 Hz. |
 | 11 | How far do events go off the frame boundary? | Recommended: live notes on their sample, and new ops that start on it. Changing a parameter within a frame would mean splitting frames, and frame 32 may make that unnecessary. |
-| 12 | MPE, polyphonic aftertouch and per-note bend? | Nothing prevents them. A voice would remember its NoteOn's channel, and events would address that. Held voices would need per-voice smoothing. Recommended: leave out unless MPE is a goal. |
-| 13 | Microtuning? | Recommended later. It needs a key-map Table and a new op. |
+| 12 | MPE, polyphonic aftertouch and per-note bend? | Nothing prevents them. A voice would remember its NoteOn's channel, and events would address that. Held voices would need per-voice smoothing. Recommended: leave out unless MPE is a goal. The pieces found a need short of MPE: a brass or string note can't swell once it starts, so the chorale shapes its phrases by velocity, and the Grieg's crescendo moves each section's fader in ramps of four to eight bars. |
+| 13 | Microtuning? | Recommended later. It needs a key-map Table and a new op. Without it the harpsichord in `BachPreludeInC` plays Bach in equal temperament. |
 | 14 | Envelope curves and looping envelopes? | Recommended later, as an `Env2` with a Table, because curves don't fit in 4 inputs. |
 | 15 | A live arpeggiator? | Recommended: leave it to the host, so the engine holds no keys. |
 | 16 | Clap, wavetable scanning, granular and shared LFO shapes? | Recommended: keep the workarounds until a real patch needs more. |
@@ -891,3 +897,9 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 | 23 | What authenticates an image over BLE? | A hash doesn't, and anyone in range can connect. Validation protects memory, but a valid image can still be very loud or overload the CPU. Recommended: BLE bonding, or signed images. |
 | 24 | Is a set of embedded-friendly recipes wanted? | Floated, not decided. 8 of the 61 recipes don't fit an L476 today, per `docs/Benchmarks.md`. `Tone` alone doesn't rescue them, so a set would also need fewer voices or partials. |
 | 25 | Does CMSIS-DSP save enough on this chip? | Section 15 models 10.8% for one voice. Measured over whole recipes the median saving at peak is under 1% of instructions. It stays a supported backend, and the answer needs cycles on a board. |
+| 26 | Time signatures and pickups? | The editor draws every timeline in 4/4 from tick 0. Für Elise, in 3/8 after an eighth's pickup, is in its third bar where the ruler shows bar 2, and the chorale's pickup puts every bar line a beat early. Recommended: a meter map and a pickup in the timeline document, which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change. |
+| 27 | A sustain pedal? | A timeline has none, so `MakePieces.py` writes Für Elise's pedalling into how long its notes are. The piano roll then shows the pedal's notes rather than the player's, and moving a pedal change means rewriting durations. Recommended: a pedal lane per track that the compiler applies to note lengths, as it writes a tempo ramp as steps, so the format and engine stay as they are. A key played live under the pedal would still need the engine to hold its voice. |
+| 28 | Importing MIDI files? | Every piece began as a MIDI file or LilyPond source, and the app imports only WAV. A Standard MIDI File reader is 45 lines of `MakePieces.py`. Recommended: import a file as a new timeline, a track for each of its tracks, with its tempo map, and its pedal once open 27 gives it somewhere to go. |
+| 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks open 21's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
+| 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
+| 31 | Should the benchmarks cover the pieces? | They aren't measured on Cortex-M4, so whether they fit an L476 is unknown. On a host they render 41 to 168 times faster than real time, from images of 10.6 to 93.3 KB [measured: Apple M4 Pro, Python binding]. Recommended: measure a window of each, such as its loudest 20 seconds, rather than all of it. |

@@ -1,9 +1,10 @@
-// The recipes in examples/Recipes, as a read-only catalogue. They play from here as they are, and adding one makes copies in
-// the library, which are then ordinary patches and timelines. Copies rather than rows of their own, so nobody's edit can
-// change what ships, and a library holds only what someone chose: all of them together carry about 600 KB of samples, and
-// every patch page loads the library.
+// The recipes in examples/Recipes and the pieces in examples/Pieces, as a read-only catalogue. They play from here as they
+// are, and adding one makes copies in the library, which are then ordinary patches and timelines. Copies rather than rows of
+// their own, so nobody's edit can change what ships, and a library holds only what someone chose: all of them together carry
+// about 600 KB of samples, and every patch page loads the library.
 import { eq } from 'drizzle-orm';
-import index from '../../../../examples/Recipes/Index.json';
+import pieces from '../../../../examples/Pieces/Index.json';
+import recipes from '../../../../examples/Recipes/Index.json';
 import type { Db } from '#lib/server/Db.ts';
 import { createAsset, createPatch, createTimeline } from '#lib/server/Repository.ts';
 import { assets, patches, timelines } from '#lib/server/Tables.ts';
@@ -24,15 +25,21 @@ export interface RecipeProject {
 	programs: { id: string; name: string; timeline: unknown }[];
 }
 
-export const RECIPES: RecipeEntry[] = index;
+export const RECIPES: RecipeEntry[] = [...pieces, ...recipes];
+// The pieces' group comes first, as the examples that are music rather than a technique, and then the rest by name.
+export const GROUPS = [...new Set([...pieces.map((p) => p.group), ...recipes.map((r) => r.group).sort()])];
 
 // Loaded one at a time, because the ones with recordings are large and a page needs only one.
-const files = import.meta.glob<{ default: RecipeProject }>('../../../../examples/Recipes/*.json');
+const files = import.meta.glob<{ default: RecipeProject }>([
+	'../../../../examples/Pieces/*.json',
+	'../../../../examples/Recipes/*.json'
+]);
+const folder = (entry: RecipeEntry) => (pieces.includes(entry) ? 'Pieces' : 'Recipes');
 
 export async function readRecipe(name: string): Promise<RecipeProject | null> {
 	const entry = RECIPES.find((recipe) => recipe.name === name);
 	if (!entry) return null;
-	const file = Object.keys(files).find((path) => path.endsWith(`/${entry.file}`));
+	const file = Object.keys(files).find((path) => path.endsWith(`/${folder(entry)}/${entry.file}`));
 	return file ? (await files[file]()).default : null;
 }
 

@@ -21,6 +21,13 @@
   "listen_for": "An organ chord that starts round and hollow, then turns bright and full as upper drawbars are pulled out."
  },
  {
+  "name": "FrenchHorn",
+  "file": "FrenchHorn.json",
+  "seconds": 6.5,
+  "group": "combinations",
+  "listen_for": "A slow, round horn call that slides between legato notes, with a soft swell on each attack and no vibrato."
+ },
+ {
   "name": "PhaseModElectricPiano",
   "file": "PhaseModElectricPiano.json",
   "seconds": 3.85,
@@ -33,6 +40,13 @@
   "seconds": 3.0,
   "group": "combinations",
   "listen_for": "Metallic, clangorous notes where the partials are sums and differences of two tones, not a scale of harmonics."
+ },
+ {
+  "name": "Trumpet",
+  "file": "Trumpet.json",
+  "seconds": 4.5,
+  "group": "combinations",
+  "listen_for": "A bright fanfare whose notes scoop up to pitch and open out as they get louder, with vibrato arriving late on the long notes."
  },
  {
   "name": "Clap",

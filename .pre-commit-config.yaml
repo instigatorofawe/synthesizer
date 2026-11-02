@@ -27,3 +27,18 @@ repos:
     rev: v1.7.12
     hooks:
       - id: actionlint
+
+  # The web app formats and lints with its own tools at the versions its lockfile pins, so run `pnpm install` in web/ first.
+  # Paths arrive from the repository root and the tools run in web/, so each loses its leading `web/`.
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier (web)
+        language: system
+        entry: bash -c 'cd web && exec pnpm exec prettier --write --ignore-unknown "${@#web/}"' --
+        files: ^web/
+      - id: eslint
+        name: eslint (web)
+        language: system
+        entry: bash -c 'cd web && exec pnpm exec eslint --fix --max-warnings 0 --no-warn-ignored "${@#web/}"' --
+        files: ^web/.*\.(js|ts|svelte)$

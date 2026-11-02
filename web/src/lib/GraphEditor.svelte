@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import {
 		addNode,
 		addZone,
@@ -44,6 +44,8 @@
 		probes,
 		maxProbes,
 		readonly = false,
+		active = true,
+		side,
 		onchange,
 		onprobes
 	}: {
@@ -58,6 +60,8 @@
 		probes: Probe[];
 		maxProbes: number;
 		readonly?: boolean; // For looking at: a node can be chosen and probed, and nothing changes
+		active?: boolean; // Whether keys are for this editor, when it shares a page with others
+		side?: Snippet; // Drawn above the inspector
 		onchange: (graph: Graph) => void;
 		onprobes: (probes: Probe[]) => void;
 	} = $props();
@@ -70,6 +74,7 @@
 
 	let svg: SVGSVGElement;
 	let view = $state({ x: -30, y: -30, width: 1000, height: 560 });
+	let aspect = 0.56; // Of the canvas on screen, height over width, so the view fills it without bars
 	let selected = $state<number | null>(null);
 	let gesture = $state<Gesture | null>(null);
 	let adding = $state('osc');
@@ -121,7 +126,10 @@
 
 	function inputPoint(node: GraphNode, input: string): Point {
 		const at = positionOf(node);
-		const index = Math.max(0, inputsOf(node, catalog, library).findIndex((candidate) => candidate.name === input));
+		const index = Math.max(
+			0,
+			inputsOf(node, catalog, library).findIndex((candidate) => candidate.name === input)
+		);
 		return { x: at.x, y: at.y + inputY(index) };
 	}
 
@@ -227,12 +235,17 @@
 		const top = Math.min(...laid.nodes.map((node) => node.y as number));
 		const right = Math.max(...laid.nodes.map((node) => (node.x as number) + NODE_WIDTH));
 		const bottom = Math.max(...laid.nodes.map((node) => (node.y as number) + nodeHeight(node, catalog, library)));
-		const scale = Math.max((right - left + 80) / 1000, (bottom - top + 80) / 560, 0.5);
-		view = { x: left - 40, y: top - 40, width: 1000 * scale, height: 560 * scale };
+		const width = Math.max(right - left + 80, (bottom - top + 80) / aspect, 500);
+		view = { x: left - 40, y: top - 40, width, height: width * aspect };
 	}
 
 	function add() {
-		const { graph: next, id } = addNode(laid, adding as GraphNode['type'], Math.round(view.x + 60), Math.round(view.y + 60));
+		const { graph: next, id } = addNode(
+			laid,
+			adding as GraphNode['type'],
+			Math.round(view.x + 60),
+			Math.round(view.y + 60)
+		);
 		commit(adding === 'subpatch' && others[0] ? setOption(next, id, 'patch', others[0].id, catalog, library) : next);
 		selected = id;
 	}
@@ -248,7 +261,7 @@
 
 	function keydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
-		if (readonly || target.closest('input, textarea, select')) return;
+		if (readonly || !active || target.closest('input, textarea, select')) return;
 		if ((event.key === 'Delete' || event.key === 'Backspace') && selected !== null) {
 			event.preventDefault();
 			removeSelected();
@@ -308,314 +321,445 @@
 	// Twice the drawn size is about as small as a node can be and still be read.
 	const READABLE_WIDTH = 2000;
 
+	// The canvas takes whatever room its panel has. The view keeps its width and takes the canvas's shape, so a panel dragged
+	// taller shows more below rather than zooming.
+	function measure() {
+		if (!svg?.clientWidth || !svg.clientHeight) return;
+		aspect = svg.clientHeight / svg.clientWidth;
+		view = { ...view, height: view.width * aspect };
+	}
+
 	$effect(() => {
 		// The first view of a graph is all of it, if that can be read, and otherwise where its signals start. Only once, or each
 		// edit would move the canvas.
 		untrack(() => {
+			measure();
 			fit();
-			if (view.width > READABLE_WIDTH) view = { ...view, width: READABLE_WIDTH, height: (READABLE_WIDTH * 560) / 1000 };
+			if (view.width > READABLE_WIDTH) view = { ...view, width: READABLE_WIDTH, height: READABLE_WIDTH * aspect };
 		});
+		const observer = new ResizeObserver(measure);
+		observer.observe(svg);
+		return () => observer.disconnect();
 	});
 </script>
 
 <svelte:window onkeydown={keydown} onpointerup={pointerUp} />
 
-<div class="toolbar">
-	{#if !readonly}
-		<select bind:value={adding} aria-label="Node type">
-			{#each types as type}<option value={type}>{type}</option>{/each}
-		</select>
-		<button type="button" onclick={add}>Add node</button>
-		<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
-		<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
-	{/if}
-	<button type="button" onclick={fit}>Fit</button>
-	<span class="muted">
-		{readonly ? 'Drag the background to move around, and scroll to zoom.' : 'Drag from an output to an input to wire them.'}
-		Green wires are audio, blue are read once a frame.
-	</span>
-</div>
-
-<div class="editor">
-	<svg
-		bind:this={svg}
-		viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
-		role="application"
-		aria-label="Patch graph"
-		data-testid="graph"
-		onpointerdown={startPan}
-		onpointermove={pointerMove}
-		onwheel={zoom}
-	>
-		{#each wires as wire (wire.key)}
-			<path class={`wire ${wire.rate}`} d={wire.path} data-testid={`wire-${wire.to}-${wire.input}`} />
-		{/each}
-		{#if gesture?.kind === 'wire'}
-			<path class="wire drawing" d={curve(gesture.start, gesture.at)} />
+<div class="grapheditor">
+	<div class="toolbar">
+		{#if !readonly}
+			<select bind:value={adding} aria-label="Node type">
+				{#each types as type (type)}<option value={type}>{type}</option>{/each}
+			</select>
+			<button type="button" onclick={add}>Add node</button>
+			<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
+			<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
 		{/if}
-		{#each laid.nodes as node (node.id)}
-			{@const at = positionOf(node)}
-			{@const height = nodeHeight(node, catalog, library)}
-			{@const problem = errors.get(node.id)}
-			{@const dead = !failed && nodes !== undefined && !nodes[node.id]}
-			<g
-				class="node"
-				class:chosen={node.id === selected}
-				class:dead
-				class:problem={problem !== undefined}
-				transform={`translate(${at.x} ${at.y})`}
-				data-testid={`node-${node.id}`}
-				data-error={problem !== undefined}
-				data-dead={dead}
-			>
-				<rect class="body" width={NODE_WIDTH} {height} rx="5" role="presentation" onpointerdown={(event) => startMove(event, node)} />
-				<rect
-					class="title"
-					width={NODE_WIDTH}
-					height={NODE_HEADER - 4}
-					rx="5"
-					role="button"
-					tabindex="0"
-					aria-label={`${node.type} ${node.id}`}
-					onpointerdown={(event) => startMove(event, node)}
-					onkeydown={(event) => {
-						if (event.key === 'Enter') selected = node.id;
-					}}
-				/>
-				<text class="heading" x="8" y="16">{node.type} <tspan class="detail">{detailOf(node, laid, library)}</tspan></text>
-				{#each inputsOf(node, catalog, library) as input, index (input.name)}
-					<circle
-						class="port"
-						class:wired={edgeInto(laid, node.id, input.name) !== undefined}
-						cx="0"
-						cy={inputY(index)}
-						r="6"
-						role="button"
-						tabindex="-1"
-						aria-label={`${node.id} input ${input.name}`}
-						data-testid={`in-${node.id}-${input.name}`}
-						onpointerup={(event) => finishWire(event, node, input.name)}
-					/>
-					<text class="label" x="11" y={inputY(index) + 4}>{input.name}</text>
-				{/each}
-				{#each outputsOf(node, catalog, library) as port, index (port)}
-					<circle
-						class="port output"
-						class:probed={probed(node.id, port)}
-						cx={NODE_WIDTH}
-						cy={inputY(index)}
-						r="6"
-						role="button"
-						tabindex="-1"
-						aria-label={`${node.id} output ${port}`}
-						data-testid={`out-${node.id}-${port}`}
-						onpointerdown={(event) => startWire(event, node, port)}
-					/>
-					<text class="label end" x={NODE_WIDTH - 11} y={inputY(index) + 4}>{port}</text>
-				{/each}
-				{#if problem}
-					<title>{problem}</title>
-					<text class="message" x="0" y={height + 13}>{problem.length > 44 ? `${problem.slice(0, 43)}…` : problem}</text>
-				{/if}
-			</g>
-		{/each}
-	</svg>
+		<button type="button" onclick={fit}>Fit</button>
+		<span class="muted">
+			{readonly
+				? 'Drag the background to move around, and scroll to zoom.'
+				: 'Drag from an output to an input to wire them.'}
+			Green wires are audio, blue are read once a frame.
+		</span>
+	</div>
 
-	<aside class="inspector">
-		{#if chosen}
-			<h3>{chosen.id} {chosen.type}</h3>
-			{#if errors.get(chosen.id)}<p class="problem" data-testid="node-error">{errors.get(chosen.id)}</p>{/if}
-			<fieldset class="bare" disabled={readonly}>
-			{#if chosen.type === 'shape'}
-				<label>
-					curve
-					<input
-						aria-label="curve"
-						value={Array.isArray(chosen.curve) ? chosen.curve.join(', ') : ''}
-						placeholder="-1, 0, 1"
-						onchange={(e) =>
-							commit(setOption(laid, chosen.id, 'curve', parseCurve(e.currentTarget.value) as never, catalog, library))}
+	<div class="editor">
+		<svg
+			bind:this={svg}
+			viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+			role="application"
+			aria-label="Patch graph"
+			data-testid="graph"
+			onpointerdown={startPan}
+			onpointermove={pointerMove}
+			onwheel={zoom}
+		>
+			{#each wires as wire (wire.key)}
+				<path class={`wire ${wire.rate}`} d={wire.path} data-testid={`wire-${wire.to}-${wire.input}`} />
+			{/each}
+			{#if gesture?.kind === 'wire'}
+				<path class="wire drawing" d={curve(gesture.start, gesture.at)} />
+			{/if}
+			{#each laid.nodes as node (node.id)}
+				{@const at = positionOf(node)}
+				{@const height = nodeHeight(node, catalog, library)}
+				{@const problem = errors.get(node.id)}
+				{@const dead = !failed && nodes !== undefined && !nodes[node.id]}
+				<g
+					class="node"
+					class:chosen={node.id === selected}
+					class:dead
+					class:problem={problem !== undefined}
+					transform={`translate(${at.x} ${at.y})`}
+					data-testid={`node-${node.id}`}
+					data-error={problem !== undefined}
+					data-dead={dead}
+				>
+					<rect
+						class="body"
+						width={NODE_WIDTH}
+						{height}
+						rx="5"
+						role="presentation"
+						onpointerdown={(event) => startMove(event, node)}
 					/>
-				</label>
-			{/if}
-			{#if chosen.type === 'sample' && chosen.mode === 'zones'}
-				<h4>Zones</h4>
-				{#each zonesOf(chosen) as zone, index}
-					{@const keys = zone.keys ?? [0, 127]}
-					{@const velocities = zone.velocities ?? [0, 127]}
-					<div class="zone" data-testid={`zone-${index}`}>
-						<select aria-label={`Zone ${index + 1} asset`} value={zone.asset} onchange={(e) => commit(setZone(laid, chosen.id, index, { asset: e.currentTarget.value }))}>
-							{#each assets as asset}<option value={asset.id}>{asset.name}</option>{/each}
-						</select>
-						<label>
-							keys
-							<input type="number" min="0" max="127" aria-label={`Zone ${index + 1} lowest key`} value={keys[0]} onchange={(e) => commit(setZone(laid, chosen.id, index, { keys: [Number(e.currentTarget.value), keys[1]] }))} />
-							<input type="number" min="0" max="127" aria-label={`Zone ${index + 1} highest key`} value={keys[1]} onchange={(e) => commit(setZone(laid, chosen.id, index, { keys: [keys[0], Number(e.currentTarget.value)] }))} />
-						</label>
-						<label>
-							velocity
-							<input type="number" min="0" max="127" aria-label={`Zone ${index + 1} lowest velocity`} value={velocities[0]} onchange={(e) => commit(setZone(laid, chosen.id, index, { velocities: [Number(e.currentTarget.value), velocities[1]] }))} />
-							<input type="number" min="0" max="127" aria-label={`Zone ${index + 1} highest velocity`} value={velocities[1]} onchange={(e) => commit(setZone(laid, chosen.id, index, { velocities: [velocities[0], Number(e.currentTarget.value)] }))} />
-						</label>
-						<label>
-							root
-							<input type="number" min="0" max="127" step="any" placeholder="asset's" aria-label={`Zone ${index + 1} root`} value={zone.root ?? ''} onchange={(e) => commit(setZone(laid, chosen.id, index, { root: e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value) }))} />
-						</label>
-						{#if !readonly}
-							<button type="button" onclick={() => commit(removeZone(laid, chosen.id, index))}>Remove zone</button>
-						{/if}
-					</div>
-				{/each}
-				{#if !readonly && assets.length}
-					<button type="button" onclick={() => commit(addZone(laid, chosen.id, assets[0].id))}>Add zone</button>
-				{/if}
-				<label>
-					reverse
-					<input type="checkbox" aria-label="reverse" checked={chosen.reverse === true} onchange={(e) => commit(setField(laid, chosen.id, 'reverse', e.currentTarget.checked || undefined))} />
-				</label>
-				<label>
-					tail
-					<input type="checkbox" aria-label="tail" checked={chosen.tail === true} onchange={(e) => commit(setField(laid, chosen.id, 'tail', e.currentTarget.checked || undefined))} />
-				</label>
-			{/if}
-			{#each optionsOf(chosen, catalog).filter((option) => !(chosen.mode === 'zones' && option.name === 'asset')) as option (option.name)}
-				<label>
-					{option.name}
-					{#if option.choices.length}
-						<select
-							aria-label={option.name}
-							value={chosen[option.name] ?? ''}
-							onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, false)}
+					<rect
+						class="title"
+						width={NODE_WIDTH}
+						height={NODE_HEADER - 4}
+						rx="5"
+						role="button"
+						tabindex="0"
+						aria-label={`${node.type} ${node.id}`}
+						onpointerdown={(event) => startMove(event, node)}
+						onkeydown={(event) => {
+							if (event.key === 'Enter') selected = node.id;
+						}}
+					/>
+					<text class="heading" x="8" y="16"
+						>{node.type} <tspan class="detail">{detailOf(node, laid, library)}</tspan></text
+					>
+					{#each inputsOf(node, catalog, library) as input, index (input.name)}
+						<circle
+							class="port"
+							class:wired={edgeInto(laid, node.id, input.name) !== undefined}
+							cx="0"
+							cy={inputY(index)}
+							r="6"
+							role="button"
+							tabindex="-1"
+							aria-label={`${node.id} input ${input.name}`}
+							data-testid={`in-${node.id}-${input.name}`}
+							onpointerup={(event) => finishWire(event, node, input.name)}
+						/>
+						<text class="label" x="11" y={inputY(index) + 4}>{input.name}</text>
+					{/each}
+					{#each outputsOf(node, catalog, library) as port, index (port)}
+						<circle
+							class="port output"
+							class:probed={probed(node.id, port)}
+							cx={NODE_WIDTH}
+							cy={inputY(index)}
+							r="6"
+							role="button"
+							tabindex="-1"
+							aria-label={`${node.id} output ${port}`}
+							data-testid={`out-${node.id}-${port}`}
+							onpointerdown={(event) => startWire(event, node, port)}
+						/>
+						<text class="label end" x={NODE_WIDTH - 11} y={inputY(index) + 4}>{port}</text>
+					{/each}
+					{#if problem}
+						<title>{problem}</title>
+						<text class="message" x="0" y={height + 13}
+							>{problem.length > 44 ? `${problem.slice(0, 43)}…` : problem}</text
 						>
-							<option value="">default</option>
-							{#each option.choices as choice}<option value={choice}>{choice}</option>{/each}
-						</select>
-					{:else if option.name === 'patch'}
-						<select aria-label="patch" value={chosen.patch ?? ''} onchange={(e) => optionChanged(chosen, 'patch', e.currentTarget.value, false)}>
-							<option value="">none</option>
-							{#each others as patch}<option value={patch.id}>{patch.name}</option>{/each}
-						</select>
-					{:else if option.name === 'asset'}
-						<select aria-label="asset" value={chosen.asset ?? ''} onchange={(e) => optionChanged(chosen, 'asset', e.currentTarget.value, false)}>
-							<option value="">none</option>
-							{#each assets as asset}<option value={asset.id}>{asset.name}</option>{/each}
-						</select>
-					{:else if option.name === 'param'}
-						<select aria-label="param" value={chosen.param ?? ''} onchange={(e) => optionChanged(chosen, 'param', e.currentTarget.value, true)}>
-							<option value="">none</option>
-							{#each laid.params as param}<option value={param.id}>{param.name || `param ${param.id}`}</option>{/each}
-						</select>
-					{:else}
-						<input
-							aria-label={option.name}
-							type={option.number ? 'number' : 'text'}
-							step="any"
-							value={chosen[option.name] ?? ''}
-							onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, option.number)}
-						/>
 					{/if}
-				</label>
+				</g>
 			{/each}
-			{#if inputsOf(chosen, catalog, library).length}<h4>Inputs</h4>{/if}
-			{#each inputsOf(chosen, catalog, library) as input (input.name)}
-				<div class="input">
-					<span>{input.name}</span>
-					<select
-						aria-label={`source of ${input.name}`}
-						value={sourceOf(chosen, input.name)}
-						onchange={(e) => sourceChanged(chosen, input.name, e.currentTarget.value)}
-					>
-						<option value="">value</option>
-						{#each laid.nodes as source (source.id)}
-							{#each outputsOf(source, catalog, library) as port}
-								<option value={`${source.id}:${port}`}>{source.id} {source.type}.{port}</option>
-							{/each}
-						{/each}
-					</select>
-					{#if !edgeInto(laid, chosen.id, input.name)}
-						<input
-							type="number"
-							step="any"
-							aria-label={`value of ${input.name}`}
-							placeholder={String(input.default)}
-							value={chosen.inputs?.[input.name] ?? ''}
-							onchange={(e) => literalChanged(chosen, input.name, e.currentTarget.value)}
-						/>
-					{/if}
-				</div>
-			{/each}
-			</fieldset>
-			{#if outputsOf(chosen, catalog, library).length}<h4>Outputs</h4>{/if}
-			{#each outputsOf(chosen, catalog, library) as port (port)}
-				<div class="input">
-					<span>{port}</span>
-					<span class="muted">{nodes?.[chosen.id]?.ports[port]?.rate ?? ''}</span>
-					<button
-						type="button"
-						disabled={!probed(chosen.id, port) &&
-							(probes.length >= maxProbes || nodes?.[chosen.id]?.ports[port]?.operand === undefined)}
-						onclick={() => toggleProbe(chosen, port)}
-					>
-						{probed(chosen.id, port) ? `Stop probing ${port}` : `Probe ${port}`}
-					</button>
-				</div>
-			{/each}
-			{#if !readonly}<button type="button" onclick={removeSelected}>Delete node</button>{/if}
-		{:else}
-			<h3>Parameters</h3>
-			{#each laid.params as param, index (param.id)}
-				<fieldset disabled={readonly}>
-					<legend>{param.id}</legend>
-					{#each paramFields as field}
+		</svg>
+
+		<aside class="inspector">
+			{@render side?.()}
+			{#if chosen}
+				<h3>{chosen.id} {chosen.type}</h3>
+				{#if errors.get(chosen.id)}<p class="problem" data-testid="node-error">{errors.get(chosen.id)}</p>{/if}
+				<fieldset class="bare" disabled={readonly}>
+					{#if chosen.type === 'shape'}
 						<label>
-							{field}
+							curve
 							<input
-								type={field === 'name' ? 'text' : 'number'}
-								step="any"
-								aria-label={`param ${param.id} ${field}`}
-								value={param[field]}
+								aria-label="curve"
+								value={Array.isArray(chosen.curve) ? chosen.curve.join(', ') : ''}
+								placeholder="-1, 0, 1"
 								onchange={(e) =>
-									changeParam(index, { [field]: field === 'name' ? e.currentTarget.value : Number(e.currentTarget.value) })}
+									commit(
+										setOption(laid, chosen.id, 'curve', parseCurve(e.currentTarget.value) as never, catalog, library)
+									)}
 							/>
 						</label>
-					{/each}
-					<label>
-						scope
-						<select value={param.scope} onchange={(e) => changeParam(index, { scope: e.currentTarget.value as Param['scope'] })}>
-							<option value="voice">voice</option>
-							<option value="track">track</option>
-							<option value="global">global</option>
-						</select>
-					</label>
-					{#if !readonly}
-						<button type="button" onclick={() => commit({ ...laid, params: laid.params.filter((_, i) => i !== index) })}>
-							Remove
-						</button>
 					{/if}
+					{#if chosen.type === 'sample' && chosen.mode === 'zones'}
+						<h4>Zones</h4>
+						{#each zonesOf(chosen) as zone, index (index)}
+							{@const keys = zone.keys ?? [0, 127]}
+							{@const velocities = zone.velocities ?? [0, 127]}
+							<div class="zone" data-testid={`zone-${index}`}>
+								<select
+									aria-label={`Zone ${index + 1} asset`}
+									value={zone.asset}
+									onchange={(e) => commit(setZone(laid, chosen.id, index, { asset: e.currentTarget.value }))}
+								>
+									{#each assets as asset (asset.id)}<option value={asset.id}>{asset.name}</option>{/each}
+								</select>
+								<label>
+									keys
+									<input
+										type="number"
+										min="0"
+										max="127"
+										aria-label={`Zone ${index + 1} lowest key`}
+										value={keys[0]}
+										onchange={(e) =>
+											commit(setZone(laid, chosen.id, index, { keys: [Number(e.currentTarget.value), keys[1]] }))}
+									/>
+									<input
+										type="number"
+										min="0"
+										max="127"
+										aria-label={`Zone ${index + 1} highest key`}
+										value={keys[1]}
+										onchange={(e) =>
+											commit(setZone(laid, chosen.id, index, { keys: [keys[0], Number(e.currentTarget.value)] }))}
+									/>
+								</label>
+								<label>
+									velocity
+									<input
+										type="number"
+										min="0"
+										max="127"
+										aria-label={`Zone ${index + 1} lowest velocity`}
+										value={velocities[0]}
+										onchange={(e) =>
+											commit(
+												setZone(laid, chosen.id, index, { velocities: [Number(e.currentTarget.value), velocities[1]] })
+											)}
+									/>
+									<input
+										type="number"
+										min="0"
+										max="127"
+										aria-label={`Zone ${index + 1} highest velocity`}
+										value={velocities[1]}
+										onchange={(e) =>
+											commit(
+												setZone(laid, chosen.id, index, { velocities: [velocities[0], Number(e.currentTarget.value)] })
+											)}
+									/>
+								</label>
+								<label>
+									root
+									<input
+										type="number"
+										min="0"
+										max="127"
+										step="any"
+										placeholder="asset's"
+										aria-label={`Zone ${index + 1} root`}
+										value={zone.root ?? ''}
+										onchange={(e) =>
+											commit(
+												setZone(laid, chosen.id, index, {
+													root: e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value)
+												})
+											)}
+									/>
+								</label>
+								{#if !readonly}
+									<button type="button" onclick={() => commit(removeZone(laid, chosen.id, index))}>Remove zone</button>
+								{/if}
+							</div>
+						{/each}
+						{#if !readonly && assets.length}
+							<button type="button" onclick={() => commit(addZone(laid, chosen.id, assets[0].id))}>Add zone</button>
+						{/if}
+						<label>
+							reverse
+							<input
+								type="checkbox"
+								aria-label="reverse"
+								checked={chosen.reverse === true}
+								onchange={(e) => commit(setField(laid, chosen.id, 'reverse', e.currentTarget.checked || undefined))}
+							/>
+						</label>
+						<label>
+							tail
+							<input
+								type="checkbox"
+								aria-label="tail"
+								checked={chosen.tail === true}
+								onchange={(e) => commit(setField(laid, chosen.id, 'tail', e.currentTarget.checked || undefined))}
+							/>
+						</label>
+					{/if}
+					{#each optionsOf(chosen, catalog).filter((option) => !(chosen.mode === 'zones' && option.name === 'asset')) as option (option.name)}
+						<label>
+							{option.name}
+							{#if option.choices.length}
+								<select
+									aria-label={option.name}
+									value={chosen[option.name] ?? ''}
+									onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, false)}
+								>
+									<option value="">default</option>
+									{#each option.choices as choice (choice)}<option value={choice}>{choice}</option>{/each}
+								</select>
+							{:else if option.name === 'patch'}
+								<select
+									aria-label="patch"
+									value={chosen.patch ?? ''}
+									onchange={(e) => optionChanged(chosen, 'patch', e.currentTarget.value, false)}
+								>
+									<option value="">none</option>
+									{#each others as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
+								</select>
+							{:else if option.name === 'asset'}
+								<select
+									aria-label="asset"
+									value={chosen.asset ?? ''}
+									onchange={(e) => optionChanged(chosen, 'asset', e.currentTarget.value, false)}
+								>
+									<option value="">none</option>
+									{#each assets as asset (asset.id)}<option value={asset.id}>{asset.name}</option>{/each}
+								</select>
+							{:else if option.name === 'param'}
+								<select
+									aria-label="param"
+									value={chosen.param ?? ''}
+									onchange={(e) => optionChanged(chosen, 'param', e.currentTarget.value, true)}
+								>
+									<option value="">none</option>
+									{#each laid.params as param (param.id)}<option value={param.id}
+											>{param.name || `param ${param.id}`}</option
+										>{/each}
+								</select>
+							{:else}
+								<input
+									aria-label={option.name}
+									type={option.number ? 'number' : 'text'}
+									step="any"
+									value={chosen[option.name] ?? ''}
+									onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, option.number)}
+								/>
+							{/if}
+						</label>
+					{/each}
+					{#if inputsOf(chosen, catalog, library).length}<h4>Inputs</h4>{/if}
+					{#each inputsOf(chosen, catalog, library) as input (input.name)}
+						<div class="input">
+							<span>{input.name}</span>
+							<select
+								aria-label={`source of ${input.name}`}
+								value={sourceOf(chosen, input.name)}
+								onchange={(e) => sourceChanged(chosen, input.name, e.currentTarget.value)}
+							>
+								<option value="">value</option>
+								{#each laid.nodes as source (source.id)}
+									{#each outputsOf(source, catalog, library) as port (port)}
+										<option value={`${source.id}:${port}`}>{source.id} {source.type}.{port}</option>
+									{/each}
+								{/each}
+							</select>
+							{#if !edgeInto(laid, chosen.id, input.name)}
+								<input
+									type="number"
+									step="any"
+									aria-label={`value of ${input.name}`}
+									placeholder={String(input.default)}
+									value={chosen.inputs?.[input.name] ?? ''}
+									onchange={(e) => literalChanged(chosen, input.name, e.currentTarget.value)}
+								/>
+							{/if}
+						</div>
+					{/each}
 				</fieldset>
-			{/each}
-			{#if !readonly}<button type="button" onclick={addParam}>Add parameter</button>{/if}
-			<p class="muted">Select a node to {readonly ? 'see how it is set up' : 'change it'}.</p>
-		{/if}
-	</aside>
+				{#if outputsOf(chosen, catalog, library).length}<h4>Outputs</h4>{/if}
+				{#each outputsOf(chosen, catalog, library) as port (port)}
+					<div class="input">
+						<span>{port}</span>
+						<span class="muted">{nodes?.[chosen.id]?.ports[port]?.rate ?? ''}</span>
+						<button
+							type="button"
+							disabled={!probed(chosen.id, port) &&
+								(probes.length >= maxProbes || nodes?.[chosen.id]?.ports[port]?.operand === undefined)}
+							onclick={() => toggleProbe(chosen, port)}
+						>
+							{probed(chosen.id, port) ? `Stop probing ${port}` : `Probe ${port}`}
+						</button>
+					</div>
+				{/each}
+				{#if !readonly}<button type="button" onclick={removeSelected}>Delete node</button>{/if}
+			{:else}
+				<h3>Parameters</h3>
+				{#each laid.params as param, index (param.id)}
+					<fieldset disabled={readonly}>
+						<legend>{param.id}</legend>
+						{#each paramFields as field (field)}
+							<label>
+								{field}
+								<input
+									type={field === 'name' ? 'text' : 'number'}
+									step="any"
+									aria-label={`param ${param.id} ${field}`}
+									value={param[field]}
+									onchange={(e) =>
+										changeParam(index, {
+											[field]: field === 'name' ? e.currentTarget.value : Number(e.currentTarget.value)
+										})}
+								/>
+							</label>
+						{/each}
+						<label>
+							scope
+							<select
+								value={param.scope}
+								onchange={(e) => changeParam(index, { scope: e.currentTarget.value as Param['scope'] })}
+							>
+								<option value="voice">voice</option>
+								<option value="track">track</option>
+								<option value="global">global</option>
+							</select>
+						</label>
+						{#if !readonly}
+							<button
+								type="button"
+								onclick={() => commit({ ...laid, params: laid.params.filter((_, i) => i !== index) })}
+							>
+								Remove
+							</button>
+						{/if}
+					</fieldset>
+				{/each}
+				{#if !readonly}<button type="button" onclick={addParam}>Add parameter</button>{/if}
+				<p class="muted">Select a node to {readonly ? 'see how it is set up' : 'change it'}.</p>
+			{/if}
+		</aside>
+	</div>
 </div>
 
 <style>
+	.grapheditor {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 0;
+	}
 	.toolbar {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		margin-bottom: 0.4rem;
+		padding: 0.25rem 0;
 		flex-wrap: wrap;
+		font-size: 0.8rem;
+	}
+	.toolbar button,
+	.toolbar select {
+		padding: 0.1rem 0.5rem;
 	}
 	.editor {
+		flex: 1;
+		min-height: 0;
 		display: grid;
-		grid-template-columns: 1fr 260px;
+		grid-template-columns: minmax(0, 1fr) 260px;
 		gap: 0.5rem;
 	}
 	svg {
+		display: block;
 		width: 100%;
-		height: 560px;
+		height: 100%;
+		min-height: 0;
 		background: #0d1117;
 		border: 1px solid var(--line);
 		border-radius: 6px;
@@ -697,7 +841,7 @@
 		border: 1px solid var(--line);
 		border-radius: 6px;
 		padding: 0.6rem;
-		max-height: 540px;
+		min-height: 0;
 		overflow: auto;
 		font-size: 0.85rem;
 	}

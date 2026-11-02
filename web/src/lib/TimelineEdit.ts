@@ -128,19 +128,29 @@ export function mixWrites(
 	const onMaster = key === MASTER;
 	for (const reported of program.tracks) {
 		if (onMaster || trackKey(reported.id as number) === key) {
-			add(doc.tracks.find((t) => t.id === reported.id), reported.mix, onMaster ? MASTER : null);
+			add(
+				doc.tracks.find((t) => t.id === reported.id),
+				reported.mix,
+				onMaster ? MASTER : null
+			);
 		}
 	}
 	for (const reported of program.buses) {
 		if (onMaster || busKey(String(reported.id)) === key) {
-			add(doc.buses.find((b) => b.id === reported.id), reported.mix, onMaster ? MASTER : null);
+			add(
+				doc.buses.find((b) => b.id === reported.id),
+				reported.mix,
+				onMaster ? MASTER : null
+			);
 		}
 	}
 	return writes;
 }
 
 export function addSend(doc: Timeline, key: ChainKey, bus: string): Timeline {
-	return mapChain(doc, key, (chain) => ('sends' in chain ? { ...chain, sends: [...chain.sends, { bus, gain: 0.5 }] } : chain));
+	return mapChain(doc, key, (chain) =>
+		'sends' in chain ? { ...chain, sends: [...chain.sends, { bus, gain: 0.5 }] } : chain
+	);
 }
 
 export function setSend(doc: Timeline, key: ChainKey, index: number, change: Partial<Send>): Timeline {
@@ -167,11 +177,14 @@ export function removeSend(doc: Timeline, key: ChainKey, index: number): Timelin
 	const named = key.startsWith('bus:') ? { bus: key.slice(4) } : { track: Number(key.slice(6)) };
 	return dropLanes(next, (target) => {
 		if (!('mix' in target) || target.mix !== 'send' || target.to !== gone) return false;
-		return 'bus' in named ? 'bus' in target && target.bus === named.bus : 'track' in target && target.track === named.track;
+		return 'bus' in named
+			? 'bus' in target && target.bus === named.bus
+			: 'track' in target && target.track === named.track;
 	});
 }
 
-const insertIds = (doc: Timeline) => eachChain(doc).flatMap((c) => c.inserts.flatMap((i) => (i.id === undefined ? [] : [i.id])));
+const insertIds = (doc: Timeline) =>
+	eachChain(doc).flatMap((c) => c.inserts.flatMap((i) => (i.id === undefined ? [] : [i.id])));
 
 export function addInsert(doc: Timeline, key: ChainKey, patch: string): Timeline {
 	const id = Math.max(0, ...insertIds(doc)) + 1;
@@ -390,7 +403,12 @@ export function movePlacement(doc: Timeline, track: number, index: number, toTra
 	});
 }
 
-export function setPlacement(doc: Timeline, track: number, index: number, change: Partial<Track['placements'][number]>) {
+export function setPlacement(
+	doc: Timeline,
+	track: number,
+	index: number,
+	change: Partial<Track['placements'][number]>
+) {
 	return mapPlacements(doc, (t) =>
 		t.id === track ? inOrder(t.placements.map((p, i) => (i === index ? { ...p, ...change } : p))) : t.placements
 	);
@@ -648,7 +666,10 @@ export function settlingWrites(doc: Timeline, program: ReportedProgram, patches:
 	const placed = (track: Track) => track.placements.flatMap((p) => clipOf(doc, p.clip)?.automation ?? []);
 	const lanes = doc.tracks.flatMap(placed);
 	const moved = (key: ChainKey) =>
-		lanes.some(({ target: t }) => t && 'mix' in t && (('track' in t && trackKey(t.track) === key) || ('bus' in t && busKey(t.bus) === key)));
+		lanes.some(
+			({ target: t }) =>
+				t && 'mix' in t && (('track' in t && trackKey(t.track) === key) || ('bus' in t && busKey(t.bus) === key))
+		);
 	const masterMoved = lanes.some(({ target: t }) => t && 'mix' in t && 'master' in t);
 
 	const settling: Settling = { mix: [], params: [], inserts: [] };
@@ -661,7 +682,11 @@ export function settlingWrites(doc: Timeline, program: ReportedProgram, patches:
 		}
 	};
 	for (const reported of program.buses) {
-		route(doc.buses.find((b) => b.id === reported.id), busKey(String(reported.id)), reported);
+		route(
+			doc.buses.find((b) => b.id === reported.id),
+			busKey(String(reported.id)),
+			reported
+		);
 	}
 
 	const globalsDone = new Set<number>();
@@ -687,8 +712,13 @@ export function settlingWrites(doc: Timeline, program: ReportedProgram, patches:
 		const index = program.inserts.find((known) => known.id === insert.id)?.index;
 		if (index === undefined) continue;
 		for (const param of paramsOf(patches.find((p) => p.id === insert.patch))) {
-			if (lanes.some((p) => p.param === param.id && p.target && 'insert' in p.target && p.target.insert === insert.id)) continue;
-			settling.inserts.push({ insert: index, param: param.id, value: insert.params?.[String(param.id)] ?? param.default });
+			if (lanes.some((p) => p.param === param.id && p.target && 'insert' in p.target && p.target.insert === insert.id))
+				continue;
+			settling.inserts.push({
+				insert: index,
+				param: param.id,
+				value: insert.params?.[String(param.id)] ?? param.default
+			});
 		}
 	}
 	return settling;
@@ -732,9 +762,7 @@ export function removePlayChange(clip: Clip, index: number): Clip {
 // ------------------------------------------------------------------------------------------------------------ the rest
 
 // Where a patch is used in a timeline, for telling someone what they are looking at and where a probe can reach it.
-export type PatchUse =
-	| { kind: 'voice'; track: Track; slot: number }
-	| { kind: 'insert'; chain: string };
+export type PatchUse = { kind: 'voice'; track: Track; slot: number } | { kind: 'insert'; chain: string };
 
 export function patchUses(doc: Timeline, patch: string): PatchUse[] {
 	const uses: PatchUse[] = [];

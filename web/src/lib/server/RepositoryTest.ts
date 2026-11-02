@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase, type Db } from '#lib/server/Db.ts';
 import {
+	bundlesWithMembers,
 	Conflict,
 	createAsset,
 	createBundle,
@@ -12,10 +13,12 @@ import {
 	getBundle,
 	getTimeline,
 	InUse,
+	latestTimeline,
 	listPatches,
 	NotFound,
 	patchUsers,
 	saveBundle,
+	saveEdits,
 	savePatch,
 	saveTimeline,
 	snapshot
@@ -37,7 +40,14 @@ beforeEach(() => {
 });
 
 describe('subpatches', () => {
-	const part: Graph = { params: [], nodes: [{ id: 1, type: 'noise' }, { id: 2, type: 'outlet', name: 'out' }], edges: [{ from: 1, to: 2, input: 'in' }] };
+	const part: Graph = {
+		params: [],
+		nodes: [
+			{ id: 1, type: 'noise' },
+			{ id: 2, type: 'outlet', name: 'out' }
+		],
+		edges: [{ from: 1, to: 2, input: 'in' }]
+	};
 	const using = (id: string): Graph => ({
 		params: [],
 		nodes: [
@@ -70,7 +80,10 @@ describe('subpatches', () => {
 		const deepest = createPatch(db, 'Deepest', part);
 		const middle = createPatch(db, 'Middle', {
 			...part,
-			nodes: [{ id: 1, type: 'subpatch', patch: deepest }, { id: 2, type: 'outlet', name: 'out' }],
+			nodes: [
+				{ id: 1, type: 'subpatch', patch: deepest },
+				{ id: 2, type: 'outlet', name: 'out' }
+			],
 			edges: [{ from: 1, port: 'out', to: 2, input: 'in' }]
 		});
 		const outer = createPatch(db, 'Outer', using(middle));
@@ -158,6 +171,44 @@ describe('revisions', () => {
 		expect(listPatches(db)[0].name).toBe('First tab');
 	});
 
+	it('saves patches and timelines in one go, patches first, so a timeline can use what an edit added', () => {
+		const a = createPatch(db, 'A', EMPTY_GRAPH);
+		const b = createPatch(db, 'B', EMPTY_GRAPH);
+		const t = createTimeline(db, 'One', timeline([a]));
+		const revisions = saveEdits(db, {
+			timelines: [{ id: t, revision: 1, name: 'One, edited', doc: timeline([a, b]) }],
+			patches: [{ id: b, revision: 1, name: 'B, edited', graph: EMPTY_GRAPH }]
+		});
+		expect(revisions).toEqual({ [`patch:${b}`]: 2, [`timeline:${t}`]: 2 });
+		expect(getTimeline(db, t).name).toBe('One, edited');
+		expect(patchUsers(db, b).map((u) => u.name)).toEqual(['One, edited']);
+	});
+
+	it('saves none of them when one is stale', () => {
+		const a = createPatch(db, 'A', EMPTY_GRAPH);
+		const t = createTimeline(db, 'One', timeline([a]));
+		expect(() =>
+			saveEdits(db, {
+				patches: [{ id: a, revision: 1, name: 'A, edited', graph: EMPTY_GRAPH }],
+				timelines: [{ id: t, revision: 7, name: 'One, edited', doc: timeline([a]) }]
+			})
+		).toThrow(Conflict);
+		expect(listPatches(db)[0]).toMatchObject({ name: 'A', revision: 1 });
+		expect(getTimeline(db, t).name).toBe('One');
+	});
+
+	it('opens on the timeline saved last', async () => {
+		expect(latestTimeline(db)).toBeNull();
+		const p = createPatch(db, 'P', EMPTY_GRAPH);
+		const a = createTimeline(db, 'A', timeline([p]));
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		const b = createTimeline(db, 'B', timeline([p]));
+		expect(latestTimeline(db)).toBe(b);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		saveTimeline(db, a, 1, 'A', timeline([p]));
+		expect(latestTimeline(db)).toBe(a);
+	});
+
 	it('leaves the use list alone when a save is refused', () => {
 		const a = createPatch(db, 'A', EMPTY_GRAPH);
 		const b = createPatch(db, 'B', EMPTY_GRAPH);
@@ -220,6 +271,7 @@ describe('bundles', () => {
 		expect(getBundle(db, bundle).timelines.map((t) => t.name)).toEqual(['B', 'A']);
 		saveBundle(db, bundle, 1, 'Set', [a, b]);
 		expect(getBundle(db, bundle).timelines.map((t) => t.name)).toEqual(['A', 'B']);
+		expect(bundlesWithMembers(db)).toEqual([{ id: bundle, name: 'Set', revision: 2, timelines: [a, b] }]);
 	});
 
 	it('protects a timeline in a bundle until the bundle lets go', () => {
@@ -252,7 +304,12 @@ describe('exports from saved rows', () => {
 		const { report } = await compileSnapshot(snapshot(db, ['song', 'ballad']));
 		expect(report.programs.length).toBe(2);
 		expect(report.chunks.filter((c) => c.kind === 'patch').length).toBe(4);
-		expect(report.chunks.filter((c) => c.programs === 2).map((c) => c.kind).sort()).toEqual(['patch', 'patch']);
+		expect(
+			report.chunks
+				.filter((c) => c.programs === 2)
+				.map((c) => c.kind)
+				.sort()
+		).toEqual(['patch', 'patch']);
 	});
 
 	it('gives the same bytes for the same rows', async () => {

@@ -13,5 +13,10 @@ export function seedDemo(db: Db) {
 	for (const program of demo.programs) {
 		createTimeline(db, program.name, timelineSchema.parse(program.timeline), program.id);
 	}
-	createBundle(db, 'Demo set', demo.programs.map((p) => p.id), 'demo-set');
+	createBundle(
+		db,
+		'Demo set',
+		demo.programs.map((p) => p.id),
+		'demo-set'
+	);
 }

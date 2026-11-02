@@ -117,7 +117,9 @@ describe('importing an instrument', () => {
 	it('refuses what could never load in a browser', () => {
 		const frames = MOST_SAMPLE_BYTES / 2 + 1;
 		expect(() => importInstrument(freshDb(), 'Long', [one('long.wav', wavFile(frames))])).toThrow(ImportError);
-		expect(() => importInstrument(freshDb(), 'Long', [one('long.wav', wavFile(frames))])).toThrow('an image holds 15.0 MB');
+		expect(() => importInstrument(freshDb(), 'Long', [one('long.wav', wavFile(frames))])).toThrow(
+			'an image holds 15.0 MB'
+		);
 	});
 
 	it('compiles and carries every zone', async () => {

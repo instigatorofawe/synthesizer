@@ -14,7 +14,9 @@ beforeEach(() => {
 
 describe('the recipe catalogue', () => {
 	it('lists every file in examples/Recipes', () => {
-		const files = readdirSync(new URL('../../../../examples/Recipes', import.meta.url)).filter((f) => f !== 'Index.json');
+		const files = readdirSync(new URL('../../../../examples/Recipes', import.meta.url)).filter(
+			(f) => f !== 'Index.json'
+		);
 		expect(RECIPES.map((recipe) => recipe.file).sort()).toEqual(files.sort());
 	});
 

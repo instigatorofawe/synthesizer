@@ -96,11 +96,33 @@
 	<span>{label}</span>
 	{#if current}
 		<fieldset disabled={readonly}>
-			<label>tick <input type="number" min="0" aria-label={`${label} point tick`} value={current.tick} onchange={(e) => field('tick', e.currentTarget.value)} /></label>
-			<label>value <input type="number" step="any" aria-label={`${label} point value`} value={current.value} onchange={(e) => field('value', e.currentTarget.value)} /></label>
+			<label
+				>tick <input
+					type="number"
+					min="0"
+					aria-label={`${label} point tick`}
+					value={current.tick}
+					onchange={(e) => field('tick', e.currentTarget.value)}
+				/></label
+			>
+			<label
+				>value <input
+					type="number"
+					step="any"
+					aria-label={`${label} point value`}
+					value={current.value}
+					onchange={(e) => field('value', e.currentTarget.value)}
+				/></label
+			>
 			<label>
 				ramp
-				<input type="number" min="0" aria-label={`${label} point ramp`} value={current.ramp ?? 0} onchange={(e) => field('ramp', e.currentTarget.value)} />
+				<input
+					type="number"
+					min="0"
+					aria-label={`${label} point ramp`}
+					value={current.ramp ?? 0}
+					onchange={(e) => field('ramp', e.currentTarget.value)}
+				/>
 			</label>
 		</fieldset>
 	{/if}
@@ -108,7 +130,14 @@
 	{#if !readonly}<button type="button" onclick={onremove} aria-label={`Remove lane ${label}`}>Remove</button>{/if}
 </div>
 <svg bind:this={svg} {width} height={HEIGHT} role="application" aria-label={`Lane ${label}`} data-testid={testid}>
-	<rect class="ground" {width} height={HEIGHT} role="presentation" ondblclick={added} onpointerdown={() => (chosen = null)} />
+	<rect
+		class="ground"
+		{width}
+		height={HEIGHT}
+		role="presentation"
+		ondblclick={added}
+		onpointerdown={() => (chosen = null)}
+	/>
 	<polyline class="curve" points={polyline} />
 	{#each drawn as { index, point } (index)}
 		<circle

@@ -376,7 +376,7 @@ describe('the mixer', () => {
 		expect(doc.master.inserts[0].id).toBe(3);
 	});
 
-	it('forgets an old patch\'s values and lanes when an insert changes patch', () => {
+	it("forgets an old patch's values and lanes when an insert changes patch", () => {
 		const doc = song();
 		doc.tracks[0] = { ...doc.tracks[0], inserts: [{ id: 1, patch: 'duck', params: { '1': 2 } }] };
 		doc.clips[0] = addPoint(doc.clips[0], { param: 1, target: { insert: 1 } }, 0, 1);
@@ -385,7 +385,7 @@ describe('the mixer', () => {
 		expect(next.clips[0].automation).toEqual([]);
 	});
 
-	it('takes an insert\'s lanes when it goes', () => {
+	it("takes an insert's lanes when it goes", () => {
 		const doc = song();
 		doc.clips[0] = addPoint(doc.clips[0], { param: 1, target: { insert: 1 } }, 0, 1);
 		doc.clips[0] = addPoint(doc.clips[0], { param: 1 }, 0, 1);
@@ -393,9 +393,13 @@ describe('the mixer', () => {
 		expect(next.clips[0].automation.map((p) => p.target)).toEqual([undefined]);
 	});
 
-	it('takes a send\'s lane when it goes, and no other chain\'s', () => {
+	it("takes a send's lane when it goes, and no other chain's", () => {
 		const doc = addSend(song(), trackKey(2), 'room');
-		doc.clips[0] = lane(lane(doc.clips[0], { mix: 'send', track: 1, to: 'room' }), { mix: 'send', track: 2, to: 'room' });
+		doc.clips[0] = lane(lane(doc.clips[0], { mix: 'send', track: 1, to: 'room' }), {
+			mix: 'send',
+			track: 2,
+			to: 'room'
+		});
 		const next = removeSend(doc, trackKey(1), 0);
 		expect(next.tracks[0].sends).toEqual([]);
 		expect(next.clips[0].automation.map((p) => p.target)).toEqual([{ mix: 'send', track: 2, to: 'room' }]);
@@ -451,7 +455,11 @@ describe('settling after a swap', () => {
 		name: id,
 		graph: { nodes: [], edges: [], params }
 	});
-	const patches = [patch('lead', param(1, 'track'), param(9, 'global', 0.25)), patch('pluck', param(9, 'global', 0.25)), patch('duck', param(4, 'track', 0.75))];
+	const patches = [
+		patch('lead', param(1, 'track'), param(9, 'global', 0.25)),
+		patch('pluck', param(9, 'global', 0.25)),
+		patch('duck', param(4, 'track', 0.75))
+	];
 	const program = {
 		tracks: [
 			{ id: 1, index: 0, mix: [{ to: 'master', left: 0, right: 1 }] },
@@ -509,7 +517,7 @@ describe('settling after a swap', () => {
 		expect(settlingWrites(doc, program, patches).params.map((p) => p.param)).toEqual([1]);
 	});
 
-	it('leaves an insert parameter to its lane, and no other insert\'s', () => {
+	it("leaves an insert parameter to its lane, and no other insert's", () => {
 		const own = withLane(song(), { param: 4, target: { insert: 1 } });
 		expect(settlingWrites(own, program, patches).inserts).toEqual([]);
 		const other = withLane(song(), { param: 4, target: { insert: 2 } });

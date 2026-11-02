@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount, untrack, type Snippet } from 'svelte';
 	import Arrangement, { type Selection } from '#lib/Arrangement.svelte';
-	import type { AudioEngine, TapTarget } from '#lib/AudioEngine.ts';
+	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import Mixer from '#lib/Mixer.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
+	import Splitter from '#lib/Splitter.svelte';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
@@ -51,7 +52,12 @@
 		rings,
 		engine,
 		readonly = false,
-		onchange
+		active = true,
+		tabs = [],
+		heading,
+		onchange,
+		ontrack = () => {},
+		onopen = () => {}
 	}: {
 		doc: Timeline;
 		patches: PatchLike[];
@@ -60,9 +66,14 @@
 		tick: number;
 		targets: TapTarget[];
 		rings: Ring[];
-		engine: AudioEngine;
+		engine: SongControls;
 		readonly?: boolean;
+		active?: boolean; // Whether keys are for this editor, when it shares a page with others
+		tabs?: { id: string; label: string; content: Snippet }[]; // More views of the document, after the notes and the mixer
+		heading?: Snippet; // At the start of the toolbar
 		onchange: (doc: Timeline) => void;
+		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
+		onopen?: (patch: string) => void; // Someone asked to edit a patch this timeline uses
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -81,6 +92,10 @@
 	let barWidth = $state(96);
 	let loop = $state<{ start: number; end: number } | null>(null);
 	let looping = $state(false);
+	let tab = $state('notes');
+	let dragged = $state<number | null>(null); // The arrangement's height, once someone has dragged it
+	// Until then it fits its tracks, up to a size that leaves room for the notes.
+	const height = $derived(dragged ?? Math.min(270, 34 + Math.max(doc.tracks.length, 1) * 60 + 20));
 	let past: Timeline[] = [];
 	let future: Timeline[] = [];
 	let canUndo = $state(false);
@@ -90,7 +105,9 @@
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
 	const clip = $derived(doc.clips.find((c) => c.id === clipId));
 	// A clip can be placed on several tracks. What it moves and what it plays are worked out for the one it was opened from.
-	const home = $derived(placed?.clip === clipId ? track : doc.tracks.find((t) => t.placements.some((p) => p.clip === clipId)));
+	const home = $derived(
+		placed?.clip === clipId ? track : doc.tracks.find((t) => t.placements.some((p) => p.clip === clipId))
+	);
 	const reported = $derived(program?.tracks.find((t) => t.id === home?.id));
 	const uses = $derived(doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clipId).length);
 	const voicePatches = $derived(patches.filter((patch) => !patch.graph.nodes.some((node) => node.type === 'in')));
@@ -134,11 +151,22 @@
 		onchange(next);
 	}
 
+	// The page shows the chosen track's patch, so it hears about every choice of track.
+	let told = false;
+	$effect(() => {
+		const id = selection.track;
+		untrack(() => {
+			ontrack(id, !told);
+			told = true;
+		});
+	});
+
 	function select(next: Selection) {
 		selection = next;
 		if (next.placement === null) return;
 		const chosen = doc.tracks.find((t) => t.id === next.track)?.placements[next.placement];
 		if (chosen) clipId = chosen.clip;
+		tab = 'notes';
 	}
 
 	function arranged(next: Timeline, moved?: Selection) {
@@ -158,7 +186,29 @@
 		commit(next);
 		selection = { track: id, placement: placementIndex(next, id, added.id, at) };
 		clipId = added.id;
+		tab = 'notes';
 	}
+
+	const HEIGHT_KEY = 'modsynth.arrangement';
+	onMount(() => {
+		const kept = Number(localStorage.getItem(HEIGHT_KEY));
+		if (kept > 0) dragged = kept;
+	});
+
+	function resize(pixels: number) {
+		dragged = Math.max(70, Math.min(900, height + pixels));
+		localStorage.setItem(HEIGHT_KEY, String(dragged));
+	}
+
+	function unresize() {
+		dragged = null;
+		localStorage.removeItem(HEIGHT_KEY);
+	}
+
+	const ringOf = (id: number) => {
+		const target = targets.find((t) => t.chain === `track:${id}`);
+		return target ? rings[target.slot] : null;
+	};
 
 	function deletePlacement() {
 		if (selection.track === null || selection.placement === null) return;
@@ -229,7 +279,7 @@
 
 	function keydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
-		if (readonly || target.closest('input, textarea, select')) return;
+		if (readonly || !active || target.closest('input, textarea, select')) return;
 		if ((event.metaKey || event.ctrlKey) && event.key === 'z') {
 			event.preventDefault();
 			if (event.shiftKey) redo();
@@ -244,8 +294,9 @@
 
 <svelte:window onkeydown={keydown} />
 
-<div class="wide">
+<section class="timeline" aria-label="Timeline editor">
 	<div class="toolbar">
+		{@render heading?.()}
 		{#if !readonly}
 			<button type="button" onclick={newTrack}>Add track</button>
 			<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
@@ -260,13 +311,13 @@
 		<button type="button" onclick={() => (barWidth = Math.max(24, barWidth / 1.5))} aria-label="Zoom out">−</button>
 		<button type="button" onclick={() => (barWidth = Math.min(800, barWidth * 1.5))} aria-label="Zoom in">+</button>
 		<button type="button" onclick={toggleLoop} aria-pressed={looping}>Loop {looping ? 'on' : 'off'}</button>
-		<span class="muted">
+		<span class="muted hint">
 			Click the numbers to move the playhead, and drag under them for a loop.
 			{#if !readonly}Double-click a row for a new clip. Drag a clip's right edge to repeat it, and hold alt to copy it.{/if}
 		</span>
 	</div>
 
-	<div class="top">
+	<div class="top" style:height="{height}px">
 		<Arrangement
 			{doc}
 			{selection}
@@ -277,6 +328,7 @@
 			{readonly}
 			{badTracks}
 			{badClips}
+			meter={ringOf}
 			onselect={select}
 			onchange={arranged}
 			onnew={newClip}
@@ -288,7 +340,7 @@
 			<fieldset disabled={readonly}>
 				<details>
 					<summary>Tempo, {doc.tempo[0]?.bpm} BPM</summary>
-					{#each doc.tempo as change, index}
+					{#each doc.tempo as change, index (index)}
 						<div class="line">
 							<span class="muted">bar {barOf(change.tick, doc.ppq)}</span>
 							<input
@@ -301,12 +353,19 @@
 								onchange={(e) => commit(setTempo(doc, index, { bpm: number(e) }))}
 							/>
 							{#if index > 0 && !readonly}
-								<button type="button" aria-label={`Remove tempo at bar ${barOf(change.tick, doc.ppq)}`} onclick={() => commit(removeTempo(doc, index))}>×</button>
+								<button
+									type="button"
+									aria-label={`Remove tempo at bar ${barOf(change.tick, doc.ppq)}`}
+									onclick={() => commit(removeTempo(doc, index))}>×</button
+								>
 							{/if}
 						</div>
 					{/each}
 					{#if !readonly}
-						<button type="button" onclick={() => commit(addTempo(doc, snapTick(tick, ticksPerBar(doc)), doc.tempo.at(-1)?.bpm ?? 120))}>
+						<button
+							type="button"
+							onclick={() => commit(addTempo(doc, snapTick(tick, ticksPerBar(doc)), doc.tempo.at(-1)?.bpm ?? 120))}
+						>
 							Add a change at the playhead
 						</button>
 					{/if}
@@ -314,16 +373,45 @@
 
 				{#if track}
 					<h3>Track</h3>
-					<label>name <input aria-label="Track name" value={track.name} onchange={(e) => commit(setTrack(doc, track.id, { name: e.currentTarget.value }))} /></label>
-					<label>voices <input type="number" min="1" max="256" aria-label="Voices" value={track.voices} onchange={(e) => commit(setTrack(doc, track.id, { voices: number(e) }))} /></label>
-					{#each track.slots as slot, index}
+					<label
+						>name <input
+							aria-label="Track name"
+							value={track.name}
+							onchange={(e) => commit(setTrack(doc, track.id, { name: e.currentTarget.value }))}
+						/></label
+					>
+					<label
+						>voices <input
+							type="number"
+							min="1"
+							max="256"
+							aria-label="Voices"
+							value={track.voices}
+							onchange={(e) => commit(setTrack(doc, track.id, { voices: number(e) }))}
+						/></label
+					>
+					{#each track.slots as slot, index (index)}
 						<div class="line">
-							<select aria-label={`Patch slot ${index + 1}`} value={slot} onchange={(e) => commit(setSlot(doc, track.id, index, e.currentTarget.value))}>
+							<select
+								aria-label={`Patch slot ${index + 1}`}
+								value={slot}
+								onchange={(e) => commit(setSlot(doc, track.id, index, e.currentTarget.value))}
+							>
 								{#each voicePatches as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
 								{#if !voicePatches.some((patch) => patch.id === slot)}<option value={slot}>{slot}</option>{/if}
 							</select>
 							{#if !readonly}
-								<button type="button" aria-label={`Remove patch slot ${index + 1}`} onclick={() => commit(removeSlot(doc, track.id, index))}>×</button>
+								<button
+									type="button"
+									aria-label={`Edit patch slot ${index + 1}`}
+									title="Show this patch above"
+									onclick={() => onopen(slot)}>Edit</button
+								>
+								<button
+									type="button"
+									aria-label={`Remove patch slot ${index + 1}`}
+									onclick={() => commit(removeSlot(doc, track.id, index))}>×</button
+								>
 							{/if}
 						</div>
 					{/each}
@@ -342,26 +430,60 @@
 					{/if}
 					<label>
 						mode
-						<select aria-label="Play mode" value={track.play?.mode ?? 'poly'} onchange={(e) => commit(setPlay(doc, track.id, { mode: e.currentTarget.value as (typeof MODES)[number] }))}>
-							{#each MODES as mode}<option value={mode}>{mode}</option>{/each}
+						<select
+							aria-label="Play mode"
+							value={track.play?.mode ?? 'poly'}
+							onchange={(e) =>
+								commit(setPlay(doc, track.id, { mode: e.currentTarget.value as (typeof MODES)[number] }))}
+						>
+							{#each MODES as mode (mode)}<option value={mode}>{mode}</option>{/each}
 						</select>
 					</label>
 					{#if track.play && track.play.mode !== 'poly'}
 						<label>
 							priority
-							<select aria-label="Note priority" value={track.play.priority} onchange={(e) => commit(setPlay(doc, track.id, { priority: e.currentTarget.value as (typeof PRIORITIES)[number] }))}>
-								{#each PRIORITIES as priority}<option value={priority}>{priority}</option>{/each}
+							<select
+								aria-label="Note priority"
+								value={track.play.priority}
+								onchange={(e) =>
+									commit(setPlay(doc, track.id, { priority: e.currentTarget.value as (typeof PRIORITIES)[number] }))}
+							>
+								{#each PRIORITIES as priority (priority)}<option value={priority}>{priority}</option>{/each}
 							</select>
 						</label>
 					{/if}
-					<label>glide <input type="number" min="0" max="60" step="any" aria-label="Glide seconds" value={track.play?.glide ?? 0} onchange={(e) => commit(setPlay(doc, track.id, { glide: number(e) }))} /></label>
+					<label
+						>glide <input
+							type="number"
+							min="0"
+							max="60"
+							step="any"
+							aria-label="Glide seconds"
+							value={track.play?.glide ?? 0}
+							onchange={(e) => commit(setPlay(doc, track.id, { glide: number(e) }))}
+						/></label
+					>
 					{#if !readonly}<button type="button" onclick={deleteTrack}>Delete track</button>{/if}
 				{/if}
 
 				{#if clip}
 					<h3>Clip</h3>
-					<label>name <input aria-label="Clip name" value={clip.id} onchange={(e) => rename(e.currentTarget.value)} /></label>
-					<label>length <input type="number" min="1" aria-label="Clip length" value={clip.length} onchange={(e) => commit(setClip(doc, clip.id, { ...clip, length: number(e) }))} /></label>
+					<label
+						>name <input
+							aria-label="Clip name"
+							value={clip.id}
+							onchange={(e) => rename(e.currentTarget.value)}
+						/></label
+					>
+					<label
+						>length <input
+							type="number"
+							min="1"
+							aria-label="Clip length"
+							value={clip.length}
+							onchange={(e) => commit(setClip(doc, clip.id, { ...clip, length: number(e) }))}
+						/></label
+					>
 					{#if placed && selection.track !== null && selection.placement !== null}
 						{@const at = { track: selection.track, index: selection.placement }}
 						<label>
@@ -378,17 +500,42 @@
 								}}
 							/>
 						</label>
-						<label>repeats <input type="number" min="1" aria-label="Repeats" value={placed.repeat} onchange={(e) => commit(setPlacement(doc, at.track, at.index, { repeat: number(e) }))} /></label>
+						<label
+							>repeats <input
+								type="number"
+								min="1"
+								aria-label="Repeats"
+								value={placed.repeat}
+								onchange={(e) => commit(setPlacement(doc, at.track, at.index, { repeat: number(e) }))}
+							/></label
+						>
 					{/if}
-					{#if uses > 1}<p class="muted" data-testid="clip-uses">Placed {uses} times. An edit changes all of them.</p>{/if}
-					{#each clip.play as change, index}
+					{#if uses > 1}<p class="muted" data-testid="clip-uses">
+							Placed {uses} times. An edit changes all of them.
+						</p>{/if}
+					{#each clip.play as change, index (index)}
 						<div class="change">
-							<input type="number" min="0" aria-label={`Play change ${index + 1} tick`} value={change.tick} onchange={(e) => clipChanged(setPlayChange(clip, index, { tick: number(e) }))} />
-							<select aria-label={`Play change ${index + 1} mode`} value={change.mode} onchange={(e) => clipChanged(setPlayChange(clip, index, { mode: e.currentTarget.value as (typeof MODES)[number] }))}>
-								{#each MODES as mode}<option value={mode}>{mode}</option>{/each}
+							<input
+								type="number"
+								min="0"
+								aria-label={`Play change ${index + 1} tick`}
+								value={change.tick}
+								onchange={(e) => clipChanged(setPlayChange(clip, index, { tick: number(e) }))}
+							/>
+							<select
+								aria-label={`Play change ${index + 1} mode`}
+								value={change.mode}
+								onchange={(e) =>
+									clipChanged(setPlayChange(clip, index, { mode: e.currentTarget.value as (typeof MODES)[number] }))}
+							>
+								{#each MODES as mode (mode)}<option value={mode}>{mode}</option>{/each}
 							</select>
 							{#if !readonly}
-								<button type="button" aria-label={`Remove play change ${index + 1}`} onclick={() => clipChanged(removePlayChange(clip, index))}>×</button>
+								<button
+									type="button"
+									aria-label={`Remove play change ${index + 1}`}
+									onclick={() => clipChanged(removePlayChange(clip, index))}>×</button
+								>
 							{/if}
 						</div>
 					{/each}
@@ -405,60 +552,151 @@
 		</aside>
 	</div>
 
-	{#if clip}
-		<h3>Notes and lanes: {clip.id}</h3>
-		{#key clip.id}
-			<PianoRoll
-				{clip}
-				ppq={doc.ppq}
-				{grid}
-				slots={home?.slots ?? []}
-				{choices}
-				{playhead}
-				canAudition={reported !== undefined}
-				{readonly}
-				onchange={clipChanged}
-				onaudition={audition}
-			/>
-		{/key}
-		{#if !readonly && home && !reported}
-			<p class="muted" data-testid="silent-track">
-				{home.name || `Track ${home.id}`} has no notes in the image yet, so its keys are silent. An image holds only what plays.
-			</p>
-		{/if}
-	{/if}
+	<Splitter label="Resize the arrangement" onmove={resize} onreset={unresize} />
 
-	<h3>Mixer</h3>
-	<Mixer {doc} {patches} {program} {targets} {rings} {engine} {readonly} onchange={commit} />
-</div>
+	<div class="detail">
+		<div class="tabs" role="tablist" aria-label="Timeline views">
+			<button type="button" role="tab" aria-selected={tab === 'notes'} onclick={() => (tab = 'notes')}>
+				Notes{clip ? `: ${clip.id}` : ''}
+			</button>
+			<button type="button" role="tab" aria-selected={tab === 'mixer'} onclick={() => (tab = 'mixer')}>Mixer</button>
+			{#each tabs as extra (extra.id)}
+				<button type="button" role="tab" aria-selected={tab === extra.id} onclick={() => (tab = extra.id)}
+					>{extra.label}</button
+				>
+			{/each}
+		</div>
+		<div class="pane" class:notes={tab === 'notes'} role="tabpanel">
+			{#if tab === 'notes'}
+				{#if clip}
+					{#key clip.id}
+						<PianoRoll
+							{clip}
+							ppq={doc.ppq}
+							{grid}
+							slots={home?.slots ?? []}
+							{choices}
+							{playhead}
+							canAudition={reported !== undefined}
+							{readonly}
+							onchange={clipChanged}
+							onaudition={audition}
+						/>
+					{/key}
+					{#if !readonly && home && !reported}
+						<p class="muted" data-testid="silent-track">
+							{home.name || `Track ${home.id}`} has no notes in the image yet, so its keys are silent. An image holds only
+							what plays.
+						</p>
+					{/if}
+				{:else}
+					<p class="muted empty">
+						{readonly
+							? 'Choose a clip in the arrangement to see its notes.'
+							: 'Choose a clip in the arrangement to edit its notes, or double-click a row for a new one.'}
+					</p>
+				{/if}
+			{:else if tab === 'mixer'}
+				<Mixer {doc} {patches} {program} {targets} {rings} {engine} {readonly} onchange={commit} {onopen} />
+			{:else}
+				{@render tabs.find((extra) => extra.id === tab)?.content()}
+			{/if}
+		</div>
+	</div>
+</section>
 
 <style>
+	.timeline {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 0;
+	}
 	.toolbar {
+		flex: none;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		flex-wrap: wrap;
 		font-size: 0.8rem;
-		margin-bottom: 0.4rem;
+		padding: 0.25rem 0;
+		min-width: 0;
 	}
 	.toolbar button,
 	.toolbar select {
 		padding: 0.1rem 0.5rem;
 	}
+	.toolbar :global(button),
+	.toolbar :global(label),
+	.toolbar :global(form) {
+		flex: none;
+		white-space: nowrap;
+	}
+	.hint {
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		font-size: 0.75rem;
+	}
 	.top {
+		flex: none;
+		max-height: calc(100% - 9rem);
+		min-height: 70px;
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 250px;
 		gap: 0.5rem;
-		align-items: start;
+		padding-bottom: 0.4rem;
+		box-sizing: border-box;
 	}
 	.inspector {
 		background: var(--panel);
 		border: 1px solid var(--line);
 		border-radius: 6px;
 		padding: 0.5rem;
-		max-height: 420px;
+		min-height: 0;
 		overflow: auto;
 		font-size: 0.8rem;
+	}
+	.detail {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	.tabs {
+		flex: none;
+		display: flex;
+		gap: 0.15rem;
+		padding-top: 0.3rem;
+		border-bottom: 1px solid var(--line);
+	}
+	.tabs button {
+		border: 1px solid transparent;
+		border-bottom: 0;
+		border-radius: 5px 5px 0 0;
+		padding: 0.15rem 0.7rem;
+		font-size: 0.8rem;
+		background: transparent;
+		color: var(--muted);
+	}
+	.tabs button[aria-selected='true'] {
+		background: var(--panel);
+		border-color: var(--line);
+		color: var(--text);
+	}
+	.pane {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
+		padding-top: 0.4rem;
+	}
+	.pane.notes {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+	.empty {
+		font-size: 0.85rem;
 	}
 	fieldset {
 		border: 0;

@@ -91,7 +91,9 @@ export function importInstrument(db: Db, name: string, files: Upload[]): string 
 	if (wavs.length > MOST_ZONES) throw new ImportError(`an instrument has at most ${MOST_ZONES} zones`);
 	const total = wavs.reduce((sum, wav) => sum + wav.data.length, 0);
 	if (total > MOST_SAMPLE_BYTES) {
-		throw new ImportError(`these samples take ${megabytes(total)} MB, and an image holds ${megabytes(MOST_SAMPLE_BYTES)} MB of them`);
+		throw new ImportError(
+			`these samples take ${megabytes(total)} MB, and an image holds ${megabytes(MOST_SAMPLE_BYTES)} MB of them`
+		);
 	}
 	return db.transaction((tx) => {
 		const t = tx as unknown as Db;

@@ -37,7 +37,12 @@ const catalog: CatalogEntry[] = [
 		options: []
 	},
 	{ type: 'out', inputs: ['l', 'r'].map((name) => ({ name, default: 0 })), outputs: [], options: [] },
-	{ type: 'sample', inputs: ['ratio', 'note', 'start'].map((name) => ({ name, default: 0 })), outputs: ['l', 'r'], options: [] }
+	{
+		type: 'sample',
+		inputs: ['ratio', 'note', 'start'].map((name) => ({ name, default: 0 })),
+		outputs: ['l', 'r'],
+		options: []
+	}
 ];
 
 const graph = (nodes: Graph['nodes'], edges: Graph['edges'] = []): Graph => ({ params: [], nodes, edges });
@@ -51,7 +56,12 @@ describe('which ports a node shows', () => {
 		expect(names({ id: 1, type: 'osc', wave: 'square' })).toEqual(['freq', 'width']);
 		expect(names({ id: 1, type: 'osc', mode: 'mod' })).toEqual(['freq', 'phase', 'sync', 'feedback']);
 		expect(names({ id: 1, type: 'osc', wave: 'saw', mode: 'mod' })).toEqual(['freq', 'phase', 'sync']);
-		expect(names({ id: 1, type: 'osc', wave: 'square', mode: 'mod-naive' })).toEqual(['freq', 'width', 'phase', 'sync']);
+		expect(names({ id: 1, type: 'osc', wave: 'square', mode: 'mod-naive' })).toEqual([
+			'freq',
+			'width',
+			'phase',
+			'sync'
+		]);
 	});
 
 	it('offers only what a math mode reads, with the defaults the compiler uses', () => {
@@ -122,7 +132,13 @@ describe('editing a graph', () => {
 	});
 
 	it('finds and removes a wire written without its input name', () => {
-		const shorthand = graph([{ id: 1, type: 'osc' }, { id: 2, type: 'snap' }], [{ from: 1, to: 2 }]);
+		const shorthand = graph(
+			[
+				{ id: 1, type: 'osc' },
+				{ id: 2, type: 'snap' }
+			],
+			[{ from: 1, to: 2 }]
+		);
 		expect(edgeInto(shorthand, 2, 'in')).toBeDefined();
 		expect(disconnect(shorthand, 2, 'in').edges).toEqual([]);
 	});
@@ -163,8 +179,15 @@ describe('laying a graph out', () => {
 	it('puts a node to the right of what feeds it', () => {
 		const places = layout(
 			graph(
-				[{ id: 3, type: 'out' }, { id: 1, type: 'note' }, { id: 2, type: 'osc' }],
-				[{ from: 1, to: 2 }, { from: 2, to: 3 }]
+				[
+					{ id: 3, type: 'out' },
+					{ id: 1, type: 'note' },
+					{ id: 2, type: 'osc' }
+				],
+				[
+					{ from: 1, to: 2 },
+					{ from: 2, to: 3 }
+				]
 			)
 		);
 		expect(places.get(1)!.x).toBeLessThan(places.get(2)!.x);
@@ -172,12 +195,28 @@ describe('laying a graph out', () => {
 	});
 
 	it('finishes on a loop', () => {
-		const places = layout(graph([{ id: 1, type: 'delay' }, { id: 2, type: 'add' }], [{ from: 1, to: 2 }, { from: 2, to: 1 }]));
+		const places = layout(
+			graph(
+				[
+					{ id: 1, type: 'delay' },
+					{ id: 2, type: 'add' }
+				],
+				[
+					{ from: 1, to: 2 },
+					{ from: 2, to: 1 }
+				]
+			)
+		);
 		expect(places.size).toBe(2);
 	});
 
 	it('gives two nodes in a column different rows', () => {
-		const places = layout(graph([{ id: 1, type: 'noise' }, { id: 2, type: 'noise' }]));
+		const places = layout(
+			graph([
+				{ id: 1, type: 'noise' },
+				{ id: 2, type: 'noise' }
+			])
+		);
 		expect(places.get(1)!.y).not.toBe(places.get(2)!.y);
 	});
 });
@@ -209,7 +248,7 @@ describe('errors and details', () => {
 		expect(parseCurve('')).toEqual([]);
 	});
 
-	it('lists a graph\'s subpatches once each', () => {
+	it("lists a graph's subpatches once each", () => {
 		const used = graph([
 			{ id: 1, type: 'subpatch', patch: 'b' },
 			{ id: 2, type: 'subpatch', patch: 'a' },

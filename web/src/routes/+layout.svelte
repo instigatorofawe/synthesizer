@@ -6,8 +6,4 @@
 
 <svelte:head><title>modsynth</title></svelte:head>
 
-<nav>
-	<a href="/"><strong>modsynth</strong></a>
-	<a href="/recipes">Recipes</a>
-</nav>
-<main>{@render children()}</main>
+{@render children()}

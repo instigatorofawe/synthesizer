@@ -61,7 +61,19 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		let i = 0;
 		for (; i < this.events.length; ++i) {
 			const e = this.events[i];
-			if (!m._ms_send(e.kind, e.note ?? 0, e.velocity ?? 0, e.channel ?? 0, e.target ?? 0, e.param ?? 0, e.value ?? 0, e.tick ?? 0, e.tickEnd ?? 0)) {
+			if (
+				!m._ms_send(
+					e.kind,
+					e.note ?? 0,
+					e.velocity ?? 0,
+					e.channel ?? 0,
+					e.target ?? 0,
+					e.param ?? 0,
+					e.value ?? 0,
+					e.tick ?? 0,
+					e.tickEnd ?? 0
+				)
+			) {
 				break; // Queue full: try the rest next quantum
 			}
 		}
@@ -108,7 +120,14 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			this.tapStart[slot] ??= m.HEAPF32.subarray(offset, offset + this.tapBlock);
 			new Float32Array(buffer).set(this.tapStart[slot]);
 			this.port.postMessage(
-				{ type: 'tap', slot, buffer, start: m._ms_tap_start(), dropped: this.tapDropped[slot], generation: m._ms_generation() },
+				{
+					type: 'tap',
+					slot,
+					buffer,
+					start: m._ms_tap_start(),
+					dropped: this.tapDropped[slot],
+					generation: m._ms_generation()
+				},
 				[buffer]
 			);
 			this.tapDropped[slot] = 0;

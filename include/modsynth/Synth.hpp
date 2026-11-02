@@ -916,6 +916,17 @@ class Synth {
         }
     }
 
+    // An id says which parameter this is, not what its numbers mean, so a value crosses a swap only as one the new
+    // patch allows. A ramp keeps the time it had left. Nothing changes inside the range, so a swap to the same image is
+    // exact.
+    [[nodiscard]] static ParamState carried(ParamState p, const ParamDesc& d) {
+        const float value = clamp(p.value, d.min, d.max);
+        const float target = clamp(p.target, d.min, d.max);
+        if (value == p.value && target == p.target) return p;
+        const float step = p.frames == 0 ? 0.0f : (target - value) / static_cast<float>(p.frames);
+        return {value, target, step, p.frames};
+    }
+
     void copy_slot(const Slot& from, Slot& to) {
         const PatchView& a = from.binding->view;
         const PatchView& b = to.binding->view;
@@ -923,8 +934,8 @@ class Synth {
             const ParamDesc d = b.param(i);
             for (u32 k = 0; k < a.h.params; ++k) {
                 if (a.param(k).id != d.id) continue;
-                to.params[i] = from.params[k];
-                if (d.scope == static_cast<u8>(ParamScope::Track)) to.track[d.reg] = from.params[k].value;
+                to.params[i] = carried(from.params[k], d);
+                if (d.scope == static_cast<u8>(ParamScope::Track)) to.track[d.reg] = to.params[i].value;
                 break;
             }
         }

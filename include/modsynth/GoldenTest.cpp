@@ -243,3 +243,26 @@ TEST(Golden, AThinImageFromTheFreezePlaysOnChunksFromTheFreeze) {
     EXPECT_EQ(loader.status(), LoadStatus::Ready) << to_string(loader.error());
     EXPECT_EQ(receiver.table.size(), before) << "it must carry nothing the receiver lacks";
 }
+
+// Demo and AllOps have nothing in common but parameter ids, so Demo's values reach AllOps' patches. They arrive as
+// values AllOps could have been set to, not as Demo's: a value in hertz once reached a gain, at +67 dB with no guard
+// tripped.
+TEST(Golden, ASwapBetweenUnrelatedImagesStaysAtTheirLevel) {
+    const auto peak = [](const std::vector<float>& audio) {
+        float p = 0;
+        for (const float s : audio) p = std::max(p, std::fabs(s));
+        return p;
+    };
+    const auto demo32 = read_file(golden_path("Demo32.image"));
+    const auto all_ops = read_file(golden_path("AllOps32.image"));
+    for (const u32 at : {20u, 150u, 300u}) {
+        Rig<kStereo> rig(demo32);
+        rig.engine.send({.kind = EventKind::Play});
+        (void)render_stereo(rig, at);
+        rig.swap_to(all_ops);
+        const auto heard = render_stereo(rig, 400);
+        ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+        ASSERT_EQ(rig.engine.generation(), 2u);
+        EXPECT_LT(peak(heard), 2.0f) << "swapped at block " << at;
+    }
+}

@@ -260,6 +260,10 @@ is carried from a step to the step with the same non-zero `state_id` and the sam
 reference table, for a Table or an Asset, or in the delay line table, for a Delay. A step using a reference must find the kind it
 needs there.
 
+A track or voice parameter's value is carried to the parameter with the same `id`, which need not mean the same thing, so it is
+clamped to the new `min` and `max` first. A change under way keeps the time it had left and ends at its target, clamped the same
+way. A value already inside the range is carried exactly.
+
 ### Opcodes
 
 `B` is an operand naming a buffer. `S` is one naming a scalar, in any bank that can be read. In the formulas below, `N` is the

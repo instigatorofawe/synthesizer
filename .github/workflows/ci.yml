@@ -27,7 +27,8 @@ jobs:
       - run: python3 tools/CheckAppendOnly.py "origin/$GITHUB_BASE_REF"
       - name: Read the golden images from the specification alone
         run: |
-          python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image golden/Tones.image
+          python3 tools/ReadImage.py --coverage \
+            golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image golden/Tones.image \
             golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image
           python3 tools/ReadImage.py --example golden/Minimal.image
 

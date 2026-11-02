@@ -129,12 +129,15 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
   own track: `{"insert": id}` moves an insert's parameter, and `{"mix": "fader" | "pan" | "send", ...}` moves the mixer, naming a `track`,
   a `bus` or `"master": true`, and for a send the bus it goes `to`. Unknown keys are errors, so a target can gain a `channel` for per-note
   control without an old document changing meaning. The stream head puts everything a lane moved back to its starting value,
-  which is what makes a locate or a loop sound the same as playing from the top.
+  which is what makes a locate or a loop sound the same as playing from the top. A lane with no target that opens with a plain value at tick 0 already does
+  that, so it adds nothing to the stream. A `SetParam` reaches every slot of a track, so where a parameter has to go back and its slots start from
+  different values, the compiler refuses it and asks for a track value or a value at tick 0.
 - A mix register holds fader, pan and send multiplied together, and a lane has to work out what to write from the others' fixed values. So
   two controls that share a register can't both move, and the compiler refuses that and points to a gain or pan insert, whose
-  parameter can. One track owns a target, because a locate replays one stream after another and playback interleaves them. A lane on a track
-  that never plays is an error, because a lane that reaches past its track would otherwise vanish without a sound. A lane on an insert or
-  chain that nothing plays through is dropped, because nothing can hear it.
+  parameter can. One track owns a target, because a locate replays one stream after another and playback interleaves them. A global parameter is a
+  target too, however a lane reaches it, because it belongs to the Program and not to a track. A lane on a track that never plays is an error if it reaches
+  past that track, which a target or a global does, because it would otherwise vanish without a sound. A lane on an insert or chain that nothing plays
+  through is dropped, because nothing can hear it.
 - Play modes are per track and carried in the stream, so a song can change them midway: poly, mono or legato, with note priority and a glide
   time. A patch can't do this itself, because it is one voice and can't see the others. Glide moves the voice's note scalar a step per frame, so
   every patch follows it with no new op. `Tone` latches its pitch at note start and does not. Format.md section 7 has the rules, and a Program
@@ -263,7 +266,9 @@ Milestone 1 needs none of this, because the image is linked into the firmware.
 
 A generation is an image reference and a runtime block, capped at 2 live. A third edit force-fades the
 oldest. The compiler emits a stable state id per stateful step, so state of matching type and size carries across a swap.
-Parameters carry by id, clamped to the new patch's range. Inserts crossfade. Embedded builds use a limit of 1, with no separate code path.
+Parameters carry by id, clamped to the new patch's range, and a global to the range of every patch that declares it. Mix registers have no ids, so they
+carry only between Programs with the same mixer, down to its tracks and inserts, and a register whose starting value the edit changed takes the new value.
+Any other edit to the mixer returns its registers to the document's values. Inserts crossfade. Embedded builds use a limit of 1, with no separate code path.
 
 ## 12. Browser load path
 
@@ -771,16 +776,6 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 - `Arg`, `OscMod`, `Math` and table waveshaping, section 5.
 - Events off the frame boundary, section 6.
 - Whole-image delivery to a device, section 10.
-
-**Where the code falls short.** The documents are right in each case, and the code hasn't caught up.
-
-| Section | The document says | The code today |
-|---|---|---|
-| 6 | The stream head restores everything a lane moved | Only lanes with a target. A lane with none keeps its last value on a loop or locate. 6 of the 59 recipes have one that starts after tick 0 or ramps at it |
-| 6 | One track owns a target | Also only lanes with a target, so two tracks can both automate a global parameter |
-| 11 | Parameters carry by id | Track and voice values do. A live global or mix register returns to its initial value at a swap |
-| 13 | A block with no free buffer is dropped and counted | The worklet drops it after the engine has cleared its count, so it goes uncounted |
-| Format 3 | An image may have no Programs | The loader accepts one, and the compiler refuses to write it |
 
 **Still undecided.** A recommendation here is only that.
 

@@ -618,6 +618,15 @@ constexpr char kGain[] = R"({"params": [{"id": 1, "min": 0, "max": 1, "default":
     "edges": [{"from": 1, "port": "l", "to": 3, "input": "a"}, {"from": 2, "to": 3, "input": "b"},
     {"from": 3, "to": 4, "input": "l"}]})";
 
+// Plays a parameter, so what a test hears is the parameter itself.
+std::string knob(const char* scope = "track", float low = 0.0f, float high = 1.0f, float start = 0.25f) {
+    json graph = json::parse(R"({"nodes": [{"id": 1, "type": "param", "param": 1}, {"id": 2, "type": "out"}],
+        "edges": [{"from": 1, "to": 2, "input": "l"}]})");
+    const json param = {{"id", 1}, {"min", low}, {"max", high}, {"default", start}, {"scope", scope}, {"smooth_ms", 0}};
+    graph["params"] = json::array({param});
+    return graph.dump();
+}
+
 json song(const json& patches, const json& tracks, const json& clips, const json& extra = json::object()) {
     json timeline = {
         {"ppq", 480}, {"tempo", json::parse(R"([{"tick": 0, "bpm": 120}])")}, {"clips", clips}, {"tracks", tracks}};
@@ -775,6 +784,62 @@ TEST(Lanes, ALoopStartsFromWhereTheLaneStarted) {
     const auto heard = first_samples(rig, frame_at(1000));
     EXPECT_NEAR(heard[frame_at(800)], 0.0f, 1e-5f);
     EXPECT_NEAR(heard[frame_at(960) + 8], 0.5f, 1e-5f);
+}
+
+TEST(Lanes, ALaneWithNoTargetStartsAgainOnALoop) {
+    for (const char* scope : {"track", "voice", "global"}) {
+        SCOPED_TRACE(scope);
+        json clip = {{"notes", json::array({{{"tick", 0}, {"note", 60}, {"dur", 960}}})}, {"length", 960}};
+        clip["automation"] = json::parse(R"([{"param": 1, "tick": 240, "value": 1}])");
+        Rig<kStereo> rig(compile_image(one_track(knob(scope).c_str(), clip)).image);
+        rig.engine.send({.kind = EventKind::SetLoop, .tick = 0, .tick_end = 960});
+        play(rig);
+        const auto heard = first_samples(rig, frame_at(1400));
+        EXPECT_EQ(heard[frame_at(100)], 0.25f);
+        EXPECT_EQ(heard[frame_at(800)], 1.0f);
+        EXPECT_EQ(heard[frame_at(960 + 100)], 0.25f);
+        EXPECT_EQ(heard[frame_at(960 + 300)], 1.0f);
+    }
+}
+
+TEST(Lanes, ALocateSoundsTheSameAsPlayingThereWithNoTarget) {
+    json clip = {{"notes", one_note()}};
+    clip["automation"] = json::parse(R"([{"param": 1, "tick": 0, "value": 0.5, "ramp": 480},
+        {"param": 1, "tick": 960, "value": 1, "ramp": 480}])");
+    const auto image = compile_image(one_track(knob().c_str(), clip)).image;
+
+    Rig<kStereo> through(image);
+    play(through);
+    const auto heard = first_samples(through, frame_at(2000));
+
+    for (const u32 tick : {u32{0}, u32{240}, u32{720}, u32{1200}, u32{1600}}) {
+        SCOPED_TRACE(tick);
+        Rig<kStereo> rig(image);
+        play(rig);
+        (void)first_samples(rig, frame_at(1900));  // Past every lane, so nothing is left where a locate would want it
+        rig.engine.send({.kind = EventKind::Locate, .tick = tick});
+        const auto jumped = first_samples(rig, frame_at(300));
+        for (const u32 at : {u32{0}, u32{100}, u32{250}}) {
+            EXPECT_NEAR(jumped[frame_at(at) + 1], heard[frame_at(tick + at) + 1], 0.003f) << "at " << at;
+        }
+    }
+}
+
+TEST(Lanes, AnInsertLaneOnAGlobalReturnsToTheProgramsValue) {
+    json gain = json::parse(kGain);
+    gain["params"][0]["scope"] = "global";
+    json clip = {{"notes", json::array({{{"tick", 0}, {"note", 60}, {"dur", 960}}})}, {"length", 960}};
+    clip["automation"] = json::parse(R"([{"target": {"insert": 7}, "param": 1, "tick": 240, "value": 0.2}])");
+    json track = {{"inserts", json::parse(R"([{"id": 7, "patch": "gain"}])")}};
+    json request = one_track(kFlat, clip, track, {{"globals", {{"1", 0.6}}}});
+    request["patches"]["gain"] = {{"name", "gain"}, {"graph", gain}};
+    Rig<kStereo> rig(compile_image(request).image);
+    rig.engine.send({.kind = EventKind::SetLoop, .tick = 0, .tick_end = 960});
+    play(rig);
+    const auto heard = first_samples(rig, frame_at(1100));
+    EXPECT_NEAR(heard[frame_at(100)], 0.3f, 1e-5f);
+    EXPECT_NEAR(heard[frame_at(800)], 0.1f, 1e-5f);
+    EXPECT_NEAR(heard[frame_at(960 + 100)], 0.3f, 1e-5f);
 }
 
 TEST(Lanes, AProgramPaysOnlyForTheRampsItUses) {
@@ -1290,7 +1355,7 @@ TEST(Swap, ACarriedValueStaysInsideTheNewRange) {
         float from, heard;
     };
     for (const Case c : {Case{"track", 8.0f, 1.0f}, Case{"track", -8.0f, 0.0f}, Case{"voice", 8.0f, 1.0f},
-                         Case{"voice", -8.0f, 0.0f}}) {
+                         Case{"voice", -8.0f, 0.0f}, Case{"global", 8.0f, 1.0f}, Case{"global", -8.0f, 0.0f}}) {
         Rig<kStereo> rig(carried(-8.0f, 8.0f, c.from, c.scope));
         ASSERT_EQ(rig.engine.load_error(), LoadError::None);
         play(rig);
@@ -1345,6 +1410,112 @@ TEST(Swap, ACarriedRampInsideTheRangeIsNotDisturbed) {
     heard.erase(heard.begin(), heard.begin() + kFadeFrames);
     expected.erase(expected.begin(), expected.begin() + kFadeFrames);
     EXPECT_EQ(heard, expected) << "the same image and the same range, so not one bit may move";
+}
+
+TEST(Swap, ALiveGlobalCarries) {
+    const auto image = carried(0.0f, 1.0f, 0.25f, "global");
+    Rig<kStereo> rig(image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    rig.engine.send({.kind = EventKind::SetParam, .target = 0, .param = 1, .value = 0.75f});
+    EXPECT_EQ(first_samples(rig, 4)[3], 0.75f);
+    swap_now(rig, image);
+    EXPECT_EQ(first_samples(rig, kFadeFrames).back(), 0.75f);
+}
+
+TEST(Swap, ACarriedGlobalFitsEveryPatchThatDeclaresIt) {
+    const auto with_second = [](float high) {
+        json clip = {{"notes", one_note()}};
+        json request = one_track(knob("global", 0.0f, 8.0f, 0.25f).c_str(), clip, {{"slots", {"p", "narrow"}}});
+        request["patches"]["narrow"] = {{"name", "narrow"}, {"graph", json::parse(knob("global", 0.0f, high, 0.25f))}};
+        request["programs"][0]["timeline"]["clips"][0]["notes"] =
+            json::parse(R"([{"tick": 0, "note": 60, "dur": 3840}, {"tick": 3000, "note": 61, "dur": 9, "slot": 1}])");
+        return compile_image(request).image;
+    };
+    Rig<kStereo> rig(with_second(8.0f));
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    rig.engine.send({.kind = EventKind::SetParam, .target = 0, .param = 1, .value = 6.0f});
+    EXPECT_EQ(first_samples(rig, 4)[3], 6.0f);
+    swap_now(rig, with_second(2.0f));
+    EXPECT_EQ(first_samples(rig, kFadeFrames).back(), 2.0f);
+}
+
+namespace {
+
+// Register 0 is a hard left track's gain to master, so a test hears it through a constant.
+constexpr char kQuiet[] = R"({"nodes": [{"id": 1, "type": "const", "value": 0.25}, {"id": 2, "type": "out"}],
+    "edges": [{"from": 1, "to": 2, "input": "l"}]})";
+
+template <class R>
+void move_fader(R& rig, float gain) {
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    rig.engine.send({.kind = EventKind::SetMix, .param = 0, .value = gain});
+    EXPECT_EQ(first_samples(rig, 4)[3], 0.5f * gain);
+}
+
+json held_note() { return {{"notes", one_note()}}; }
+
+}  // namespace
+
+TEST(Swap, ALiveFaderCarriesToTheSameMixer) {
+    Rig<kStereo> rig(compile_image(one_track(kFlat, held_note())).image);
+    move_fader(rig, 0.5f);
+    swap_now(rig, compile_image(one_track(kQuiet, held_note())).image);
+    EXPECT_EQ(first_samples(rig, kFadeFrames).back(), 0.125f) << "the patch changed and the mixer did not";
+}
+
+TEST(Swap, AFaderTheEditMovedTakesTheNewValue) {
+    Rig<kStereo> rig(compile_image(one_track(kFlat, held_note())).image);
+    move_fader(rig, 0.5f);
+    swap_now(rig, compile_image(one_track(kFlat, held_note(), {{"gain", 0.5}})).image);
+    EXPECT_EQ(first_samples(rig, kFadeFrames).back(), 0.25f);
+    Rig<kStereo> louder(compile_image(one_track(kFlat, held_note())).image);
+    move_fader(louder, 0.5f);
+    swap_now(louder, compile_image(one_track(kFlat, held_note(), {{"gain", 0.75}})).image);
+    EXPECT_EQ(first_samples(louder, kFadeFrames).back(), 0.375f) << "the new document, not the old live value";
+}
+
+TEST(Swap, ARegisterMeansNothingToAnotherMixer) {
+    Rig<kStereo> rig(compile_image(one_track(kFlat, held_note())).image);
+    move_fader(rig, 0.5f);
+    const json send = {{"sends", json::parse(R"([{"bus": "wet", "gain": 0}])")}};
+    const json bus = {{"buses", json::parse(R"([{"id": "wet", "pan": -1}])")}};
+    swap_now(rig, compile_image(one_track(kFlat, held_note(), send, bus)).image);
+    EXPECT_EQ(first_samples(rig, kFadeFrames).back(), 0.5f) << "its registers are not these, so it starts as written";
+}
+
+TEST(Swap, AMixRampCarries) {
+    json clip = {{"notes", one_note(96000)}, {"length", 96000}};
+    clip["automation"] =
+        json::parse(R"([{"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 0, "ramp": 9600}])");
+    const auto image = compile_image(one_track(kFlat, clip)).image;
+    Rig<kStereo> rig(image), reference(image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    play(reference);
+    (void)first_samples(rig, 100);
+    (void)first_samples(reference, 100);
+    swap_now(rig, image);
+    (void)first_samples(reference, 1);  // The frame that committed it
+    auto heard = first_samples(rig, 400);
+    auto expected = first_samples(reference, 400);
+    heard.erase(heard.begin(), heard.begin() + kFadeFrames);
+    expected.erase(expected.begin(), expected.begin() + kFadeFrames);
+    EXPECT_EQ(heard, expected);
+}
+
+TEST(Swap, AMixRampLandsWhereTheNewProgramCannotFinishIt) {
+    json clip = {{"notes", one_note()}};
+    clip["automation"] =
+        json::parse(R"([{"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 0.5, "ramp": 2400}])");
+    Rig<kStereo> rig(compile_image(one_track(kFlat, clip)).image);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    (void)first_samples(rig, 100);
+    swap_now(rig, compile_image(one_track(kFlat, held_note())).image);
+    EXPECT_EQ(first_samples(rig, kFadeFrames).back(), 0.25f);
 }
 
 namespace {

@@ -21,6 +21,7 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		this.liveId = 0;
 		this.generation = 0;
 		this.tapStart = new Array(TAP_SLOTS).fill(null);
+		this.tapDropped = new Array(TAP_SLOTS).fill(0); // Blocks lost since this slot last sent one
 		this.quanta = 0;
 		this.port.onmessage = (e) => this.receive(e.data);
 		// registerProcessor() cannot wait for this, so process() outputs silence until it resolves.
@@ -97,15 +98,20 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		for (let slot = 0; slot < TAP_SLOTS; ++slot) {
 			const pointer = m._ms_tap_take(slot);
 			if (pointer === 0) continue;
+			this.tapDropped[slot] += m._ms_tap_dropped(); // Taking a block cleared the engine's count, so it lives here until one goes out
 			const buffer = this.pool.pop();
-			if (!buffer) continue; // The display can never hold up audio. This block goes uncounted: see docs/Design.md section 24.
+			if (!buffer) {
+				++this.tapDropped[slot]; // The display can never hold up audio
+				continue;
+			}
 			const offset = pointer >> 2;
 			this.tapStart[slot] ??= m.HEAPF32.subarray(offset, offset + this.tapBlock);
 			new Float32Array(buffer).set(this.tapStart[slot]);
 			this.port.postMessage(
-				{ type: 'tap', slot, buffer, start: m._ms_tap_start(), dropped: m._ms_tap_dropped(), generation: m._ms_generation() },
+				{ type: 'tap', slot, buffer, start: m._ms_tap_start(), dropped: this.tapDropped[slot], generation: m._ms_generation() },
 				[buffer]
 			);
+			this.tapDropped[slot] = 0;
 		}
 	}
 

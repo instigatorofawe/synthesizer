@@ -124,7 +124,8 @@ Chunks follow in manifest order, skipping those with `present` 0. A chunk's head
 `kind`. An entry with `present` 0 must be satisfied by a chunk the receiver holds, matching `hash`, `size` and `kind`.
 
 An image with `present` 0 entries is **thin**: it carries a Program and leaves out what the receiver already has. An image may
-have no Programs at all, which is how a library of patches is sent ahead of them.
+have no Programs at all, which is how a library of patches is sent ahead of them. A compiler puts every patch of its library in one, and an engine that
+loads one keeps its chunks, binds nothing and goes on playing what it was playing.
 
 A reader verifies everything before it commits anything. An image that fails at any point leaves the receiver as it was.
 
@@ -562,7 +563,8 @@ SetInsert and RampInsert do to an insert's parameter what SetParam and Ramp do t
 parameter of voice scope does nothing there, because an insert's instance reads those once, at load. SetMix writes a mix register, and RampMix
 moves one in a straight line, a step per frame, over as many frames as a Ramp of those ticks takes. `register` must be below `mix_regs`. A later SetMix
 or RampMix on that register ends a ramp, as does a live change to it. These two reach the mixer from any track's stream, so two streams
-naming one target would interleave by tick as they play and run one after the other in a locate. A compiler refuses that.
+naming one target would interleave by tick as they play and run one after the other in a locate. A compiler refuses that, and for the same reason it
+refuses two streams moving one global parameter, by any of these instructions, since a global belongs to the Program and not to a track.
 
 A stream's **tick total** is the sum of its Waits, plus `clip.ticks * repeats` for each Call. Every stream's total must be at most
 `kMaxTicks`. The **expanded size** of a stream counts its instructions, with `clip.length + 1` for each repeat of each Call, and the

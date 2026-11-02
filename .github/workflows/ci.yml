@@ -1,9 +1,14 @@
 name: CI
 
-# Milestones reach main as squashed pull requests, and those are the only thing that runs CI.
+# Milestones reach main as squashed pull requests, and those are the only thing that runs CI. One that changes only
+# Markdown skips it, except for the format specification, because tools/ReadImage.py reads that file.
 on:
   pull_request:
     branches: [main]
+    paths:
+      - "**"
+      - "!**.md"
+      - "docs/Format.md"
 
 permissions:
   contents: read

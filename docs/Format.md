@@ -32,7 +32,8 @@ damaged. A compiler writes the lowest revision that covers what it actually used
 loading on old engines. This document describes revision 5. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
-version so far, and no such change is planned. A version above the engine's gets the same refusal.
+version so far, and no such change is planned. A version above the engine's in the manifest, which comes first, gets the same refusal. In any later chunk
+it is refused as a damaged chunk.
 
 Old images keep their sound as well as their shape. Sound within −100 dB of peak of the golden renders, on every target,
 is part of this contract: see section 10.
@@ -220,7 +221,7 @@ exactly at the end of the last section.
 | 2 | u8 | `scope` | 0 voice, 1 track, 2 global |
 | 3 | u8 | `reserved` | |
 | 4 | u16 | `reg` | its register in that scope's bank, or 0 for global. Two parameters must not share one. |
-| 6 | u16 | `smooth_ms` | how long a track-scope change glides |
+| 6 | u16 | `smooth_ms` | how long a live change to a track-scope parameter glides. A SetParam in a stream applies at once, and a Ramp takes its own time. |
 | 8 | f32 | `min` | |
 | 12 | f32 | `max` | |
 | 16 | f32 | `default` | `min <= default <= max`, all finite |
@@ -407,6 +408,10 @@ filter coefficient that alone reaches −90 dB. `round(x)` is `x + 0.5`, or `x -
             p = p * y + k
         return p * x
 
+At the end of each frame a kernel flushes state that would otherwise decay into denormals. `flush(x)` is 0 if `-1e-20 < x < 1e-20`, and otherwise `x`. Biquad
+does this to both of its state variables, Comb to `low` and Follow to `level`. It is part of the kernel on every target, because wasm has no flush-to-zero
+mode, and no target sets one.
+
 Every kernel is total: any finite or non-finite input gives defined behaviour, with no out-of-range read. A voice whose output is not
 finite is stopped, and an insert whose output is not finite restarts empty. The final output is checked as well and replaced with
 silence if it is not finite.
@@ -460,8 +465,8 @@ A Program is the compiled form of a timeline. Each track has an Instruction stre
 
 ### Body
 
-In this order. The only padding is after the slots, to bring the clips to a 4-byte boundary, which is zero or two bytes. The payload
-must end exactly at the end of the last section.
+In this order. The only padding is after the slots, to bring the clips to a 4-byte boundary, which is zero or two bytes. A compiler writes zeros there, and
+an engine does not check them, so these bytes can never be given a meaning. The payload must end exactly at the end of the last section.
 
 | Section | Element | Count |
 |---|---|---|
@@ -550,7 +555,8 @@ forever without time passing.
 
 A track's `SetPatch` applies to the next note, so held notes finish on the old patch. It must name a slot the track has. For a clip,
 that is what `slots` declares, and a track may only call a clip whose `slots` is at most its `slot_count`. An unknown parameter id in
-SetParam or Ramp does nothing, and a parameter of a slot that is not selected still changes.
+SetParam or Ramp does nothing, and a parameter of a slot that is not selected still changes. A parameter of voice or global scope has no glide: a SetParam
+or a Ramp on one moves it to its value at once, and for voice scope that includes every voice sounding that slot, as well as later notes.
 
 SetInsert and RampInsert do to an insert's parameter what SetParam and Ramp do to a slot's, and `insert` must be an index into the Inserts. A
 parameter of voice scope does nothing there, because an insert's instance reads those once, at load. SetMix writes a mix register, and RampMix

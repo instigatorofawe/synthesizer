@@ -496,7 +496,7 @@ inline CompiledPatch compile_patch(const json& graph, const std::string& where, 
         }
         return 0.0f;
     };
-    // An input read once a frame refuses audio, because reading one sample in every 128 is right for an envelope and
+    // An input read once a frame refuses audio, because reading one sample in a frame is right for an envelope and
     // silently wrong for anything fast, and only the patch's author knows which this is. A snap node says so.
     const auto scalar_in = [&](const Node& n, const std::string& name) {
         const auto v = input(n, name);

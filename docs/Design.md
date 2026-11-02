@@ -92,7 +92,7 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
 
 - Compiler passes: dead-node removal, delay splitting, Kahn with smallest id first, buffer allocation by last use.
   [measured: 11 nodes used 3 buffers, 200 shuffles gave identical bytes, a delay-free cycle was rejected.]
-- Every Patch declares a parameter table: stable id, scope (voice, channel, global), range, smoothing. Operands name a
+- Every Patch declares a parameter table: stable id, scope (voice, track, global), range, smoothing. Operands name a
   buffer, a scalar in one of those scopes, or a constant. Patches gain control-rate Steps that write scalars.
 - Initial values live in the Program, so a knob move changes no Patch hash.
 - Patches have an I/O port table, with stereo as ordinary ports.
@@ -160,8 +160,8 @@ An Asset is a new chunk kind, separate from power-of-two wavetables.
 - The compiler appends one guard frame, so interpolation can always read `idx + 1`.
 - `Sample` is a Step with a 32.32 position. Validation requires `loop_start < loop_end <= frames`. The increment is clamped
   below the loop length at control rate, so one wrap subtraction is always enough and the kernel stays total.
-- On Cortex-M4 this costs 32 cycles per sample with linear interpolation, or 18 without, comparable to one oscillator at
-  22 [model].
+- On Cortex-M4 this costs 52.8 instructions per sample for mono i16 and 46.8 for f32, against 16.6 for a wavetable oscillator [measured:
+  `docs/Benchmarks.md`]. Interpolation is always linear. A form without it was modelled at first, and no such mode exists.
 - Native rate over engine rate enters the increment at run time, so an asset plays correctly at any engine rate.
 - A one-shot reaching its end marks that source done. A voice is free when its envelopes and sources are all done.
 - On a device, assets go straight to flash and are not staged in RAM. They stay unreferenced until their
@@ -210,7 +210,8 @@ differs. The target profile records `channels`.
 
 Requirement 4 originally put the rate in the NTTP, and revision 3 proposed 0 to mean run time. A single runtime path is
 simpler, and parameters are physical units anyway. Hardware gains an option from it: running at 32 kHz gives 50% more
-cycles per sample and a third less delay memory with no change to the image.
+cycles per sample and a third less delay memory with no change to the image's bytes. How it sounds does move, because control rate and the shortest
+feedback loop follow the rate, which open 21 covers.
 
 Delay lengths, phase increments, envelope and filter coefficients, and tick conversion are all derived at bind time. A
 rate change is a rebind through the same path as a generation swap, and it can fail on a device if the result no longer
@@ -260,7 +261,7 @@ Milestone 1 needs none of this, because the image is linked into the firmware.
 
 ## 11. Live editing, desktop and browser only
 
-A generation is an image reference, a runtime block and a refcount, capped at 2 live. A third edit force-fades the
+A generation is an image reference and a runtime block, capped at 2 live. A third edit force-fades the
 oldest. The compiler emits a stable state id per stateful step, so state of matching type and size carries across a swap.
 Parameters carry by id, clamped to the new patch's range. Inserts crossfade. Embedded builds use a limit of 1, with no separate code path.
 
@@ -275,7 +276,8 @@ Milestone 7.
 
 The browser shows live waveforms during playback, starting with the master and track buses and later any graph node.
 This is engine and host state only. Nothing about it enters the image, so it does not affect hashes or the format freeze.
-All of this section is [not prototyped].
+Scopes on the master and track buses are built, and tested in a browser. Taps on graph nodes wait for Milestone 3, so what this section says about them
+is [not prototyped].
 
 **Tap.** The engine has a fixed number of tap slots, set by `SynthConfig`. Hardware builds use 0, which compiles the
 feature out. `set_tap(slot, target)` arrives through the event queue and is validated there like any live event.
@@ -322,7 +324,8 @@ index. One path serves every case.
   aren't finite, so a finite blow-up still reaches the output. Open 9 covers that.
 - Delay lines clear lazily, because a hostile image took 5.8 ms of a 2.67 ms frame [measured]. A per-op cost table sets a
   compile-time and load-time limit alongside the memory limit.
-- Denormals: FTZ on native, explicit state flushing on wasm, and FZ left to measurement on Cortex-M.
+- Denormals: no target sets a flush-to-zero mode, because wasm has none. Kernels flush their own state every frame, the same way on every target, as
+  `docs/Format.md` says under Arithmetic.
 
 Revision 2's fuzz run did not exercise header rejection or most of each Program, and it ran only on 64-bit. Section 23 describes
 its replacement.
@@ -347,16 +350,20 @@ Cycles per sample, frame 64:
 | Wavetable oscillator | 21.8 | none |
 | Noise | 13.3 | none |
 | Envelope | 9.3 | none |
-| Sample, linear / no interpolation | 31.9 / 17.6 | none |
-| Reverb comb, f32 / i16 line | 25.8 / 34.8 | none |
+| Sample | 31.9 | none |
+| Reverb comb, f32 line | 25.8 | none |
 | Reverb allpass | 20.5 | none |
+
+`docs/Benchmarks.md` now has measured instruction counts for every kernel, and they replace this table where the two differ. Sample is the largest miss,
+at 52.8 instructions against 31.9 cycles, which is outside the 30% above. Comb at 29.6 and Allpass at 26.8 are also above their modelled cycles. This
+table has no engine cost in it either, and each voice adds 28.6 instructions a sample whatever it plays [measured].
 
 The native oscillators came later, from a pass that prices the wavetable oscillator at 19.5, so compare them with that. Their band-limited forms
 pay only beside a jump, so they cost more at high notes, and the ranges run from 110 Hz to 4186 Hz:
 
 | Oscillator | Cycles per sample |
 |---|---|
-| Wavetable, now only sine and custom tables | 19.5 |
+| Wavetable, now only sine | 19.5 |
 | Saw, band-limited / naive | 14.0 to 15.6 / 9.4 |
 | Pulse, band-limited / naive | 19.3 to 22.7 / 10.7 |
 | Triangle | 11.4 |
@@ -394,8 +401,9 @@ Whole voice (2 oscillators, noise, 2 filters, envelope), per voice with 4 held:
 
 Findings to apply in Milestone 7:
 
-- CMSIS-DSP is worth having on this chip, but only if built with `ARM_MATH_LOOPUNROLL`. Without it, the gain mostly
-  disappears.
+- Build CMSIS-DSP with `ARM_MATH_LOOPUNROLL`, or the modelled gain mostly disappears. With it the table above models 10.8% for one voice, but over whole
+  recipes the median saving at peak is 0.95% of instructions and the most is 2.3% [measured: `docs/Benchmarks.md`]. Those aren't like for like, since one
+  is modelled cycles at frame 64 and the other instructions at frame 32. Open 25 needs cycles on a board.
 - `-ffp-contract=off` is now set on every target, for a different reason: section 16. On M4 it also saves time, since `vfma` costs 3
   cycles where `vmul` plus `vadd` cost 2. That part rests on the timing table, not on a board.
 - Hold coefficients in locals in scalar kernels. The prototype's reload per sample cost 56% on the biquad.
@@ -450,14 +458,15 @@ Golden audio compares within a tolerance of −100 dB relative to peak, and audi
 targets. The reference is committed: `golden/` holds images written at the freeze, with their renders, and they never change.
 
 Measured against those references, which a macOS arm64 build wrote. `Demo` is 122,880 stereo samples, `AllOps` 102,400 and `Waves`, from revision 1,
-51,200. Each mono render has half as many. `Tones`, from revision 2, came after the table below, and CI holds it to the same comparison. Zero means exactly that: every sample's bits match.
+51,200. Each mono render has half as many. `Tones` from revision 2, the frame 32 forms from revision 3, `Lanes` and `Zones` from revision 4 and `Hold` from
+revision 5 came after the table below, and CI holds them to the same comparison. Zero means exactly that: every sample's bits match.
 
 | Target | Compiler | Stereo samples that differ | Mono samples that differ |
 |---|---|---|---|
 | macOS arm64 | Clang | 0 of all | 0 of all |
 | Linux arm64 | GCC 14.2 | 0 of all | 0 of all |
 | Linux x86-64, emulated | GCC 14.2 | 0 of all | 0 of all |
-| wasm32 under Node | Emscripten 6.0 | 0 of all | no mono build |
+| wasm32 under Node | Emscripten 6.0 | 0 of all | within −100 dB, per `GoldenTest` |
 | Cortex-M4 on the L475 model, scalar | arm-none-eabi-gcc 14.2 | 0 of all | 0 of all |
 | Cortex-M4 on the L475 model, CMSIS-DSP | arm-none-eabi-gcc 14.2 | Demo at most −123.9 dB, AllOps at most −108.0 dB, Waves 0 | no mono build |
 
@@ -512,9 +521,8 @@ only on parallel builds. Parallel builds also align instance state to a cache li
    the mixer's sort.
 
 Serial builds run the same two phases, so splitting the frame is not a parallel-only code path. With `PoolExecutor`, the
-calling thread also works rather than only waiting, tasks are claimed with atomic counters and no locks, and every worker
-sets the same FTZ state as the caller, because FTZ is per-thread and a mismatch would change the output depending on which
-thread ran a task.
+calling thread also works rather than only waiting, tasks are claimed with atomic counters and no locks, and no worker changes its floating-point
+state. Flush-to-zero is per-thread, so a mismatch would change the output depending on which thread ran a task, and section 14 has no need for it.
 
 **Rules the format keeps, enforced since the Milestone 2 freeze.** They cost nothing on embedded, but relaxing them later would
 be impossible, because images relying on the looser rules would then exist.
@@ -580,8 +588,8 @@ and hardware still only ever sees image bytes.
 
 **Who does what.**
 
-- Server actions own persistence: create, save, rename and delete patches, timelines and assets, and validate every
-  document on the way in. Pages load through `load` functions.
+- Server actions own persistence: create, save, rename and delete patches and timelines, and validate every document on the way in. Assets are only
+  seeded so far, and asset import in Milestone 4 adds the rest. Pages load through `load` functions.
 - Audio never touches the server. Playback, the worklet and the oscilloscope are browser-only, as sections 12 and 13 say.
 - The compiler is one wasm module with two hosts. In a browser worker it compiles the open document on each edit, including
   edits not yet saved, so preview needs no round trip. In a server action it compiles exports from saved rows. Both give
@@ -672,7 +680,8 @@ index, persisting knob moves made during playback, and validating a Patch or Pro
 ## 22. Milestones
 
 Each milestone lands as one squashed pull request into `main`. Work reaches a branch as it goes, and only those pull
-requests run CI, so checks run locally before a push.
+requests run CI, so checks run locally before a push. One that changes only Markdown skips CI, unless it changes `docs/Format.md`, which
+`tools/ReadImage.py` reads.
 
 1. **Vertical slice, format explicitly unstable.** A stereo voice with filter envelope and knob, one sampled voice, a send
    reverb with one sidechain, a two-track Program with seek, one edit during playback, and an oscilloscope on the master
@@ -763,13 +772,15 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 - Events off the frame boundary, section 6.
 - Whole-image delivery to a device, section 10.
 
-**Where the code falls short of this document.** The document is right in each case, and the code hasn't caught up.
+**Where the code falls short.** The documents are right in each case, and the code hasn't caught up.
 
-| Section | This document says | The code today |
+| Section | The document says | The code today |
 |---|---|---|
 | 6 | The stream head restores everything a lane moved | Only lanes with a target. A lane with none keeps its last value on a loop or locate. 6 of the 59 recipes have one that starts after tick 0 or ramps at it |
 | 6 | One track owns a target | Also only lanes with a target, so two tracks can both automate a global parameter |
 | 11 | Parameters carry by id | Track and voice values do. A live global or mix register returns to its initial value at a swap |
+| 13 | A block with no free buffer is dropped and counted | The worklet drops it after the engine has cleared its count, so it goes uncounted |
+| Format 3 | An image may have no Programs | The loader accepts one, and the compiler refuses to write it |
 
 **Still undecided.** A recommendation here is only that.
 

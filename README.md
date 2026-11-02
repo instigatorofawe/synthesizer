@@ -84,4 +84,5 @@ fails if the document and the code disagree:
 ## Workflow
 
 Work goes to a branch as it happens. A finished milestone lands as one squashed pull request into `main`, and only those
-pull requests run CI, so run the checks above before pushing.
+pull requests run CI, so run the checks above before pushing. One that changes only Markdown skips CI, unless it changes
+`docs/Format.md`, which `tools/ReadImage.py` reads.

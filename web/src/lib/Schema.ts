@@ -67,7 +67,8 @@ export const graphSchema = z.object({
 	edges: z.array(edgeSchema).default([])
 });
 
-const noteSchema = z.object({
+// Timeline objects refuse fields they don't know, as the compiler does, so a misspelt one is an error rather than its default.
+const noteSchema = z.strictObject({
 	tick,
 	note: z.number().int().min(0).max(127),
 	vel: z.number().int().min(0).max(127).default(100),
@@ -88,12 +89,14 @@ const laneTargetSchema = z.union([
 	z.strictObject({ mix: z.literal('send'), bus: z.string().min(1), to: z.string().min(1) })
 ]);
 
-const automationSchema = z.object({
+// `curve: 'exp'` ramps by equal ratios, which is even in decibels for a gain and in pitch for a frequency.
+const automationSchema = z.strictObject({
 	param: id16.optional(),
 	target: laneTargetSchema.optional(),
 	tick,
 	value: z.number(),
-	ramp: z.number().int().min(0).optional()
+	ramp: z.number().int().min(0).optional(),
+	curve: z.enum(['linear', 'exp']).optional()
 });
 
 const playFields = {
@@ -101,10 +104,10 @@ const playFields = {
 	priority: z.enum(['last', 'high', 'low']).default('last'),
 	glide: z.number().min(0).max(60).default(0)
 };
-const playSchema = z.object(playFields);
-const playChangeSchema = z.object({ tick, ...playFields });
+const playSchema = z.strictObject(playFields);
+const playChangeSchema = z.strictObject({ tick, ...playFields });
 
-const clipSchema = z.object({
+const clipSchema = z.strictObject({
 	id: z.string().min(1),
 	length: z.number().int().min(1),
 	notes: z.array(noteSchema).default([]),
@@ -112,14 +115,19 @@ const clipSchema = z.object({
 	play: z.array(playChangeSchema).default([])
 });
 
-const insertSchema = z.object({
+const insertSchema = z.strictObject({
 	id: id16.optional(),
 	patch: z.string().min(1),
 	params: z.record(z.string(), z.number()).optional(),
 	key: z.string().optional()
 });
 
-const sendSchema = z.object({ bus: z.string().min(1), gain: z.number().min(0).max(4).default(1) });
+// A pre-fader send takes its chain before its fader and pan.
+const sendSchema = z.strictObject({
+	bus: z.string().min(1),
+	gain: z.number().min(0).max(4).default(1),
+	pre: z.boolean().optional()
+});
 
 const routing = {
 	gain: z.number().min(0).max(4).default(1),
@@ -130,13 +138,19 @@ const routing = {
 	inserts: z.array(insertSchema).default([])
 };
 
-const placementSchema = z.object({
+// A placement plays a window of its clip, `start` and `length` in the clip's ticks, transposed and with its velocities
+// scaled.
+const placementSchema = z.strictObject({
 	clip: z.string().min(1),
 	tick,
-	repeat: z.number().int().min(1).max(100000).default(1)
+	repeat: z.number().int().min(1).max(100000).default(1),
+	transpose: z.number().int().min(-127).max(127).optional(),
+	velocity: z.number().min(0).max(4).optional(),
+	start: tick.optional(),
+	length: z.number().int().min(1).max(0x7fffffff).optional()
 });
 
-const trackSchema = z.object({
+const trackSchema = z.strictObject({
 	id: id16,
 	name: z.string().max(100).default(''),
 	voices: z.number().int().min(1).max(256).default(4),
@@ -147,22 +161,22 @@ const trackSchema = z.object({
 	...routing
 });
 
-const busSchema = z.object({ id: z.string().min(1), ...routing });
+const busSchema = z.strictObject({ id: z.string().min(1), ...routing });
 
 const distinct = (ids: unknown[]) => new Set(ids).size === ids.length;
 
 export const timelineSchema = z
-	.object({
+	.strictObject({
 		ppq: z.number().int().min(1).max(65535).default(480),
 		// A change marked `ramp` glides to the next one, linearly in bpm over ticks, rather than holding until it.
 		tempo: z
-			.array(z.object({ tick, bpm: z.number().min(1).max(1000), ramp: z.boolean().optional() }))
+			.array(z.strictObject({ tick, bpm: z.number().min(1).max(1000), ramp: z.boolean().optional() }))
 			.default([{ tick: 0, bpm: 120 }]),
 		clips: z.array(clipSchema).default([]),
 		tracks: z.array(trackSchema).default([]),
 		buses: z.array(busSchema).default([]),
 		master: z
-			.object({ gain: z.number().min(0).max(4).default(1), inserts: z.array(insertSchema).default([]) })
+			.strictObject({ gain: z.number().min(0).max(4).default(1), inserts: z.array(insertSchema).default([]) })
 			.default({ gain: 1, inserts: [] }),
 		globals: z.record(z.string(), z.number()).default({})
 	})

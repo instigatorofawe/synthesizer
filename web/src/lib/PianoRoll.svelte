@@ -6,13 +6,17 @@
 		addPoint,
 		describeLane,
 		duplicateNotes,
+		humanize,
 		isBlackKey,
 		lanesOf,
 		moveNotes,
 		noteName,
+		quantize,
+		rampVelocities,
 		removeLane,
 		removeNotes,
 		resizeNotes,
+		scaleVelocities,
 		setNotes,
 		snapTick,
 		type Clip,
@@ -226,6 +230,16 @@
 		if (Number.isInteger(value) && chosen.size) onchange(setNotes(clip, chosen, { [name]: value }));
 	}
 
+	// What the shaping tools last used, which is where they start next time.
+	let rampFrom = $state(40);
+	let rampTo = $state(110);
+	let scaleBy = $state(0.8);
+	let nudges = $state(0);
+
+	function shape(next: Clip) {
+		if (chosen.size && next !== clip) onchange(next);
+	}
+
 	function slotChanged(text: string) {
 		const next = setNotes(clip, chosen, { slot: text === '' ? undefined : Number(text) });
 		onchange({
@@ -311,6 +325,51 @@
 					onchange={(e) => field('vel', e.currentTarget.value)}
 				/></label
 			>
+			<span class="shaping" role="group" aria-label="Shape the chosen notes">
+				{#if chosen.size > 1}
+					<label
+						>ramp <input
+							type="number"
+							min="1"
+							max="127"
+							aria-label="Ramp velocities from"
+							bind:value={rampFrom}
+						/></label
+					>
+					<label>to <input type="number" min="1" max="127" aria-label="Ramp velocities to" bind:value={rampTo} /></label
+					>
+					<button
+						type="button"
+						title="Velocities on a line from the first chosen note to the last"
+						onclick={() => shape(rampVelocities(clip, chosen, rampFrom, rampTo))}>Ramp</button
+					>
+				{/if}
+				<label
+					>× <input
+						type="number"
+						min="0"
+						max="4"
+						step="0.05"
+						aria-label="Scale velocities by"
+						bind:value={scaleBy}
+					/></label
+				>
+				<button
+					type="button"
+					title="Every chosen velocity times this, so their shape stays"
+					onclick={() => shape(scaleVelocities(clip, chosen, scaleBy))}>Scale</button
+				>
+				<button
+					type="button"
+					title="Nudge each start by up to a 1/64 note and each velocity by up to 8, either way"
+					onclick={() => shape(humanize(clip, chosen, Math.round(ppq / 16), 8, ++nudges))}>Humanize</button
+				>
+				<button
+					type="button"
+					title="Move each start to the nearest line of the grid"
+					onclick={() => shape(quantize(clip, chosen, grid))}>Quantize</button
+				>
+			</span>
 			{#if slots.length > 1}
 				<label>
 					slot

@@ -71,10 +71,16 @@ export interface ChunkReport {
 	programs: number;
 }
 
-export interface MixRoute {
-	to: string;
+// A pair of mix registers, and the factors whose product it holds.
+export interface MixPair {
 	left: number;
 	right: number;
+	of?: ('fader' | 'mute' | 'pan' | 'send' | 'master')[];
+}
+
+export interface MixRoute extends MixPair {
+	to: string;
+	pre?: boolean;
 }
 
 export interface ChainReport {
@@ -84,6 +90,15 @@ export interface ChainReport {
 	step: number;
 	bus: number;
 	mix: MixRoute[];
+	stages?: MixPair[]; // A factor applied to the whole chain by a step of its own, once a lane on it would share a pair
+	notes_at_once?: number; // The most notes a track holds at once while it plays poly
+}
+
+// Something that compiles but may not sound as meant, such as a track with too few voices for what it holds.
+export interface CompileWarning {
+	where: string;
+	message: string;
+	tick?: number;
 }
 
 export interface ProgramReport {
@@ -96,7 +111,8 @@ export interface ProgramReport {
 	size: number;
 	tracks: ChainReport[];
 	buses: ChainReport[];
-	master: { step: number; bus: number };
+	master: { step: number; bus: number; stages?: MixPair[] };
+	warnings?: CompileWarning[];
 	inserts: { id: number; index: number }[]; // Where each insert id sits in the image, which a live change addresses
 	patches: { id: string; hash: string }[];
 }

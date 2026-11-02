@@ -9,6 +9,8 @@
 		addInsert,
 		addSend,
 		busKey,
+		faderGain,
+		faderPosition,
 		MASTER,
 		mixWrites,
 		moveInsert,
@@ -138,18 +140,21 @@
 	{/if}
 {/snippet}
 
+<!-- Its travel is cubic in gain, so it moves evenly through what is heard, and its value is still the gain. -->
 {#snippet fader(key: string, label: string, gain: number)}
+	{@const at = (event: Event) => Number(faderGain(number(event)).toPrecision(4))}
 	<label class="fader">
 		<span class="value">{decibels(gain)}</span>
 		<input
 			type="range"
 			min="0"
-			max={Math.max(2, gain)}
-			step="0.01"
-			value={gain}
+			max={Math.max(1, faderPosition(gain))}
+			step="0.001"
+			value={faderPosition(gain)}
 			aria-label={`Fader for ${label}`}
-			oninput={(e) => live(setChain(doc, key, { gain: number(e) }), key)}
-			onchange={(e) => onchange(setChain(doc, key, { gain: number(e) }))}
+			aria-valuetext={decibels(gain)}
+			oninput={(e) => live(setChain(doc, key, { gain: at(e) }), key)}
+			onchange={(e) => onchange(setChain(doc, key, { gain: at(e) }))}
 		/>
 	</label>
 {/snippet}
@@ -289,6 +294,14 @@
 				oninput={(e) => live(setSend(doc, key, index, { gain: number(e) }), key)}
 				onchange={(e) => onchange(setSend(doc, key, index, { gain: number(e) }))}
 			/>
+			<button
+				type="button"
+				class="pre"
+				aria-pressed={send.pre ?? false}
+				aria-label={`Send from ${label} to ${send.bus} before the fader`}
+				title="Pre-fader: the send takes this chain before its fader and pan"
+				onclick={() => onchange(setSend(doc, key, index, { pre: send.pre ? undefined : true }))}>pre</button
+			>
 			{#if !readonly}
 				<button
 					type="button"

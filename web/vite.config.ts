@@ -14,5 +14,7 @@ export default defineConfig({
 		})
 	],
 	server: { fs: { allow: ['..'] } },
-	test: { include: ['src/**/*Test.ts'] }
+	// Vitest keeps transformed modules between runs, keyed on the source, but import.meta.glob expands in that transform. A file
+	// added to examples/Recipes would change nothing it can see, and the recipe would read as null until the cache was deleted.
+	test: { include: ['src/**/*Test.ts'], fsModuleCache: false }
 });

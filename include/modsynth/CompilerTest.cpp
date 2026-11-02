@@ -839,6 +839,88 @@ TEST(CompileImage, AnImageNeedsSomethingInIt) {
     EXPECT_NE(lane_error(request).find("a program or a patch"), std::string::npos);
 }
 
+namespace {
+
+struct Conductor {
+    u32 initial_uspq;
+    std::vector<std::pair<u32, u32>> changes;  // tick, microseconds per quarter, after the first
+};
+
+Conductor conductor_of(const json& tempo, u32 ppq = 480) {
+    json timeline = one_note_timeline("saw");
+    timeline["ppq"] = ppq;
+    timeline["tempo"] = tempo;
+    const auto image = compile_image(request_with({"saw"}, {program("a", timeline)})).image;
+    const LoadedImage loaded(image);
+    EXPECT_EQ(loaded.loader.status(), LoadStatus::Ready);
+    ProgramView v;
+    const ChunkRef* c = loaded.table.find(loaded.loader.program_hash(0));
+    EXPECT_TRUE(parse_program({c->data, c->size}, v));
+    Conductor out{v.h.uspq, {}};
+    u32 tick = 0;
+    for (u32 i = 0; i < v.h.conductor_length; ++i) {
+        const Instruction in = v.instruction(v.h.conductor_begin + i);
+        if (in.op == static_cast<u8>(Instr::Wait)) tick += in.c;
+        if (in.op == static_cast<u8>(Instr::Tempo)) out.changes.emplace_back(tick, in.c);
+    }
+    return out;
+}
+
+u32 uspq(float bpm) { return static_cast<u32>(60000000.0f / bpm); }
+
+}  // namespace
+
+TEST(Tempo, ARampIsAStepEveryThirtySecondNoteAtTheTempoHalfwayThroughIt) {
+    const Conductor c =
+        conductor_of(json::parse(R"([{"tick": 0, "bpm": 120, "ramp": true}, {"tick": 1920, "bpm": 60}])"));
+    // The first step, from tick 0 to 60, is at the tempo of tick 30.
+    EXPECT_EQ(c.initial_uspq, uspq(120.0f - 60.0f * 30.0f / 1920.0f));
+    ASSERT_EQ(c.changes.size(), 32u);  // 31 more steps, then the change the ramp arrives at
+    for (u32 i = 0; i + 1 < c.changes.size(); ++i) {
+        EXPECT_EQ(c.changes[i].first, 60 * (i + 1));
+        EXPECT_EQ(c.changes[i].second, uspq(120.0f - 60.0f * (60.0f * (i + 1) + 30.0f) / 1920.0f));
+    }
+    EXPECT_EQ(c.changes.back(), std::make_pair(1920u, uspq(60.0f)));
+}
+
+TEST(Tempo, AStepIsWhatItWasAndARampStartsWhereItIs) {
+    const Conductor steps = conductor_of(json::parse(R"([{"tick": 0, "bpm": 90}, {"tick": 960, "bpm": 140}])"));
+    EXPECT_EQ(steps.initial_uspq, uspq(90.0f));
+    EXPECT_EQ(steps.changes, (std::vector<std::pair<u32, u32>>{{960, uspq(140.0f)}}));
+    // A ramp later in the song: the tempo holds until it starts, and the change after it still applies.
+    const Conductor later = conductor_of(json::parse(R"([{"tick": 0, "bpm": 100}, {"tick": 480, "bpm": 100,
+        "ramp": true}, {"tick": 600, "bpm": 160}, {"tick": 960, "bpm": 80}])"));
+    EXPECT_EQ(later.initial_uspq, uspq(100.0f));
+    EXPECT_EQ(later.changes, (std::vector<std::pair<u32, u32>>{
+                                 {480, uspq(115.0f)}, {540, uspq(145.0f)}, {600, uspq(160.0f)}, {960, uspq(80.0f)}}));
+}
+
+TEST(Tempo, ALongRampTakesLongerStepsAndAFlatOneIsOneChange) {
+    // 64 bars would be 2048 steps of a 1/32 note, which is twice as many as a ramp is allowed.
+    const Conductor longer = conductor_of(json::parse(R"([{"tick": 0, "bpm": 60, "ramp": true}, {"tick": 122880,
+        "bpm": 180}])"));
+    ASSERT_EQ(longer.changes.size(), 1024u);
+    EXPECT_EQ(longer.changes[0].first, 120u);
+    EXPECT_EQ(longer.changes.back(), std::make_pair(122880u, uspq(180.0f)));
+    const Conductor flat = conductor_of(json::parse(R"([{"tick": 0, "bpm": 120, "ramp": true}, {"tick": 1920,
+        "bpm": 120}])"));
+    EXPECT_EQ(flat.initial_uspq, uspq(120.0f));
+    EXPECT_EQ(flat.changes, (std::vector<std::pair<u32, u32>>{{1920, uspq(120.0f)}}));
+    // A short ppq still steps at least a tick at a time.
+    EXPECT_EQ(conductor_of(json::parse(R"([{"tick": 0, "bpm": 100, "ramp": true}, {"tick": 4, "bpm": 140}])"), 4)
+                  .changes.size(),
+              4u);
+}
+
+TEST(Tempo, ARampNeedsAChangeToRampTo) {
+    json timeline = one_note_timeline("saw");
+    timeline["tempo"] = json::parse(R"([{"tick": 0, "bpm": 120}, {"tick": 960, "bpm": 90, "ramp": true}])");
+    const auto result = compiler::compile_image_checked(request_with({"saw"}, {program("a", timeline)}).dump());
+    EXPECT_FALSE(result.report.value("ok", true));
+    EXPECT_NE(result.report.at("errors")[0].at("message").get<std::string>().find("a tempo ramp needs a later change"),
+              std::string::npos);
+}
+
 TEST(Lanes, EveryTargetTheFormatCanReachCompilesAndLoads) {
     for (const char* lane : {R"({"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5, "ramp": 10})",
                              R"({"target": {"insert": 2}, "param": 1, "tick": 0, "value": 0.5})",

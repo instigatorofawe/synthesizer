@@ -125,6 +125,26 @@ TEST(Synth, TempoDoesNotDriftOverALongRun) {
     EXPECT_NEAR(rig.engine.tick(), expected, 1.0);
 }
 
+TEST(Synth, ATempoRampTakesAsLongAsItsCurve) {
+    // 120 down to 60 bpm across four bars, linear in bpm over ticks. A curve like that lasts
+    // 60 / ppq · T / (b1 − b0) · ln(b1 / b0) seconds.
+    json request = single_track(json::array({{{"tick", 0}, {"note", 60}, {"vel", 100}, {"dur", 10}}}));
+    request["programs"][0]["timeline"]["tempo"] =
+        json::parse(R"([{"tick": 0, "bpm": 120, "ramp": true}, {"tick": 7680, "bpm": 60}])");
+    Rig<kStereo> rig(compile_image(request).image);
+    play(rig);
+    float l[kFrame], r[kFrame];
+    u32 frames = 0;
+    while (rig.engine.tick() < 7680) {
+        rig.engine.render({l, r});
+        ++frames;
+    }
+    const double exact = 60.0 / 480.0 * 7680.0 / (60.0 - 120.0) * std::log(60.0 / 120.0) * 48000.0;
+    // Each of its 128 steps rounds up to a sample, and the count stops at the end of a frame. The step at the start of
+    // each 1/32 note instead of its middle would be 1500 samples out.
+    EXPECT_NEAR(frames * static_cast<double>(kFrame), exact, 128.0 + kFrame + 2.0);
+}
+
 TEST(Synth, LocateChasesHeldNotes) {
     const json notes = json::array({{{"tick", 0}, {"note", 60}, {"vel", 100}, {"dur", 1800}}});
     Rig<kStereo> rig(compile_image(single_track(notes)).image);

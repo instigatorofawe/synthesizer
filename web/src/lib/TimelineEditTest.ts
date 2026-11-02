@@ -51,6 +51,7 @@ import {
 	setPoint,
 	settlingWrites,
 	setTempo,
+	tempoAt,
 	snapTick,
 	songLength,
 	trackKey,
@@ -560,6 +561,42 @@ describe('tempo', () => {
 		const doc = removeTempo(song(), 0);
 		expect(doc.tempo).toHaveLength(1);
 		expect(removeTempo(addTempo(doc, 960, 90), 1).tempo).toHaveLength(1);
+	});
+
+	const ramp = {
+		...song(),
+		tempo: [
+			{ tick: 0, bpm: 120, ramp: true },
+			{ tick: 1920, bpm: 60 }
+		]
+	};
+
+	it('holds a change until the next, and glides along a ramp to it', () => {
+		const held = [
+			{ tick: 480, bpm: 90 },
+			{ tick: 960, bpm: 140 }
+		];
+		expect([0, 480, 700, 960, 5000].map((tick) => tempoAt(held, tick))).toEqual([120, 90, 90, 140, 140]);
+		expect([0, 480, 960, 1920, 3000].map((tick) => tempoAt(ramp.tempo, tick))).toEqual([120, 105, 90, 60, 60]);
+		// The compiler refuses a ramp with nowhere to go, and until it is fixed the tempo just holds.
+		expect(tempoAt([{ tick: 0, bpm: 100, ramp: true }], 960)).toBe(100);
+	});
+
+	it('carries a ramp on through a change added inside it, so the curve stays as it was', () => {
+		const doc = addTempo(ramp, 960, tempoAt(ramp.tempo, 960));
+		expect(doc.tempo).toEqual([
+			{ tick: 0, bpm: 120, ramp: true },
+			{ tick: 960, bpm: 90, ramp: true },
+			{ tick: 1920, bpm: 60 }
+		]);
+		for (const tick of [0, 480, 960, 1440, 1920]) expect(tempoAt(doc.tempo, tick)).toBe(tempoAt(ramp.tempo, tick));
+		expect(addTempo(ramp, 3840, 60).tempo.at(-1)).toEqual({ tick: 3840, bpm: 60 });
+	});
+
+	it('marks a ramp only where a later change gives it somewhere to go', () => {
+		expect(removeTempo(ramp, 1).tempo).toEqual([{ tick: 0, bpm: 120 }]);
+		expect(setTempo(ramp, 1, { ramp: true }).tempo[1]).toEqual({ tick: 1920, bpm: 60 });
+		expect(setTempo(ramp, 0, { ramp: false }).tempo[0]).toEqual({ tick: 0, bpm: 120 });
 	});
 });
 

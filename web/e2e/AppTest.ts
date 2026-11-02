@@ -258,6 +258,44 @@ test('a broken edit shows where it failed and the old image keeps playing', asyn
 	await expect(page.getByTestId('voices')).not.toHaveText('0');
 });
 
+test('a tempo ramp glides to the next change, and the transport shows how far it has got', async ({ page }) => {
+	await page.goto('/?timeline=song');
+	await page.getByRole('button', { name: 'Start audio' }).click();
+	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await expect(page.getByTestId('tempo')).toHaveText('140 BPM');
+	// Bars are 96 pixels and 1920 ticks.
+	const ruler = (await page.getByTestId('ruler').boundingBox())!;
+	const locate = async (bar: number, tick: string) => {
+		await page.mouse.click(ruler.x + (bar - 1) * 96 + 2, ruler.y + ruler.height / 2);
+		await expect(page.getByTestId('tick')).toHaveText(tick);
+	};
+	await locate(3, '3840');
+	await timelineEditor(page).getByText('Tempo, 140 BPM').click();
+	await timelineEditor(page).getByRole('button', { name: 'Add a change at the playhead' }).click();
+	await page.getByLabel('Tempo at bar 3', { exact: true }).fill('100');
+	await page.getByLabel('Tempo at bar 3', { exact: true }).press('Enter');
+	// Only a change with a later one can ramp.
+	await expect(page.getByLabel('Ramp from bar 3')).toHaveCount(0);
+	await page.getByLabel('Ramp from bar 1').check();
+	await settled(page);
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	expect(await page.getByTestId('generation').textContent()).not.toBe('1');
+	await expect(page.getByTestId('tempo')).toHaveText('100 BPM');
+	await locate(2, '1920');
+	await expect(page.getByTestId('tempo')).toHaveText('120 BPM');
+	const json = await timelineJson(page);
+	expect(JSON.parse(await json.inputValue()).tempo).toEqual([
+		{ tick: 0, bpm: 140, ramp: true },
+		{ tick: 3840, bpm: 100 }
+	]);
+	await page
+		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tab', { name: /^Notes/ })
+		.click();
+	await page.getByLabel('Ramp from bar 1').uncheck();
+	await expect(page.getByTestId('tempo')).toHaveText('140 BPM');
+});
+
 test('seeking chases held notes and a knob works', async ({ page }) => {
 	await startPlaying(page, 'ballad');
 	await expect(page.getByTestId('voices')).toHaveText('3');

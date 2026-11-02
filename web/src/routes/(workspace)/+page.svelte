@@ -24,7 +24,7 @@
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import Splitter from '#lib/Splitter.svelte';
-	import { BEATS_PER_BAR, patchUses, settlingWrites, type PatchUse } from '#lib/TimelineEdit.ts';
+	import { BEATS_PER_BAR, patchUses, settlingWrites, tempoAt, type PatchUse } from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
 	import {
 		actionOn,
@@ -514,9 +514,8 @@
 	const position = $derived(
 		`${Math.floor(tick / (ppq * BEATS_PER_BAR)) + 1}.${Math.floor((tick % (ppq * BEATS_PER_BAR)) / ppq) + 1}`
 	);
-	const tempo = $derived(
-		songDoc ? ([...songDoc.tempo].reverse().find((t) => t.tick <= tick) ?? songDoc.tempo[0])?.bpm : undefined
-	);
+	// To a tenth of a bpm, which a ramp needs and a held tempo doesn't show.
+	const tempo = $derived(songDoc ? Math.round(tempoAt(songDoc.tempo, tick) * 10) / 10 : undefined);
 
 	function open(change: Record<string, string | null>, replace = false) {
 		void goto(withParams(search, change), { reset: false, replace });
@@ -630,7 +629,7 @@
 			<span class="big">{position}</span>
 			<span class="muted">tick <span data-testid="tick">{tick}</span></span>
 		</div>
-		{#if tempo}<span class="readout muted">{tempo} BPM</span>{/if}
+		{#if tempo}<span class="readout muted" data-testid="tempo">{tempo} BPM</span>{/if}
 		<div class="master"><Meter ring={masterRing} label="Master level" /></div>
 		{#if engineState}
 			<span class="muted state" data-testid="state" data-playing={engineState.playing}>

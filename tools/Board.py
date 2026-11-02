@@ -12,7 +12,7 @@ uv run tools/Board.py loopback                                     # reads PA4 b
 uv run tools/Board.py render --frames 1920 --out board.f32
 uv run tools/Board.py check                                        # every golden image, against its mono render
 uv run tools/Board.py test                                         # transfers that fail must change nothing
-uv run tools/Board.py time examples/Recipes                        # cycles a frame for each, on the board
+uv run tools/Board.py time examples/Recipes                        # cycles a frame for each, to its end
 """
 
 import argparse
@@ -372,7 +372,11 @@ def main() -> int:
     time_.add_argument(
         "paths", type=Path, nargs="+", help="images, requests, or folders of them"
     )
-    time_.add_argument("--seconds", type=float, default=4.0)
+    time_.add_argument(
+        "--seconds",
+        type=float,
+        help="how long to render each, by default to its end and tail as the Python module renders it",
+    )
     time_.add_argument("--json", type=Path, help="also write the results here")
     args = parser.parse_args()
 
@@ -440,6 +444,7 @@ def main() -> int:
                 image = load_image(path, board)
             except Refused as e:
                 print(f"{path.stem:28} does not compile: {e}")
+                results[path.stem] = {"refused": str(e)}
                 continue
             try:
                 upload = board.upload(image)
@@ -447,15 +452,22 @@ def main() -> int:
                 print(f"{path.stem:28} {e}")
                 results[path.stem] = {"refused": str(e)}
                 continue
-            result, _ = board.render(
-                round(args.seconds * 48000 / FRAME), 48000.0, False
-            )
+            if args.seconds is None:
+                import modsynth  # only needed to find how long it plays
+
+                samples = len(modsynth.render(image))
+            else:
+                samples = round(args.seconds * 48000)
+            result, _ = board.render(math.ceil(samples / FRAME), 48000.0, False)
             results[path.stem] = result | {
                 "image": upload["image"],
                 "fast": upload["fast"],
                 "bulk": upload["bulk"],
             }
-            print(f"{path.stem:28} {timing(result)}  voices {result['peak_voices']}")
+            seconds = int(result["frames"]) * FRAME / 48000
+            print(
+                f"{path.stem:28} {timing(result)}  voices {result['peak_voices']}, {seconds:.1f} s"
+            )
         if args.json:
             args.json.write_text(json.dumps(results, indent=1) + "\n")
     return 0

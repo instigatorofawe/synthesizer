@@ -407,9 +407,9 @@ These figures are early estimates. Tuning waits for Milestone 7.
 [board]. `docs/Board.md` has the detail.
 - **Recipes:** 59 of the 61 load. The other two need more bulk memory than its 64 KB. Of the 59:
   - 56 fit a 32-sample frame on average and 53 in their worst frame.
-  - The median takes 25% of the core.
-- **One voice:** a patch playing one voice costs 196 to 407 cycles a sample, mixer included. The model's 160 to 200 is for the voice alone.
-- **The demo:** it runs at 109% of the core on average, so it doesn't play in real time.
+  - The median takes 26% of the core.
+- **One voice:** a patch playing one voice costs 203 to 400 cycles a sample, mixer included. The model's 160 to 200 is for the voice alone.
+- **The demo:** it runs at 106% of the core on average, so it doesn't play in real time.
 - **The pieces:** none of them fits. Their stereo reverb needs 188 KB of bulk memory.
 
 Calibrating the model against these is still Milestone 7's.

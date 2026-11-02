@@ -4,12 +4,14 @@
 over the ST-LINK's USB serial port, stores them in flash, and plays the newest through the 12-bit DAC. `tools/Board.py` is the host side.
 Section 10 of the design says why delivery is one-way and how storage was chosen.
 
-## Listening
+## Audio out
 
-The audio is mono, on **PA4**, which is pin **A2** of the Arduino header (CN8), with ground on any GND pin. It swings from 0 to 3.3 V
-around 1.65 V, so it is DC-coupled and hotter than line level.
+The board is for checking the firmware and measuring it, so nothing has to be connected to it. `loopback` checks the audio output by reading
+it back with the ADC.
 
-- Into a line input or a powered speaker, put a capacitor of 10 µF or more in series, and turn the volume down before the first note.
+The audio is mono, on **PA4**, which is pin **A2** of the Arduino header (CN8). It swings from 0 to 3.3 V around 1.65 V, DC-coupled and
+hotter than line level. To listen anyway:
+- Into a line input or a powered speaker, put a capacitor of 10 µF or more in series.
 - Don't drive headphones from it. The DAC's buffer is specified into 5 kΩ or more.
 
 The board plays its stored image when it starts. The blue button plays it again from the start, and the green LED is on while audio runs.
@@ -140,23 +142,34 @@ All of this was measured on one board, on 2026-11-02.
 
 A 21 KB image takes 0.8 s to send.
 
-**Cycles.** These are cycles per 32-sample frame at 48 kHz, with images in flash, 4 wait states, and the ART caches on. The budget is 53,333
-cycles a frame.
-- **What fits:**
-  - 59 of the 61 recipes load. Reverb and PingPongDelay need 188 KB and 231 KB of bulk memory, and the board has 64 KB.
-  - Of the 59, 56 stay within budget on average and 53 in their worst frame. The median takes 25% of the core.
-- **Over budget on average:**
-  - AdditiveBell at 162%, PhaseModElectricPiano at 146%, and DrawbarOrgan at 113%.
-  - The demo, at 109%.
-- **One voice:** a patch playing a single voice costs 196 to 407 cycles a sample, including the mixer. Section 15's model gave 160 to 200 for
+**Cycles.** These are cycles per 32-sample frame at 48 kHz, with images in flash, 4 wait states, and the ART caches on. Each recipe was
+rendered to its end and its tail. The budget is 53,333 cycles a frame.
+
+| Recipes | How they fit |
+|---|---|
+| 53 | Every frame within budget. The heaviest are Trumpet (worst frame 75%), Chorus (74%), LoopedSample (72%), PluckedString (71%), FrenchHorn and SidechainDucking (70%). |
+| Vocoder, DetunedSupersaw, DrumLoop | Within budget on average, at 84%, 87% and 60%. Some frames are over, worst 113%, 114% and 121%. |
+| DrawbarOrgan, PhaseModElectricPiano, AdditiveBell | Over budget on average, at 136%, 117% and 164%. |
+| Reverb, PingPongDelay | Don't load. They need 188 KB and 231 KB of bulk memory, and the board has 64 KB. |
+
+The 53 are Arpeggio, AudioRateAmplitudeModulation, AutoPan, ChannelAftertouch, ChebyshevWavefold, Chorus, Clap, Compressor,
+CubicSaturation, CurvedEnvelope, Flanger, FormantVowels, FrenchHorn, HaasWidener, HiHat, InsertFilterSweep, KeyboardTrackedFilter, Kick808,
+LegatoPortamento, LoopedSample, LoopingEnvelope, MacroKnob, MonoLead, OneShotSample, ParametricEq, PerVoiceLfo, Phaser, PitchBend,
+PluckedString, PrecutGrainCloud, PwmPad, ResonantSawBass, RingModulation, SampleAndHold, SawLfoFilter, SharedLfo, SidechainDucking, Snare,
+SquareLfoFilter, StepSequencer, StereoUnison, SubOscillator, TempoSyncedLfo, TranceGate, Tremolo, TriangleLfoFilter, Trumpet,
+VelocityFilterAmp, VelocityLayers, VibratoModWheel, VoiceStealing, WavetableMorph and Wind.
+
+- **The median** recipe takes 26% of the core on average.
+- **One voice:** a patch playing a single voice costs 203 to 400 cycles a sample, including the mixer. Section 15's model gave 160 to 200 for
   the voice alone.
+- **The demo:** 106% on average and 128% in its worst frame, so it doesn't play in real time.
 - **The four pieces:** none fits. Each sends to a stereo reverb that needs 188 KB of bulk memory.
 
 **Live playback.** The DMA plays one half of its buffer while the main loop fills the other. A half is 16 frames, 10.7 ms. Over 6 s of each:
 - LoopedSample and Vocoder never ran late.
 - DrumLoop ran late 4 times and DetunedSupersaw 14 times. Those are stretches of 16 frames that cost more than 16 frame periods.
 
-**CMSIS-DSP.** Over the same 60 programs, the median change in mean cycles was 0.0%. Some ran 9.9% slower (Vocoder) and some 8.4% faster
+**CMSIS-DSP.** Over the first 4 s of the same 60 programs, the median change in mean cycles was 0.0%. Some ran 9.9% slower (Vocoder) and some 8.4% faster
 (PhaseModElectricPiano).
 
-The full tables come from `uv run tools/Board.py time examples/Recipes --json FILE`.
+The full tables come from `uv run --no-project --with dist/modsynth-*.whl --with pyserial tools/Board.py time examples/Recipes --json FILE`.

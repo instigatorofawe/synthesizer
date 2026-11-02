@@ -87,8 +87,8 @@ With the board plugged in, flash it and talk to it with `tools/Board.py`:
     uv run --with dist/modsynth-*.whl tools/Board.py send examples/Recipes/Arpeggio.json --play
     uv run tools/Board.py check      # every golden image, rendered on the board
 
-A request is compiled against the board's profile, so one that won't fit fails before it is sent. The audio comes out of PA4 (A2):
-[docs/Board.md](docs/Board.md) has how to listen, the protocol, and what was measured.
+A request is compiled against the board's profile, so one that won't fit fails before it is sent. [docs/Board.md](docs/Board.md) has
+the protocol, the audio pin, and what was measured, including which recipes fit.
 
 ## Fuzzing
 

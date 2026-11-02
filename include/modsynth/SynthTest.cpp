@@ -1243,3 +1243,106 @@ TEST(Sample2, AMonoEngineFoldsAStereoAsset) {
     rig.engine.render({out});
     EXPECT_NEAR(out[0], 0.2f, 1e-6f) << "(0.2 + 0.6) / 2, and the track's hard left pan halves that again";
 }
+
+namespace {
+
+constexpr u32 kFadeFrames = 2048 / kFrame + 1;  // Until then the old generation is still heard, at its own legal values
+constexpr u32 kRampFrames = static_cast<u32>(kRate) / kFrame;
+
+// A patch that plays one parameter, so what a test hears is the parameter itself. A set takes `smooth_ms` to arrive.
+std::vector<std::byte> carried(float low, float high, float initial, const char* scope = "track", u32 smooth_ms = 0) {
+    json graph = json::parse(R"({"nodes": [{"id": 1, "type": "param", "param": 1}, {"id": 2, "type": "out"}],
+        "edges": [{"from": 1, "to": 2, "input": "l"}]})");
+    const json param = {
+        {"id", 1}, {"min", low}, {"max", high}, {"default", initial}, {"scope", scope}, {"smooth_ms", smooth_ms}};
+    graph["params"] = json::array({param});
+    const json held = json::parse(R"([{"tick": 0, "note": 60, "dur": 3840}])");
+    return compile_image(one_track(graph.dump().c_str(), {{"notes", held}})).image;
+}
+
+// Starts a one second ramp to `value`, and leaves it `done` frames along.
+template <class R>
+void start_ramp(R& rig, float value, u32 done) {
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    play(rig);
+    (void)first_samples(rig, 2);
+    rig.engine.send({.kind = EventKind::SetParam, .target = 0, .param = 1, .value = value});
+    (void)first_samples(rig, done);
+}
+
+// Rendering binds a load a step at a time, with the old generation still running. This does all of that before the next
+// frame, which commits it, so a test knows the frame its fade began. pump() stays true until then, so it can't be the
+// test.
+template <class R>
+void swap_now(R& rig, const std::vector<std::byte>& image) {
+    rig.swap_to(image);
+    for (u32 i = 0; i < 4096; ++i) (void)rig.engine.pump(1 << 16);
+    (void)first_samples(rig, 1);
+    ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+    ASSERT_EQ(rig.engine.generation(), 2u);
+}
+
+}  // namespace
+
+TEST(Swap, ACarriedValueStaysInsideTheNewRange) {
+    struct Case {
+        const char* scope;
+        float from, heard;
+    };
+    for (const Case c : {Case{"track", 8.0f, 1.0f}, Case{"track", -8.0f, 0.0f}, Case{"voice", 8.0f, 1.0f},
+                         Case{"voice", -8.0f, 0.0f}}) {
+        Rig<kStereo> rig(carried(-8.0f, 8.0f, c.from, c.scope));
+        ASSERT_EQ(rig.engine.load_error(), LoadError::None);
+        play(rig);
+        EXPECT_EQ(first_samples(rig, 4)[3], c.from);
+        swap_now(rig, carried(0.0f, 1.0f, 0.5f, c.scope));
+        EXPECT_EQ(first_samples(rig, kFadeFrames).back(), c.heard) << c.scope << " from " << c.from;
+    }
+}
+
+TEST(Swap, ACarriedRampHeadingPastTheRangeEndsAtItsLimitOnTime) {
+    constexpr u32 done = 100;
+    Rig<kStereo> rig(carried(0.0f, 8.0f, 0.0f, "track", 1000));
+    start_ramp(rig, 8.0f, done);
+    const float from = 8.0f * done / kRampFrames;
+    ASSERT_LT(from, 1.0f) << "the ramp must still be inside the new range for this to test its target";
+
+    swap_now(rig, carried(0.0f, 1.0f, 0.0f, "track", 1000));
+    const u32 left = kRampFrames - done;
+    const auto heard = first_samples(rig, left + 16);
+    EXPECT_LE(peak(heard), 1.0f);
+    EXPECT_NEAR(heard[left / 2], (from + 1.0f) / 2, 0.01f) << "it must take the time it had left, at a new slope";
+    EXPECT_LT(heard[left - 8], 1.0f);
+    EXPECT_EQ(heard[left + 8], 1.0f);
+}
+
+TEST(Swap, ACarriedRampFromPastTheRangeDoesNotOvershootItsTarget) {
+    constexpr u32 done = 100;
+    Rig<kStereo> rig(carried(0.0f, 8.0f, 8.0f, "track", 1000));
+    start_ramp(rig, 0.0f, done);
+    swap_now(rig, carried(0.0f, 1.0f, 0.5f, "track", 1000));
+
+    const u32 left = kRampFrames - done;
+    const auto heard = first_samples(rig, left + 16);
+    for (u32 f = kFadeFrames; f < heard.size(); ++f) {
+        ASSERT_GE(heard[f], 0.0f) << f;
+        ASSERT_LE(heard[f], 1.0f) << f;
+    }
+    EXPECT_NEAR(heard[left / 2], 0.5f, 0.01f) << "it must start at the limit and take the time it had left";
+    EXPECT_GT(heard[left - 8], 0.0f);
+    EXPECT_EQ(heard[left + 8], 0.0f);
+}
+
+TEST(Swap, ACarriedRampInsideTheRangeIsNotDisturbed) {
+    const auto image = carried(0.0f, 8.0f, 0.0f, "track", 1000);
+    Rig<kStereo> rig(image), reference(image);
+    start_ramp(rig, 3.3f, 100);  // A step that rounds differently if it is worked out again from here, as most don't
+    start_ramp(reference, 3.3f, 100);
+    swap_now(rig, image);
+    (void)first_samples(reference, 1);  // The frame that committed it
+    auto heard = first_samples(rig, kRampFrames);
+    auto expected = first_samples(reference, kRampFrames);
+    heard.erase(heard.begin(), heard.begin() + kFadeFrames);
+    expected.erase(expected.begin(), expected.begin() + kFadeFrames);
+    EXPECT_EQ(heard, expected) << "the same image and the same range, so not one bit may move";
+}

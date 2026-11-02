@@ -239,7 +239,7 @@ Milestone 1 needs none of this, because the image is linked into the firmware.
 
 A generation is an image reference, a runtime block and a refcount, capped at 2 live. A third edit force-fades the
 oldest. The compiler emits a stable state id per stateful step, so state of matching type and size carries across a swap.
-Inserts crossfade. Embedded builds use a limit of 1, with no separate code path.
+Parameters carry by id, clamped to the new patch's range. Inserts crossfade. Embedded builds use a limit of 1, with no separate code path.
 
 ## 12. Browser load path
 

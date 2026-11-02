@@ -42,29 +42,33 @@ target_compile_options(cmsis_kernels PRIVATE ${ARCH} -Ofast -ffp-contract=off -f
 target_compile_definitions(cmsis_kernels PRIVATE ${CMSIS_DEFINES})
 target_include_directories(cmsis_kernels SYSTEM PRIVATE ${CMSIS_INCLUDES})
 
-function(add_firmware name channels backend frame)
-    add_executable(${name} Main.cpp)
-    set_target_properties(${name} PROPERTIES SUFFIX .elf)
+# What every Cortex-M build shares. Each links with its own script, as only some need the fuzzer's room.
+function(configure_firmware name channels backend script)
+    set_target_properties(${name} PROPERTIES SUFFIX .elf LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${script})
     target_compile_features(${name} PRIVATE cxx_std_23)
     target_include_directories(${name} PRIVATE ../include)
-    target_compile_definitions(${name} PRIVATE
-        MODSYNTH_CHANNELS=${channels}
-        MODSYNTH_FRAME=${frame}
-        MODSYNTH_GOLDEN="${MODSYNTH_GOLDEN}"
-        MODSYNTH_OUTPUT="${name}"
-    )
+    target_compile_definitions(${name} PRIVATE MODSYNTH_CHANNELS=${channels})
     # No threadsafe statics: a guard variable would be the one route for threading symbols into this binary.
     target_compile_options(${name} PRIVATE ${ARCH} -O2 -ffp-contract=off -fno-math-errno -fno-exceptions -fno-rtti
         -fno-threadsafe-statics -ffunction-sections -fdata-sections -Wall -Wextra -Wno-psabi)
     target_link_options(${name} PRIVATE ${ARCH} -nostartfiles --specs=nano.specs --specs=nosys.specs
-        -Wl,--gc-sections -T ${CMAKE_CURRENT_SOURCE_DIR}/Link.ld)
-    set_target_properties(${name} PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Link.ld)
+        -Wl,--gc-sections -T ${CMAKE_CURRENT_SOURCE_DIR}/${script})
     if(backend STREQUAL "cmsis")
         target_compile_definitions(${name} PRIVATE MODSYNTH_CMSIS ${CMSIS_DEFINES})
         target_include_directories(${name} SYSTEM PRIVATE ${CMSIS_INCLUDES})
         target_sources(${name} PRIVATE $<TARGET_OBJECTS:cmsis_kernels>)
     endif()
     add_custom_command(TARGET ${name} POST_BUILD COMMAND arm-none-eabi-size $<TARGET_FILE:${name}>)
+endfunction()
+
+function(add_firmware name channels backend frame)
+    add_executable(${name} Main.cpp)
+    configure_firmware(${name} ${channels} ${backend} Link.ld)
+    target_compile_definitions(${name} PRIVATE
+        MODSYNTH_FRAME=${frame}
+        MODSYNTH_GOLDEN="${MODSYNTH_GOLDEN}"
+        MODSYNTH_OUTPUT="${name}"
+    )
 endfunction()
 
 # The default frame size, then the one the frozen images declare. An engine refuses any other size than its own.
@@ -74,6 +78,21 @@ add_firmware(StereoCmsis 2 cmsis 32)
 add_firmware(Stereo128 2 scalar 128)
 add_firmware(Mono128 1 scalar 128)
 add_firmware(StereoCmsis128 2 cmsis 128)
+
+# Instruction counts for tools/Bench.py, which compiles the recipes these link. On the mps2-an386 as they need the room.
+set(MODSYNTH_BENCH_RECIPES "" CACHE FILEPATH "The list of recipes tools/Bench.py wrote")
+if(MODSYNTH_BENCH_RECIPES)
+    foreach(build "BenchStereo 2 scalar" "BenchMono 1 scalar" "BenchCmsis 2 cmsis")
+        separate_arguments(build)
+        list(GET build 0 name)
+        list(GET build 1 channels)
+        list(GET build 2 backend)
+        add_executable(${name} Bench.cpp)
+        configure_firmware(${name} ${channels} ${backend} An386.ld)
+        target_include_directories(${name} PRIVATE ../bench)
+        target_compile_definitions(${name} PRIVATE MODSYNTH_BENCH_RECIPES="${MODSYNTH_BENCH_RECIPES}")
+    endforeach()
+endif()
 
 # The fuzzer, on QEMU's mps2-an386, whose Cortex-M4 has the room for it. Only Target.cpp is instrumented, so what a
 # mutation discovers is new engine behaviour and not a new path through the mutator. It links first, so that an inline

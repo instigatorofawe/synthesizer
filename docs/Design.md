@@ -447,6 +447,11 @@ Benchmarks record worst frame and p99.9, use modulated patches, and include wasm
 from 3.5 to 10 ns between frames 8 and 512 for unknown reasons, so native ratios are not carried to Cortex-M. Use the
 instruction counts above instead.
 
+`tools/Bench.py` runs both sides and writes `docs/Benchmarks.md`: Google Benchmark on a host, and `firmware/Bench.cpp` for exact instruction
+counts on QEMU, over one list of kernel cases and every recipe. wasm on x86 is not measured yet. CI runs both harnesses once, so they keep
+working, and does not compare their figures: the instruction-count gate is still Milestone 7's. Cycles on a board need a harness that reads
+`DWT_CYCCNT` instead of SysTick, and Google Benchmark can't run there, which is why the case list has no dependency on it.
+
 Desktop figure so far [measured]: about 8.4 ns per voice-sample, flat from 1 to 2,048 voices on one M4 Pro core, scalar,
 one patch, no effects.
 

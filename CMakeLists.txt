@@ -184,6 +184,9 @@ if(MODSYNTH_BUILD_FUZZ)
 endif()
 
 if(MODSYNTH_BUILD_BENCH)
+    if(NOT MODSYNTH_BUILD_COMPILER)
+        message(FATAL_ERROR "The benchmarks compile the recipes, so they need MODSYNTH_BUILD_COMPILER")
+    endif()
     set(BENCHMARK_ENABLE_TESTING OFF)
     set(BENCHMARK_ENABLE_INSTALL OFF)
     FetchContent_Declare(benchmark
@@ -198,7 +201,8 @@ if(MODSYNTH_BUILD_BENCH)
 
     file(GLOB MODSYNTH_BENCH_SOURCES CONFIGURE_DEPENDS bench/*.cpp)
     add_executable(modsynth_bench ${MODSYNTH_BENCH_SOURCES})
-    target_link_libraries(modsynth_bench PRIVATE modsynth benchmark::benchmark_main)
+    target_link_libraries(modsynth_bench PRIVATE modsynth_compiler benchmark::benchmark_main)
+    target_compile_definitions(modsynth_bench PRIVATE MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes")
 endif()
 
 if(MODSYNTH_INSTALL)

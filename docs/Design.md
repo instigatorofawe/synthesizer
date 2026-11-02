@@ -113,7 +113,8 @@ only for patches a Program uses. Uploads go through a chunk store, whose only jo
 - An `Either` operand takes audio or a scalar on a single input, for new ops only, rather than a twin op for each rate. `OscMod` takes frequency, phase and
   sync, and its fourth input is feedback on a sine and width on a pulse, because a step has 4 inputs. Sync's jump is smoothed the way a saw's own is, on every wave,
   which costs a sample of delay. Its sine comes from `sin_turns`, which is more accurate than the table and needs none, so an image using only `OscMod` carries no
-  8 KB table [measured: -134 dB against -118 dB]. `Math` has min, max, abs, clip, floor, divide, compare and select, and is `KMath` when no input is audio, so its result
+  8 KB table [measured: -134 dB against -118 dB]. All that costs far more than `Osc` on a Cortex-M4, 128 instructions a sample against 17 for a sine and 64 against
+  13 for a saw [measured], so it's for a voice that needs the modulation. `Math` has min, max, abs, clip, floor, divide, compare and select, and is `KMath` when no input is audio, so its result
   can drive an input read once a frame with no snap. `Shape` reads a curve from a Table, because it needs a table resource. An op's mode list can't
   grow once it is on `main`, since `max_mode` sits in an append-only line, so its modes are settled before it merges. A graph selects a new op with an
   explicit `"mode"`, as `Tone` and `Sample2` do, so a saved graph keeps its meaning.

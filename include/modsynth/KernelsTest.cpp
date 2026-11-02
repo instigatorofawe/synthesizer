@@ -466,6 +466,23 @@ TEST(OscMod, FeedbackBrightensASineWithoutBlowingUp) {
     for (const float sample : fed) ASSERT_LE(std::fabs(sample), 1.0001f);
 }
 
+// Format.md's arithmetic, step by step. Averaging the last two samples is what keeps strong feedback from hunting.
+TEST(OscMod, FeedbackIsTheDocumentedSum) {
+    constexpr float kFeedback = 0.8f;
+    const auto audio = Modulated<>(OscModMode::Sine, 997.0f, kFeedback).render(4801);
+    const auto step = static_cast<std::int32_t>(clamp(997.0f * (1.0f / kRate), -0.5f, 0.5f) * 4294967040.0f);
+    float earlier = 0.0f, last = 0.0f;
+    u32 phase = 0;
+    for (std::size_t i = 1; i < audio.size(); ++i) {
+        const u32 push = turns_to_phase(kFeedback * (earlier + last) * 0.5f);
+        const float value = sin_turns(static_cast<float>(static_cast<std::int32_t>(phase + push)) * 2.32830644e-10f);
+        ASSERT_EQ(audio[i], value) << i;
+        earlier = last;
+        last = value;
+        phase += static_cast<u32>(step);
+    }
+}
+
 TEST(OscMod, WidthMovesAtAudioRateAndTheLevelStaysPut) {
     Modulated<> pulse(OscModMode::Pulse, 997.0f);
     pulse.drive(3, [](u64 n) { return static_cast<float>(0.5 + 0.4 * sine(1231.0, n)); });

@@ -5,8 +5,8 @@
 	import { Compiler } from '#lib/Compiler.ts';
 	import { downloadImage } from '#lib/Download.ts';
 	import ReportPanel from '#lib/ReportPanel.svelte';
-	import { buildRequest, type ChainReport, type CompileReport } from '#lib/Request.ts';
-	import type { Graph, Param, Timeline } from '#lib/Schema.ts';
+	import { buildRequest, reachable, type ChainReport, type CompileReport } from '#lib/Request.ts';
+	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
 	import { Ring } from '#lib/ScopeMath.ts';
 
@@ -69,7 +69,12 @@
 		if (!compiler) return;
 		const timeline = parsed.doc;
 		if (!timeline) return;
-		const request = buildRequest(data.patches, data.assets, [{ id: data.timeline.id, name, timeline }]);
+		// A document that doesn't fit the schema goes whole, so that the compiler is what says what's wrong with it.
+		const checked = timelineSchema.safeParse(timeline);
+		const reached = checked.success
+			? reachable(referencedPatches(checked.data), data.patches, data.assets)
+			: { patches: data.patches, assets: data.assets };
+		const request = buildRequest(reached.patches, reached.assets, [{ id: data.timeline.id, name, timeline }]);
 		const result = await compiler.compile(request);
 		if (!result) return;
 		report = result.report;

@@ -1,6 +1,6 @@
 // Builds the compiler's input. The browser preview and the server export both come through here, so given the same rows
 // they send the same JSON and get the same bytes.
-import type { Graph, Timeline } from '#lib/Schema.ts';
+import { referencedAssets, referencedSubpatches, type Graph, type Timeline } from '#lib/Schema.ts';
 
 export interface PatchEntry {
 	id: string;
@@ -30,6 +30,22 @@ export interface ProgramEntry {
 export interface RequestOptions {
 	omit?: string[];
 	live?: boolean;
+}
+
+// What a preview has to send: these patches, what they expand, and the assets all of those name. A compile runs on every edit,
+// and a library can hold megabytes of samples that this one has nothing to do with.
+export function reachable(roots: string[], patches: PatchEntry[], assets: AssetEntry[]) {
+	const byId = new Map(patches.map((patch) => [patch.id, patch]));
+	const found = new Map<string, PatchEntry>();
+	const waiting = [...roots];
+	while (waiting.length) {
+		const patch = byId.get(waiting.pop() as string);
+		if (!patch || found.has(patch.id)) continue;
+		found.set(patch.id, patch);
+		waiting.push(...referencedSubpatches(patch.graph));
+	}
+	const named = new Set([...found.values()].flatMap((patch) => referencedAssets(patch.graph)));
+	return { patches: [...found.values()], assets: assets.filter((asset) => named.has(asset.id)) };
 }
 
 export function buildRequest(

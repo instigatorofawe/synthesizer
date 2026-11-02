@@ -6,7 +6,7 @@
 	import { nodeOfError } from '#lib/GraphEdit.ts';
 	import GraphEditor from '#lib/GraphEditor.svelte';
 	import ReportPanel from '#lib/ReportPanel.svelte';
-	import { buildRequest, type CompileReport, type NodesReport } from '#lib/Request.ts';
+	import { buildRequest, reachable, type CompileReport, type NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
 	import { Ring } from '#lib/ScopeMath.ts';
@@ -66,11 +66,11 @@
 		}
 		// A track with no notes, kept alive by `live`, so the keys below can play it.
 		const timeline = { tracks: [{ id: 1, name: name, voices: 8, slots: [data.patch.id] }] };
-		// The whole library, because this graph can name any of it as a subpatch. Only what it reaches gets compiled.
 		const library = data.library.map((patch) => (patch.id === data.patch.id ? { id: patch.id, name, graph: parsed } : patch));
+		const reached = reachable([data.patch.id], library, data.assets);
 		const request = buildRequest(
-			library,
-			data.assets,
+			reached.patches,
+			reached.assets,
 			[{ id: 'preview', name: 'Preview', timeline: timeline as never }],
 			{ live: true }
 		);

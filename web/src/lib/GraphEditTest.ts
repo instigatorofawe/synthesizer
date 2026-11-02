@@ -19,6 +19,7 @@ import {
 	type LibraryPatch
 } from '#lib/GraphEdit.ts';
 import { probeTargets } from '#lib/AudioEngine.ts';
+import { reachable, type AssetEntry } from '#lib/Request.ts';
 import { referencedSubpatches, type Graph } from '#lib/Schema.ts';
 
 const catalog: CatalogEntry[] = [
@@ -216,6 +217,36 @@ describe('errors and details', () => {
 			{ id: 4, type: 'subpatch' }
 		]);
 		expect(referencedSubpatches(used)).toEqual(['a', 'b']);
+	});
+});
+
+describe('what a preview sends', () => {
+	const sampled = (id: string, asset: string) => ({
+		id,
+		name: id,
+		graph: graph([{ id: 1, type: 'sample', asset }])
+	});
+	const expanding = (id: string, inner: string) => ({
+		id,
+		name: id,
+		graph: graph([{ id: 1, type: 'subpatch', patch: inner }])
+	});
+	const asset = (id: string) => ({ id, name: id }) as AssetEntry;
+
+	it('follows subpatches to the assets they name, and leaves the rest', () => {
+		const library = [expanding('a', 'b'), sampled('b', 'used'), sampled('c', 'other')];
+		const { patches, assets } = reachable(['a'], library, [asset('used'), asset('other')]);
+		expect(patches.map((p) => p.id).sort()).toEqual(['a', 'b']);
+		expect(assets.map((a) => a.id)).toEqual(['used']);
+	});
+
+	it('finishes on a graph that names itself, for the compiler to refuse', () => {
+		const { patches } = reachable(['a'], [expanding('a', 'a')], []);
+		expect(patches.map((p) => p.id)).toEqual(['a']);
+	});
+
+	it('leaves a missing patch for the compiler to name', () => {
+		expect(reachable(['gone'], [], []).patches).toEqual([]);
 	});
 });
 

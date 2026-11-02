@@ -331,7 +331,8 @@ inline Expanded expand_subpatches(const json& graph, const std::string& where, P
         }
 
         std::map<std::string, json> literals;
-        for (const auto& [input, value] : node->value("inputs", json::object()).items()) literals[input] = value;
+        const json typed_in = node->value("inputs", json::object());
+        for (const auto& [input, value] : typed_in.items()) literals[input] = value;
         const auto add_wire = [&](int inner_id, int part, const std::string& input, std::optional<json> fallback) {
             const int wire = fresh_id(id, inner_id, part, used);
             json w = {{"id", wire}, {"type", "wire"}, {"_top", id}};

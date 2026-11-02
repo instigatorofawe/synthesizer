@@ -38,6 +38,8 @@ MODSYNTH_LINK_SEED(g_seed_e, MODSYNTH_FUZZ_SEED_E)
 MODSYNTH_LINK_SEED(g_seed_f, MODSYNTH_FUZZ_SEED_F)
 MODSYNTH_LINK_SEED(g_seed_g, MODSYNTH_FUZZ_SEED_G)
 MODSYNTH_LINK_SEED(g_seed_h, MODSYNTH_FUZZ_SEED_H)
+MODSYNTH_LINK_SEED(g_seed_i, MODSYNTH_FUZZ_SEED_I)
+MODSYNTH_LINK_SEED(g_seed_j, MODSYNTH_FUZZ_SEED_J)
 
 extern "C" std::byte __arena_start[], __arena_end[];
 
@@ -228,7 +230,9 @@ extern std::uint32_t __bss_start, __bss_end, __stack_top;
                                      {g_seed_e, static_cast<std::size_t>(g_seed_e_end - g_seed_e)},
                                      {g_seed_f, static_cast<std::size_t>(g_seed_f_end - g_seed_f)},
                                      {g_seed_g, static_cast<std::size_t>(g_seed_g_end - g_seed_g)},
-                                     {g_seed_h, static_cast<std::size_t>(g_seed_h_end - g_seed_h)}};
+                                     {g_seed_h, static_cast<std::size_t>(g_seed_h_end - g_seed_h)},
+                                     {g_seed_i, static_cast<std::size_t>(g_seed_i_end - g_seed_i)},
+                                     {g_seed_j, static_cast<std::size_t>(g_seed_j_end - g_seed_j)}};
     // The top of the arena, out of take_memory()'s reach. As integers, because __arena_end is one past an unknown
     // array.
     const auto top = reinterpret_cast<std::uintptr_t>(__arena_end);

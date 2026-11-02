@@ -533,3 +533,221 @@ TEST(CompileImage, CheckedEntryPointReportsErrorsAsData) {
     EXPECT_FALSE(missing.report.value("ok", true));
     EXPECT_NE(missing.report.at("errors")[0].at("message").get<std::string>().find("gone"), std::string::npos);
 }
+
+namespace {
+
+// One track of a plain patch and a bus, each with an insert that has a parameter, for lanes to reach.
+json lane_project(const json& automation) {
+    json request = json::parse(R"({"patches": {
+        "tone": {"name": "tone", "graph": {"nodes": [{"id": 1, "type": "note"}, {"id": 2, "type": "mul",
+            "inputs": {"b": 0.01}}, {"id": 3, "type": "out"}], "edges": [{"from": 1, "port": "pitch", "to": 2, "input": "a"},
+            {"from": 2, "to": 3, "input": "l"}]}},
+        "gain": {"name": "gain", "graph": {"params": [{"id": 1, "min": 0, "max": 1, "default": 1},
+            {"id": 2, "scope": "voice", "min": 0, "max": 1, "default": 1}],
+            "nodes": [{"id": 1, "type": "in"}, {"id": 2, "type": "param", "param": 1}, {"id": 3, "type": "mul"},
+            {"id": 5, "type": "param", "param": 2}, {"id": 6, "type": "mul"}, {"id": 4, "type": "out"}],
+            "edges": [{"from": 1, "port": "l", "to": 3, "input": "a"}, {"from": 2, "to": 3, "input": "b"},
+            {"from": 3, "to": 6, "input": "a"}, {"from": 5, "to": 6, "input": "b"}, {"from": 6, "to": 4, "input": "l"}]}}},
+      "programs": [{"id": "a", "name": "a", "timeline": {"ppq": 480,
+        "clips": [{"id": "c", "length": 960, "notes": [{"tick": 0, "note": 60, "dur": 960}]},
+                  {"id": "other", "length": 960, "notes": [{"tick": 0, "note": 64, "dur": 960}]}],
+        "tracks": [{"id": 1, "slots": ["tone"], "placements": [{"clip": "c", "tick": 0}],
+                    "sends": [{"bus": "wet", "gain": 0.5}], "inserts": [{"id": 1, "patch": "gain"}]},
+                   {"id": 2, "slots": ["tone"], "placements": [{"clip": "other", "tick": 0}]}],
+        "buses": [{"id": "wet", "inserts": [{"id": 2, "patch": "gain"}]},
+                  {"id": "unused", "inserts": [{"id": 3, "patch": "gain"}]}]}}]})");
+    request["programs"][0]["timeline"]["clips"][0]["automation"] = automation;
+    return request;
+}
+
+std::string lane_error(const json& request) {
+    try {
+        (void)compile_image(request);
+    } catch (const CompileError& e) {
+        return e.what();
+    }
+    return "";
+}
+
+std::string error_of_lane(const char* lane) { return lane_error(lane_project(json::array({json::parse(lane)}))); }
+
+}  // namespace
+
+TEST(Lanes, EveryTargetTheFormatCanReachCompilesAndLoads) {
+    for (const char* lane : {R"({"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5, "ramp": 10})",
+                             R"({"target": {"insert": 2}, "param": 1, "tick": 0, "value": 0.5})",
+                             R"({"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1, "ramp": 10})",
+                             R"({"target": {"mix": "fader", "bus": "wet"}, "tick": 0, "value": 1})",
+                             R"({"target": {"mix": "pan", "track": 1}, "tick": 0, "value": -1})",
+                             R"({"target": {"mix": "send", "track": 1, "to": "wet"}, "tick": 0, "value": 1})",
+                             R"({"target": {"mix": "fader", "master": true}, "tick": 0, "value": 1})"}) {
+        SCOPED_TRACE(lane);
+        EXPECT_EQ(error_of_lane(lane), "");
+    }
+}
+
+TEST(Lanes, ALaneNeedsARevisionAndAnOrdinaryOneDoesNot) {
+    const auto revision = [](const json& automation) {
+        const auto image = compile_image(lane_project(automation)).image;
+        return load<ManifestHeader>(image.data() + sizeof(ChunkHeader)).revision;
+    };
+    EXPECT_EQ(revision(json::array()), kFrameSizeRevision);
+    EXPECT_EQ(revision(json::parse(R"([{"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5}])")), 4u);
+}
+
+TEST(Lanes, AnInsertNothingPlaysThroughDropsItsLane) {
+    EXPECT_EQ(error_of_lane(R"({"target": {"insert": 3}, "param": 1, "tick": 0, "value": 0.5})"), "");
+}
+
+TEST(Lanes, WhatALaneCannotReachIsAnError) {
+    const std::pair<const char*, const char*> cases[] = {
+        {R"({"target": {"insert": 9}, "param": 1, "tick": 0, "value": 0})", "unknown insert"},
+        {R"({"target": {"insert": 1}, "param": 7, "tick": 0, "value": 0})", "does not have"},
+        {R"({"target": {"insert": 1}, "param": 2, "tick": 0, "value": 0})", "voice scope"},
+        {R"({"target": {"insert": 1, "channel": 3}, "param": 1, "tick": 0, "value": 0})", "no 'channel'"},
+        {R"({"target": {"channel": 3}, "param": 1, "tick": 0, "value": 0})", "an insert or a mix control"},
+        {R"({"target": 3, "tick": 0, "value": 0})", "is an object"},
+        {R"({"target": {"mix": "volume", "track": 1}, "tick": 0, "value": 0})", "unknown mix control"},
+        {R"({"target": {"mix": "fader"}, "tick": 0, "value": 0})", "one of track, bus or master"},
+        {R"({"target": {"mix": "fader", "track": 1, "bus": "wet"}, "tick": 0, "value": 0})", "one of track"},
+        {R"({"target": {"mix": "fader", "track": 8}, "tick": 0, "value": 0})", "unknown"},
+        {R"({"target": {"mix": "fader", "master": false}, "tick": 0, "value": 0})", "only be true"},
+        {R"({"target": {"mix": "pan", "master": true}, "tick": 0, "value": 0})", "only a fader"},
+        {R"({"target": {"mix": "fader", "track": 1}, "tick": 0, "value": -1})", "out of range"},
+        {R"({"target": {"mix": "pan", "track": 1}, "tick": 0, "value": 2})", "out of range"},
+        {R"({"target": {"mix": "send", "track": 1, "to": "nowhere"}, "tick": 0, "value": 0})", "unknown"},
+        {R"({"target": {"mix": "send", "track": 2, "to": "wet"}, "tick": 0, "value": 0})", "no send"},
+        {R"({"target": {"mix": "fader", "track": 1, "to": "wet"}, "tick": 0, "value": 0})", "only a send lane"},
+        {R"({"target": {"mix": "fader", "track": 1, "colour": 1}, "tick": 0, "value": 0})", "no 'colour'"},
+        {R"({"target": {"mix": "fader", "track": 1}, "param": 1, "tick": 0, "value": 0})", "no param"},
+    };
+    for (const auto& [lane, wanted] : cases) {
+        SCOPED_TRACE(lane);
+        EXPECT_NE(error_of_lane(lane).find(wanted), std::string::npos) << error_of_lane(lane);
+    }
+}
+
+TEST(Lanes, TwoControlsInOneRegisterCannotBothMove) {
+    const std::string error = lane_error(lane_project(json::parse(R"([
+        {"target": {"mix": "fader", "track": 1}, "tick": 0, "value": 1},
+        {"target": {"mix": "pan", "track": 1}, "tick": 10, "value": 0}])")));
+    EXPECT_NE(error.find("share a mix register"), std::string::npos) << error;
+    const std::string master = lane_error(lane_project(json::parse(R"([
+        {"target": {"mix": "fader", "track": 2}, "tick": 0, "value": 1},
+        {"target": {"mix": "fader", "master": true}, "tick": 10, "value": 0}])")));
+    EXPECT_NE(master.find("share a mix register"), std::string::npos) << master;
+}
+
+TEST(Lanes, OneTrackOwnsATarget) {
+    json request = lane_project(json::parse(R"([{"target": {"insert": 2}, "param": 1, "tick": 0, "value": 1}])"));
+    json& clips = request["programs"][0]["timeline"]["clips"];
+    clips[1]["automation"] = clips[0]["automation"];
+    const std::string error = lane_error(request);
+    EXPECT_NE(error.find("both automate"), std::string::npos) << error;
+}
+
+TEST(Lanes, ATrackThatNeverPlaysCannotCarryALane) {
+    json request = lane_project(json::parse(R"([{"target": {"insert": 2}, "param": 1, "tick": 0, "value": 1}])"));
+    request["programs"][0]["timeline"]["clips"][0]["notes"] = json::array();
+    const std::string error = lane_error(request);
+    EXPECT_NE(error.find("never plays"), std::string::npos) << error;
+}
+
+TEST(Lanes, ALaneComesBeforeANoteAtItsTickAndAPlayChangeBeforeBoth) {
+    json request = lane_project(json::parse(R"([{"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5}])"));
+    request["programs"][0]["timeline"]["clips"][0]["play"] = json::parse(R"([{"tick": 0, "mode": "mono"}])");
+    const auto image = compile_image(request).image;
+    const LoadedImage loaded(image);
+    ASSERT_EQ(loaded.loader.status(), LoadStatus::Ready);
+    ProgramView v;
+    const ChunkRef* c = loaded.table.find(loaded.loader.program_hash(0));
+    ASSERT_TRUE(parse_program({c->data, c->size}, v));
+    EXPECT_EQ(v.h.features, kFeaturePlayModes);
+    const ClipDesc clip = v.clip(0);
+    EXPECT_EQ(v.instruction(clip.begin).op, static_cast<u8>(Instr::PlayMode));
+    EXPECT_EQ(v.instruction(clip.begin + 1).op, static_cast<u8>(Instr::SetInsert));
+    EXPECT_EQ(v.instruction(clip.begin + 2).op, static_cast<u8>(Instr::NoteOn));
+}
+
+TEST(Play, WhatAPlaySettingRefuses) {
+    const auto error = [](const char* play) {
+        json request = lane_project(json::array());
+        request["programs"][0]["timeline"]["tracks"][0]["play"] = json::parse(play);
+        return lane_error(request);
+    };
+    EXPECT_EQ(error(R"({"mode": "legato", "priority": "low", "glide": 0.1})"), "");
+    EXPECT_NE(error(R"({"mode": "solo"})").find("unknown play mode"), std::string::npos);
+    EXPECT_NE(error(R"({"mode": "mono", "priority": "first"})").find("unknown priority"), std::string::npos);
+    EXPECT_NE(error(R"({"mode": "poly", "priority": "high"})").find("poly plays them all"), std::string::npos);
+    EXPECT_NE(error(R"({"mode": "mono", "glide": -1})").find("0 to 60"), std::string::npos);
+    EXPECT_NE(error(R"({"mode": "mono", "glide": 61})").find("0 to 60"), std::string::npos);
+    EXPECT_NE(error(R"({"mode": "mono", "bend": 2})").find("no 'bend'"), std::string::npos);
+}
+
+TEST(Play, TheDefaultWritesNothing) {
+    json plain = lane_project(json::array());
+    json stated = plain;
+    stated["programs"][0]["timeline"]["tracks"][0]["play"] = json::parse(R"({"mode": "poly"})");
+    EXPECT_EQ(compile_image(plain).image, compile_image(stated).image);
+}
+
+namespace {
+
+json zone_project(const json& node) {
+    json request = json::parse(R"({"patches": {"p": {"name": "p", "graph": {
+        "nodes": [{"id": 2, "type": "out"}], "edges": [{"from": 1, "port": "l", "to": 2, "input": "l"}]}}},
+      "assets": {"a": {"frames": 2, "rate": 48000, "root_key": 40, "data": "AAAAAA=="}},
+      "programs": [{"id": "a", "name": "a", "timeline": {"ppq": 480,
+        "clips": [{"id": "c", "length": 960, "notes": [{"tick": 0, "note": 60, "dur": 960}]}],
+        "tracks": [{"id": 1, "slots": ["p"], "placements": [{"clip": "c", "tick": 0}]}]}}]})");
+    json sample = node;
+    sample["id"] = 1;
+    sample["type"] = "sample";
+    request["patches"]["p"]["graph"]["nodes"].push_back(sample);
+    return request;
+}
+
+std::string zone_error(const char* node) { return lane_error(zone_project(json::parse(node))); }
+
+}  // namespace
+
+TEST(Sample2, TheModesKeepTheirOwnInputs) {
+    EXPECT_EQ(zone_error(R"({"mode": "zones", "zones": [{"asset": "a"}], "reverse": true, "tail": true})"), "");
+    EXPECT_EQ(zone_error(R"({"asset": "a"})"), "");
+    EXPECT_NE(zone_error(R"({"asset": "a", "reverse": true})").find("zones mode"), std::string::npos);
+    EXPECT_NE(zone_error(R"({"asset": "a", "zones": []})").find("zones mode"), std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "zones", "asset": "a", "zones": [{"asset": "a"}]})").find("their own"),
+              std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "granular", "asset": "a"})").find("unknown sample mode"), std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "zones"})").find("1 to 256"), std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "zones", "zones": [{"asset": "b"}]})").find("no asset"), std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "zones", "zones": [{"asset": "a", "keys": [9, 8]}]})").find("keys"),
+              std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "zones", "zones": [{"asset": "a", "velocities": [0, 128]}]})").find("velocities"),
+              std::string::npos);
+    EXPECT_NE(zone_error(R"({"mode": "zones", "zones": [{"asset": "a", "root": 200}]})").find("root"),
+              std::string::npos);
+}
+
+TEST(Sample2, ARootDefaultsToTheAssetsAndRowsPadToAPowerOfTwo) {
+    const auto compiled = compile_image(zone_project(json::parse(R"({"mode": "zones", "zones": [
+        {"asset": "a", "keys": [0, 10]}, {"asset": "a", "keys": [11, 20], "root": 72.5},
+        {"asset": "a", "keys": [21, 127]}]})")));
+    const LoadedImage loaded(compiled.image);
+    ASSERT_EQ(loaded.loader.status(), LoadStatus::Ready);
+    bool found = false;
+    for (u32 i = 0; i < loaded.table.size(); ++i) {
+        const ChunkRef& c = loaded.storage[i];
+        if (c.kind != static_cast<u8>(ChunkKind::Table)) continue;
+        found = true;
+        EXPECT_EQ(load<TableHeader>(c.data).length, 4 * kZoneFields);
+        const auto field = [&](u32 row, u32 at) {
+            return load<float>(c.data + sizeof(TableHeader) + (row * kZoneFields + at) * sizeof(float));
+        };
+        EXPECT_EQ(field(0, kZoneRoot), 40.0f);
+        EXPECT_EQ(field(1, kZoneRoot), 72.5f);
+        EXPECT_EQ(field(3, kZoneLowKey), 1.0f);
+        EXPECT_EQ(field(3, kZoneHighKey), 0.0f);
+    }
+    EXPECT_TRUE(found);
+}

@@ -67,8 +67,9 @@ INSTRUCTIONS = {
         "a": bool(row[2]),
         "b": bool(row[3]),
         "c": bool(row[4]),
+        "since": int(row[6]),
     }
-    for row in table_rows("| Op | Name | a | b | c | Where |")
+    for row in table_rows("| Op | Name | a | b | c | Where | Since |")
 }
 MIX_OPS = {
     int(number): name
@@ -105,8 +106,9 @@ def check_document() -> None:
         "the document and the header describe different revisions",
     )
     require(
-        max(op["since"] for op in OPS.values()) <= int(engine.group(1)),
-        "an opcode is newer than the newest revision",
+        max(op["since"] for op in [*OPS.values(), *INSTRUCTIONS.values()])
+        <= int(engine.group(1)),
+        "an opcode or instruction is newer than the newest revision",
     )
     registered = re.findall(r"^MODSYNTH_OP\(([^)]*)\)", REGISTRY, re.MULTILINE)
     require(len(registered) == len(OPS), "document and registry list different opcodes")
@@ -234,9 +236,28 @@ def read_table(data: bytes) -> dict:
     require(
         reserved == 0 and length >= 2 and length & (length - 1) == 0, "table header"
     )
-    c.table(length + 1, "f")
+    samples = [row[0] for row in c.table(length + 1, "f")]
     c.done()
-    return {"length": length}
+    return {"length": length, "samples": samples}
+
+
+def check_zones(table: dict, asset_refs: set[int], refs: int) -> None:
+    """What section 5 asks of a table that a Sample2 uses."""
+    length = table["length"]
+    require(length % 8 == 0 and length // 8 <= 256, "zone table size")
+    for at in range(0, length, 8):
+        row = table["samples"][at : at + 8]
+        low_key, high_key, low_velocity, high_velocity, ref, root = row[:6]
+        if low_key > high_key:
+            require(row == [1, 0, 0, 0, 0, 0, 0, 0], "zone table padding")
+            continue
+        for value in (low_key, high_key, low_velocity, high_velocity):
+            require(value == int(value) and 0 <= value <= 127, "zone range")
+        require(low_velocity <= high_velocity, "zone velocities")
+        require(0 <= root <= 127, "zone root")
+        require(ref == int(ref) and int(ref) < refs, "zone ref")
+        require(int(ref) in asset_refs, "a zone must name an asset")
+        require(row[6:] == [0, 0], "zone reserved fields")
 
 
 def read_patch(data: bytes) -> dict:
@@ -254,7 +275,7 @@ def read_patch(data: bytes) -> dict:
     for (seconds,) in c.table(delays, "f"):
         require(0 < seconds <= 60, "delay line")
     c.table(inputs * 2, "H")
-    used, modes = set(), set()
+    used, modes, zone_tables = set(), set(), set()
     for i, (op, mode, resource, _, *rest) in enumerate(
         c.table(control + voice, "BBHI6H")
     ):
@@ -277,19 +298,27 @@ def read_patch(data: bytes) -> dict:
             require(resource == 0, f"{spec['name']} unused resource")
         if not spec["mode"]:
             require(mode == 0, f"{spec['name']} unused mode")
+        if spec["name"] == "Sample2":
+            zone_tables.add(resource)
         used.add(op)
         modes.add((op, mode))
     c.done()
-    return {"ops": used, "modes": modes, "refs": hashes, "inputs": inputs}
+    return {
+        "ops": used,
+        "modes": modes,
+        "refs": hashes,
+        "inputs": inputs,
+        "zone_tables": zone_tables,
+    }
 
 
 def read_program(data: bytes) -> dict:
     c = Cursor(data)
     ppq, uspq, length, conductor_begin, conductor_length, code = c.read("6I")
     patches, tracks, slots, clips, inserts, mix, gather, buses = c.read("8H")
-    mix_regs, globals_count, inits, master, reserved = c.read("4HI")
+    mix_regs, globals_count, inits, master, features = c.read("4HI")
     require(
-        reserved == 0 and 1 <= ppq <= 65535 and 1000 <= uspq <= 60000000,
+        features <= 3 and 1 <= ppq <= 65535 and 1000 <= uspq <= 60000000,
         "program header",
     )
     require(buses >= 1 and master < buses, "program buses")
@@ -330,7 +359,16 @@ def read_program(data: bytes) -> dict:
         spec = INSTRUCTIONS[op]
         for field, number in (("a", a), ("b", b), ("c", value)):
             require(spec[field] or number == 0, f"{spec['name']} unused field {field}")
+        if spec["name"] in ("SetInsert", "RampInsert"):
+            require(a < inserts, "a lane names an insert the Program lacks")
+        if spec["name"] in ("SetMix", "RampMix"):
+            require(b < mix_regs, "a lane names a register the Program lacks")
         used.add(op)
+    names = {INSTRUCTIONS[op]["name"] for op in used}
+    require(
+        features == ("RampMix" in names) + 2 * ("PlayMode" in names),
+        "features must say what the code uses",
+    )
 
     def stream_ticks(begin: int, count: int) -> int:
         total = 0
@@ -439,6 +477,31 @@ def read_image(path: Path) -> dict:
         ),
         default=0,
     )
+    needed = max(
+        needed,
+        *(
+            INSTRUCTIONS[op]["since"]
+            for c in chunks
+            if c["kind"] == "program"
+            for op in c.get("decoded", {}).get("instructions", ())
+        ),
+        0,
+    )
+    by_hash = {c["hash"]: c for c in chunks}
+    for chunk in chunks:
+        decoded = chunk.get("decoded", {})
+        if chunk["kind"] != "patch" or not decoded:
+            continue
+        names = [f"{ref:016x}" for ref in decoded["refs"]]
+        assets = {
+            i
+            for i, name in enumerate(names)
+            if name in by_hash and by_hash[name]["kind"] == "asset"
+        }
+        for resource in decoded["zone_tables"]:
+            table = by_hash.get(names[resource], {})
+            if "decoded" in table:  # A thin image can omit it
+                check_zones(table["decoded"], assets, len(names))
     if frame_size != 0:
         needed = max(needed, 3)
     # A thin image can need more than what it carries.
@@ -485,6 +548,7 @@ def check_coverage(results: list[dict]) -> None:
     missing += [MIX_OPS[m] for m in MIX_OPS if m not in mix_ops]
     missing += [f"Biquad mode {m}" for m in (0, 1, 2) if (4, m) not in modes]
     missing += [f"DelayRead mode {m}" for m in (0, 1) if (13, m) not in modes]
+    missing += [f"Sample2 mode {m}" for m in range(4) if (27, m) not in modes]
     require(not missing, "not used by any golden image: " + ", ".join(missing))
     print(
         f"coverage: all {len(OPS)} opcodes, {len(INSTRUCTIONS)} instructions and {len(MIX_OPS)} mixer steps, "

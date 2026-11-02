@@ -1,6 +1,6 @@
 # modsynth design, revision 9
 
-Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 3. `docs/Format.md` is its specification,
+Status: Milestones 1 and 2 are implemented, and the wire format is frozen at version 1, now at revision 4. `docs/Format.md` is its specification,
 and where this document and that one differ, that one is right. This document replaces all earlier revisions, and everything
 needed from them is included here. Sections about later milestones are still proposals.
 
@@ -115,7 +115,20 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
 - A track holds a list of patch slots. `SetPatch` applies to the next note, so a timeline can change instrument while
   held notes finish on the old patch. Voices on a track are sized for its largest slot. A patch also works as a mixer
   insert, per section 8.
-- `SetParam` and `Ramp` address (track, param id). Automation lanes compile to these.
+- `SetParam` and `Ramp` address (track, param id), and a lane with no target compiles to these. A lane's `target` reaches past its
+  own track: `{"insert": id}` moves an insert's parameter, and `{"mix": "fader" | "pan" | "send", ...}` moves the mixer, naming a `track`,
+  a `bus` or `"master": true`, and for a send the bus it goes `to`. Unknown keys are errors, so a target can gain a `channel` for per-note
+  control without an old document changing meaning. The stream head puts everything a lane moved back to its starting value,
+  which is what makes a locate or a loop sound the same as playing from the top.
+- A mix register holds fader, pan and send multiplied together, and a lane has to work out what to write from the others' fixed values. So
+  two controls that share a register can't both move, and the compiler refuses that and points to a gain or pan insert, whose
+  parameter can. One track owns a target, because a locate replays one stream after another and playback interleaves them. A lane on a track
+  that never plays is an error, because a lane that reaches past its track would otherwise vanish without a sound. A lane on an insert or
+  chain that nothing plays through is dropped, because nothing can hear it.
+- Play modes are per track and carried in the stream, so a song can change them midway: poly, mono or legato, with note priority and a glide
+  time. A patch can't do this itself, because it is one voice and can't see the others. Glide moves the voice's note scalar a step per frame, so
+  every patch follows it with no new op. `Tone` latches its pitch at note start and does not. Format.md section 7 has the rules, and a Program
+  that uses no play mode sets aside nothing for them.
 - All tracks share one tick clock. A conductor stream carries tempo changes, and ticks convert to samples through an
   exact rational accumulator at the run-time rate [measured: no drift over 10 minutes].
 - Transport (play, stop, locate, loop range) is engine state, so dragging a loop brace does not recompile. A locate replays
@@ -141,6 +154,11 @@ An Asset is a new chunk kind, separate from power-of-two wavetables.
   80 MHz [model]. It runs on receipt, not at every boot.
 - On wasm the fixed heap must hold assets, because memory growth stays off. Its size becomes a start-up setting. What a
   large heap costs in the browser is measured in Milestone 7.
+- `Sample2`, from revision 4, is the op asset import writes. A Table of zones maps key and velocity ranges to recordings, each with its own root
+  key, and the note picks one at its start. It takes `note` rather than a ratio, because the root is only known then, and that is what lets a
+  glide or a legato change slide one recording. It adds a start offset, reverse, and a tail, where a loop runs while the note is held and plays
+  on to the end after release. A loop with no tail does not hold a voice open, so a note ends with its envelope. `Sample` is frozen and stays as it
+  was, and in a graph `"mode": "zones"` on a `sample` node selects `Sample2`.
 - In-memory playback is in scope now. Disk streaming and compressed assets are deferred, and the header reserves a flag.
   An L476 with about 900 KB of flash spare holds about 9.6 seconds of mono i16 at 48 kHz, or twice that at 24 kHz.
 
@@ -634,7 +652,8 @@ requests run CI, so checks run locally before a push.
    and validator enforcement of the rules in section 18. Hash choice is settled here: FNV-1a 64, for the reasons in `docs/Format.md`.
 3. **Browser graph editor and full compiler.** Subpatches, rate conversion, errors shown on nodes, oscilloscope probes on
    graph nodes.
-4. **DAW views.** Timeline, piano roll, mixer with per-track scopes, full Program compiler, asset import.
+4. **DAW views.** Timeline, piano roll, mixer with per-track scopes, full Program compiler, asset import. Asset import writes only `Sample2`
+   zones, so a saved instrument has one shape and never needs migrating.
 5. **Device delivery.** Board bring-up with real audio output, target profile generation, chunk store on flash,
    `Loader::feed`, host send tool.
 6. **Python engine binding and offline render.** `PoolExecutor`, `MODSYNTH_PARALLEL`, and a ThreadSanitizer CI job.

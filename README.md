@@ -57,14 +57,14 @@ and then fuzzes on a Cortex-M4. `FUZZ_SECONDS` and `FUZZ_RANDOM` set how long, a
     cmake -B build/fuzz -DMODSYNTH_BUILD_FUZZ=ON -DMODSYNTH_BUILD_TESTS=OFF -DMODSYNTH_BUILD_COMPILER=OFF -DMODSYNTH_INSTALL=OFF
     cmake --build build/fuzz --target modsynth_fuzz
     build/fuzz/modsynth_fuzz 60 1 golden/AllOps.image golden/Demo.image golden/Waves.image golden/Tones.image \
-        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image
+        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image golden/Lanes.image golden/Zones.image
 
 The arguments are seconds, a random seed, and the images to start from. Use `emcmake cmake` for wasm32 and run the result with
 `node`. A failure prints a recipe, and `--replay` runs it again on any target, with the same image, under whatever sanitizers
 that target has:
 
     build/fuzz/modsynth_fuzz --replay 0:3219687050,256226439 1 golden/AllOps.image golden/Demo.image golden/Waves.image golden/Tones.image \
-        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image
+        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image golden/Lanes.image golden/Zones.image
 
 Fuzz with `AllOps.image` as well as `Demo.image`. The demo's tasks all depend on each other and it has no globals, so on its own it
 cannot exercise the rules that make task order irrelevant. The frozen images play at frame 128 and the others at 32, and an image reaches
@@ -77,7 +77,7 @@ files are append-only, and CI enforces that against the base branch. `tools/Read
 fails if the document and the code disagree:
 
     python3 tools/ReadImage.py --coverage golden/Minimal.image golden/Demo.image golden/AllOps.image golden/Waves.image golden/Tones.image \
-        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image
+        golden/AllOps32.image golden/Demo32.image golden/Waves32.image golden/Tones32.image golden/Lanes.image golden/Zones.image
     python3 tools/ReadImage.py --example golden/Minimal.image
     python3 tools/CheckAppendOnly.py origin/main
 

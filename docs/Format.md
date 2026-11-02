@@ -29,7 +29,7 @@ Three kinds of change are possible after this freeze, and nothing else is.
 Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
 can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
 damaged. A compiler writes the lowest revision that covers what it actually used, so an image that uses nothing new keeps
-loading on old engines. This document describes revision 3. The opcode table says which revision added each opcode.
+loading on old engines. This document describes revision 4. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
 version so far, and no such change is planned. A version above the engine's gets the same refusal.
@@ -157,6 +157,22 @@ An 8-byte header, then `length + 1` f32 samples, all finite. The extra sample is
 
 The payload size must match exactly.
 
+A table that a Sample2 uses is a **zone table**: rows of 8 f32, and at most 256 of them, so `length` is a multiple of 8.
+
+| Field | Name | Meaning |
+|---|---|---|
+| 0 | `low_key` | a whole number, 0 to 127 |
+| 1 | `high_key` | likewise, and at least `low_key` |
+| 2 | `low_velocity` | a whole number, 0 to 127 |
+| 3 | `high_velocity` | likewise, and at least `low_velocity` |
+| 4 | `ref` | an index into the Patch's references, which must name an Asset |
+| 5 | `root` | the key the recording sounds at, 0 to 127, which may have a fraction |
+| 6, 7 | | must be 0 |
+
+The first row whose ranges hold a note and its velocity is that note's zone. A row of `1, 0, 0, 0, 0, 0, 0, 0` matches nothing, which is how a
+table reaches a power of two, and no other row may have `low_key` above `high_key`. `ref` is an index and not a hash, so a zone table means
+something only with its Patch. The validator checks it once for each Patch that uses it.
+
 ## 6. Patch chunk (kind 3)
 
 A Patch is a list of steps. Its bytes depend on its graph alone: nothing about a track, a target or a Program is in it. That is
@@ -278,6 +294,7 @@ samples.
 | 24 | Pulse | B | S frequency, S width | 0 band-limited, 1 naive | | voice | 1 |
 | 25 | Triangle | B | S frequency | | | voice | 1 |
 | 26 | Tone | B | S frequency | | | voice | 2 |
+| 27 | Sample2 | B left, B right | S note, S start | bit 0 reverse, bit 1 tail | Table | voice | 4 |
 
 What each one does:
 
@@ -321,6 +338,22 @@ What each one does:
   the loop length so one wrap is always enough. The output interpolates linearly. A one-shot writes 0 once its position passes its last
   frame, and is done. A looping Sample whose position is past `loop_end`, which only a live edit can cause, restarts at `loop_start`. A mono
   asset writes one signal to both outputs. A note starting at an offset within a frame writes 0 before it.
+- **Sample2.** Plays one recording of a zone table, chosen at the start of a note by the note and velocity that started the voice, and kept to
+  the note's end. A note no zone holds is silent, and is done. In an insert both are 0. The position is 32.32, set once to
+  `s * (frames - 1)`, or `(1 - s) * (frames - 1)` in reverse, with `s = clamp(start, 0, 1)`, truncated to an integer. So `start` always
+  counts from where playback begins. Each sample writes as Sample does, then moves by `inc`, forwards or in reverse, where `inc` is
+  `clamp(r, 0, 256) * native_rate / rate`, capped at 65536 and held below the loop length, and
+  `r = pow2((clamp(note, -48, 200) - root) / 12)`, worked out again only when that distance changes. So pitch follows `note` for the whole note,
+  and a glide or a legato change slides the one recording. A note starting at an offset within a frame writes 0 before it.
+  - With no loop in the asset it plays to the end and is done: forwards when `idx >= frames`, and in reverse when it cannot move by `inc` and stay
+    at or above 0, after writing that sample.
+  - With a loop it stays in it. Going forwards past `loop_end` subtracts the loop length. Going in reverse, a move that would go below
+    `loop_start` adds the loop length less `inc`. A position that starts beyond the loop in the direction of travel plays into it, and one that
+    starts past it goes to `loop_start`, or in reverse to just below `loop_end`.
+  - With no tail bit a loop never ends, so it does not hold a voice open: a note ends with its Env, or on release if it has none. With the tail
+    bit it leaves the loop at the sample of the release and plays to the end of the recording in its direction, and the voice lasts until then.
+  - A live edit can carry a position or a zone that no longer fits. A zone past the table's end or on a padding row is done. In reverse a position
+    past the last frame goes to just below it.
 - **Mul, MulS, Add, AddS.** Per sample. An output may be the same register as an input.
 - **Pan.** `left = in * (1 - p) / 2` and `right = in * (1 + p) / 2`, with `p` clamped to −1 to 1. This law is linear, so `left + right`
   is always `in`, whatever `p` is.
@@ -386,6 +419,7 @@ silence if it is not finite.
 - `out_left` and `out_right` name buffers that have been written.
 - No step uses an opcode added after the manifest's revision.
 - Each reference names a Table or an Asset that exists, and each step's resource is in range and of the right kind.
+- A Sample2's Table is a zone table, as section 5 describes.
 
 ## 7. Program chunk (kind 4)
 
@@ -413,7 +447,7 @@ A Program is the compiled form of a timeline. Each track has an Instruction stre
 | 42 | u16 | `globals` | |
 | 44 | u16 | `inits` | |
 | 46 | u16 | `master` | the bus register that is the output |
-| 48 | u32 | `reserved` | |
+| 48 | u32 | `features` | bit 0 if any stream has a RampMix, bit 1 if any has a PlayMode, and no other bits. It must say exactly that, and it decides what an engine sets aside for them, so a Program pays for neither unless it uses it. |
 
 ### Body
 
@@ -484,17 +518,22 @@ Applied at load, then clamped to the parameter's range. An `id` no patch has doe
 | 2 | u16 | `b` |
 | 4 | u32 | `c` |
 
-| Op | Name | a | b | c | Where |
-|---|---|---|---|---|---|
-| 0 | End | | | | Tracks and the conductor |
-| 1 | Wait | | | ticks | Anywhere |
-| 2 | NoteOn | note, 0 to 127 | velocity, 0 to 127 | duration, 1 to `kMaxTicks` | Tracks and clips |
-| 3 | SetPatch | slot | | | Tracks and clips |
-| 4 | SetParam | | param id | value, f32 bits, finite | Tracks and clips |
-| 5 | Ramp | | param id | target, f32 bits, finite | Tracks and clips, then RampArg |
-| 6 | RampArg | | | ticks, 1 to `kMaxTicks` | Only straight after a Ramp |
-| 7 | Call | | clip | repeats, at least 1 | Tracks only |
-| 8 | Tempo | | | microseconds per quarter, 1000 to 60,000,000 | The conductor only |
+| Op | Name | a | b | c | Where | Since |
+|---|---|---|---|---|---|---|
+| 0 | End | | | | Tracks and the conductor | 0 |
+| 1 | Wait | | | ticks | Anywhere | 0 |
+| 2 | NoteOn | note, 0 to 127 | velocity, 0 to 127 | duration, 1 to `kMaxTicks` | Tracks and clips | 0 |
+| 3 | SetPatch | slot | | | Tracks and clips | 0 |
+| 4 | SetParam | | param id | value, f32 bits, finite | Tracks and clips | 0 |
+| 5 | Ramp | | param id | target, f32 bits, finite | Tracks and clips, then RampArg | 0 |
+| 6 | RampArg | | | ticks, 1 to `kMaxTicks` | Only straight after a ramp | 0 |
+| 7 | Call | | clip | repeats, at least 1 | Tracks only | 0 |
+| 8 | Tempo | | | microseconds per quarter, 1000 to 60,000,000 | The conductor only | 0 |
+| 9 | SetInsert | insert | param id | value, f32 bits, finite | Tracks and clips | 4 |
+| 10 | RampInsert | insert | param id | target, f32 bits, finite | Tracks and clips, then RampArg | 4 |
+| 11 | SetMix | | mix register | value, f32 bits, finite | Tracks and clips | 4 |
+| 12 | RampMix | | mix register | target, f32 bits, finite | Tracks and clips, then RampArg | 4 |
+| 13 | PlayMode | 0 poly, 1 mono, 2 legato | 0 last, 1 high, 2 low. 0 with poly. | glide seconds, f32 bits, 0 to 60 | Tracks and clips | 4 |
 
 A field left blank must be 0. A track's stream and the conductor's must each end in one End, and contain no other. A clip must not
 contain an End, because it returns to its caller. Calls do not nest, and a clip's `ticks` is at least 1, so a stream cannot run
@@ -504,9 +543,45 @@ A track's `SetPatch` applies to the next note, so held notes finish on the old p
 that is what `slots` declares, and a track may only call a clip whose `slots` is at most its `slot_count`. An unknown parameter id in
 SetParam or Ramp does nothing, and a parameter of a slot that is not selected still changes.
 
+SetInsert and RampInsert do to an insert's parameter what SetParam and Ramp do to a slot's, and `insert` must be an index into the Inserts. A
+parameter of voice scope does nothing there, because an insert's instance reads those once, at load. SetMix writes a mix register, and RampMix
+moves one in a straight line, a step per frame, over as many frames as a Ramp of those ticks takes. `register` must be below `mix_regs`. A later SetMix
+or RampMix on that register ends a ramp, as does a live change to it. These two reach the mixer from any track's stream, so two streams
+naming one target would interleave by tick as they play and run one after the other in a locate. A compiler refuses that.
+
 A stream's **tick total** is the sum of its Waits, plus `clip.ticks * repeats` for each Call. Every stream's total must be at most
 `kMaxTicks`. The **expanded size** of a stream counts its instructions, with `clip.length + 1` for each repeat of each Call, and the
 sum for all streams must be at most `kMaxExpanded`. These two limits are why a tick and a locate are always bounded.
+
+### Play modes
+
+A track starts in poly, with priority last and no glide. PlayMode changes all three for the next note, and notes already sounding finish as they
+started. One at the head of a stream, before any Wait or Call, is in force from load, so a live note before Play follows it too.
+
+- **Poly.** Each note takes a voice. Nothing below about held notes applies. Going to poly from another mode empties the held list, and any
+  voice still sounding ends at its own tick.
+- **Mono.** One note sounds. When another note takes over, the old one is released at that sample and the new one takes a voice of its own, so
+  with `voices` above 1 a release tail rings under it.
+- **Legato.** One note sounds. When another note takes over from a note still sounding, on the same slot, it keeps that voice: its note scalar
+  changes, and its gate, velocity and state do not. Otherwise it starts as in mono.
+
+A track in mono or legato keeps a list of the notes it is holding, of at most 16, in the order they started. Whenever one starts or ends, priority
+chooses one of them: the newest for last, the highest for high and the lowest for low, with ties going to the newest. If that is not the note
+sounding, it takes over at that sample, with its own velocity if it starts a voice. A note that is not chosen waits and can still sound if it
+outlasts the others. With the list full, a new note pushes out the oldest that is not sounding. If the note sounding ends and the list is
+empty, its voice is released. Within a segment these run in time order, and at one sample an end comes before a start, so a note that only touches
+the next one is not an overlap.
+
+With a glide above 0, a note that takes over starts at the pitch `from` and moves in `n = max(trunc(glide * rate / N), 1)` equal steps, one each
+frame, the first in the frame it starts, and lands exactly on its note. The steps move the voice's note scalar, so whatever reads it follows.
+`from` is:
+
+- in legato, or in mono with a note sounding, that note's pitch at that moment, part way through a slide if it is in one;
+- in mono with nothing sounding, the last note the track started;
+- in poly, the last note the track started, while earlier voices stay where they are;
+- in legato with nothing sounding, nothing, so it starts on its note.
+
+The first note a track plays has nothing to slide from. A locate replays the stream, so it restores the mode and the last note as well.
 
 ### Time
 
@@ -626,6 +701,9 @@ Reading it:
 | `kMaxInits` | 4096 | |
 | `kMaxTicks` | 2^31 − 1 | a stream's total, a note, and a ramp |
 | `kMaxExpanded` | 2^24 | a Program's instructions with every repeat unrolled |
+| `kMaxZones` | 256 | rows in a zone table |
+| `kMaxHeldNotes` | 16 | notes a track in mono or legato remembers |
+| `kMaxGlideSeconds` | 60 | one glide |
 
 These bound validation and sizing. The engine computes what a Program needs in 64 bits on every target, and the largest total these
 limits allow cannot wrap. They do not bound what a frame costs: an image can pass all of them and still be too much for a device, which
@@ -633,7 +711,7 @@ is what the per-op cost limit in the design is for.
 
 ## 10. Golden images
 
-`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2 and frame 32 forms of four of them from revision 3, each with its render on a stereo and a mono engine. They are the
+`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, and `Lanes` and `Zones` from revision 4, each with its render on a stereo and a mono engine. They are the
 contract in executable form.
 
 - A golden image and its render never change, and CI fails a pull request that edits or removes one.

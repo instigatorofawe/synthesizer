@@ -26,6 +26,10 @@ make_golden AllOps32 1600
 make_golden Waves32 800
 make_golden Tones32 800
 
+# Revision 4. A new project at the default frame size has no second form, so these keep plain names.
+make_golden Lanes 1920
+make_golden Zones 1920
+
 # What a device receives when it already has every chunk but the Programs.
 if [ -e golden/Demo.thin.image ]; then
     exit 0

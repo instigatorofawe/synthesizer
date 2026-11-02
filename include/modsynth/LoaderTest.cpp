@@ -464,8 +464,17 @@ struct ProgramCase {
 
 Instruction instr(Instr op, u8 a, u16 b, u32 c) { return {static_cast<u8>(op), a, b, c}; }
 
+// Puts these at the head of the one track's stream, so that they are the only thing wrong with it.
+void prepend(HandProgram& p, std::initializer_list<Instruction> code) {
+    const u32 count = static_cast<u32>(code.size());
+    p.code.insert(p.code.begin(), code);
+    p.tracks[0].stream_length += count;
+    p.header.conductor_begin += count;
+}
+
 const ProgramCase kProgramCases[] = {
-    {"a reserved header field", [](HandProgram& p) { p.header.reserved = 1; }},
+    {"a feature no revision defines", [](HandProgram& p) { p.header.features = 4; }},
+    {"a feature its code does not use", [](HandProgram& p) { p.header.features = kFeatureMixRamps; }},
     {"a wrong length", [](HandProgram& p) { p.header.length_ticks = 1; }},
     {"no end to a stream", [](HandProgram& p) { p.code[0] = instr(Instr::Wait, 0, 0, 1); }},
     {"End in the middle of a stream",
@@ -605,6 +614,70 @@ const ProgramCase kProgramCases[] = {
     {"a reserved global field", [](HandProgram& p) { p.globals = {GlobalDesc{1, 1, 0.0f}}; }},
     {"globals out of order", [](HandProgram& p) { p.globals = {GlobalDesc{2, 0, 0.0f}, GlobalDesc{1, 0, 0.0f}}; }},
     {"a reserved init field", [](HandProgram& p) { p.inits = {ParamInit{0, 0, 1, 1, 0.0f}}; }},
+    {"a lane on an insert that does not exist", [](HandProgram& p) { prepend(p, {instr(Instr::SetInsert, 0, 1, 0)}); }},
+    {"a ramp on an insert that does not exist",
+     [](HandProgram& p) { prepend(p, {instr(Instr::RampInsert, 0, 1, 0), instr(Instr::RampArg, 0, 0, 1)}); }},
+    {"a lane on a mix register that does not exist",
+     [](HandProgram& p) { prepend(p, {instr(Instr::SetMix, 0, 0, 0)}); }},
+    {"a mix ramp on a register that does not exist",
+     [](HandProgram& p) {
+         p.header.features = kFeatureMixRamps;
+         prepend(p, {instr(Instr::RampMix, 0, 0, 0), instr(Instr::RampArg, 0, 0, 1)});
+     }},
+    {"a mix ramp with no feature",
+     [](HandProgram& p) {
+         p.mix_init = {1.0f};
+         prepend(p, {instr(Instr::RampMix, 0, 0, 0), instr(Instr::RampArg, 0, 0, 1)});
+     }},
+    {"a mix ramp with no ticks",
+     [](HandProgram& p) {
+         p.mix_init = {1.0f};
+         p.header.features = kFeatureMixRamps;
+         prepend(p, {instr(Instr::RampMix, 0, 0, 0), instr(Instr::RampArg, 0, 0, 0)});
+     }},
+    {"a mix value that is not finite",
+     [](HandProgram& p) {
+         p.mix_init = {1.0f};
+         prepend(p, {instr(Instr::SetMix, 0, 0, std::bit_cast<u32>(NAN))});
+     }},
+    {"a play mode with no feature", [](HandProgram& p) { prepend(p, {instr(Instr::PlayMode, 1, 0, 0)}); }},
+    {"a play mode that does not exist",
+     [](HandProgram& p) {
+         p.header.features = kFeaturePlayModes;
+         prepend(p, {instr(Instr::PlayMode, 3, 0, 0)});
+     }},
+    {"a priority that does not exist",
+     [](HandProgram& p) {
+         p.header.features = kFeaturePlayModes;
+         prepend(p, {instr(Instr::PlayMode, 1, 3, 0)});
+     }},
+    {"a priority on poly",
+     [](HandProgram& p) {
+         p.header.features = kFeaturePlayModes;
+         prepend(p, {instr(Instr::PlayMode, 0, 1, 0)});
+     }},
+    {"a glide that is too long",
+     [](HandProgram& p) {
+         p.header.features = kFeaturePlayModes;
+         prepend(p, {instr(Instr::PlayMode, 1, 0, std::bit_cast<u32>(61.0f))});
+     }},
+    {"a glide that is not a time",
+     [](HandProgram& p) {
+         p.header.features = kFeaturePlayModes;
+         prepend(p, {instr(Instr::PlayMode, 1, 0, std::bit_cast<u32>(NAN))});
+     }},
+    {"a play mode in the conductor",
+     [](HandProgram& p) {
+         p.header.features = kFeaturePlayModes;
+         p.code.insert(p.code.end() - 1, instr(Instr::PlayMode, 1, 0, 0));
+         p.header.conductor_length = 2;
+     }},
+    {"a mix change in the conductor",
+     [](HandProgram& p) {
+         p.mix_init = {1.0f};
+         p.code.insert(p.code.end() - 1, instr(Instr::SetMix, 0, 0, 0));
+         p.header.conductor_length = 2;
+     }},
 };
 
 }  // namespace
@@ -627,6 +700,110 @@ TEST(Rules, EveryProgramRuleRefusesItsCase) {
         c.change(hand.program);
         EXPECT_EQ(load_error(hand.bytes()), LoadError::BadProgram);
     }
+}
+
+// A Sample2 over a table of these rows, with the asset at ref 0 and the table at ref 1.
+LoadError zone_error(std::vector<float> rows) {
+    compiler::detail::Writer table, sound;
+    table.put(TableHeader{static_cast<u32>(rows.size()), 0});
+    rows.push_back(0.0f);
+    table.put_all(rows);
+    AssetHeader a{};
+    a.encoding = static_cast<u8>(AssetEncoding::F32);
+    a.channels = 1;
+    a.root_key = 60;
+    a.native_rate = kRate;
+    a.frames = 1;
+    sound.put(a);
+    sound.put_all(std::vector<float>(2, 0.0f));
+    Hand hand;
+    hand.extra = {compiler::detail::make_chunk(ChunkKind::Asset, std::move(sound.bytes)),
+                  compiler::detail::make_chunk(ChunkKind::Table, std::move(table.bytes))};
+    hand.patch.refs = {hand.extra[0].hash, hand.extra[1].hash};
+    hand.patch.header.buffers = 2;
+    hand.patch.consts = {60.0f, 0.0f};
+    WireStep step{};
+    step.op = static_cast<u8>(Op::Sample2);
+    step.resource = 1;
+    step.out[0] = operand(Bank::Buffer, 0);
+    step.out[1] = operand(Bank::Buffer, 1);
+    step.in[0] = operand(Bank::Const, 0);
+    step.in[1] = operand(Bank::Const, 1);
+    hand.patch.voice = {step};
+    return load_error(hand.bytes());
+}
+
+TEST(Rules, AZoneTableIsCheckedForTheStepThatUsesIt) {
+    const std::vector<float> good = {0, 127, 0, 127, 0, 60.5f, 0, 0};
+    const std::vector<float> padding = {1, 0, 0, 0, 0, 0, 0, 0};
+    EXPECT_EQ(zone_error(good), LoadError::None);
+
+    std::vector<float> two = good;
+    two.insert(two.end(), padding.begin(), padding.end());
+    EXPECT_EQ(zone_error(two), LoadError::None);
+
+    EXPECT_EQ(zone_error({0, 127, 0, 127}), LoadError::BadPatch) << "shorter than a row";
+    std::vector<float> many;
+    for (u32 i = 0; i < 2 * kMaxZones; ++i) many.insert(many.end(), good.begin(), good.end());
+    EXPECT_EQ(zone_error(many), LoadError::BadPatch) << "too many rows";
+
+    const auto with = [&](u32 field, float value) {
+        std::vector<float> row = good;
+        row[field] = value;
+        return zone_error(row);
+    };
+    EXPECT_EQ(with(kZoneHighKey, 128), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneHighKey, 60.5f), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneHighVelocity, 128), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneLowVelocity, -1), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneRef, 1), LoadError::BadPatch) << "the table itself, which is not a recording";
+    EXPECT_EQ(with(kZoneRef, 2), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneRef, 0.5f), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneRoot, 127.5f), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneRoot + 1, 1), LoadError::BadPatch);
+    EXPECT_EQ(with(kZoneFields - 1, 1), LoadError::BadPatch);
+
+    std::vector<float> velocities = good;
+    velocities[kZoneLowVelocity] = 100;
+    velocities[kZoneHighVelocity] = 50;
+    EXPECT_EQ(zone_error(velocities), LoadError::BadPatch);
+    std::vector<float> other_padding = padding;
+    other_padding[kZoneLowKey] = 2;
+    EXPECT_EQ(zone_error(other_padding), LoadError::BadPatch);
+    other_padding = padding;
+    other_padding[kZoneRef] = 1;
+    EXPECT_EQ(zone_error(other_padding), LoadError::BadPatch);
+}
+
+// The cases above break one rule each, which proves nothing unless the same shape loads without it.
+TEST(Rules, TheNewInstructionsLoadWhenNothingIsWrong) {
+    const auto load_with = [](u32 features, std::initializer_list<Instruction> code) {
+        Hand hand;
+        hand.program = minimal_program(0);
+        hand.fresh_program = false;
+        hand.program.mix_init = {1.0f};
+        hand.program.header.features = features;
+        prepend(hand.program, code);
+        return load_error(hand.bytes());
+    };
+    const u32 half = std::bit_cast<u32>(0.5f);
+    EXPECT_EQ(load_with(0, {instr(Instr::SetMix, 0, 0, half)}), LoadError::None);
+    EXPECT_EQ(load_with(kFeatureMixRamps, {instr(Instr::RampMix, 0, 0, half), instr(Instr::RampArg, 0, 0, 1)}),
+              LoadError::None);
+    EXPECT_EQ(load_with(kFeaturePlayModes, {instr(Instr::PlayMode, 2, 2, half)}), LoadError::None);
+    EXPECT_EQ(load_with(kFeaturePlayModes, {instr(Instr::PlayMode, 0, 0, half)}), LoadError::None);
+}
+
+TEST(Rules, AnImageMustDeclareTheRevisionOfItsInstructions) {
+    Hand hand;
+    hand.program = minimal_program(0);
+    hand.fresh_program = false;
+    hand.program.mix_init = {1.0f};
+    prepend(hand.program, {instr(Instr::SetMix, 0, 0, std::bit_cast<u32>(0.5f))});
+    const auto good = hand.bytes();
+    EXPECT_EQ(load_error(good), LoadError::None);
+    const u32 older = 3;
+    EXPECT_EQ(load_error(with_manifest(good, offsetof(ManifestHeader, revision), &older, 4)), LoadError::BadProgram);
 }
 
 TEST(Rules, ReservedTableAndAssetFieldsMustBeZero) {

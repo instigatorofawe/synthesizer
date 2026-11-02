@@ -35,7 +35,7 @@ template <class T>
 
 inline constexpr u32 kChunkMagic = 0x4B43534D;  // "MSCK"
 inline constexpr u8 kFormatVersion = 1;         // Changes only if an old engine must not even try to read an image
-inline constexpr u32 kFormatRevision = 3;       // The newest additions this engine understands
+inline constexpr u32 kFormatRevision = 4;       // The newest additions this engine understands
 inline constexpr u32 kChunkAlign = 8;
 inline constexpr u16 kNone = 0xFFFF;
 
@@ -63,6 +63,9 @@ inline constexpr u32 kMaxGlobals = 256;
 inline constexpr u32 kMaxInits = 4096;
 inline constexpr u32 kMaxTicks = 0x7FFFFFFF;   // Any tick plus any duration fits a u32, and kNoTick stays unreachable
 inline constexpr u32 kMaxExpanded = 1u << 24;  // Instructions a Program runs with every repeat unrolled
+inline constexpr u32 kMaxZones = 256;          // in one Sample2's table
+inline constexpr u32 kMaxHeldNotes = 16;       // a track in mono or legato remembers this many held notes
+inline constexpr float kMaxGlideSeconds = 60.0f;
 
 enum class ChunkKind : u8 { Manifest = 0, Asset = 1, Table = 2, Patch = 3, Program = 4 };
 
@@ -159,7 +162,15 @@ enum class Op : u8 {
 
 enum class BiquadMode : u8 { LowPass = 0, HighPass = 1, BandPass = 2 };
 inline constexpr u8 kReadBeforeWrite = 1;
-inline constexpr u8 kNaive = 1;  // Saw and Pulse with no anti-aliasing
+inline constexpr u8 kNaive = 1;          // Saw and Pulse with no anti-aliasing
+inline constexpr u8 kSampleReverse = 1;  // Sample2 plays towards the start
+inline constexpr u8 kSampleTail = 2;     // Sample2 leaves its loop on release and plays on to the end
+
+// A Sample2's Table is rows of this many f32, in this order, so a row is a key range, a velocity range, an index into
+// the patch's refs, and the key the recording sounds at, which may be fractional. A row whose low key is above its high
+// key matches nothing and is {1, 0, 0, 0, 0, 0, 0, 0}, which is how a table reaches a power of two.
+enum ZoneField : u32 { kZoneLowKey, kZoneHighKey, kZoneLowVelocity, kZoneHighVelocity, kZoneRef, kZoneRoot };
+inline constexpr u32 kZoneFields = 8;
 
 enum class Arg : u8 { None, Buffer, Scalar };
 enum class Resource : u8 { None, Table, Asset, Delay };
@@ -190,7 +201,9 @@ struct OpSignature {
 
 // The revision that added an opcode. An image must declare it, so an older engine reports "needs a newer engine" and
 // not "damaged". Lines in Opcodes.def can't carry this, as they never change. A revision adding an opcode adds a line.
-[[nodiscard]] constexpr u32 op_revision(Op op) { return op >= Op::Tone ? 2 : op >= Op::Saw ? 1 : 0; }
+[[nodiscard]] constexpr u32 op_revision(Op op) {
+    return op >= Op::Sample2 ? 4 : op >= Op::Tone ? 2 : op >= Op::Saw ? 1 : 0;
+}
 
 struct WireStep {
     u8 op;
@@ -256,9 +269,14 @@ struct InstrFields {
     }
 }
 
+// The same rule for instructions.
+[[nodiscard]] constexpr u32 instr_revision(Instr instr) { return instr >= Instr::SetInsert ? 4 : 0; }
+
 // Wait: c ticks. NoteOn: a note, b velocity 0..127, c duration in ticks. SetPatch: a slot. SetParam: b param id, c
 // value bits. Ramp: b param id, c value bits, followed by RampArg. RampArg: c ticks. Call: b clip, c repeats. Tempo: c
-// microseconds per quarter, conductor stream only.
+// microseconds per quarter, conductor stream only. SetInsert and RampInsert: a insert, then as SetParam and Ramp.
+// SetMix and RampMix: b mix register, c value bits, RampMix followed by RampArg. PlayMode: a PlayKind, b NotePriority,
+// c glide seconds bits.
 struct Instruction {
     u8 op;
     u8 a;
@@ -266,6 +284,9 @@ struct Instruction {
     u32 c;
 };
 static_assert(sizeof(Instruction) == 8);
+
+enum class PlayKind : u8 { Poly = 0, Mono = 1, Legato = 2 };
+enum class NotePriority : u8 { Last = 0, High = 1, Low = 2 };
 
 struct TrackDesc {
     u16 id;  // stable across edits
@@ -327,6 +348,12 @@ struct GlobalDesc {
     float value;
 };
 
+// What a Program's streams use that costs memory at run time, so a Program that uses neither pays for neither. These
+// are exactly what its code uses, and the validator refuses anything else.
+inline constexpr u32 kFeatureMixRamps = 1;   // a RampMix
+inline constexpr u32 kFeaturePlayModes = 2;  // a PlayMode
+inline constexpr u32 kKnownFeatures = kFeatureMixRamps | kFeaturePlayModes;
+
 // The body after this header, in order: u64 patches[patches], TrackDesc[tracks], u16 slots[slots], ClipDesc[clips],
 // InsertDesc[inserts], MixStep[mix_steps], GatherInput[gather_inputs], f32 mix_init[mix_regs], GlobalDesc[globals] with
 // ids ascending, ParamInit[inits], Instruction[code].
@@ -349,7 +376,7 @@ struct ProgramHeader {
     u16 globals;
     u16 inits;
     u16 master;
-    u32 reserved;
+    u32 features;
 };
 static_assert(sizeof(ProgramHeader) == 52);
 

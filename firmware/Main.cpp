@@ -96,6 +96,10 @@ MODSYNTH_LINK_IMAGE(g_demo, MODSYNTH_GOLDEN_IMAGE("Demo"))
 MODSYNTH_LINK_IMAGE(g_all_ops, MODSYNTH_GOLDEN_IMAGE("AllOps"))
 MODSYNTH_LINK_IMAGE(g_waves, MODSYNTH_GOLDEN_IMAGE("Waves"))
 MODSYNTH_LINK_IMAGE(g_tones, MODSYNTH_GOLDEN_IMAGE("Tones"))
+#if MODSYNTH_FRAME == 32  // Written at the default size, so they have no frozen form
+MODSYNTH_LINK_IMAGE(g_lanes, MODSYNTH_GOLDEN "/Lanes.image")
+MODSYNTH_LINK_IMAGE(g_zones, MODSYNTH_GOLDEN "/Zones.image")
+#endif
 
 namespace {
 
@@ -143,10 +147,14 @@ int main() {
     print(", bulk ");
     print_number(sizeof(g_bulk));
     print("\n");
-    const bool ok = render(MODSYNTH_OUTPUT ".Demo.f32", g_demo, g_demo_end, 480 * kPerOriginalFrame) &&
-                    render(MODSYNTH_OUTPUT ".AllOps.f32", g_all_ops, g_all_ops_end, 400 * kPerOriginalFrame) &&
-                    render(MODSYNTH_OUTPUT ".Waves.f32", g_waves, g_waves_end, 200 * kPerOriginalFrame) &&
-                    render(MODSYNTH_OUTPUT ".Tones.f32", g_tones, g_tones_end, 200 * kPerOriginalFrame);
+    bool ok = render(MODSYNTH_OUTPUT ".Demo.f32", g_demo, g_demo_end, 480 * kPerOriginalFrame) &&
+              render(MODSYNTH_OUTPUT ".AllOps.f32", g_all_ops, g_all_ops_end, 400 * kPerOriginalFrame) &&
+              render(MODSYNTH_OUTPUT ".Waves.f32", g_waves, g_waves_end, 200 * kPerOriginalFrame) &&
+              render(MODSYNTH_OUTPUT ".Tones.f32", g_tones, g_tones_end, 200 * kPerOriginalFrame);
+#if MODSYNTH_FRAME == 32
+    ok = ok && render(MODSYNTH_OUTPUT ".Lanes.f32", g_lanes, g_lanes_end, 1920) &&
+         render(MODSYNTH_OUTPUT ".Zones.f32", g_zones, g_zones_end, 1920);
+#endif
     finish(ok);
 }
 

@@ -1,4 +1,4 @@
-# modsynth design, revision 23
+# modsynth design, revision 24
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -837,7 +837,7 @@ for each view, the transport and the loop, the position and the tempo, one Undo 
 the compile light and Save. There is no status bar. Under it one of two views has
 all the height: Song, with the arrangement, the notes, the mix, the JSON, the image and the inspector, and Patch, with one
 patch's graph. The two used to share the page, one above the other, which left the piano roll 102 px at 1280×800; apart, it
-is 426 px for a timeline of one track and 278 px for one of two tracks and a lane, and Expand makes those 528 and 440
+is 461 px for a timeline of one track and 313 px for one of two tracks and a lane, and Expand makes those 563 and 475
 [measured]. The view not on screen stays on the page, hidden and inert, so its scroll, zoom and choices are there to come back
 to.
 
@@ -989,7 +989,11 @@ A fader moves the mix registers as it is dragged and compiles when it is let go,
 a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
 gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. What the page plays and Export WAV writes pass through a limiter after the
 engine, at full scale, and a light on the master meter says when it is limiting, with how much in its tooltip, section 24. It holds
-for a moment after the last time, as a clip light does, since the limiter comes and goes many times a second. Export WAV renders the song as it compiles now, in a
+for a moment after the last time, as a clip light does, since the limiter comes and goes many times a second. Every meter and scope
+also holds the loudest it has been since Play or since the image playing began, in its tooltip, so a note shorter than a frame of the
+display still shows it sounded. Under the compile light's list, the engine says how many seconds of audio it has rendered, and the page
+how many compiles it has started. The e2e tests wait on these and on the light's busy state, never on time passing, so a slow machine
+makes them slower and no less sure. Export WAV renders the song as it compiles now, in a
 worker with the worklet's engine, to its end and on until its voices stop and a tenth of a second stays below -100 dB, as the Python binding's render does.
 
 Each track head has M and S. M is the track's own `mute`, the Mixer's Mute, so it saves with the song and is one step of its
@@ -1222,7 +1226,8 @@ hasn't weighed in on:
   0.1 s, both channels together, and below full scale it changes no bit. It is in the wasm engine's render, so playback and Export WAV both
   have it, and the Python binding's `limit`, which `Listen.py` plays through. The binding's `render` stays the engine's own output, which
   the golden tests compare.
-- **The status bar** says "limiting" with the most it turned down in the last moment, in dB, so a blow-up is seen rather than hidden.
+- **Limiting is shown,** with the most it turned down in the last moment in dB, so a blow-up is seen rather than hidden: in the status
+  bar until revision 24, and since then by a light on the master meter.
 
 **Built for the examples' patches in the library**, as section 19 describes. The user asked for every patch the recipes and pieces use to be in the library from the start, read-only, with a duplicate
 to change one. Choices made there that the user hasn't weighed in on:
@@ -1314,6 +1319,51 @@ transport, a first song that sounds, and recording with snap. Choices made here 
   - In Song the keys play the chosen track. They're off while it has no notes, since the preview leaves such a track out of the image.
   - New patch, Import and Delete patch come back to the Patch view, and New timeline to Song.
   - Below 1400 px wide the browser forgets whether it was open, and wider it remembers.
+
+**Built for the UX sprint, wave 2** (revision 24), as section 19 describes. This wave builds step entry on R, room for the notes, the
+transport and the compile light in the top bar, and a first song that sounds, mute and solo, and copy and paste. The user asked as well
+that tests wait for something on the page to change, never for time to pass. Recording with snap, on Shift+R, is wave 3. Choices made
+here that the user hasn't weighed in on:
+- **Step entry:**
+  - The cursor starts where it last was in that clip, or else at its start. A click on empty grid moves it to the nearest Snap line and
+    adds nothing, and while step entry is on a double-click adds nothing either.
+  - A chord is written once its last key is let go, as one undo step. A step at the start and pitch of a note already there replaces it.
+  - Backspace takes back the last step behind the cursor: its notes if they're as written, the notes it replaced, and a clip it grew.
+    With no step behind the cursor it moves the cursor back by the Draw length and deletes nothing.
+  - Step entry stays on across a change of clip, tab or view, and the keys write only while the Song view's Notes tab shows a clip.
+    While it's on, →, Backspace and Esc are its own, ahead of every handler but a field's, a menu's, a dialog's and the browser's.
+  - Velocity for new notes is editor state, 100 for each timeline opened. C and V step it by tens. The keys sound at the engine's
+    default velocity, and only what they write takes it.
+- **Room:**
+  - The arrangement takes up to 35% of the window's height, and the splitter is gone.
+  - Expand folds the inspector to its rail as well, and keeps the toolbar and tab strip, since notes are drawn with them. Esc's layers
+    are a menu, a drag or an offer, step entry, Expand, and then the chosen notes.
+  - The inspector is remembered on each side of 1400 px.
+  - A zoom chosen by hand is kept across a reload, for the last 200 clips, and the scroll while the page is open. Zoom runs from 8 to
+    400 px a beat and rows from 6 to 32 px, and a wheel notch zooms by 2^(1/3).
+  - Fit fits the bars the notes are in, and their pitches with two rows to spare, or a clip with no notes from its length and C3 to C5.
+- **The transport and the compile light:**
+  - Problems with compiling or with what plays go in the light's list, and what an action did goes in a short message. "Saved." shows
+    for 4 s, and a refusal stays until its ×. Warnings make the light amber, and the limiting light holds 1.5 s.
+  - Renaming stays a field at the start of the Song view's toolbar, and the ▾ menu's Rename goes to it.
+  - Until a loop is drawn, the loop is the whole song, dimmed. A click on the strip turns the loop on or off, as Logic's does. Loop this
+    clip moves the playhead into the loop when it was outside it.
+  - The BPM field changes the tempo change in effect at the playhead. In a ramp it shows how far the glide has got, and typed into, it
+    sets the tempo the glide starts from.
+  - A position is typed as a bar, bar.beat or bar.beat.tick, counted from 1 with the tick from 0. A beat or tick out of range is
+    refused rather than carried over.
+- **A first song:**
+  - New timeline makes one track playing the Für Elise electric piano and an empty four-bar clip, chosen and scrolled to middle C. It is
+    the one built-in that sounds at once with no insert and keeps a chord short of the limiter.
+  - Keys on a track with no notes play that track's own image, so a song that is playing stops, as it does for a key on an unplayed
+    patch. Putting the track in the song's preview instead would make what is heard differ from what is exported.
+  - S adds to any other solo, a muted track stays muted when soloed, and buses and the master are never left out. Solo isn't saved.
+  - Export WAV writes what is heard, so a solo makes a stem. Export saved version has no solo.
+  - A paste lands straight after what was copied, in the clip or on the track it came from, and end to end after that, and anywhere
+    else at the place it was copied from. A pasted clip is the same clip while it's unchanged, and otherwise a copy. A paste or a
+    duplicate past a clip's end grows it.
+- **Tests:** a meter's hold starts again at Play and when a new image begins, since a tap may follow another chain then. The audio
+  clock is the AudioContext's own.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

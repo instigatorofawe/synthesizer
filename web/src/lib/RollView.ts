@@ -101,6 +101,30 @@ export function keepZoom(text: string | null, key: string, zoom: RollZoom, most 
 	return JSON.stringify(zooms);
 }
 
+// The zooms kept for a timeline's clips that are gone from it, dropped, or null if none are. A clip that goes takes its zoom
+// with it, so a new clip given its name, as the next one drawn can be, opens as a new clip does.
+export function dropGone(text: string | null, timeline: string, clips: ReadonlySet<string>): string | null {
+	const zooms = parseZooms(text);
+	let dropped = false;
+	for (const key of Object.keys(zooms)) {
+		if (!gone(key, timeline, clips)) continue;
+		delete zooms[key];
+		dropped = true;
+	}
+	return dropped ? JSON.stringify(zooms) : null;
+}
+
+// Whether a key made by `zoomKey` names a clip of this timeline that isn't in it now.
+export function gone(key: string, timeline: string, clips: ReadonlySet<string>): boolean {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(key);
+	} catch {
+		return false;
+	}
+	return Array.isArray(parsed) && parsed[0] === timeline && typeof parsed[1] === 'string' && !clips.has(parsed[1]);
+}
+
 // Whatever is there, as an object of pairs of numbers. Anything else, from another version or another hand, is dropped.
 function parseZooms(text: string | null): Record<string, [number, number]> {
 	let parsed: unknown;

@@ -5,6 +5,7 @@ import {
 	anchored,
 	clampBeat,
 	clampRow,
+	dropGone,
 	fitRoll,
 	keepZoom,
 	keptZoom,
@@ -171,5 +172,17 @@ describe("each clip's zoom across a reload", () => {
 		expect(keptZoom(JSON.stringify({ [song]: ['wide', 12] }), song)).toBeNull();
 		expect(keptZoom(JSON.stringify({ [song]: [9999, 1] }), song)).toEqual({ beat: BEAT.most, row: ROWS.least });
 		expect(keepZoom('not json', song, { beat: 50, row: 12 })).toBe(JSON.stringify({ [song]: [50, 12] }));
+	});
+
+	it("forgets a clip that has gone from its timeline, and only that timeline's", () => {
+		const other = zoomKey('timeline:2', 'gone');
+		let text = keepZoom(null, song, { beat: 120, row: 16 });
+		text = keepZoom(text, pluck, { beat: 40, row: 10 });
+		text = keepZoom(text, other, { beat: 60, row: 12 });
+		const kept = dropGone(text, 'timeline:1', new Set(['lead-a']));
+		expect(keptZoom(kept, song)).toEqual({ beat: 120, row: 16 });
+		expect(keptZoom(kept, pluck)).toBeNull();
+		expect(keptZoom(kept, other)).toEqual({ beat: 60, row: 12 });
+		expect(dropGone(kept, 'timeline:1', new Set(['lead-a']))).toBeNull(); // Nothing more to drop
 	});
 });

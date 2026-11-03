@@ -9,7 +9,7 @@
 	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
 	import type { ProgramReport } from '#lib/Request.ts';
-	import { ZOOM_KEY, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
+	import { ZOOM_KEY, dropGone, gone, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
@@ -332,6 +332,16 @@
 		if (typeof localStorage === 'undefined') return null;
 		return keptZoom(localStorage.getItem(ZOOM_KEY), viewKey(clip));
 	}
+	// A clip that leaves the document, deleted or renamed, takes its view with it, so a new clip given its name doesn't open at
+	// the old one's zoom.
+	$effect(() => {
+		const clips = new Set(doc.clips.map((c) => c.id));
+		untrack(() => {
+			for (const key of [...rollViews.keys()]) if (gone(key, id, clips)) rollViews.delete(key);
+			const kept = dropGone(localStorage.getItem(ZOOM_KEY), id, clips);
+			if (kept !== null) localStorage.setItem(ZOOM_KEY, kept);
+		});
+	});
 	function viewed(clip: string, view: RollView, zoomed: boolean) {
 		rollViews.set(viewKey(clip), view);
 		if (zoomed) localStorage.setItem(ZOOM_KEY, keepZoom(localStorage.getItem(ZOOM_KEY), viewKey(clip), view));

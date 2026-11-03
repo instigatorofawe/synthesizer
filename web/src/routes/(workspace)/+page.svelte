@@ -1035,7 +1035,7 @@
 							onopen={patchOpened}
 							onnewpatch={newPatchForTrack}
 							onsolo={toggleSolo}
-							onkey={keyNote}
+							onkey={(note, on) => started && keyNote(note, on)}
 						/>
 					{/key}
 				{:else}

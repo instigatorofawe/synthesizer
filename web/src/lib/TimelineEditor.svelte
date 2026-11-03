@@ -102,7 +102,7 @@
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
-		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, on the chosen track
+		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, once audio has started
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;

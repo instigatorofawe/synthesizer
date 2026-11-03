@@ -41,6 +41,7 @@ async function newPatch(page: Page, name: string) {
 
 // A patch made from the browser, which keeps the page and what it has copied, as a reload wouldn't.
 async function anotherPatch(page: Page, name: string) {
+	await page.getByRole('button', { name: 'New patch', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New patch name').fill(name);
 	await page.getByLabel('New patch name').press('Enter');
 	await page.waitForURL(/patch=/);

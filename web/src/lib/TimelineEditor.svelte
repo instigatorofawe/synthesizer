@@ -12,7 +12,8 @@
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
-	import { matches, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { clampVelocity, stepVelocity, type Cursor } from '#lib/StepEntry.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -73,7 +74,8 @@
 		onchange,
 		ontrack = () => {},
 		onopen = () => {},
-		onnewpatch
+		onnewpatch,
+		onwriting = () => {}
 	}: {
 		doc: Timeline;
 		patches: PatchLike[];
@@ -94,6 +96,7 @@
 		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
+		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -111,6 +114,12 @@
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
+	let velocity = $state(100); // The velocity of new notes, clicked or stepped, which C and V step
+	// Step entry, which R or the Step toggle turns on and Esc leaves. It outlasts a change of clip, and its cursor is kept for
+	// each clip, so coming back to one carries on where it left off.
+	let stepping = $state(false);
+	const cursors = new Map<string, Cursor>();
+	let roll = $state<ReturnType<typeof PianoRoll>>();
 	const drawChoices = $derived.by(() => {
 		const lengths = drawLengths(doc.ppq);
 		if (lengths.some((length) => length.ticks === draw)) return lengths;
@@ -143,6 +152,16 @@
 	const length = $derived(program?.length_ticks ?? songLength(doc));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
 	const badClips = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).clip ?? [])));
+
+	// The piano keys write into the roll while step entry is on and the roll shows a clip. The page asks before it routes them.
+	const writing = $derived(stepping && active && !readonly && tab === 'notes' && !!clip);
+	$effect(() => onwriting(writing));
+	$effect(() => () => onwriting(false));
+
+	// A piano key from the page, for step entry to write. The roll ignores it unless it is writing.
+	export function stepKey(note: number, on: boolean) {
+		roll?.stepKey(note, on);
+	}
 
 	const playhead = $derived.by(() => {
 		if (!clip || !placed || placed.clip !== clip.id) return null;
@@ -340,6 +359,24 @@
 		draw = stepLength(draw, doc.ppq, by);
 	}
 
+	// R turns step entry on or off, wherever focus is but a field or a dialog. From another tab it opens the notes to write
+	// in, and with no clip there is nothing to write into. C and V step the velocity of new notes.
+	function noteKeys(event: KeyboardEvent) {
+		const target = event.target as Element | null;
+		if (readonly || !active || typingIn(target) || target?.closest?.('dialog')) return;
+		if (matches(event, 'step-entry')) {
+			event.preventDefault();
+			if (event.repeat || !clip) return;
+			stepping = tab !== 'notes' || !stepping;
+			tab = 'notes';
+		} else if (matches(event, 'softer') || matches(event, 'louder')) {
+			event.preventDefault();
+			velocity = stepVelocity(velocity, matches(event, 'louder') ? 1 : -1);
+		}
+	}
+
+	onMount(() => on(window, 'keydown', noteKeys));
+
 	onMount(() => {
 		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
 		return on(window, 'keydown', stepDraw);
@@ -415,6 +452,23 @@
 				<select aria-label="Draw length" bind:value={draw}>
 					{#each drawChoices as choice (choice.ticks)}<option value={choice.ticks}>{choice.label}</option>{/each}
 				</select>
+			</label>
+			<label
+				title={`How hard a new note is played, from 1 to 127. ${label('softer')} and ${label('louder')} step it by 10.`}
+			>
+				Vel
+				<input
+					class="velocity"
+					type="number"
+					min="1"
+					max="127"
+					aria-label="Velocity of new notes"
+					value={velocity}
+					onchange={(e) => {
+						velocity = clampVelocity(Number(e.currentTarget.value) || velocity);
+						e.currentTarget.value = String(velocity);
+					}}
+				/>
 			</label>
 		{/if}
 		<label>
@@ -783,6 +837,17 @@
 				>
 			{/each}
 		</div>
+		{#if tab === 'notes' && clip && !readonly}
+			<div class="rolltools" role="toolbar" aria-label="Notes">
+				<button
+					type="button"
+					class="step"
+					aria-pressed={stepping}
+					title={`Step entry (${label('step-entry')}): the piano keys write notes at a cursor, each as long as Draw`}
+					onclick={() => (stepping = !stepping)}><span aria-hidden="true">●</span> Step</button
+				>
+			</div>
+		{/if}
 		<div class="pane" class:notes={tab === 'notes'} role="tabpanel">
 			{#if tab === 'notes'}
 				{#if clip}
@@ -798,6 +863,11 @@
 							canAudition={reported !== undefined}
 							{readonly}
 							bind:draw
+							bind:this={roll}
+							bind:stepping
+							{velocity}
+							{active}
+							{cursors}
 							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
 							onchange={clipChanged}
 							onaudition={audition}
@@ -910,6 +980,35 @@
 		min-height: 0;
 		display: flex;
 		flex-direction: column;
+		position: relative;
+	}
+	/* The roll's own controls sit at the right end of the tab strip. */
+	.rolltools {
+		position: absolute;
+		top: 0;
+		right: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding-top: 0.3rem;
+		font-size: 0.8rem;
+	}
+	.rolltools button {
+		padding: 0.1rem 0.6rem;
+		font-size: 0.8rem;
+	}
+	.step span {
+		color: var(--muted);
+	}
+	.step[aria-pressed='true'] {
+		border-color: #3fb950;
+	}
+	.step[aria-pressed='true'] span {
+		color: #3fb950;
+	}
+	.toolbar input.velocity {
+		width: 3.2rem;
+		padding: 0.1rem 0.25rem;
 	}
 	.tabs {
 		flex: none;

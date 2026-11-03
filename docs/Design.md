@@ -880,7 +880,8 @@ the page, hidden and inert, so its scroll, zoom and choices are there to come ba
 - Space plays and stops the song from anywhere but a text field, a select or a checkbox, and a button with focus doesn't take it. Home
   goes back to the start, and so does Stop pressed while stopped, since a laptop may have no Home key.
 - The top bar's keys play what the view on screen is about: the chosen track in the Song view, and in the Patch view its patch,
-  wherever it is heard.
+  wherever it is heard. A track the song's image leaves out, because it has no notes yet, is compiled on its own, as one track
+  with nothing placed, as a voice no track plays is, and the keys play it there. So a new track sounds before its first note.
 - The computer keyboard plays them as most DAWs lay it out: the home row from A is the white keys from the lowest C shown, the row
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
   piano, and a field being typed in or a key with a modifier keeps its own meaning, though a button or a slider with focus doesn't. A key
@@ -922,14 +923,40 @@ end grows the clip to the bar that holds it, which says so with an Undo. Here th
 would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
 four bars past the end, so there is room to do it.
 
+New timeline makes a song that sounds at once, as FL Studio's and Live's templates do (`Template.ts`): a track playing a
+built-in electric piano, Für Elise's, and an empty four-bar clip at bar 1, chosen and open in the roll around middle C. It is
+an ordinary timeline, saved as it is made, which undoes and compiles as any other. An electric piano is what Logic and
+GarageBand open a new song with: it sounds right with no insert or bus behind it, it has no recordings to fetch, and a
+four-note chord on it peaks near -5 dBFS, short of the limiter [measured].
+
+Mod+C, Mod+V and Mod+D copy, paste and duplicate the chosen notes while the roll has focus, and the chosen clip in the
+arrangement otherwise, but not in a field. Outside a field Mod+D is always taken in the Song view, so the browser never
+bookmarks the page for it. The clipboard is the page's own (`Clipboard.ts`), with notes and a clip kept apart, and it lasts
+as long as the page does, so a copy reaches another clip or timeline, and can come from an example. A paste lands straight
+after what was copied, in the clip or on the track it came from, and the next paste straight after that one, so pasting
+again lays copies end to end as Mod+D does. Anywhere else it lands where it was copied from. The playhead would be the other
+place to paste, but it means nothing in a clip that isn't playing, and stopped at the start it would put a copied clip on
+top of itself. A pasted clip plays the same clip, as a copy dragged off with Mod does, while the timeline has that clip as
+it was copied, and otherwise a copy of it under a name of its own. Notes a paste or a duplicate puts past the end grow the
+clip, as a note placed there does.
+
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
 a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
 gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. What the page plays and Export WAV writes pass through a limiter after the
 engine, at full scale, and the status bar says when it is limiting and by how much, section 24. Export WAV renders the song as it compiles now, in a
 worker with the worklet's engine, to its end and on until its voices stop and a tenth of a second stays below -100 dB, as the Python binding's render does.
 
-Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the image and its keys are silent until it has one. `live` keeps unused tracks, so it could pass a document
-that an export refuses, and an editor that previews one thing and exports another is worse than a silent key. The page says so when it happens.
+Each track head has M and S. M is the track's own `mute`, the Mixer's Mute, so it saves with the song and is one step of its
+undo. S solos the track, which mutes every other track and leaves the buses and the master as they are, so a soloed track's
+sends still reach their reverb, as in most DAWs. A muted track stays muted when soloed. Solo is a way of listening and not
+part of the song, so it is never in the document or saved, and an example can be soloed though it can't be changed. It goes
+into what is compiled, as mutes on the tracks it leaves out (`soloed`), so that a lane on a fader, which writes the mute the
+image holds, can't bring a track back, and it is written to the mix registers at once, so it is heard before that compile.
+Export WAV writes what is heard, so with a solo it writes only the soloed tracks, as a DAW's bounce does, and that makes a
+stem. Export saved version compiles the saved document, which has none.
+
+Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the song's image. `live` keeps unused tracks, so it could pass a document
+that an export refuses, and an editor that previews one thing and exports another is worse than a silent key. So the keys play such a track on its own instead.
 
 **Asset import.** WAV files become one instrument: an asset for each file and a patch with a `sample` node in zones mode, whose inspector edits zones, roots and ranges. 16-bit and narrower stay i16, and anything wider stays exact in f32.
 A file's sampler chunk gives its root and loop, and failing that a name like `Piano_C4.wav` gives the root, and failing that it is 60. Keys split halfway between recordings, and several at one key become velocity layers, quietest first by peak, because

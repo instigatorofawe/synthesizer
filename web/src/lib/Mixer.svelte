@@ -24,6 +24,7 @@
 		setInsertPatch,
 		setSend,
 		setTrackParam,
+		soloed,
 		trackKey,
 		type Bus,
 		type Insert,
@@ -39,8 +40,10 @@
 		rings,
 		engine,
 		readonly = false,
+		solo = new Set(),
 		onchange,
-		onopen = () => {}
+		onopen = () => {},
+		onsolo = () => {}
 	}: {
 		doc: Timeline;
 		patches: PatchLike[];
@@ -49,8 +52,10 @@
 		rings: Ring[];
 		engine: SongControls;
 		readonly?: boolean;
+		solo?: ReadonlySet<number>; // The tracks soloed, which every other track is muted for
 		onchange: (doc: Timeline) => void;
 		onopen?: (patch: string) => void; // Show an insert's patch in the patch editor
+		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
 	} = $props();
 
 	let newBus = $state('');
@@ -93,9 +98,10 @@
 
 	// A control moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the
 	// document only takes the value that was settled on. Those registers hold what the document would, so the swap changes nothing.
+	// A track that a solo keeps quiet stays quiet while its fader moves.
 	function live(next: Timeline, key: string) {
 		if (!program) return;
-		for (const { register, value } of mixWrites(next, program, key)) engine.setMix(register, value);
+		for (const { register, value } of mixWrites(soloed(next, solo), program, key)) engine.setMix(register, value);
 	}
 
 	function liveParam(track: Track, param: Param, value: number) {
@@ -344,7 +350,18 @@
 		{@const key = trackKey(track.id)}
 		{@const label = track.name || `Track ${track.id}`}
 		<section class="strip" data-testid={`strip-${key}`}>
-			<h4>{label}</h4>
+			<div class="title">
+				<h4>{label}</h4>
+				<!-- Outside the fieldset: a solo changes nothing saved, so an example can be soloed too. -->
+				<button
+					type="button"
+					class="solo"
+					aria-pressed={solo.has(track.id)}
+					aria-label={`Solo ${label}`}
+					title="Hear only the soloed tracks. A solo isn't saved."
+					onclick={() => onsolo(track.id)}>Solo</button
+				>
+			</div>
 			{@render scope(key, label)}
 			<fieldset disabled={readonly}>
 				{@render fader(key, label, track.gain)}
@@ -448,6 +465,25 @@
 	}
 	.strip.master {
 		border-color: #d2992280;
+	}
+	.title {
+		display: flex;
+		align-items: baseline;
+		gap: 0.3rem;
+	}
+	.title h4 {
+		flex: 1;
+		min-width: 0;
+	}
+	.solo {
+		flex: none;
+		padding: 0 0.35rem;
+		font-size: 0.72rem;
+	}
+	.solo[aria-pressed='true'] {
+		background: #1f6feb;
+		border-color: #1f6feb;
+		color: #fff;
 	}
 	h4 {
 		margin: 0 0 0.3rem;

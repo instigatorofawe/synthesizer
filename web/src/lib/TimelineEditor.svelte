@@ -26,6 +26,7 @@
 		grids,
 		laneChoices,
 		makeUnique,
+		mixWrites,
 		noteValue,
 		place,
 		placementIndex,
@@ -46,8 +47,10 @@
 		tempoAt,
 		setTrack,
 		snapTick,
+		soloed,
 		songLength,
 		stepLength,
+		trackKey,
 		windowOf,
 		ticksPerBar,
 		type Clip,
@@ -70,10 +73,13 @@
 		tabs = [],
 		heading,
 		examples = [],
+		solo = new Set(),
 		onchange,
 		ontrack = () => {},
 		onopen = () => {},
-		onnewpatch
+		onnewpatch,
+		onsolo = () => {},
+		onkey
 	}: {
 		doc: Timeline;
 		patches: PatchLike[];
@@ -90,10 +96,13 @@
 		tabs?: { id: string; label: string; content: Snippet }[]; // More views of the document, after the notes and the mixer
 		heading?: Snippet; // At the start of the toolbar
 		examples?: ExampleGroup[]; // How the browser groups the examples, which the patch pickers group built-in patches by
+		solo?: ReadonlySet<number>; // The tracks soloed, which the page keeps, since it is no part of the document
 		onchange: (doc: Timeline) => void;
 		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
+		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
+		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, on the chosen track
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -277,6 +286,17 @@
 		selection = { ...selection, placement: null };
 	}
 
+	// A track head's M is the track's own mute, as the Mixer's Mute is: saved with the song, one step of its undo, and heard at
+	// once through the mix registers.
+	function toggleMute(id: number) {
+		const track = doc.tracks.find((t) => t.id === id);
+		if (!track || readonly) return;
+		const next = setTrack(doc, id, { mute: !track.mute });
+		const writes = program ? mixWrites(soloed(next, solo), program, trackKey(id)) : [];
+		for (const { register, value } of writes) engine.setMix(register, value);
+		commit(next);
+	}
+
 	function deleteTrack() {
 		if (selection.track === null) return;
 		commit(removeTrack(doc, selection.track));
@@ -345,7 +365,13 @@
 		return on(window, 'keydown', stepDraw);
 	});
 
+	// A track the image leaves out, because it has no notes yet, is heard where the keys play it, on its own.
+	const auditionByKeys = $derived(
+		reported === undefined && !!onkey && home !== undefined && home.id === selection.track
+	);
+
 	function audition(note: number, on: boolean) {
+		if (auditionByKeys) return onkey?.(note, on);
 		if (reported?.index === undefined) return;
 		if (on) engine.noteOn(reported.index, note);
 		else engine.noteOff(reported.index, note);
@@ -448,6 +474,10 @@
 			{badClips}
 			meter={ringOf}
 			{patches}
+			{solo}
+			{active}
+			onmute={toggleMute}
+			{onsolo}
 			picking={picking?.kind === 'head' ? picking.track : null}
 			onpick={(track, anchor) => toggle({ kind: 'head', track, anchor })}
 			onopen={(track, patch) => void openPatch(track, patch)}
@@ -795,7 +825,7 @@
 							{choices}
 							{playhead}
 							{playing}
-							canAudition={reported !== undefined}
+							canAudition={reported !== undefined || auditionByKeys}
 							{readonly}
 							bind:draw
 							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
@@ -804,12 +834,6 @@
 							onundo={undo}
 						/>
 					{/key}
-					{#if !readonly && home && !reported}
-						<p class="muted" data-testid="silent-track">
-							{home.name || `Track ${home.id}`} has no notes in the image yet, so its keys are silent. An image holds only
-							what plays.
-						</p>
-					{/if}
 				{:else}
 					<p class="muted empty">
 						{readonly
@@ -818,7 +842,19 @@
 					</p>
 				{/if}
 			{:else if tab === 'mixer'}
-				<Mixer {doc} {patches} {program} {targets} {rings} {engine} {readonly} onchange={commit} {onopen} />
+				<Mixer
+					{doc}
+					{patches}
+					{program}
+					{targets}
+					{rings}
+					{engine}
+					{readonly}
+					{solo}
+					onchange={commit}
+					{onopen}
+					{onsolo}
+				/>
 			{:else}
 				{@render tabs.find((extra) => extra.id === tab)?.content()}
 			{/if}

@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { emptyNewSong } from './NewSong.ts';
 import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated, as AppTest's do.
@@ -37,6 +38,7 @@ async function newTimeline(page: Page, name: string) {
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
 	await expect(page.getByTestId('arrangement')).toBeVisible();
+	await emptyNewSong(page);
 }
 
 async function slots(page: Page) {

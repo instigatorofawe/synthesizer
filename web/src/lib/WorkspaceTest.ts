@@ -8,6 +8,7 @@ import {
 	graphError,
 	hearing,
 	parseGraph,
+	trackAlone,
 	viewOf,
 	withDrafts,
 	withParams,
@@ -116,6 +117,44 @@ describe('where keys are heard', () => {
 			why: 'Its track has no notes yet, so the image leaves it out.'
 		});
 		expect(hearing(doc, program, null, null, true).kind).toBe('none');
+	});
+
+	it('is a track with nothing placed on its own, with its sound and without what reaches the rest of the song', () => {
+		const routed = timelineSchema.parse({
+			...doc,
+			tracks: [
+				...doc.tracks.slice(0, 2),
+				{
+					id: 3,
+					name: 'Empty',
+					voices: 2,
+					slots: ['c', 'b'],
+					play: { mode: 'mono' },
+					gain: 0.5,
+					output: 'bus:room',
+					sends: [{ bus: 'room' }],
+					inserts: [{ id: 4, patch: 'duck', key: 'track:1' }]
+				}
+			],
+			buses: [{ id: 'room' }],
+			master: { gain: 0.8, inserts: [{ id: 5, patch: 'limit', key: 'bus:room' }] }
+		});
+		const alone = trackAlone(routed, 3)!;
+		expect(alone.clips).toEqual([]);
+		expect(alone.buses).toEqual([]);
+		expect(alone.tracks).toEqual([
+			{
+				...routed.tracks[2],
+				placements: [],
+				output: 'master',
+				sends: [],
+				inserts: [{ id: 4, patch: 'duck' }]
+			}
+		]);
+		expect(alone.master).toEqual({ gain: 0.8, inserts: [{ id: 5, patch: 'limit' }] });
+		expect(timelineSchema.parse(alone)).toEqual(alone);
+		expect(trackAlone(routed, 9)).toBeNull();
+		expect(trackAlone(timelineSchema.parse({ tracks: [{ id: 1 }] }), 1)).toBeNull(); // No patch to play
 	});
 });
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import AutomationLane from '#lib/AutomationLane.svelte';
+	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { followScroll } from '#lib/Follow.ts';
 	import { matches, modHeld, modKey } from '#lib/Shortcuts.ts';
@@ -15,7 +16,10 @@
 		lanesOf,
 		moveNotes,
 		noteName,
+		noteSpan,
 		noteValue,
+		pasteAt,
+		pasteNotes,
 		position,
 		quantize,
 		rampVelocities,
@@ -357,9 +361,52 @@
 		if (chosen.size) onchange(moveNotes(clip, chosen, ticks, notes));
 	}
 
+	// Notes a duplicate or a paste put past the clip's end grow it to the bar that holds the last of them, as a note put there
+	// does, unless that would run a placement of the clip into the next one. Then they wait past the end, dimmed, as before.
+	function withRoom(next: Clip) {
+		const grown = growToHold(next, Math.max(...next.notes.map((n) => n.tick)), ppq);
+		const grows = grown !== next && cangrow(grown.length);
+		onchange(grows ? grown : next);
+		if (grows) tell(`Clip is now ${bars(grown.length)}`);
+	}
+
+	function duplicate() {
+		if (!chosen.size) return;
+		const copied = duplicateNotes(clip, chosen);
+		chosen = copied.chosen;
+		withRoom(copied.clip);
+	}
+
+	// Copies stay in the page. The first paste in the clip they came from lands straight after them, and the first in another
+	// clip where they were in theirs, and each paste after that straight after the one before (`pasteAt`).
+	function copy() {
+		const notes = clip.notes.filter((_, i) => chosen.has(i));
+		if (!notes.length) return;
+		const at = Math.min(...notes.map((n) => n.tick));
+		clipboard.notes = { what: notes, from: clip.id, at, span: noteSpan(notes), pasted: null };
+	}
+
+	function paste() {
+		const copied = clipboard.notes;
+		if (!copied) return;
+		const at = pasteAt(copied, copied.pasted, clip.id);
+		copied.pasted = { to: clip.id, at };
+		const pasted = pasteNotes(clip, copied.what, at);
+		chosen = pasted.chosen;
+		withRoom(pasted.clip);
+	}
+
+	// An example's notes can be chosen and copied, which changes nothing, and Mod+D is kept from the browser, which would
+	// bookmark the page.
+	function readonlyKeys(event: KeyboardEvent) {
+		if (matches(event, 'select-all') || matches(event, 'copy') || matches(event, 'duplicate')) event.preventDefault();
+		if (matches(event, 'select-all')) chosen = new Set(clip.notes.keys());
+		else if (matches(event, 'copy')) copy();
+	}
+
 	// The roll's keys, from the editor's one table of them. Each needs exactly its own modifiers.
 	function keydown(event: KeyboardEvent) {
-		if (readonly) return;
+		if (readonly) return readonlyKeys(event);
 		const by = (id: Parameters<typeof matches>[1]) => matches(event, id);
 		if (by('roll.delete') || by('roll.backspace')) {
 			event.preventDefault();
@@ -369,11 +416,15 @@
 		} else if (by('select-all')) {
 			event.preventDefault();
 			chosen = new Set(clip.notes.keys());
+		} else if (by('copy')) {
+			event.preventDefault(); // Or the browser copies whatever text is selected, which nobody meant here
+			copy();
+		} else if (by('paste')) {
+			event.preventDefault();
+			paste();
 		} else if (by('duplicate')) {
 			event.preventDefault();
-			const copied = duplicateNotes(clip, chosen);
-			chosen = copied.chosen;
-			onchange(copied.clip);
+			duplicate();
 		} else if (by('escape')) {
 			// The first Esc lets go of what is held or offered, and the next lets go of the notes.
 			if (gesture?.kind === 'draw') chosen = new Set();
@@ -416,14 +467,7 @@
 				onchange(removeNotes(clip, gone));
 			}
 		},
-		{
-			label: 'Duplicate',
-			action: () => {
-				const copied = duplicateNotes(clip, chosen);
-				chosen = copied.chosen;
-				onchange(copied.clip);
-			}
-		}
+		{ label: 'Duplicate', action: duplicate }
 	];
 
 	function pressKey(event: PointerEvent, note: number) {

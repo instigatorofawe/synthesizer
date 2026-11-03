@@ -258,6 +258,18 @@ const TOP = Math.cbrt(2);
 export const faderGain = (position: number) => (position * TOP) ** 3;
 export const faderPosition = (gain: number) => Math.cbrt(Math.max(0, gain)) / TOP;
 
+// The song as it sounds while some tracks are soloed: every other track muted, and the buses and the master as they are, so a
+// soloed track's sends still reach their reverb, as solo works in most DAWs. Solo belongs to the editor and not the document,
+// so this is what is compiled and heard, and never what is saved. A muted track stays muted when it is soloed, and a solo whose
+// tracks have all gone solos nothing.
+export function soloed<T extends { tracks: { id: number; mute?: boolean }[] }>(doc: T, solo: ReadonlySet<number>): T {
+	if (!doc.tracks.some((track) => solo.has(track.id))) return doc;
+	return {
+		...doc,
+		tracks: doc.tracks.map((track) => (solo.has(track.id) || track.mute ? track : { ...track, mute: true }))
+	};
+}
+
 export function addSend(doc: Timeline, key: ChainKey, bus: string): Timeline {
 	return mapChain(doc, key, (chain) =>
 		'sends' in chain ? { ...chain, sends: [...chain.sends, { bus, gain: 0.5 }] } : chain
@@ -583,6 +595,49 @@ export function duplicatePlacement(doc: Timeline, track: number, index: number):
 	return { doc: next, index: (next.tracks.find((t) => t.id === track)?.placements ?? []).lastIndexOf(copy) };
 }
 
+// What Mod+C takes from the arrangement: a placement, and its clip as it was then, which is what reaches another timeline.
+export interface CopiedPlacement {
+	placement: Placement;
+	clip: Clip;
+}
+
+// How long a copied placement lasts, every repeat of its window, by its clip as it was copied.
+export const copiedSpan = ({ placement, clip }: CopiedPlacement) =>
+	placementSpan({ clips: [clip] } as Timeline, placement);
+
+// A copied placement put on a track at a tick, and the index it lands at. It plays the clip it was copied from, as a copy
+// dragged off with Mod does, while this timeline has that clip as it was copied. Otherwise it plays a copy of the clip as it
+// was, under a name of its own, which is how a clip reaches another timeline or outlives an edit made since.
+export function pastePlacement(
+	doc: Timeline,
+	track: number,
+	tick: number,
+	copied: CopiedPlacement
+): { doc: Timeline; index: number } {
+	if (!doc.tracks.some((t) => t.id === track)) return { doc, index: -1 };
+	const same = clipOf(doc, copied.clip.id);
+	let id = copied.clip.id;
+	let next = doc;
+	if (!same || JSON.stringify(same) !== JSON.stringify(copied.clip)) {
+		id = freshClipId(doc, copied.clip.id);
+		next = { ...doc, clips: [...doc.clips, { ...copied.clip, id }] };
+	}
+	const placed = { ...copied.placement, clip: id, tick };
+	next = mapChain(next, trackKey(track), (chain) => ({
+		...chain,
+		placements: inOrder([...(chain as Track).placements, placed])
+	}));
+	return { doc: next, index: (next.tracks.find((t) => t.id === track)?.placements ?? []).lastIndexOf(placed) };
+}
+
+// Where a paste lands. In the clip or on the track it was copied from, straight after what was copied, and after a paste the
+// next one straight after that one, so pasting again and again lays copies end to end, as Mod+D does. Anywhere else, at the
+// place it was copied from, and from there end to end. `at` is where the copy starts and `span` how long it lasts.
+export function pasteAt<K>(copied: { from: K; at: number; span: number }, last: { to: K; at: number } | null, here: K) {
+	if (last && last.to === here) return last.at + copied.span;
+	return here === copied.from ? copied.at + copied.span : copied.at;
+}
+
 // The clip a drag across an empty row draws, from the tick it was pressed at to the one it reached, either way: whole bars, from
 // the start of the first to the end of the last. It stays in the gap it was pressed in, between the placements either side, so
 // drawing one never makes an overlap. Null if there is no room.
@@ -722,6 +777,25 @@ export function duplicateNotes(clip: Clip, indices: Set<number>): { clip: Clip; 
 	const first = Math.min(...notes.map((n) => n.tick));
 	const last = Math.max(...notes.map((n) => n.tick + n.dur));
 	const copies = notes.map((n) => ({ ...n, tick: n.tick + last - first }));
+	const start = clip.notes.length;
+	return {
+		clip: { ...clip, notes: [...clip.notes, ...copies] },
+		chosen: new Set(copies.map((_, i) => start + i))
+	};
+}
+
+// From the first of some notes' starts to the last of their ends, which is how far apart a duplicate or a paste puts copies.
+export function noteSpan(notes: Note[]): number {
+	if (!notes.length) return 0;
+	return Math.max(...notes.map((n) => n.tick + n.dur)) - Math.min(...notes.map((n) => n.tick));
+}
+
+// Copied notes put into a clip with the first of them at `tick` and the rest as far from it as they were. They come back
+// chosen, as a duplicate's do.
+export function pasteNotes(clip: Clip, notes: Note[], tick: number): { clip: Clip; chosen: Set<number> } {
+	if (!notes.length) return { clip, chosen: new Set() };
+	const first = Math.min(...notes.map((n) => n.tick));
+	const copies = notes.map((n) => ({ ...n, tick: n.tick - first + tick }));
 	const start = clip.notes.length;
 	return {
 		clip: { ...clip, notes: [...clip.notes, ...copies] },

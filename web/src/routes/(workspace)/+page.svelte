@@ -28,7 +28,17 @@
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
-	import { BEATS_PER_BAR, patchUses, replacePatch, settlingWrites, tempoAt, type PatchUse } from '#lib/TimelineEdit.ts';
+	import {
+		BEATS_PER_BAR,
+		mixWrites,
+		patchUses,
+		replacePatch,
+		settlingWrites,
+		soloed,
+		tempoAt,
+		trackKey,
+		type PatchUse
+	} from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
 	import ViewTabs from '#lib/ViewTabs.svelte';
 	import {
@@ -40,6 +50,7 @@
 		isInsert,
 		parseGraph,
 		stay,
+		trackAlone,
 		viewOf,
 		withDrafts,
 		withParams,
@@ -347,30 +358,77 @@
 			shown !== null && !shown.example
 		)
 	);
+
+	// Tracks soloed in the song that is open, which play while every other track is muted. Solo is a way of listening to the
+	// song rather than part of it, so it is never saved: it goes into what is compiled and heard, and so into Export WAV, which
+	// writes what is heard. A song opened starts with none.
+	let solo = $state.raw<ReadonlySet<number>>(new Set());
+
+	function toggleSolo(id: number) {
+		const next = new Set(solo);
+		if (!next.delete(id)) next.add(id);
+		solo = next;
+		// Heard at once through the mix registers, as a Mute is, until the compile that follows puts it in the image.
+		const program = goodSong?.report.programs[0];
+		if (!songDoc || !program) return;
+		const heard = soloed(songDoc, next);
+		for (const track of songDoc.tracks) {
+			for (const { register, value } of mixWrites(heard, program, trackKey(track.id))) controls.setMix(register, value);
+		}
+	}
+
+	// A soloed track that is deleted is soloed no more, so a track made later with its id doesn't start soloed.
+	$effect(() => {
+		const ids = new Set(songDoc?.tracks.map((track) => track.id));
+		untrack(() => {
+			if ([...solo].some((id) => !ids.has(id))) solo = new Set([...solo].filter((id) => ids.has(id)));
+		});
+	});
+
+	// In the Song view the keys play the chosen track. While the song's image leaves it out, because it has no notes yet, they
+	// play it on its own instead, as the Patch view plays a patch no track plays, so a new track sounds before its first note.
+	const aloneTrack = $derived.by(() => {
+		if (view !== 'song' || !saved || !songDoc || selectedTrack === null) return null;
+		if (goodSong?.report.programs[0]?.tracks.some((t) => t.id === selectedTrack)) return null;
+		return trackAlone(soloed(songDoc, solo), selectedTrack);
+	});
+
 	// A patch no track plays is compiled on its own too, so its errors and what compiled away show even when it can't be played.
 	const aloneWanted = $derived(
-		shown !== null &&
-			!shown.example &&
-			(hears.kind === 'alone' || (isInsert(shown.patch.graph) && !goodSong?.report.sidecar?.[shown.patch.id]))
+		aloneTrack !== null ||
+			(shown !== null &&
+				!shown.example &&
+				(hears.kind === 'alone' || (isInsert(shown.patch.graph) && !goodSong?.report.sidecar?.[shown.patch.id])))
 	);
 
 	function songRequest(): { request: string; doc?: Timeline } | null {
-		if (recipe) return { request: JSON.stringify(recipe.project) };
+		if (recipe) {
+			const [first, ...rest] = recipe.project.programs;
+			const programs = [{ ...first, timeline: soloed(first.timeline as Timeline, solo) }, ...rest];
+			return { request: JSON.stringify({ ...recipe.project, programs }) };
+		}
 		if (!saved || timelineParsed.value === null) return null;
 		// A document that doesn't fit the schema goes whole, so that the compiler is what says what's wrong with it.
 		const checked = timelineSchema.safeParse(timelineParsed.value);
 		const reached = checked.success
 			? reachable(referencedPatches(checked.data), library, assets)
 			: { patches: library, assets };
-		const programs = [{ id: saved.id, name: timelineName, timeline: timelineParsed.value as Timeline }];
+		const timeline = checked.success ? soloed(timelineParsed.value as Timeline, solo) : timelineParsed.value;
+		const programs = [{ id: saved.id, name: timelineName, timeline: timeline as Timeline }];
 		return {
 			request: buildRequest(reached.patches, reached.assets, programs),
-			doc: checked.success ? checked.data : undefined
+			doc: checked.success ? soloed(checked.data, solo) : undefined
 		};
 	}
 
-	// One track that plays the patch, kept by `live` though it has no notes, or for an insert, the master's only insert.
+	// One track that plays the patch, kept by `live` though it has no notes, or for an insert, the master's only insert. In
+	// the Song view, the chosen track as it is, with nothing placed.
 	function aloneRequest(): string | null {
+		if (aloneTrack) {
+			const reached = reachable(referencedPatches(aloneTrack), library, assets);
+			const programs = [{ id: 'preview', name: 'Preview', timeline: aloneTrack }];
+			return buildRequest(reached.patches, reached.assets, programs, { live: true });
+		}
 		if (!aloneWanted || !shown) return null;
 		const id = shown.patch.id;
 		const timeline = isInsert(shown.patch.graph)
@@ -446,7 +504,8 @@
 		done();
 	}
 
-	// Another song resets what belonged to the last one, and the transport goes back to its start.
+	// Another song resets what belonged to the last one, and the transport goes back to its start. The chosen track is the new
+	// timeline editor's to say, which it does as it opens, and that can come before this runs, so it isn't reset here.
 	let shownSong = '';
 	$effect(() => {
 		const key = openKey;
@@ -458,7 +517,7 @@
 			song = goodSong = null;
 			sent.song = '';
 			songTick = 0;
-			selectedTrack = null;
+			solo = new Set();
 			if (started && want === 'song') {
 				engine.stop();
 				engine.locate(0);
@@ -481,14 +540,27 @@
 		});
 	});
 
+	// What the keys play on its own went from a patch to a track, or to another track: the image there was is no longer it.
+	let aloneKey = '';
+	$effect(() => {
+		const key = aloneTrack ? `track:${aloneTrack.tracks[0].id}` : `patch:${shown?.patch.id ?? ''}`;
+		untrack(() => {
+			if (key === aloneKey) return;
+			aloneKey = key;
+			alone = goodAlone = null;
+			sent.alone = '';
+			if (live === 'alone') live = null;
+		});
+	});
+
 	// What each image is made of. Reading it here is what runs these again when any of it changes, and an image whose request
 	// hasn't changed isn't compiled again.
 	$effect(() => {
-		void [recipe, saved, timelineText, timelineName, library, assets, fetchingAssets];
+		void [recipe, saved, timelineText, timelineName, library, assets, fetchingAssets, solo];
 		schedule('song');
 	});
 	$effect(() => {
-		void [aloneWanted, shown, patchName, library, assets, fetchingAssets];
+		void [aloneWanted, aloneTrack, shown, patchName, library, assets, fetchingAssets];
 		schedule('alone');
 	});
 
@@ -565,16 +637,19 @@
 	};
 
 	// The top bar's keys play what the view on screen is about: the chosen track in the Song view, and in the Patch view its
-	// patch, wherever it is heard. A track the image leaves out, because it has no notes yet, can't be played.
+	// patch, wherever it is heard. A track the image leaves out, because it has no notes yet, is played on its own.
 	const chosenIndex = $derived(goodSong?.report.programs[0]?.tracks.find((t) => t.id === selectedTrack)?.index ?? null);
 	const chosenName = $derived(songDoc?.tracks.find((t) => t.id === selectedTrack)?.name ?? '');
-	const keysPlay = $derived(view === 'song' ? chosenIndex !== null : hears.kind !== 'none');
+	const keysPlay = $derived(view === 'song' ? chosenIndex !== null || aloneTrack !== null : hears.kind !== 'none');
 	const keysWhere = $derived.by(() => {
 		if (view === 'song') {
-			if (chosenIndex !== null) return `Keys play ${chosenName || `track ${selectedTrack}`}.`;
-			return selectedTrack === null
-				? 'Choose a track for the keys to play.'
-				: 'This track has no notes yet, so keys are silent.';
+			const name = chosenName || `track ${selectedTrack}`;
+			if (chosenIndex !== null) return `Keys play ${name}.`;
+			if (aloneTrack) return `Keys play ${name}, on its own until it has notes.`;
+			if (selectedTrack === null) return 'Choose a track for the keys to play.';
+			return songDoc?.tracks.find((t) => t.id === selectedTrack)?.slots.length
+				? 'This track has no notes yet, so keys are silent.'
+				: 'This track has no patch to play.';
 		}
 		if (hears.kind === 'song') return `Keys play ${patchName} on ${hears.name}, in the song.`;
 		return hears.kind === 'alone' ? `Keys play ${patchName} on its own.` : hears.why;
@@ -595,7 +670,9 @@
 		const to: { source: Source; track: number } | null =
 			view === 'song'
 				? chosenIndex === null
-					? null
+					? aloneTrack
+						? { source: 'alone', track: 0 }
+						: null
 					: { source: 'song', track: chosenIndex }
 				: heard.kind === 'song'
 					? { source: 'song', track: heard.track }
@@ -952,10 +1029,13 @@
 							]}
 							{heading}
 							examples={data.examples}
+							{solo}
 							onchange={(next) => timelineEdited({ text: JSON.stringify(next, null, 1) })}
 							ontrack={trackChosen}
 							onopen={patchOpened}
 							onnewpatch={newPatchForTrack}
+							onsolo={toggleSolo}
+							onkey={keyNote}
 						/>
 					{/key}
 				{:else}

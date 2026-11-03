@@ -1,9 +1,12 @@
 <script lang="ts">
 	import {
 		barOf,
+		copiedSpan,
 		drawnClip,
 		movePlacement,
 		noteValue,
+		pasteAt,
+		pastePlacement,
 		place,
 		placementIndex,
 		setPlacement,
@@ -15,12 +18,13 @@
 		type PatchLike,
 		type Track
 	} from '#lib/TimelineEdit.ts';
+	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { followScroll } from '#lib/Follow.ts';
 	import Meter from '#lib/Meter.svelte';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
-	import { modHeld, modKey } from '#lib/Shortcuts.ts';
+	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
 
 	export interface Selection {
 		track: number | null;
@@ -50,8 +54,12 @@
 		meter = () => null,
 		patches = [],
 		picking = null,
+		solo = new Set(),
+		active = true,
 		onpick = () => {},
 		onopen = () => {},
+		onmute = () => {},
+		onsolo = () => {},
 		onselect,
 		onchange,
 		onnew,
@@ -72,8 +80,12 @@
 		meter?: (track: number) => Ring | null; // What each track's level meter reads
 		patches?: PatchLike[]; // What the heads name each track's patches by
 		picking?: number | null; // The track whose head opened the patch picker
+		solo?: ReadonlySet<number>; // The tracks soloed, which every other track is muted for
+		active?: boolean; // Whether keys are for this editor, which they are while the Song view is on screen
 		onpick?: (track: number, anchor: HTMLElement) => void; // A head's ▾, to choose another patch
 		onopen?: (track: number, patch: string) => void; // A head's patch name, to edit that patch
+		onmute?: (track: number) => void; // A head's M
+		onsolo?: (track: number) => void; // A head's S
 		onselect: (selection: Selection) => void;
 		onchange: (doc: Timeline, selection?: Selection) => void;
 		onnew: (track: number, tick: number, length?: number) => void; // A new clip there, a bar long unless it says
@@ -345,6 +357,40 @@
 		if (track) onnew(track.id, Math.floor(ticksAt(at.x) / grid) * grid);
 	}
 
+	// Mod+C, Mod+V and Mod+D for the chosen clip, while the Song view is on screen and the key isn't the roll's or a field's.
+	// Mod+D is always taken, so the browser never bookmarks the page for it. A copy can come from an example, and a paste lands
+	// on the chosen track, where `pasteAt` says.
+	function keydown(event: KeyboardEvent) {
+		const target = event.target as Element | null;
+		const elsewhere = typingIn(target) || !!target?.closest?.('[data-testid="roll"], dialog');
+		if (!active || event.defaultPrevented || elsewhere) return;
+		const track = selection.track;
+		const at = track !== null && selection.placement !== null ? { track, placement: selection.placement } : null;
+		if (matches(event, 'duplicate')) {
+			event.preventDefault();
+			if (at && !readonly) actions?.duplicate(at);
+		} else if (matches(event, 'copy') && at) {
+			const placed = doc.tracks.find((t) => t.id === at.track)?.placements[at.placement];
+			const clip = placed && doc.clips.find((c) => c.id === placed.clip);
+			if (!placed || !clip) return;
+			event.preventDefault();
+			const what = { placement: placed, clip };
+			clipboard.placement = { what, from: at.track, at: placed.tick, span: copiedSpan(what), pasted: null };
+		} else if (matches(event, 'paste') && clipboard.placement && !readonly) {
+			const copied = clipboard.placement;
+			const to = track ?? (doc.tracks.some((t) => t.id === copied.from) ? copied.from : doc.tracks[0]?.id);
+			if (to === undefined) return;
+			event.preventDefault();
+			const tick = pasteAt(copied, copied.pasted, to);
+			const pasted = pastePlacement(doc, to, tick, copied.what);
+			if (pasted.index < 0) return;
+			copied.pasted = { to, at: tick };
+			const chosen = { track: to, placement: pasted.index };
+			onchange(pasted.doc, chosen);
+			onselect(chosen);
+		}
+	}
+
 	// While the song plays, the view keeps the playhead in sight. Where it was last is all this keeps, so it isn't state.
 	let followed: number | null = null;
 	$effect(() => {
@@ -358,6 +404,8 @@
 		followed = at;
 	});
 
+	const soloing = $derived(doc.tracks.some((track) => solo.has(track.id)));
+
 	const shownLoop = $derived(
 		gesture?.kind === 'loop'
 			? { start: Math.min(gesture.from, gesture.to), end: Math.max(gesture.from, gesture.to) }
@@ -365,23 +413,51 @@
 	);
 </script>
 
-<svelte:window onpointermove={pointerMove} onpointerup={pointerUp} />
+<svelte:window onpointermove={pointerMove} onpointerup={pointerUp} onkeydown={keydown} />
 
 <div class="arrangement" bind:this={view} data-testid="arrangement-view">
 	<div class="heads" bind:this={heads} style:padding-top="{TOP}px">
 		{#each doc.tracks as track (track.id)}
 			{@const names = track.slots.map(patchName)}
-			<div class="head" class:chosen={selection.track === track.id} style:height="{ROW}px">
-				<button
-					type="button"
-					class="select"
-					class:problem={badTracks.has(track.id)}
-					data-testid={`track-${track.id}`}
-					aria-pressed={selection.track === track.id}
-					onclick={() => onselect({ track: track.id, placement: null })}
-				>
-					<span class="title">{trackName(track)}</span>
-				</button>
+			{@const soloed = solo.has(track.id)}
+			<div
+				class="head"
+				class:chosen={selection.track === track.id}
+				class:silent={track.mute || (soloing && !soloed)}
+				style:height="{ROW}px"
+			>
+				<div class="namerow">
+					<button
+						type="button"
+						class="select"
+						class:problem={badTracks.has(track.id)}
+						data-testid={`track-${track.id}`}
+						aria-pressed={selection.track === track.id}
+						onclick={() => onselect({ track: track.id, placement: null })}
+					>
+						<span class="title">{trackName(track)}</span>
+					</button>
+					<!-- Mute is the track's own, saved with the song as the Mixer's is. Solo is the editor's, and isn't saved. -->
+					<div class="toggles" role="group" aria-label={`Mute and solo ${trackName(track)}`}>
+						<button
+							type="button"
+							class="mute"
+							aria-pressed={track.mute}
+							aria-label="Mute"
+							title={`Mute ${trackName(track)}. It's saved with the song.`}
+							disabled={readonly}
+							onclick={() => onmute(track.id)}>M</button
+						>
+						<button
+							type="button"
+							class="solo"
+							aria-pressed={soloed}
+							aria-label="Solo"
+							title={`Solo ${trackName(track)}: hear only the soloed tracks. A solo isn't saved.`}
+							onclick={() => onsolo(track.id)}>S</button
+						>
+					</div>
+				</div>
 				<!-- The track plays its patch: its name opens it, and ▾ chooses another. -->
 				<div class="patch">
 					{#if names.length}
@@ -399,7 +475,6 @@
 					{:else}
 						<span class="muted none">no patch</span>
 					{/if}
-					{#if track.mute}<span class="muted more">muted</span>{/if}
 					{#if !readonly}
 						<button
 							type="button"
@@ -577,15 +652,52 @@
 		text-align: left;
 		overflow: hidden;
 	}
-	.head .select {
+	/* Not .name, which is the clip label's and lets the pointer through. */
+	.namerow {
 		flex: 1;
 		min-height: 0;
 		display: flex;
+		align-items: flex-end;
+	}
+	.head .select {
+		flex: 1;
+		min-width: 0;
+		height: 100%;
+		display: flex;
 		flex-direction: column;
 		justify-content: flex-end;
-		width: 100%;
-		padding: 0 0.6rem;
+		padding: 0 0.3rem 0 0.6rem;
 		font-size: 0.8rem;
+	}
+	.toggles {
+		flex: none;
+		display: flex;
+		gap: 2px;
+	}
+	.head .toggles button {
+		width: 1.2rem;
+		padding: 0.05rem 0;
+		border: 1px solid var(--line);
+		border-radius: 3px;
+		font-size: 0.68rem;
+		font-weight: 600;
+		line-height: 1.1;
+		text-align: center;
+		color: var(--muted);
+	}
+	.head .toggles .mute[aria-pressed='true'] {
+		background: #d29922;
+		border-color: #d29922;
+		color: #0d1117;
+	}
+	.head .toggles .solo[aria-pressed='true'] {
+		background: #1f6feb;
+		border-color: #1f6feb;
+		color: #fff;
+	}
+	/* Muted, or left out by a solo. */
+	.head.silent .title {
+		color: var(--muted);
 	}
 	.patch {
 		display: flex;

@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { emptyNewSong } from './NewSong.ts';
 
 // A page load waits until the page has hydrated, as AppTest.ts does: what is typed into it before then is lost.
 const test = base.extend({
@@ -29,6 +30,7 @@ async function newTrack(page: Page, name: string) {
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await emptyNewSong(page);
 	await page.getByRole('button', { name: 'Add track' }).click(); // It asks which patch the track plays
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 }

@@ -25,7 +25,8 @@ import {
 	snapshot,
 	type Edits
 } from '#lib/server/Repository.ts';
-import { EMPTY_GRAPH, EMPTY_TIMELINE, graphSchema, timelineSchema } from '#lib/Schema.ts';
+import { EMPTY_GRAPH, graphSchema, timelineSchema } from '#lib/Schema.ts';
+import { NEW_TIMELINE } from '#lib/Template.ts';
 
 // The address says what is open: `timeline` or `recipe` in the lower panel, and `patch` or `part` above it. Only the first two
 // need anything from here, and a load reruns only for the parameters it reads, so choosing a patch costs no round trip.
@@ -138,11 +139,12 @@ export const actions = {
 		if (form.has('back')) redirect(303, back(form, { patch: id, part: null }));
 		return { created: id };
 	},
+	// A new timeline starts from the template, a track with a patch and an empty clip, so that it makes a sound at once.
 	createTimeline: async ({ request }) => {
 		const form = await request.formData();
 		const name = field(form, 'name');
 		if (!name) return fail(400, { message: 'a timeline needs a name' });
-		redirect(303, back(form, { timeline: createTimeline(db(), name, EMPTY_TIMELINE), recipe: null, part: null }));
+		redirect(303, back(form, { timeline: createTimeline(db(), name, NEW_TIMELINE), recipe: null, part: null }));
 	},
 	createBundle: async ({ request }) => {
 		const form = await request.formData();

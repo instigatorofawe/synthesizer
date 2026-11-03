@@ -1,4 +1,4 @@
-# modsynth design, revision 22
+# modsynth design, revision 23
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -1202,6 +1202,45 @@ when it runs out of sight. Choices made there that the user hasn't weighed in on
   under the pointer holds still between turns.
 - **Scrolling away:** a view scrolled away from the playhead stays there until the playhead comes back into it, or Play starts the song again.
   The piano roll follows only while its own clip is playing.
+
+**Built for the UX sprint, wave 1** (revision 23), as section 19 describes. The user asked for a sprint on the editor's UX. They named three
+problems: notes are hard to put into a timeline, it's unclear where patches are edited, and there's too little room, vertical room most of
+all. A team proposed and reviewed changes, and the user took every recommendation. This wave builds:
+- one undo history for each patch and timeline, and one table of keys;
+- a click that adds a note, and clips that grow to hold it;
+- one picker for a track's patch;
+- a graph that stays readable, with a search for nodes;
+- separate Song and Patch views.
+
+The user ruled out Alt on every platform: Mod is ⌘ on a Mac and Ctrl elsewhere. Waves 2 and 3 follow: step entry, room for notes, the
+transport, a first song that sounds, and recording with snap. Choices made here that the user hasn't weighed in on:
+- **Undo:**
+  - A step is the document's whole text, and each document keeps 200 of them.
+  - A run of typing in the JSON is one step, and it ends when the field is left.
+  - Mod is strict: on a Mac, Ctrl+Z neither undoes nor saves.
+- **Space and Home:**
+  - A focused button or slider doesn't take Space or Home, so Space plays after a fader is dragged.
+  - While a patch plays on its own, Space plays the song instead, as Play does.
+- **Drawing notes:** a drawn note reaches the end of the Snap cell under the pointer. A drawn clip covers whole bars, inside the gap where it
+  was drawn.
+- **Lengthening anyway:** "Lengthen to N bars" and Duplicate after go ahead even when they cause an overlap. The compiler then reports the
+  overlap until the next clip is moved.
+- **Lanes:** a click past a clip's end in a lane does nothing, since lanes don't grow clips.
+- **A new patch for a track** is saved at once, and putting it on the track is a draft. Its name is what was typed in the picker, or else
+  "*Track name* patch".
+- **A track head's ▾** changes slot 1 only, and the inspector changes the others.
+- **Graph zoom:**
+  - Fit never goes below 100%, where a port label is 11 px, nor above 150%.
+  - Fit shows the top-left of a graph too big to read whole, since that's where signals start.
+  - A node's header is two lines, so existing drawings are a little taller.
+- **A subpatch from the search** starts as the first other patch in the library.
+- **The views:**
+  - The Patch view shows the patch the address names, or else the chosen track's.
+  - A change of view, or a patch chosen, moves the address without loading anything, and `?view=patch` survives a reload. Opening a
+    timeline or an example still loads the page.
+  - In Song the keys play the chosen track. They're off while it has no notes, since the preview leaves such a track out of the image.
+  - New patch, Import and Delete patch come back to the Patch view, and New timeline to Song.
+  - Below 1400 px wide the browser forgets whether it was open, and wider it remembers.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

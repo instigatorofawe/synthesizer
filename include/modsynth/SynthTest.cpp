@@ -166,11 +166,16 @@ TEST(Synth, LocatePastANoteLeavesSilence) {
 
 TEST(Synth, LoopBraceWrapsWithoutRecompiling) {
     Rig<kStereo> rig(compile_demo());
+    EXPECT_FALSE(rig.engine.looping());
     rig.engine.send({.kind = EventKind::SetLoop, .tick = 0, .tick_end = 480});
     play(rig);
     render_stereo(rig, 2000);
+    EXPECT_TRUE(rig.engine.looping());
     EXPECT_LT(rig.engine.tick(), 480u);
     EXPECT_GT(rig.engine.active_voices(), 0u);
+    rig.engine.send({.kind = EventKind::SetLoop});  // A tick_end of 0 clears it
+    render_stereo(rig, 1);
+    EXPECT_FALSE(rig.engine.looping());
 }
 
 TEST(Synth, AKnobMoveGlidesInsteadOfJumping) {

@@ -51,6 +51,7 @@
 		program,
 		errors,
 		tick,
+		playing = false,
 		targets,
 		rings,
 		engine,
@@ -67,6 +68,7 @@
 		program: ProgramReport | null;
 		errors: { where: string; message: string }[];
 		tick: number;
+		playing?: boolean; // Whether the song is playing, which the arrangement and the roll follow
 		targets: TapTarget[];
 		rings: Ring[];
 		engine: SongControls;
@@ -330,6 +332,7 @@
 			{barWidth}
 			{grid}
 			{tick}
+			{playing}
 			loop={looping ? loop : null}
 			{readonly}
 			{badTracks}
@@ -675,6 +678,7 @@
 							slots={home?.slots ?? []}
 							{choices}
 							{playhead}
+							{playing}
 							canAudition={reported !== undefined}
 							{readonly}
 							onchange={clipChanged}

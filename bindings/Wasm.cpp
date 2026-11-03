@@ -149,6 +149,13 @@ EMSCRIPTEN_KEEPALIVE std::uint32_t ms_tick() {
 EMSCRIPTEN_KEEPALIVE int ms_playing() {
     return with_engine([](auto& synth) { return synth.playing(); });
 }
+// Where the song playing ends, in ticks, or 0 for one with nothing placed, such as a patch played on its own.
+EMSCRIPTEN_KEEPALIVE std::uint32_t ms_length() {
+    return with_engine([](auto& synth) { return synth.length(); });
+}
+EMSCRIPTEN_KEEPALIVE int ms_looping() {
+    return with_engine([](auto& synth) { return synth.looping(); });
+}
 EMSCRIPTEN_KEEPALIVE std::uint32_t ms_generation() { return generation(); }
 EMSCRIPTEN_KEEPALIVE std::uint32_t ms_voices() {
     return with_engine([](auto& synth) { return synth.active_voices(); });

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import AutomationLane from '#lib/AutomationLane.svelte';
+	import { followScroll } from '#lib/Follow.ts';
 	import {
 		addNote,
 		addPoint,
@@ -30,6 +31,7 @@
 		slots,
 		choices,
 		playhead,
+		playing = false,
 		canAudition,
 		readonly = false,
 		onchange,
@@ -41,6 +43,7 @@
 		slots: string[]; // The track's patches, for notes that choose one
 		choices: LaneChoice[];
 		playhead: number | null; // In ticks from the start of the clip
+		playing?: boolean; // Whether the song is playing, which the roll follows while it plays this clip
 		canAudition: boolean;
 		readonly?: boolean;
 		onchange: (clip: Clip) => void;
@@ -263,6 +266,19 @@
 	function scrolled() {
 		for (const element of followers) element.scrollLeft = scroller.scrollLeft;
 	}
+
+	// While the song plays this clip, the roll keeps the playhead in sight, as the arrangement does.
+	let followed: number | null = null;
+	$effect(() => {
+		const at = playhead === null ? null : playhead * perTick;
+		if (!playing || at === null) {
+			followed = null;
+			return;
+		}
+		const to = followScroll(at, followed, scroller.scrollLeft, scroller.clientWidth - KEYS);
+		if (to !== null) scroller.scrollLeft = to;
+		followed = at;
+	});
 
 	onMount(() => {
 		// A whole clip if it fits, up to a size where a short one doesn't turn into a few very long notes.

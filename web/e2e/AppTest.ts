@@ -68,11 +68,13 @@ const settled = (page: Page) =>
 	expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
 
 // Each of the song's four mixer strips shows a level at some point: the pluck is silent between its notes, so not all at once. The
-// song lasts seven seconds, and a slow machine can play past its end before this, so it starts again from the beginning first.
+// song lasts seven seconds, and a slow machine can reach its end, where it stops, before this, so it starts again from the
+// beginning first.
 async function everyStripHeard(page: Page) {
 	await tab(page, 'Mixer');
 	const ruler = (await page.getByTestId('ruler').boundingBox())!;
 	await page.mouse.click(ruler.x + 1, ruler.y + ruler.height / 2);
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	const heard = new Set<number>();
 	await expect
 		.poll(
@@ -108,13 +110,70 @@ test('a timeline plays in an AudioWorklet and the scopes see every bus', async (
 	await expect(page.getByRole('heading', { name: 'Master' })).toBeVisible();
 	await expect(page.getByText('Lead', { exact: true }).first()).toBeVisible();
 	await everyStripHeard(page);
-	await expect
-		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
-		.toBeGreaterThan(0.01);
 	const before = Number(await page.getByTestId('tick').textContent());
 	await page.waitForTimeout(400);
 	expect(Number(await page.getByTestId('tick').textContent())).toBeGreaterThan(before);
+	await expect
+		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
+		.toBeGreaterThan(0.01);
 	expect(problems).toEqual([]);
+});
+
+const tickShown = async (page: Page) => Number(await page.getByTestId('tick').textContent());
+
+test('a song stops at its end, and Play starts it again from the top', async ({ page }) => {
+	const problems = await startPlaying(page);
+	const state = page.getByTestId('state');
+	await expect(state).toHaveAttribute('data-playing', 'true');
+	await expect(state).toHaveAttribute('data-playing', 'false', { timeout: 15000 }); // It lasts seven seconds
+	const end = await tickShown(page);
+	await page.waitForTimeout(300);
+	expect(await tickShown(page)).toBe(end);
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	await expect(state).toHaveAttribute('data-playing', 'true');
+	expect(await tickShown(page)).toBeLessThan(end);
+	expect(problems).toEqual([]);
+});
+
+test('a loop goes round past the end instead of stopping', async ({ page }) => {
+	await startPlaying(page);
+	const strip = (await page.getByTestId('loop-strip').boundingBox())!;
+	// Bars are 96 pixels: a loop over the first bar.
+	await page.mouse.move(strip.x + 1, strip.y + strip.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(strip.x + 96, strip.y + strip.height / 2, { steps: 4 });
+	await page.mouse.up();
+	await expect(page.getByTestId('loop-brace')).toBeVisible();
+	const ruler = (await page.getByTestId('ruler').boundingBox())!;
+	await page.mouse.click(ruler.x + 1, ruler.y + ruler.height / 2); // Into the loop, wherever the song had got to
+	await page.waitForTimeout(9000); // Longer than the song
+	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true');
+	expect(await tickShown(page)).toBeLessThanOrEqual(1920);
+});
+
+// Where the playhead is in the arrangement's view, from its left edge, and how wide the view is past the track heads.
+const playheadInView = (page: Page) =>
+	page.getByTestId('arrangement-view').evaluate((view) => {
+		const heads = view.querySelector('.heads') as HTMLElement;
+		const x = Number(view.querySelector('[data-testid="playhead"]')!.getAttribute('x1'));
+		return { at: x - view.scrollLeft, width: view.clientWidth - heads.offsetWidth, scroll: view.scrollLeft };
+	});
+
+test('the arrangement follows the playhead off its edge, unless it was scrolled away', async ({ page }) => {
+	await page.goto('/?timeline=song');
+	await page.getByRole('button', { name: 'Start audio' }).click();
+	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	for (let i = 0; i < 5; ++i) await page.getByRole('button', { name: 'Zoom in' }).click(); // Bars of 729 pixels
+	expect((await playheadInView(page)).scroll).toBe(0);
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	await expect.poll(async () => (await playheadInView(page)).scroll, { timeout: 8000 }).toBeGreaterThan(0);
+	const seen = await playheadInView(page);
+	expect(seen.at).toBeGreaterThanOrEqual(0);
+	expect(seen.at).toBeLessThanOrEqual(seen.width);
+	// Scrolled back to the start, away from the playhead, it stays there.
+	await page.getByTestId('arrangement-view').evaluate((view) => (view.scrollLeft = 0));
+	await page.waitForTimeout(600);
+	expect((await playheadInView(page)).scroll).toBe(0);
 });
 
 test('editing during playback swaps generations without stopping', async ({ page }) => {

@@ -448,6 +448,8 @@ class Synth {
     // Where the Program's last note ends, so an offline render knows when the song is over.
     [[nodiscard]] u32 length() const { return live_ ? live_->program.h.length_ticks : 0; }
     [[nodiscard]] bool playing() const { return live_ && live_->clock.playing; }
+    // Whether the transport has a loop, which holds the clock inside it.
+    [[nodiscard]] bool looping() const { return live_ && live_->clock.loop_end != 0; }
     [[nodiscard]] u32 active_voices() const {
         if (!live_) return 0;
         u32 n = 0;

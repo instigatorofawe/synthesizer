@@ -809,6 +809,7 @@
 							program={goodSong?.report.programs[0] ?? null}
 							errors={songErrors}
 							{tick}
+							playing={live === 'song' && !!engineState?.playing}
 							targets={songTargets}
 							{rings}
 							engine={controls}

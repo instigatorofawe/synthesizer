@@ -482,6 +482,31 @@ test('a patch a track plays is heard in the song, through that track', async ({ 
 	await expect(page.getByTestId('playing-alone')).toHaveCount(0);
 });
 
+test('the computer keyboard plays the patch, Z and X move its octave, and a field keeps its keys', async ({ page }) => {
+	await page.goto('/?timeline=song');
+	await expect(page.getByTestId('hearing')).toContainText('Keys play it on Lead, in the song');
+	const key = (note: number) => page.getByRole('button', { name: String(note), exact: true });
+	await expect(key(48)).toHaveAttribute('aria-keyshortcuts', 'A');
+	await page.keyboard.down('g'); // G, a fifth above the lowest C, which starts audio as a click on a key does
+	await expect(key(55)).toHaveClass(/down/);
+	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await expect
+		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
+		.toBeGreaterThan(0.01);
+	await page.keyboard.press('x'); // An octave up while G is held, and letting go still lets go of the G it started
+	await expect(key(72)).toBeVisible();
+	await expect(key(48)).toHaveCount(0);
+	await page.keyboard.up('g');
+	await expect(page.locator('.key.down')).toHaveCount(0);
+	await page.keyboard.press('z');
+	await expect(key(48)).toBeVisible();
+
+	await page.getByLabel('Patch name', { exact: true }).focus();
+	await page.keyboard.down('a');
+	await expect(page.locator('.key.down')).toHaveCount(0);
+	await page.keyboard.up('a');
+});
+
 test('an edit to a patch the song does not use, or opening another, swaps nothing', async ({ page }) => {
 	await startPlaying(page);
 	await browser(page)

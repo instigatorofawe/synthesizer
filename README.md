@@ -61,8 +61,8 @@ the GIL, so engines on separate threads render at once.
 
 The editor is one page, laid out like a DAW: a transport along the top, the patch editor above, the timeline below, and a
 browser down the side, which folds away, for the library and the examples. A patch draws as a graph, with wires dragged
-between nodes, errors on the nodes they belong to, and scopes on any node, and its keys play it in the song, or on its own
-when no track plays it. Choosing a track shows its patch. Edits to any number of patches and timelines stay while other
+between nodes, errors on the nodes they belong to, and scopes on any node, and its keys, or the computer keyboard from A to ' with Z
+and X for the octave, play it in the song, or on its own when no track plays it. Choosing a track shows its patch. Edits to any number of patches and timelines stay while other
 things are opened, and Save writes them all at once. An example plays as it is, and adding one copies it into the library.
 An empty database fills itself with the demo project on first start. `pnpm test` runs the unit tests and `pnpm e2e` drives
 the built app in Chromium. There is no authentication, so keep it on loopback.

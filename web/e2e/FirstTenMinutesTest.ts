@@ -1,5 +1,6 @@
 import { expect, test as base, type Page } from '@playwright/test';
 import { loopButton, undoButton } from './Chrome.ts';
+import { engineRenders, loudest, settled } from './Engine.ts';
 
 // A page load waits until the page has hydrated, as AppTest's do.
 const test = base.extend({
@@ -55,8 +56,9 @@ const noteTicks = async (page: Page, clip = 'clip') =>
 		.find((c: { id: string }) => c.id === clip)
 		.notes.map((n: { tick: number; note: number }) => [n.tick, n.note]);
 
-const level = (page: Page, name: string) =>
-	page.getByRole('meter', { name, includeHidden: true }).getAttribute('data-peak').then(Number);
+// The loudest a meter has been since Play or since the image playing now began. A piano dies away while its key is held, so
+// its level may be gone when it's read, but not this.
+const level = (page: Page, name: string) => loudest(page.getByRole('meter', { name, includeHidden: true }));
 
 const stripPeak = async (page: Page, chain: string) =>
 	Number(await page.getByTestId(`strip-${chain}`).getByTestId('peak').getAttribute('data-peak'));
@@ -112,6 +114,9 @@ test('a new timeline opens on a track with a built-in patch and a four-bar clip 
 	await page.mouse.click(at.x, at.y);
 	await expect(page.getByTestId('note-0')).toBeVisible();
 	await expect(keys(page)).toHaveAttribute('title', /^Keys play Track 1\./, { timeout: 8000 });
+	// The song's image is playing, and long enough that the meter holds only what it has played
+	await settled(page);
+	await engineRenders(page, 0.1);
 	await page.getByTestId('roll').focus();
 	await page.keyboard.down('k');
 	await expect.poll(() => level(page, 'Level of Track 1'), { timeout: 10000 }).toBeGreaterThan(0.005);

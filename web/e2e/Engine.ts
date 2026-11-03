@@ -6,6 +6,10 @@ import { expect, type Locator, type Page } from '@playwright/test';
 // whenever it is read, where the level shows it only while it sounds.
 export const loudest = (meter: Locator) => meter.getAttribute('data-loudest').then(Number);
 
+// Every edit has compiled, and the image made from the last one is playing.
+export const settled = (page: Page) =>
+	expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
+
 // Waits for the engine to render `seconds` more audio, however long that takes. A check that something doesn't happen, such as
 // a playhead that stays put or a track that stays silent, waits for this.
 export async function engineRenders(page: Page, seconds: number) {

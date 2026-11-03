@@ -8,6 +8,7 @@ const TAP_SLOTS = 8;
 const POOL_SIZE = 32;
 const COPY_PER_QUANTUM = 64 * 1024; // A large image must not take a whole render quantum to copy in
 const STATE_EVERY = 8;
+const STOP = 7; // EventKind in Synth.hpp
 
 class ModsynthProcessor extends AudioWorkletProcessor {
 	constructor() {
@@ -104,6 +105,16 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		if (i > 0) this.events.splice(0, i);
 	}
 
+	// A song stops where it ends, as a DAW's does, and its tails ring on, since stopping lets go of every note. A loop goes on
+	// round instead, and Play at the end starts again from the top. The engine plays on past the end, as a device does, so
+	// this belongs to the player.
+	stopAtEnd() {
+		const m = this.engine;
+		if (!m._ms_playing() || m._ms_looping()) return;
+		const length = m._ms_length();
+		if (length > 0 && m._ms_tick() >= length) m._ms_send(STOP, 0, 0, 0, 0, 0, 0, 0, 0);
+	}
+
 	advanceLoad() {
 		const m = this.engine;
 		if (!this.copy && this.request && !m._ms_loading()) {
@@ -163,6 +174,7 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		this.advanceLoad();
 		this.flushEvents();
 		m._ms_render();
+		this.stopAtEnd();
 		const generation = m._ms_generation();
 		if (generation !== this.generation) {
 			this.generation = generation;

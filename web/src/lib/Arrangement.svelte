@@ -12,6 +12,7 @@
 		type Clip,
 		type Track
 	} from '#lib/TimelineEdit.ts';
+	import { followScroll } from '#lib/Follow.ts';
 	import Meter from '#lib/Meter.svelte';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
@@ -27,6 +28,7 @@
 		barWidth,
 		grid,
 		tick,
+		playing = false,
 		loop,
 		readonly = false,
 		badTracks,
@@ -43,6 +45,7 @@
 		barWidth: number;
 		grid: number;
 		tick: number;
+		playing?: boolean; // Whether the song is playing, which the view follows
 		loop: { start: number; end: number } | null;
 		readonly?: boolean;
 		badTracks: Set<number>; // What the last compile complained about
@@ -70,6 +73,8 @@
 		| { kind: 'loop'; from: number; to: number };
 
 	let svg: SVGSVGElement;
+	let view: HTMLDivElement; // What scrolls, with the track heads held at its left
+	let heads: HTMLDivElement;
 	let gesture = $state.raw<Gesture | null>(null);
 
 	const perTick = $derived(barWidth / ticksPerBar(doc));
@@ -252,6 +257,19 @@
 		if (track) onnew(track.id, Math.floor(ticksAt(at.x) / grid) * grid);
 	}
 
+	// While the song plays, the view keeps the playhead in sight. Where it was last is all this keeps, so it isn't state.
+	let followed: number | null = null;
+	$effect(() => {
+		const at = tick * perTick;
+		if (!playing) {
+			followed = null;
+			return;
+		}
+		const to = followScroll(at, followed, view.scrollLeft, view.clientWidth - heads.offsetWidth);
+		if (to !== null) view.scrollLeft = to;
+		followed = at;
+	});
+
 	const shownLoop = $derived(
 		gesture?.kind === 'loop'
 			? { start: Math.min(gesture.from, gesture.to), end: Math.max(gesture.from, gesture.to) }
@@ -261,8 +279,8 @@
 
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} />
 
-<div class="arrangement">
-	<div class="heads" style:padding-top="{TOP}px">
+<div class="arrangement" bind:this={view} data-testid="arrangement-view">
+	<div class="heads" bind:this={heads} style:padding-top="{TOP}px">
 		{#each doc.tracks as track (track.id)}
 			<div class="head" class:chosen={selection.track === track.id} style:height="{ROW}px">
 				<button

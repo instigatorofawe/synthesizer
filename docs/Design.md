@@ -1,4 +1,4 @@
-# modsynth design, revision 21
+# modsynth design, revision 22
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -857,6 +857,11 @@ changes it. A fresh visit opens the timeline saved last, and the old addresses r
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
   piano, and a field being typed in or a key with a modifier keeps its own meaning. A key let go while the page is in the background lets go
   of its note.
+- A song stops where its last clip ends, and its tails ring on, because Stop lets go of every note. A loop goes round instead, and Play at
+  the end starts again from the top. The engine plays on past the end, as a device does, so stopping there is the worklet's job, and no
+  target's engine behaves differently.
+- While a song plays, the arrangement and the piano roll keep the playhead in sight. When it runs off an edge, the view turns a page so that
+  the playhead is near the left. A view someone has scrolled away from stays where they put it until the playhead comes back into it.
 
 **The graph editor.** A graph's document is still what is saved and compiled. The editor adds `x` and `y` to its nodes, which the compiler ignores, so moving a node
 changes no hash. It takes its node table from the compiler's catalog, the table the compiler reads, so the two can't disagree. The compiler's report carries the debug sidecar
@@ -1138,6 +1143,16 @@ weighed in on:
   rather than a patch.
 - **Recordings made in code:** RoundRobin, ReleaseSamples and ReverseSwell carry recordings synthesized when they were written, mono i16 at 22.05 or
   24 kHz, from 5 KB to 50 KB an image.
+
+**Built for the player** (revision 22), as section 19 describes. The user asked for a song to stop at its end, and for the timeline to follow the playhead
+when it runs out of sight. Choices made there that the user hasn't weighed in on:
+- **Where the end is:** where the last clip ends, the engine's length. Stop lets the tails ring out, rather than the transport running on until
+  they fall silent, as Export WAV does.
+- **A loop wins:** with a loop on, the song goes round and never stops, even when the loop ends after the song does.
+- **Page turns:** the view jumps a page when the playhead leaves it, rather than scrolling with the playhead held in the middle, so what is
+  under the pointer holds still between turns.
+- **Scrolling away:** a view scrolled away from the playhead stays there until the playhead comes back into it, or Play starts the song again.
+  The piano roll follows only while its own clip is playing.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

@@ -999,9 +999,11 @@ async function rollPoint(page: Page, tick: number, note: number) {
 	return { x: box.x + tick * Number(await roll.getAttribute('data-per-tick')) + 2, y: key.y + key.height / 2 };
 }
 
+// Adds a note, and waits for its compile, so nothing the compile changes on the page moves it under the next measurement.
 async function addNoteAt(page: Page, tick: number, note: number) {
 	const { x, y } = await rollPoint(page, tick, note);
 	await page.mouse.dblclick(x, y);
+	await settled(page);
 }
 
 async function startAudio(page: Page) {
@@ -1020,13 +1022,14 @@ test('a song built from nothing plays, saves and comes back', async ({ page }) =
 	page.on('pageerror', (e) => problems.push(e.message));
 	await trackWithClip(page, 'From nothing');
 	await addNoteAt(page, 0, 60);
+	// The track is in the song now, so the next note is heard as it is added, and that starts audio, as a key does.
 	await addNoteAt(page, 480, 64);
+	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	await addNoteAt(page, 960, 67);
 	await expect(page.getByTestId('note-2')).toHaveAttribute('data-note', '67');
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
 	await loopButton(page).click();
-	await startAudio(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await tab(page, 'Mixer');
 	await expect.poll(() => stripLoudest(page, 'track:1'), { timeout: 8000 }).toBeGreaterThan(0.01);

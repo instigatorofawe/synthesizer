@@ -105,6 +105,24 @@ export function hearing(
 	};
 }
 
+// A track as the keys play it while the song's image leaves it out, because none of its notes are placed yet: on its own, as
+// the Patch view plays a patch no track plays, compiled with `live` so that a track with nothing placed is kept. It keeps what
+// makes its sound, its patches, voices, play mode, parameters, level and inserts, and the master's level and inserts, and
+// leaves out what reaches the rest of the song, its placements, sends and sidechains, so it compiles on its own. Null for a
+// track with no patch to play.
+export function trackAlone(doc: Timeline, id: number): Timeline | null {
+	const track = doc.tracks.find((candidate) => candidate.id === id);
+	if (!track?.slots.length) return null;
+	const unkeyed = <T extends { key?: string }>({ key: _, ...insert }: T) => insert;
+	return {
+		...doc,
+		clips: [],
+		tracks: [{ ...track, placements: [], output: 'master', sends: [], inserts: track.inserts.map(unkeyed) }],
+		buses: [],
+		master: { ...doc.master, inserts: doc.master.inserts.map(unkeyed) }
+	};
+}
+
 // The address with some parameters changed, and null taking one away.
 export function withParams(search: string, change: Record<string, string | null>): string {
 	const params = new URLSearchParams(search);

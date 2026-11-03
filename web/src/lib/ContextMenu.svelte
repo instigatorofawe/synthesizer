@@ -24,13 +24,14 @@
 	let menu: HTMLDivElement;
 	let left = $state(untrack(() => x));
 	let top = $state(untrack(() => y));
-	let opener: HTMLElement | null = null;
+	let opener: HTMLElement | SVGElement | null = null; // The piano roll, which takes focus, is an SVG element
 
 	const enabled = () => [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
 
 	// It opens where it was asked for, moved in from the window's edges, and its first item takes the keys.
 	onMount(() => {
-		opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const focused = document.activeElement;
+		opener = focused instanceof HTMLElement || focused instanceof SVGElement ? focused : null;
 		const box = menu.getBoundingClientRect();
 		left = Math.max(0, Math.min(x, innerWidth - box.width - 4));
 		top = Math.max(0, Math.min(y, innerHeight - box.height - 4));

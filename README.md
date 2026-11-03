@@ -60,9 +60,14 @@ the GIL, so engines on separate threads render at once.
     pnpm start     # http://127.0.0.1:5321
 
 The editor is laid out like a DAW, as two views under one top bar: Song, the arrangement with the notes of the chosen clip
-below it, and Patch, a patch's graph at full height. The top bar holds the transport, one Undo and Redo for the view on screen, the
-keys and Save, and a browser down the side, which folds to a rail, holds the library and the examples. A click in the roll adds a
-note, and a clip grows to hold one placed past its end. A track's patch is chosen from one searchable list, and its name in the
+below it, and Patch, a patch's graph at full height. The top bar holds the transport and a loop button, the position and the tempo
+as fields, one Undo and Redo for the view on screen, the keys, the master meter with a limiting light, a compile light that lists
+any problems with links to them, and Save. A browser down the side, which folds to a rail, holds the library and the examples. A new
+timeline starts with a track playing an electric piano and an empty clip open in the roll. A click in the roll adds a note, and a
+clip grows to hold one placed past its end. R turns on step entry, where the keys write notes and chords at a cursor, → rests and
+Backspace steps back, and C and V set the velocity of new notes. The arrangement is only as tall as its tracks, ⤢ or a double-click
+on a clip gives the notes the whole view, I folds the inspector, and each clip keeps its zoom. Track heads have mute and solo, and
+C, V and D with ⌘ or Ctrl copy, paste and duplicate notes and clips. A track's patch is chosen from one searchable list, and its name in the
 track head opens it in the Patch view. A patch draws as a graph, with wires dragged between nodes, a node search on N or a
 double-click, errors on the nodes they belong to, and scopes on any node. The computer keyboard from A to ' with Z and X for the
 octave plays the chosen track, or in the Patch view the patch, on its own when no track plays it. Space plays and stops, and Home,

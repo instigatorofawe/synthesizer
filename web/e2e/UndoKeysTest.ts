@@ -1,4 +1,6 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { redoButton, undoButton } from './Chrome.ts';
+import { engineRenders } from './Engine.ts';
 
 // The transport's keys, Stop pressed twice, and an undo history for each patch and timeline that outlasts opening others.
 
@@ -23,8 +25,6 @@ test.beforeEach(({ page }) => {
 	page.on('dialog', (dialog) => dialog.accept());
 });
 
-const patchEditor = (page: Page) => page.getByRole('region', { name: 'Patch editor' });
-const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Timeline editor' });
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 const state = (page: Page) => page.getByTestId('state');
 const tickShown = async (page: Page) => Number(await page.getByTestId('tick').textContent());
@@ -69,7 +69,7 @@ test('Space plays and stops from anywhere but a field, and a button with focus d
 	await play.focus();
 	await page.keyboard.press('Space');
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
-	await page.waitForTimeout(300);
+	await engineRenders(page, 0.3);
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
 
 	// The roll has focus, and it doesn't scroll.
@@ -89,7 +89,7 @@ test('Space plays and stops from anywhere but a field, and a button with focus d
 	await page.keyboard.press('End');
 	await page.keyboard.press('Space');
 	await expect(name).toHaveValue('Song ');
-	await page.waitForTimeout(300);
+	await engineRenders(page, 0.3);
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
 });
 
@@ -104,7 +104,7 @@ test('Stop pressed again goes back to the start, and so does Home', async ({ pag
 	await stop.click();
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
 	const stopped = await tickShown(page);
-	await page.waitForTimeout(300);
+	await engineRenders(page, 0.3);
 	expect(await tickShown(page)).toBe(stopped); // Once, it only stops
 	expect(stopped).toBeGreaterThan(0);
 	await stop.click();
@@ -125,8 +125,8 @@ test('Stop pressed again goes back to the start, and so does Home', async ({ pag
 
 test("a patch's undo outlasts opening another patch, its JSON and a save", async ({ page }) => {
 	await newPatch(page, 'Kept history');
-	const undo = patchEditor(page).getByRole('button', { name: 'Undo' });
-	const redo = patchEditor(page).getByRole('button', { name: 'Redo' });
+	const undo = undoButton(page);
+	const redo = redoButton(page);
 	await expect(undo).toBeDisabled();
 	await deleteNode(page, 4);
 
@@ -190,7 +190,7 @@ test('an edit typed into the JSON is undone as one step, from the graph or the J
 
 test("a timeline's undo outlasts opening another timeline", async ({ page }) => {
 	await page.goto('/?timeline=song');
-	const undo = timelineEditor(page).getByRole('button', { name: 'Undo' });
+	const undo = undoButton(page);
 	await expect(undo).toBeDisabled();
 	await page.getByTestId('placement-1-0').locator('rect').first().click();
 	await page.keyboard.press('Delete');
@@ -205,6 +205,6 @@ test("a timeline's undo outlasts opening another timeline", async ({ page }) => 
 	await undo.click();
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
-	await timelineEditor(page).getByRole('button', { name: 'Redo' }).click();
+	await redoButton(page).click();
 	await expect(page.getByTestId('placement-1-0')).toHaveCount(0);
 });

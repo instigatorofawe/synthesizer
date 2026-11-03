@@ -14,6 +14,7 @@ import {
 	busKey,
 	byOwner,
 	canGrow,
+	copiedSpan,
 	describeLane,
 	drawnClip,
 	drawLengths,
@@ -33,7 +34,11 @@ import {
 	moveNotes,
 	movePlacement,
 	noteName,
+	noteSpan,
 	noteValue,
+	pasteAt,
+	pasteNotes,
+	pastePlacement,
 	patchUses,
 	place,
 	placeOfError,
@@ -70,8 +75,10 @@ import {
 	setPoint,
 	settlingWrites,
 	setTempo,
+	setTrack,
 	tempoAt,
 	snapTick,
+	soloed,
 	songLength,
 	stepLength,
 	trackKey,
@@ -226,6 +233,45 @@ describe('placements', () => {
 		expect(drawnClip(doc, 2, 100, 200)).toBeNull(); // Pressed inside a, which fills that bar
 	});
 
+	it('paste on a track, playing the clip they were copied from while it is as it was', () => {
+		const doc = song();
+		const copied = { placement: { ...doc.tracks[0].placements[0], transpose: 5 }, clip: doc.clips[0] };
+		expect(copiedSpan(copied)).toBe(3840); // Twice a bar
+		const linked = pastePlacement(doc, 2, 1920, copied);
+		expect(linked.doc.clips).toEqual(doc.clips);
+		expect(linked.doc.tracks[1].placements).toEqual([
+			{ clip: 'a', tick: 0, repeat: 1 },
+			{ clip: 'a', tick: 1920, repeat: 2, transpose: 5 }
+		]);
+		expect(linked.index).toBe(1);
+	});
+
+	it('paste a copy of the clip as it was when it has changed since, or is in another timeline', () => {
+		const doc = song();
+		const copied = { placement: doc.tracks[1].placements[0], clip: { ...doc.clips[0], length: 960 } };
+		const changed = pastePlacement(doc, 1, 9600, copied);
+		expect(changed.doc.clips.map((c) => [c.id, c.length])).toEqual([
+			['a', 1920],
+			['b', 960],
+			['a-2', 960]
+		]);
+		expect(changed.doc.tracks[0].placements[changed.index]).toEqual({ clip: 'a-2', tick: 9600, repeat: 1 });
+
+		const elsewhere = timelineSchema.parse({ tracks: [{ id: 7, slots: ['x'] }] });
+		const reached = pastePlacement(elsewhere, 7, 0, { placement: doc.tracks[1].placements[0], clip: doc.clips[0] });
+		expect(reached.doc.clips).toEqual([doc.clips[0]]);
+		expect(reached.doc.tracks[0].placements).toEqual([{ clip: 'a', tick: 0, repeat: 1 }]);
+		expect(pastePlacement(elsewhere, 1, 0, copied)).toEqual({ doc: elsewhere, index: -1 }); // No such track
+	});
+
+	it('paste after what was copied where it came from, and at its own place anywhere else', () => {
+		const copied = { from: 1, at: 960, span: 1920 };
+		expect(pasteAt(copied, null, 1)).toBe(2880);
+		expect(pasteAt(copied, { to: 1, at: 2880 }, 1)).toBe(4800); // End to end
+		expect(pasteAt(copied, { to: 1, at: 2880 }, 2)).toBe(960);
+		expect(pasteAt(copied, { to: 2, at: 960 }, 2)).toBe(2880);
+	});
+
 	it('leave the other uses of a clip alone when made unique', () => {
 		const { doc, id } = makeUnique(song(), 1, 0);
 		expect(id).toBe('a-2');
@@ -297,6 +343,19 @@ describe('notes', () => {
 
 	it('come out by index', () => {
 		expect(removeNotes(clip, new Set([0, 2])).notes.map((n) => n.note)).toEqual([64]);
+	});
+
+	it('paste with the first of them where it says and the rest as far from it as they were, chosen', () => {
+		const copied = [clip.notes[1], clip.notes[2]];
+		expect(noteSpan(copied)).toBe(480); // From 240 to the end of the one at 480
+		expect(noteSpan([])).toBe(0);
+		const { clip: next, chosen } = pasteNotes(clip, copied, 1920);
+		expect(next.notes.slice(3).map((n) => [n.tick, n.note])).toEqual([
+			[1920, 64],
+			[2160, 67]
+		]);
+		expect([...chosen]).toEqual([3, 4]);
+		expect(pasteNotes(clip, [], 0).clip).toBe(clip);
 	});
 });
 
@@ -496,6 +555,21 @@ describe('the mixer', () => {
 		const doc = song();
 		doc.tracks[0] = { ...doc.tracks[0], mute: true };
 		expect(routeGains(doc, doc.tracks[0], MASTER)).toEqual({ left: 0, right: 0 });
+	});
+
+	it('mutes every track but those soloed, and leaves the buses and what was muted as they are', () => {
+		const doc = song();
+		const solo = soloed(doc, new Set([2]));
+		expect(solo.tracks.map((t) => t.mute)).toEqual([true, false]);
+		expect(solo.buses).toBe(doc.buses);
+		expect(doc.tracks[0].mute).toBe(false); // The document itself is left as it was
+		const muted = setTrack(doc, 2, { mute: true });
+		expect(soloed(muted, new Set([2])).tracks.map((t) => t.mute)).toEqual([true, true]);
+		expect(soloed(doc, new Set())).toBe(doc);
+		expect(soloed(doc, new Set([9]))).toBe(doc); // A soloed track that has gone solos nothing
+		expect(soloed(doc, new Set([1, 2]))).toEqual(doc);
+		// The registers a solo writes are a mute's
+		expect(mixWrites(solo, program, trackKey(1)).map((w) => w.value)).toEqual([0, 0, 0, 0]);
 	});
 
 	const program = {

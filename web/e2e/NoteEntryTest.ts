@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { emptyNewSong } from './NewSong.ts';
 
 // A page load waits until the page has hydrated, as AppTest.ts does: what is typed into it before then is lost.
 const test = base.extend({
@@ -22,13 +23,14 @@ const BAR = 1920; // Ticks in a bar at a new timeline's 480 ppq
 const notes = (page: Page) => page.locator('[data-testid^="note-"]');
 
 async function newTrack(page: Page, name: string) {
-	await page.setViewportSize({ width: 1440, height: 1500 });
+	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
 	await page.getByLabel('New timeline name').fill(name);
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await emptyNewSong(page);
 	await page.getByRole('button', { name: 'Add track' }).click(); // It asks which patch the track plays
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 }
@@ -230,6 +232,7 @@ test('Mod-drag copies a placement, and its menu makes it unique and takes it awa
 	await page.getByTestId('placement-1-1').locator('rect').first().click({ button: 'right' });
 	await expect(menu.getByRole('menuitem')).toHaveText([
 		'Open notes',
+		'Loop this clip',
 		'Duplicate after',
 		'Make unique',
 		'Remove from track',

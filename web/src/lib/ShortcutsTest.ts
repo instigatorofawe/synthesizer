@@ -76,6 +76,18 @@ describe('the table of shortcuts', () => {
 		expect(around('graph')).toEqual(['graph', 'patch', 'everywhere']);
 	});
 
+	it('gives step entry → and Backspace, which the roll and the arrangement use when it is off', () => {
+		const step = table.filter((s) => s.scope === 'step');
+		expect(step.map((s) => [s.id, s.code])).toEqual([
+			['step.rest', 'ArrowRight'],
+			['step.back', 'Backspace']
+		]);
+		for (const id of ['roll.later', 'roll.backspace', 'arrangement.backspace'])
+			expect(step.map((s) => s.code)).toContain(table.find((s) => s.id === id)?.code);
+		expect(label('step.rest', 'Meta')).toBe('→');
+		expect(label('step.back', 'Control')).toBe('Backspace');
+	});
+
 	it('lists every key the gestures name', () => {
 		const ids = new Set(table.map((s) => s.id));
 		for (const id of [

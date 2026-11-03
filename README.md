@@ -11,7 +11,7 @@ checked against committed renders in [golden](golden).
 
 | Path | What it is |
 |---|---|
-| `include/modsynth` | The header-only engine and, in `Compiler.hpp`, the authoring compiler. Tests sit beside what they test, as `FooTest.cpp`. |
+| `include/modsynth` | The header-only engine and, in `Compiler.hpp`, the authoring compiler, whose one source file, `Peak.cpp`, holds the engines its peak check plays. Tests sit beside what they test, as `FooTest.cpp`. |
 | `bindings` | wasm and Python bindings, and the Python tests in `PythonTest.py` |
 | `firmware` | Cortex-M4 firmware, run on QEMU's STM32L475 model, and on a NUCLEO-L476RG as [docs/Board.md](docs/Board.md) describes |
 | `fuzz` | The coverage-guided fuzzer, one source on desktop, wasm32 and Cortex-M4 |

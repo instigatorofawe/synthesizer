@@ -43,7 +43,8 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			liveId: 0,
 			error: 0,
 			loading: false,
-			guardTrips: 0
+			guardTrips: 0,
+			limited: 1
 		};
 		this.quanta = 0;
 		this.port.onmessage = (e) => this.receive(e.data);
@@ -185,6 +186,7 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			state.error = m._ms_error();
 			state.loading = m._ms_loading() !== 0;
 			state.guardTrips = m._ms_guard_trips();
+			state.limited = m._ms_limited();
 			this.port.postMessage(state);
 		}
 		return true;

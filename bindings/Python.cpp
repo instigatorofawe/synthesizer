@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <modsynth/Compiler.hpp>
+#include <modsynth/Limiter.hpp>
 #include <modsynth/Modsynth.hpp>
 #include <modsynth/Parallel.hpp>
 
@@ -270,6 +271,30 @@ NB_MODULE(_core, m) {
         "request"_a,
         "Compiles a request, a dict or its JSON, to an image. Returns the image's bytes and the compiler's report, or "
         "raises CompileError, whose `where` says what failed.");
+
+    m.def(
+        "limit",
+        [](nb::ndarray<const float, nb::ndim<2>, nb::c_contig, nb::device::cpu> audio, float rate, float release) {
+            const std::size_t frames = audio.shape(0), channels = audio.shape(1);
+            if (channels != 1 && channels != 2) throw nb::value_error("audio must have 1 or 2 channels");
+            if (!(rate > 0.0f) || !(release > 0.0f)) throw nb::value_error("rate and release must be above 0");
+            std::vector<float> left(frames), right(channels == 2 ? frames : 0);
+            for (std::size_t i = 0; i < frames; ++i) {
+                left[i] = audio(i, 0);
+                if (channels == 2) right[i] = audio(i, 1);
+            }
+            Limiter(rate, release).process(left.data(), channels == 2 ? right.data() : nullptr, frames);
+            auto* data = new float[std::max<std::size_t>(frames * channels, 1)];
+            nb::capsule owner(data, [](void* p) noexcept { delete[] static_cast<float*>(p); });
+            for (std::size_t i = 0; i < frames; ++i) {
+                data[i * channels] = left[i];
+                if (channels == 2) data[i * channels + 1] = right[i];
+            }
+            return nb::ndarray<nb::numpy, float, nb::ndim<2>>(data, {frames, channels}, owner);
+        },
+        "audio"_a, "rate"_a = 48000.0f, "release"_a = 0.1f,
+        "What a host plays to speakers: float32 audio of shape (frames, channels) held to full scale, turned down at "
+        "once wherever it would pass it and back up over `release` seconds. Below full scale it changes nothing.");
 
     nb::class_<Engine>(m, "Engine",
                        "Plays one Program of an image. Events take effect at the start of the next frame rendered.")

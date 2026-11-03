@@ -1,4 +1,4 @@
-# modsynth design, revision 20
+# modsynth design, revision 21
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -318,6 +318,18 @@ PrecutGrainCloud with 12 voices for grains of which 2 sound at once, fits once i
 
 Not built yet: showing fit in the editor.
 
+**What a device plays.** A device has no limiter, so a request for one also fails, with `where` set to `target`, if any Program would play a
+sample past full scale there. The compiler plays each Program as the device would, on an engine of its frame size and channel count at its
+rate, from its start to its end and on until its voices stop and a tenth of a second stays below −100 dB, for at most 10 s more, which is
+how the Python binding's render ends too. A device plays what it holds from its start, and takes no live input, so that is the most it can
+put out. The report's `target` gives each Program's `peak`:
+
+    Program "loud" reaches 1.414 at 0.51 s, 3.0 dB over full scale, and this target plays up to 1. Turn it down: the master's gain, or a
+    track's or a bus's.
+
+On the board, the 48 recipes it takes peak at 0.15 to 0.52, and compiling all 48 for it, with every check, takes 0.16 s on an M4 Pro
+[measured]. A mono device hears a stereo patch folded, so something panned hard to one side reaches it at half.
+
 **Delivery.** A device receives the whole image over BLE or a serial link, and a small host tool sends an exported image file. Serial is
 built: `tools/Board.py` sends over the ST-LINK's USB serial port, and `docs/Board.md` has the protocol. The format needs no change for this. It uses byte offsets and no pointers, its manifest comes first, so a wrong revision or frame size can be refused from the first
 packet, and each chunk's hash and the image's exact size catch damage. Framing, retransmission and acknowledgement belong to the transport, because
@@ -411,7 +423,8 @@ index. One path serves every case.
 - Live events are validated at queue ingress and fuzzed. [measured: `note_on(200, ...)` crashed.]
 - Table contents are checked for non-finite values, sliced.
 - Each voice has an output guard, because about 14% of accepted fuzz images produced NaN or infinity [measured]. A guard trips only on values that
-  aren't finite, so a finite blow-up still reaches the output. Section 24 has what is agreed to stop it (open 9).
+  aren't finite, so a finite blow-up would still reach the output. A device's compile refuses an image that would play past full scale there,
+  section 10, and a desktop or a browser plays through a limiter, section 19 (open 9).
 - Delay lines clear lazily, because a hostile image took 5.8 ms of a 2.67 ms frame [measured]. A device's cost table sets a
   compile-time and load-time limit alongside the memory limit, section 10, so on a device no image can overrun a frame. A desktop or a
   browser has no such limit, and an image there can still take longer than a frame.
@@ -857,7 +870,8 @@ a document holds ticks, so a time signature would change how it is drawn and not
 
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
 a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
-gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. Export WAV renders the song as it compiles now, in a
+gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. What the page plays and Export WAV writes pass through a limiter after the
+engine, at full scale, and the status bar says when it is limiting and by how much, section 24. Export WAV renders the song as it compiles now, in a
 worker with the worklet's engine, to its end and on until its voices stop and a tenth of a second stays below -100 dB, as the Python binding's render does.
 
 Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the image and its keys are silent until it has one. `live` keeps unused tracks, so it could pass a document
@@ -1051,10 +1065,6 @@ They decided 24, 26 and 32 too, and chose the direction for open 9, below. Open 
 
 - Events off the frame boundary, section 6.
 - Delivery over BLE, and showing a target's fit in the editor, section 10.
-- **What stops a finite blow-up reaching speakers** (open 9), both parts of the direction it had. A request compiled for a device renders its
-  image on the desktop first, at the target's rate and frame size, and fails if any sample's magnitude passes full scale, so a device never
-  needs a limiter of its own. Desktop and browser playback and WAV export pass through a limiter in the host, after the engine, at full scale.
-  Neither changes the engine, and the NaN guards stay on every target.
 - **Time signatures and pickups** (open 26), which the user wants. The editor draws every timeline in 4/4 from tick 0, so Für Elise, in 3/8
   after an eighth's pickup, is in its third bar where the ruler shows bar 2. The plan is a meter map and a pickup in the timeline document,
   which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change.
@@ -1071,6 +1081,21 @@ Choices made there that the user hasn't weighed in on:
   every tail reaches 0. The price is 12 dB of agreement with the f32 sound: the demo's reverb,
   halved going in, is 70.6 dB below its peak from it rather than 82.6 [measured], as the quietest part of a tail dies a little sooner.
 - **In a graph** the field is `"line": "i16"` on `delay`, `comb` and `allpass`, and the editor offers it from the compiler's catalog.
+
+**Built for open 9** (revision 21): what stops a finite blow-up reaching speakers, in both of its parts, which the user chose. A device's
+compile plays each Program as the device would and refuses a peak past full scale, section 10, and a desktop or a browser plays through a
+limiter in the host, sections 14 and 19. Neither changes the engine, and the NaN guards stay on every target. Choices made there that the user
+hasn't weighed in on:
+- **Full scale is 1**, with no margin, for the device check and the limiter both.
+- **Every compiler can play every engine.** It holds one for each frame size from 8 to 1024 and both channel counts, so every host refuses
+  the same images, which makes the browser's compiler module 1.40 MB rather than 671 KB. The sixteen engines are built once, in
+  `Peak.cpp`, the compiler library's one source file: built in every file that includes the compiler, they made each four times as slow
+  for GCC to compile, and with the memory to match.
+- **The limiter** looks at no sample ahead, so it adds no latency. Its gain drops at once to keep a sample at full scale and comes back over
+  0.1 s, both channels together, and below full scale it changes no bit. It is in the wasm engine's render, so playback and Export WAV both
+  have it, and the Python binding's `limit`, which `Listen.py` plays through. The binding's `render` stays the engine's own output, which
+  the golden tests compare.
+- **The status bar** says "limiting" with the most it turned down in the last moment, in dB, so a blow-up is seen rather than hidden.
 
 **Built for the examples' patches in the library**, as section 19 describes. The user asked for every patch the recipes and pieces use to be in the library from the start, read-only, with a duplicate
 to change one. Choices made there that the user hasn't weighed in on:

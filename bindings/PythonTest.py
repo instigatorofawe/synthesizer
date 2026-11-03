@@ -216,3 +216,31 @@ def test_every_frame_size_plays(frame):
     assert engine.frame_size == frame
     engine.play()
     assert np.abs(engine.render(48000)).max() > 0.1
+
+
+def test_limit_holds_audio_to_full_scale_and_leaves_the_rest_alone():
+    quiet = (np.sin(np.arange(4800) / 7.0) * 0.9).astype(np.float32)
+    stereo = np.stack([quiet, -quiet], axis=1)
+    assert np.array_equal(modsynth.limit(stereo), stereo)
+    loud = np.stack([quiet * 4, quiet], axis=1)
+    held = modsynth.limit(loud)
+    assert held.shape == loud.shape and held.dtype == np.float32
+    assert np.abs(held).max() <= 1.0
+    assert np.abs(held).max() > 0.99
+    assert modsynth.limit(quiet[:, None]).shape == (4800, 1)
+    with pytest.raises(ValueError):
+        modsynth.limit(np.zeros((10, 3), np.float32))
+
+
+def test_a_target_refuses_an_image_it_would_play_past_full_scale():
+    request = recipe("Kick808")
+    request["target"] = json.loads(
+        (ROOT / "firmware" / "Profiles" / "Nucleo.json").read_text()
+    )
+    report = modsynth.compile_report(request)[1]
+    assert 0 < report["target"]["programs"][0]["peak"] <= 1
+    request["programs"][0]["timeline"].setdefault("master", {})["gain"] = 4.0
+    with pytest.raises(modsynth.CompileError) as error:
+        modsynth.compile_image(request)
+    assert error.value.where == "target"
+    assert "over full scale" in str(error.value)

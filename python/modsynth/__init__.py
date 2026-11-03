@@ -12,9 +12,16 @@ import math
 
 import numpy as np
 
-from ._core import CompileError, Engine, compile_report
+from ._core import CompileError, Engine, compile_report, limit
 
-__all__ = ["CompileError", "Engine", "compile_image", "compile_report", "render"]
+__all__ = [
+    "CompileError",
+    "Engine",
+    "compile_image",
+    "compile_report",
+    "limit",
+    "render",
+]
 
 SILENCE = 1e-5  # -100 dB, below which a tail counts as over
 

@@ -8,7 +8,7 @@ import recipes from '../../../../examples/Recipes/Index.json';
 import type { Db } from '#lib/server/Db.ts';
 import { createAsset, createPatch, createTimeline } from '#lib/server/Repository.ts';
 import { assets, patches, timelines } from '#lib/server/Tables.ts';
-import { graphSchema, timelineSchema, type Graph, type Timeline } from '#lib/Schema.ts';
+import { graphSchema, referencedSubpatches, timelineSchema, type Graph, type Timeline } from '#lib/Schema.ts';
 import type { AssetEntry } from '#lib/Request.ts';
 
 export interface RecipeEntry {
@@ -58,6 +58,8 @@ function renamedGraph(graph: Graph, name: string): Graph {
 	return {
 		...graph,
 		nodes: graph.nodes.map((node) => {
+			if (node.type === 'subpatch' && typeof node.patch === 'string')
+				return { ...node, patch: patchId(name, node.patch) };
 			if (node.type !== 'sample') return node;
 			const copy = { ...node };
 			if (typeof copy.asset === 'string') copy.asset = assetId(name, copy.asset);
@@ -98,7 +100,16 @@ export function addRecipe(db: Db, name: string, project: RecipeProject): string 
 			createAsset(t, { loop_start: 0, loop_end: 0, ...asset, id: copy, name: `${name} ${key}` });
 		}
 		const ids = Object.keys(project.patches);
-		for (const [key, patch] of Object.entries(project.patches)) {
+		// A patch another expands goes in first, since a patch's links are checked against what is already there.
+		const expands = (key: string) =>
+			referencedSubpatches(graphSchema.parse(project.patches[key].graph)).filter((p) => ids.includes(p));
+		const order: string[] = [];
+		while (order.length < ids.length) {
+			const ready = ids.filter((key) => !order.includes(key) && expands(key).every((p) => order.includes(p)));
+			order.push(...(ready.length ? ready : ids.filter((key) => !order.includes(key))));
+		}
+		for (const key of order) {
+			const patch = project.patches[key];
 			const copy = patchId(name, key);
 			if (exists(t, patches, copy)) continue;
 			const label = ids.length === 1 ? name : `${name} ${patch.name || key}`;

@@ -10,17 +10,27 @@
 	] as const;
 
 	export type Section = (typeof SECTIONS)[number]['id'];
+
+	// What each list is for.
+	const SAMPLES =
+		"WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like Piano_C4.wav says which key it was recorded at.";
+	const BUILTINS = "Every example's patches, for any timeline to play. They can't be changed, but a copy of one can.";
+	const BUNDLES = 'Several timelines compiled into one image, for a device to choose between.';
+	const EXAMPLES =
+		'Short pieces that ship with the app. Each plays as it is, its patches are built in, and adding one to the library copies its timeline to change.';
 </script>
 
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import { untrack } from 'svelte';
-	import { actionOn, draftKey, isInsert, withParams, withView } from '#lib/Workspace.ts';
+	import { enhance, type SubmitFunction } from '$app/forms';
+	import { tick, untrack } from 'svelte';
+	import { matches as pressed } from '#lib/Shortcuts.ts';
+	import { actionOn, draftKey, isInsert, withoutPlace, withParams, withView } from '#lib/Workspace.ts';
 	import type { Graph } from '#lib/Schema.ts';
 
 	// The sidebar: the library on top and the examples that ship with the app below. Everything in it is a link that changes what
 	// the page shows, so the page, its audio and its unsaved edits stay where they are. A timeline or an example opens in the
-	// Song view, and a patch in the Patch view.
+	// Song view, and a patch in the Patch view. It is narrow and short, so it fits a laptop's height with the examples shut:
+	// what each list is for is behind a ? in its heading, and what makes a timeline, a patch or a bundle behind a +.
 	let {
 		search,
 		examples,
@@ -58,6 +68,51 @@
 	let filter = $state('');
 	let scroller: HTMLDivElement;
 
+	// The list whose name field is open, from the + in its heading. It takes focus as it opens, Enter makes the thing, and Esc
+	// or leaving it empty closes it.
+	type Adding = 'timeline' | 'patch' | 'bundle';
+	let adding = $state<Adding | null>(null);
+	let field = $state<HTMLInputElement>();
+
+	async function add(what: Adding, details: HTMLDetailsElement | null) {
+		if (adding === what) {
+			adding = null;
+			return;
+		}
+		if (details) details.open = true;
+		adding = what;
+		await tick();
+		field?.focus();
+	}
+
+	function fieldKey(event: KeyboardEvent, opener: string) {
+		if (!pressed(event, 'escape')) return;
+		event.preventDefault();
+		adding = null;
+		scroller.querySelector<HTMLButtonElement>(`[data-opens="${opener}"]`)?.focus();
+	}
+
+	// Once what was asked for is made the field goes. A name refused leaves it open to change.
+	const made: SubmitFunction =
+		() =>
+		async ({ result, update }) => {
+			await update();
+			if (result.type !== 'failure' && result.type !== 'error') adding = null;
+		};
+
+	// What each list is for, which its ? shows, and which an empty list shows of itself.
+	let about = $state<ReadonlySet<string>>(new Set());
+	function toggleAbout(id: string) {
+		const next = new Set(about);
+		if (!next.delete(id)) next.add(id);
+		about = next;
+	}
+
+	// Import is a button: it asks for WAV files, and sends them as they are chosen. The instrument is named after the first,
+	// and its name can be changed where it opens.
+	let files = $state<HTMLInputElement>();
+	let importForm = $state<HTMLFormElement>();
+
 	$effect(() => {
 		const section = reveal;
 		if (!section) return;
@@ -70,11 +125,12 @@
 
 	const matches = (name: string) => !filter.trim() || name.toLowerCase().includes(filter.trim().toLowerCase());
 
-	const inSong = $derived(withView(search, 'song'));
+	// Another song has its own tracks and clips, so the place in this one stays behind.
+	const inSong = $derived(withView(withoutPlace(search), 'song'));
 	const timelineHref = (id: string) =>
-		withView(withParams(search, { timeline: id, recipe: null, patch: null, part: null }), 'song');
+		withView(withParams(withoutPlace(search), { timeline: id, recipe: null, patch: null, part: null }), 'song');
 	const recipeHref = (name: string) =>
-		withView(withParams(search, { recipe: name, timeline: null, patch: null, part: null }), 'song');
+		withView(withParams(withoutPlace(search), { recipe: name, timeline: null, patch: null, part: null }), 'song');
 	const patchHref = (id: string) => withView(withParams(search, { patch: id, part: null }), 'patch');
 	const bundleHref = (id: string) => withParams(search, { bundle: id });
 
@@ -112,6 +168,57 @@
 	</li>
 {/snippet}
 
+<!-- A list's ? says what it is for, and an empty list says so of itself. -->
+{#snippet aboutButton(id: string, name: string, text: string)}
+	<button
+		type="button"
+		class="tool"
+		aria-label={`About ${name}`}
+		aria-expanded={about.has(id)}
+		aria-controls={`about-${id}`}
+		title={text}
+		onclick={() => toggleAbout(id)}>?</button
+	>
+{/snippet}
+
+{#snippet aboutText(id: string, text: string, empty: boolean)}
+	{#if empty || about.has(id)}<p class="muted note" id={`about-${id}`}>{text}</p>{/if}
+{/snippet}
+
+<!-- A + in a list's heading, which opens its name field. A press on it keeps focus in the field, so a second one closes it. -->
+{#snippet adder(what: Adding)}
+	<button
+		type="button"
+		class="tool"
+		data-opens={what}
+		aria-label={`New ${what}`}
+		aria-expanded={adding === what}
+		title={`Make a ${what}`}
+		onmousedown={(event) => event.preventDefault()}
+		onclick={(event) => void add(what, event.currentTarget.closest('details'))}>+</button
+	>
+{/snippet}
+
+{#snippet nameField(what: Adding, action: string, back: string)}
+	{#if adding === what}
+		<form method="POST" action={actionOn(search, action)} use:enhance={made} class="add">
+			<input type="hidden" name="back" value={back} />
+			<input
+				bind:this={field}
+				name="name"
+				placeholder="Name, then Enter"
+				aria-label={`New ${what} name`}
+				autocomplete="off"
+				required
+				onkeydown={(event) => fieldKey(event, what)}
+				onblur={(event) => {
+					if (!event.currentTarget.value.trim()) adding = null;
+				}}
+			/>
+		</form>
+	{/if}
+{/snippet}
+
 <nav class="browser" aria-label="Browser">
 	<input class="filter" type="search" placeholder="Filter" aria-label="Filter the browser" bind:value={filter} />
 
@@ -120,6 +227,8 @@
 
 		<details open data-section="timelines">
 			<summary>Timelines <span class="count">{timelines.length}</span></summary>
+			<div class="tools">{@render adder('timeline')}</div>
+			{@render nameField('timeline', 'createTimeline', inSong)}
 			<ul aria-label="Timelines">
 				{#each shownTimelines as timeline (timeline.id)}
 					<li>
@@ -129,31 +238,50 @@
 					</li>
 				{/each}
 			</ul>
-			<form method="POST" action={actionOn(search, 'createTimeline')} use:enhance class="add">
-				<input type="hidden" name="back" value={inSong} />
-				<input name="name" placeholder="New timeline" aria-label="New timeline name" required />
-				<button aria-label="Add timeline">+</button>
-			</form>
 		</details>
 
 		<details open data-section="patches">
 			<summary>Patches <span class="count">{ownPatches.length}</span></summary>
+			<div class="tools">{@render adder('patch')}</div>
+			{@render nameField('patch', 'createPatch', withView(search, 'patch'))}
 			<ul aria-label="Patches">
 				{#each shownPatches as patch (patch.id)}{@render patchLink(patch)}{/each}
 			</ul>
-			<form method="POST" action={actionOn(search, 'createPatch')} use:enhance class="add">
-				<input type="hidden" name="back" value={withView(search, 'patch')} />
-				<input name="name" placeholder="New patch" aria-label="New patch name" required />
-				<button aria-label="Add patch">+</button>
-			</form>
 		</details>
 
 		<details open data-section="samples">
 			<summary>Samples <span class="count">{ownSamples.length}</span></summary>
-			<p class="muted note">
-				WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like
-				Piano_C4.wav says which key it was recorded at.
-			</p>
+			<div class="tools">
+				{#if ownSamples.length}{@render aboutButton('samples', 'samples', SAMPLES)}{/if}
+				<button
+					type="button"
+					class="tool"
+					aria-label="Import WAV files"
+					title="Import WAV files as one instrument"
+					onclick={() => files?.click()}>+</button
+				>
+			</div>
+			{@render aboutText('samples', SAMPLES, !ownSamples.length)}
+			<form
+				method="POST"
+				action={actionOn(search, 'importSamples')}
+				enctype="multipart/form-data"
+				use:enhance
+				bind:this={importForm}
+			>
+				<input type="hidden" name="back" value={withView(search, 'patch')} />
+				<input
+					bind:this={files}
+					class="unseen"
+					type="file"
+					name="files"
+					accept=".wav,audio/wav"
+					multiple
+					tabindex="-1"
+					aria-label="WAV files"
+					onchange={(event) => event.currentTarget.files?.length && importForm?.requestSubmit()}
+				/>
+			</form>
 			<ul aria-label="Samples">
 				{#each shownSamples as sample (sample.id)}
 					<li class="sample">
@@ -169,20 +297,6 @@
 					</li>
 				{/each}
 			</ul>
-			<form
-				method="POST"
-				action={actionOn(search, 'importSamples')}
-				enctype="multipart/form-data"
-				use:enhance
-				class="import"
-			>
-				<input type="hidden" name="back" value={withView(search, 'patch')} />
-				<input type="file" name="files" accept=".wav,audio/wav" multiple aria-label="WAV files" />
-				<div class="add">
-					<input name="name" placeholder="Instrument name" aria-label="Instrument name" />
-					<button>Import</button>
-				</div>
-			</form>
 		</details>
 
 		<details
@@ -191,9 +305,8 @@
 			data-section="builtins"
 		>
 			<summary>Built-in patches <span class="count">{builtinPatches.length}</span></summary>
-			<p class="muted note">
-				Every example's patches, for any timeline to play. They can't be changed: Duplicate makes a copy that can.
-			</p>
+			<div class="tools">{@render aboutButton('builtins', 'built-in patches', BUILTINS)}</div>
+			{@render aboutText('builtins', BUILTINS, false)}
 			<ul aria-label="Built-in patches">
 				{#each shownBuiltins as patch (patch.id)}{@render patchLink(patch)}{/each}
 			</ul>
@@ -201,24 +314,23 @@
 
 		<details open data-section="bundles">
 			<summary>Bundles <span class="count">{bundles.length}</span></summary>
-			<p class="muted note">Several timelines compiled into one image, for a device to choose between.</p>
+			<div class="tools">
+				{#if bundles.length}{@render aboutButton('bundles', 'bundles', BUNDLES)}{/if}
+				{@render adder('bundle')}
+			</div>
+			{@render aboutText('bundles', BUNDLES, !bundles.length)}
+			{@render nameField('bundle', 'createBundle', search)}
 			<ul aria-label="Bundles">
 				{#each shownBundles as bundle (bundle.id)}
 					<li><a href={bundleHref(bundle.id)}>{bundle.name}</a></li>
 				{/each}
 			</ul>
-			<form method="POST" action={actionOn(search, 'createBundle')} use:enhance class="add">
-				<input type="hidden" name="back" value={search} />
-				<input name="name" placeholder="New bundle" aria-label="New bundle name" required />
-				<button aria-label="Add bundle">+</button>
-			</form>
 		</details>
 
-		<h2 data-section="examples">Examples</h2>
-		<p class="muted note">
-			Short pieces that ship with the app. Each plays as it is, its patches are built in, and adding one to the library
-			copies its timeline to change.
-		</p>
+		<h2 data-section="examples">
+			Examples {@render aboutButton('examples', 'examples', EXAMPLES)}
+		</h2>
+		{@render aboutText('examples', EXAMPLES, false)}
 		{#each shownExamples as group (group.name)}
 			<details open={filter.trim() !== '' || group.recipes.some((r) => r.name === openRecipe) || undefined}>
 				<summary>{group.name} <span class="count">{group.recipes.length}</span></summary>
@@ -269,12 +381,43 @@
 		margin: 0.8rem 0 0.3rem;
 	}
 	details {
+		position: relative;
 		margin-bottom: 0.3rem;
 	}
 	summary {
 		cursor: pointer;
-		padding: 0.2rem 0;
+		padding: 0.2rem 3rem 0.2rem 0;
 		font-weight: 600;
+	}
+	/* A list's ? and +, at the right of its heading. They are the list's, so they come after its name, and go with it when it
+	   is shut. */
+	.tools {
+		position: absolute;
+		top: 0;
+		right: 0;
+		display: flex;
+		gap: 0.1rem;
+	}
+	.tool {
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border-color: transparent;
+		background: transparent;
+		color: var(--muted);
+		font-size: 0.8rem;
+		line-height: 1;
+	}
+	.tool:hover,
+	.tool[aria-expanded='true'] {
+		color: var(--text);
+	}
+	h2 .tool {
+		width: 18px;
+		height: 18px;
+		margin-left: 0.2rem;
+		font-size: 0.72rem;
+		vertical-align: middle;
 	}
 	.count {
 		color: var(--muted);
@@ -331,32 +474,22 @@
 		padding: 0 0.2rem;
 	}
 	.add {
-		display: flex;
-		gap: 0.25rem;
-		margin: 0.3rem 0 0.2rem 0.8rem;
+		margin: 0.1rem 0 0.2rem 0.8rem;
 	}
 	.add input {
-		flex: 1;
-		min-width: 0;
+		width: 100%;
+		box-sizing: border-box;
 		padding: 0.15rem 0.4rem;
 		font-size: 0.78rem;
 	}
-	.add button {
-		padding: 0.1rem 0.5rem;
-		font-size: 0.78rem;
-	}
-	.import {
-		margin-left: 0.8rem;
-	}
-	.import input[type='file'] {
-		width: 100%;
-		box-sizing: border-box;
-		font-size: 0.72rem;
-		padding: 0.15rem;
-		margin-top: 0.3rem;
-	}
-	.import .add {
-		margin-left: 0;
+	/* The file field Import opens, out of sight. */
+	.unseen {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		opacity: 0;
 	}
 	.note {
 		font-size: 0.72rem;

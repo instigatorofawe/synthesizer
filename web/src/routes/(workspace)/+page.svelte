@@ -57,13 +57,17 @@
 		graphError,
 		hearing,
 		isInsert,
+		landing,
 		parseGraph,
+		placeParams,
+		songPlaceOf,
 		trackAlone,
 		viewOf,
 		withDrafts,
 		withParams,
 		withView,
 		type Draft,
+		type SongPlace,
 		type View
 	} from '#lib/Workspace.ts';
 
@@ -118,8 +122,11 @@
 	const songName = $derived(recipe?.entry.name ?? timelineName);
 	const songPatches = $derived(recipe ? recipe.patches : library);
 
-	// The Patch view shows the patch asked for, and otherwise the chosen track's.
-	let selectedTrack = $state<number | null>(null);
+	// The Patch view shows the patch asked for, and otherwise the chosen track's, which the address names until the Song view
+	// says which it chose, so a page drawn by the server shows the patch it will show once it runs.
+	let selectedTrack = $state<number | null>(
+		untrack(() => (songDoc ? landing(songDoc, songPlaceOf(search), []).track : null))
+	);
 	const askedPatch = $derived(address.searchParams.get('patch'));
 	const askedPart = $derived(address.searchParams.get('part'));
 	const trackSlot = $derived.by(() => {
@@ -1139,20 +1146,48 @@
 	}
 
 	// Changes what the address says, and with it what the page shows. None of it is anything the server loads, so this moves
-	// the address without a navigation, which would also move focus. A change of view is a step Back can undo.
-	function open(change: Record<string, string | null>, replace = false, next: View = view) {
-		return goto(withView(withParams(search, change), next), { shallow: true, replace });
+	// the address without a navigation, which would also move focus. A change of view is a step Back can undo, and a change
+	// of what the Song view has chosen replaces the step it's on. Each change waits for the one before, and starts from the
+	// address that one left, so a choice and a change of view made together both arrive. The view is the one on screen
+	// then, unless the change names one.
+	let moving: Promise<unknown> = Promise.resolve();
+	function open(change: Record<string, string | null>, replace = false, next?: View) {
+		const moved = moving.then(() => {
+			const to = withView(withParams(search, change), next ?? view);
+			if (to !== withParams(search, {})) return goto(to, { shallow: true, replace });
+		});
+		moving = moved.catch(() => {});
+		return moved;
 	}
 
 	async function show(next: View) {
 		if (next !== view) await open({}, false, next);
 	}
 
-	// Choosing a track makes its patch the one the Patch view shows, so a patch asked for by name gives way. The track an editor
-	// opens on doesn't count.
-	function trackChosen(id: number | null, first: boolean) {
-		selectedTrack = id;
-		if (!first && (askedPatch !== null || askedPart !== null)) void open({ patch: null, part: null }, true);
+	// Where the address asks the Song view to be. The editor goes there as it opens, and again whenever Back or Forward move
+	// the address under it, read from the address bar, which the router catches up with later. The page's own changes to the
+	// address say where the editor is already, so they ask nothing of it.
+	let traversed = $state(0);
+	const askedPlace = $derived.by(() => {
+		void openKey;
+		void traversed;
+		return untrack(() => songPlaceOf(typeof location === 'undefined' ? search : location.search));
+	});
+	onMount(() => {
+		const popped = () => (traversed += 1);
+		addEventListener('popstate', popped);
+		return () => removeEventListener('popstate', popped);
+	});
+
+	// What the Song view chooses goes in the address, so a reload or a link lands on it, in place of the step it's on, so Back
+	// goes to the view before rather than through every click. Choosing a track makes its patch the one the Patch view shows,
+	// so a patch asked for by name gives way. Where the editor opens, or where the address takes it, isn't a choice.
+	function placeChosen(place: SongPlace, chosen: boolean) {
+		const before = selectedTrack;
+		selectedTrack = place.track;
+		if (!chosen) return;
+		const giveWay = place.track !== before && (askedPatch !== null || askedPart !== null);
+		void open({ ...placeParams(place), ...(giveWay ? { patch: null, part: null } : {}) }, true);
 	}
 
 	function patchOpened(id: string) {
@@ -1496,7 +1531,8 @@
 							examples={data.examples}
 							{solo}
 							onchange={(next) => timelineEdited({ text: JSON.stringify(next, null, 1) })}
-							ontrack={trackChosen}
+							asked={askedPlace}
+							onplace={placeChosen}
 							onopen={patchOpened}
 							onnewpatch={newPatchForTrack}
 							onwriting={(writing) => (stepWriting = writing)}
@@ -1842,7 +1878,7 @@
 		min-height: 0;
 	}
 	.body.pinned {
-		grid-template-columns: 250px minmax(0, 1fr);
+		grid-template-columns: 220px minmax(0, 1fr);
 	}
 	.body.unmeasured > :global(.rail) {
 		display: none;
@@ -1868,7 +1904,7 @@
 		top: 0;
 		bottom: 0;
 		left: 32px;
-		width: 250px;
+		width: 220px;
 		z-index: 20;
 		box-shadow: 6px 0 18px #0009;
 	}

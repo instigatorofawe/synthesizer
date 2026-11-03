@@ -447,6 +447,7 @@ test('choosing a track shows its patch, and the browser shows another', async ({
 	// A patch the address names stays, whatever track a timeline opens on, as when one is made while it is shown.
 	await page.goto('/?timeline=song&patch=unused');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Square, in the library but on no timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill('Beside a patch');
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== 'song');
@@ -644,6 +645,7 @@ test('the old addresses open the same things', async ({ page }) => {
 
 async function newPatch(page: Page, name: string) {
 	await page.goto('/');
+	await page.getByRole('button', { name: 'New patch', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New patch name').fill(name);
 	await page.getByLabel('New patch name').press('Enter');
 	await page.waitForURL(/patch=/);
@@ -941,6 +943,7 @@ test('a probe in a recipe reads the voice of the patch on screen', async ({ page
 async function newTimeline(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill(name);
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
@@ -1626,12 +1629,13 @@ const samples = (page: Page) => browser(page).getByRole('list', { name: 'Samples
 
 test('WAV files become an instrument that plays, and its samples stay while it does', async ({ page }) => {
 	await page.goto('/');
-	await page.getByLabel('WAV files').setInputFiles([wavFile('Sine_A3.wav'), wavFile('Sine_A4.wav')]);
-	await page.getByLabel('Instrument name').fill('Imported sines');
-	await page.getByRole('button', { name: 'Import' }).click();
+	// Import asks for the files, sends them as they are chosen, and names the instrument after the first
+	const chooser = page.waitForEvent('filechooser');
+	await page.getByRole('button', { name: 'Import WAV files' }).click();
+	await (await chooser).setFiles([wavFile('Sine_A3.wav'), wavFile('Sine_A4.wav')]);
 	await page.waitForURL(/patch=/);
 	const id = shownPatchId(page);
-	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Imported sines');
+	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Sine_A3');
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
 	await page.getByRole('button', { name: 'sample 2' }).click();
@@ -1654,7 +1658,7 @@ test('WAV files become an instrument that plays, and its samples stay while it d
 	await page.goto('/');
 	await expect(samples(page).getByText('Sine_A3')).toBeVisible();
 	await page.getByRole('button', { name: 'Delete Sine_A3' }).click();
-	await expect(page.getByText('used by Imported sines')).toBeVisible();
+	await expect(page.getByText('used by Sine_A3')).toBeVisible();
 	await expect(samples(page).getByText('Sine_A3')).toBeVisible();
 
 	await page.goto(`/?patch=${id}`);
@@ -1672,7 +1676,6 @@ test('a file that is not audio is refused and leaves nothing behind', async ({ p
 			wavFile('Good.wav'),
 			{ name: 'Notes.wav', mimeType: 'audio/wav', buffer: Buffer.from('these are not samples') }
 		]);
-	await page.getByRole('button', { name: 'Import' }).click();
 	await expect(page.getByText("Notes.wav can't be imported: it is not a WAV file")).toBeVisible();
 	await expect(samples(page).getByText('Good', { exact: true })).toHaveCount(0);
 });
@@ -1686,9 +1689,7 @@ test('an image too large for the engine says so instead of going quiet', async (
 		['Big two', 330]
 	] as const) {
 		await page.goto('/');
-		await page.getByLabel('WAV files').setInputFiles([wavFile(`${name}.wav`, 90, frequency)]);
-		await page.getByLabel('Instrument name').fill(name);
-		await page.getByRole('button', { name: 'Import' }).click();
+		await page.getByLabel('WAV files').setInputFiles([wavFile(`${name}.wav`, 90, frequency)]); // Named after the file
 		await page.waitForURL(/patch=/);
 		ids.push(shownPatchId(page));
 	}

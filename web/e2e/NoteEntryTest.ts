@@ -26,6 +26,7 @@ async function newTrack(page: Page, name: string) {
 	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill(name);
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);

@@ -1,7 +1,7 @@
 // What the graph editor does to a graph, apart from drawing it. Every function returns a new graph, which is what makes undo
 // a list of old ones. Nothing here decides what is legal: a graph that won't compile can still be drawn, and the compiler says
 // what is wrong on the node it is wrong on.
-import type { Graph } from '#lib/Schema.ts';
+import type { Graph, Param } from '#lib/Schema.ts';
 
 export type GraphNode = Graph['nodes'][number];
 export type GraphEdge = Graph['edges'][number];
@@ -254,15 +254,145 @@ export function addNode(graph: Graph, type: GraphNode['type'], x: number, y: num
 }
 
 export function removeNode(graph: Graph, id: number): Graph {
+	return removeNodes(graph, [id]);
+}
+
+// The nodes and every wire to or from them, as one edit.
+export function removeNodes(graph: Graph, ids: Iterable<number>): Graph {
+	const gone = new Set(ids);
 	return {
 		...graph,
-		nodes: graph.nodes.filter((node) => node.id !== id),
-		edges: graph.edges.filter((edge) => edge.from !== id && edge.to !== id)
+		nodes: graph.nodes.filter((node) => !gone.has(node.id)),
+		edges: graph.edges.filter((edge) => !gone.has(edge.from) && !gone.has(edge.to))
 	};
 }
 
+// What a patch is played and wired through: the note node, which brings it a voice's note, and its ports, which a track, an
+// insert or another patch wires to. Deleting several nodes at once leaves these, so that choosing everything and deleting it
+// clears a patch without taking away what makes it one. One chosen on its own can still be deleted, as an insert drops its
+// note node and a subpatch its out node.
+const PORT_TYPES: ReadonlySet<string> = new Set(['note', 'in', 'out', 'inlet', 'outlet']);
+export const isPort = (node: GraphNode) => PORT_TYPES.has(node.type);
+
 export function moveNode(graph: Graph, id: number, x: number, y: number): Graph {
 	return { ...graph, nodes: graph.nodes.map((node) => (node.id === id ? { ...node, x, y } : node)) };
+}
+
+const coordinate = (value: unknown) => (typeof value === 'number' ? value : 0);
+
+// Several nodes moved by the same amount, as one edit.
+export function moveNodes(graph: Graph, ids: Iterable<number>, dx: number, dy: number): Graph {
+	const moving = new Set(ids);
+	return {
+		...graph,
+		nodes: graph.nodes.map((node) =>
+			moving.has(node.id) ? { ...node, x: coordinate(node.x) + dx, y: coordinate(node.y) + dy } : node
+		)
+	};
+}
+
+export interface Box {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+// The box round some nodes, as they are drawn.
+export function boundsOf(nodes: GraphNode[], heightOf: HeightOf): Box {
+	if (!nodes.length) return { x: 0, y: 0, width: 0, height: 0 };
+	const left = Math.min(...nodes.map((node) => coordinate(node.x)));
+	const top = Math.min(...nodes.map((node) => coordinate(node.y)));
+	const right = Math.max(...nodes.map((node) => coordinate(node.x) + NODE_WIDTH));
+	const bottom = Math.max(...nodes.map((node) => coordinate(node.y) + heightOf(node)));
+	return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+// The nodes a box drawn across the canvas touches, which are what it chooses, as a box drawn in the piano roll chooses the
+// notes it touches.
+export function nodesTouching(graph: Graph, box: Box, heightOf: HeightOf): number[] {
+	return graph.nodes
+		.filter((node) => {
+			const [x, y] = [coordinate(node.x), coordinate(node.y)];
+			return x < box.x + box.width && box.x < x + NODE_WIDTH && y < box.y + box.height && box.y < y + heightOf(node);
+		})
+		.map((node) => node.id);
+}
+
+// What Mod+C takes from a patch: the nodes chosen, as they are, the wires between them, and the parameters their param nodes
+// read. A wire into them from a node that wasn't chosen is left behind, since what it comes from doesn't come along. It's a
+// copy, so that nothing done to the graph afterwards changes it.
+export interface CopiedNodes {
+	from: string; // The patch they were copied from
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+	params: Param[];
+}
+
+export function copyNodes(graph: Graph, ids: Iterable<number>, from: string): CopiedNodes | null {
+	const chosen = new Set(ids);
+	const nodes = graph.nodes.filter((node) => chosen.has(node.id));
+	if (!nodes.length) return null;
+	const read = new Set(nodes.map((node) => (node.type === 'param' ? node.param : undefined)));
+	const copied: CopiedNodes = {
+		from,
+		nodes,
+		edges: graph.edges.filter((edge) => chosen.has(edge.from) && chosen.has(edge.to)),
+		params: graph.params.filter((param) => read.has(param.id))
+	};
+	return JSON.parse(JSON.stringify(copied)); // A graph is JSON, so that is all a copy needs
+}
+
+// The copied nodes added to the graph of the patch `into`, moved by `offset`, and which ids they have there. Each takes a fresh
+// id above every id the graph has, so none can clash with a node already there, and the wires between them are renumbered to
+// match. A node comes whole, with its settings and typed-in values, so a subpatch names the same patch and a sample the same
+// recordings. A patch has one out node, so a copied one is left out where there is one already, and its wires with it.
+//
+// A parameter belongs to a patch, not to a node, so a param node pasted into another patch can't go on naming one by its id:
+// there the id may be another parameter's, or nobody's. It reads the parameter of the same name there, and where there is
+// none, a copy of its own is added to the patch, under its old id if that's free. In the patch it was copied from it reads
+// what it read before, if that is still there.
+export function pasteNodes(
+	graph: Graph,
+	copied: CopiedNodes,
+	into: string,
+	offset: Point
+): { graph: Graph; ids: number[] } {
+	const hasOut = graph.nodes.some((node) => node.type === 'out');
+	const coming = copied.nodes.filter((node) => !(hasOut && node.type === 'out'));
+	let next = Math.max(0, ...graph.nodes.map((node) => node.id)) + 1;
+	const ids = new Map(coming.map((node) => [node.id, next++]));
+
+	const params = [...graph.params];
+	const paramIds = new Map<number, number>();
+	for (const param of copied.params) {
+		const same = into === copied.from ? params.find((p) => p.id === param.id) : undefined;
+		const found = same ?? (param.name ? params.find((p) => p.name === param.name) : undefined);
+		const id = found
+			? found.id
+			: params.some((p) => p.id === param.id)
+				? Math.max(0, ...params.map((p) => p.id)) + 1
+				: param.id;
+		if (!found) params.push({ ...param, id });
+		paramIds.set(param.id, id);
+	}
+
+	const nodes = coming.map((node): GraphNode => {
+		const copy: GraphNode = JSON.parse(JSON.stringify(node));
+		copy.id = ids.get(node.id)!;
+		copy.x = coordinate(node.x) + offset.x;
+		copy.y = coordinate(node.y) + offset.y;
+		if (node.type === 'param' && typeof node.param === 'number' && paramIds.has(node.param))
+			copy.param = paramIds.get(node.param);
+		return copy;
+	});
+	const edges = copied.edges
+		.filter((edge) => ids.has(edge.from) && ids.has(edge.to))
+		.map((edge) => ({ ...edge, from: ids.get(edge.from)!, to: ids.get(edge.to)! }));
+	return {
+		graph: { ...graph, params, nodes: [...graph.nodes, ...nodes], edges: [...graph.edges, ...edges] },
+		ids: [...ids.values()]
+	};
 }
 
 const inputName = (edge: GraphEdge) => edge.input ?? 'in';

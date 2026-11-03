@@ -86,14 +86,16 @@ const holdButton = (page: Page) => page.getByRole('button', { name: 'Hold', exac
 const control = (page: Page, name: string) => page.getByRole('slider', { name: `Control ${name}`, exact: true });
 const controlRow = (page: Page, id: number) => page.getByTestId(`control-${id}`);
 
+// The patch's JSON is the side column's last tab, and the Controls are over its Node and Patch tabs.
 async function graphJson(page: Page) {
-	await page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'JSON' }).click();
+	await page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name: 'JSON' }).click();
 	return page.getByLabel('Graph JSON');
 }
 
 async function graphView(page: Page) {
-	await page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'Graph' }).click();
-	await expect(page.getByTestId('graph')).toBeVisible();
+	const tab = page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name: 'Patch' });
+	await tab.click();
+	await expect(tab).toHaveAttribute('aria-selected', 'true');
 }
 
 const patchGraph = async (page: Page) => {

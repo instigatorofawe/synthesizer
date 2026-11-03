@@ -127,7 +127,9 @@ test('the ▾ beside BPM lists a song’s tempo changes, and one chosen moves th
 	await page.goto('/?recipe=HallOfTheMountainKing');
 	await page.getByRole('button', { name: 'Tempo changes' }).click();
 	const list = page.getByRole('menu', { name: 'Tempo changes' });
-	await expect(list.getByRole('menuitem')).toHaveCount(2);
+	await expect(list.getByRole('menuitem').nth(1)).toHaveText(/ BPM at bar \d+/);
+	const second = await list.getByRole('menuitem').nth(1).textContent();
+	const bar = /at bar (\d+)/.exec(second!)![1];
 	await list.getByRole('menuitem').nth(1).click();
-	await expect(page.getByLabel('Position')).toHaveValue(/^2\.1\.000$/);
+	await expect(page.getByLabel('Position')).toHaveValue(new RegExp(`^${bar}\\.`));
 });

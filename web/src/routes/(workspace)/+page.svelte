@@ -40,7 +40,8 @@
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
-	import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
+	import type { Stamp } from '#lib/Recording.ts';
+	import { TakeRun, type TakeHost } from '#lib/Take.svelte.ts';
 	import { stepVelocity } from '#lib/StepEntry.ts';
 	import { bpmText, tempoAt, gliding, parseBpm, shownTempo, tempoTyped, tempoWords } from '#lib/Tempo.ts';
 	import {
@@ -611,7 +612,7 @@
 			if (built.doc) compiledFrom.set(result.report, built.doc);
 			song = result;
 			if (result.report.ok) goodSong = result;
-			else if (take && takePhase === 'arming') {
+			else if (take?.phase === 'arming') {
 				take = null;
 				say("The song doesn't compile, so it can't be recorded into. The light says what's wrong.");
 			}
@@ -847,7 +848,7 @@
 		if (on && latched.has(note)) {
 			letGo([note], at);
 			// While a take records, a key played again sounds and is written as any other key is.
-			if (!take || takePhase !== 'started') {
+			if (take?.phase !== 'started') {
 				freeing.add(note);
 				return;
 			}
@@ -905,7 +906,7 @@
 						: null;
 		if (!to) return;
 		// A take records the keys that play its track, from the count-in on, and stamps them with when they were pressed.
-		const stamped = at !== undefined && takePhase === 'started' && to.source === 'song' && to.track === takeIndex;
+		const stamped = at !== undefined && take?.phase === 'started' && to.source === 'song' && to.track === takeIndex;
 		sounding.set(note, { ...to, stamped });
 		use(to.source, () => engine.noteOn(to.track, note, vel, stamped ? at : undefined));
 	}
@@ -917,10 +918,15 @@
 	// to the roll's Snap, at the Vel velocity. Pressed again it stops recording and the song plays on, and Stop or Space stops
 	// both. A take is one undo step. The rules are Recording.ts's, and the timing the worklet's, which stamps each key with where
 	// the song was when what was playing then was heard, so latency moves nothing.
-	type Taking = { track: number; key: string; grid: number; velocity: number; write: Take; held: Map<number, Stamp> };
-	let take = $state.raw<Taking | null>(null);
-	let takePhase = $state<'arming' | 'started' | 'ending'>('arming');
-	let shownClip: string | null = null; // The clip the take last wrote into, which the roll shows
+	let take = $state.raw<TakeRun | null>(null);
+	// What a take asks of the page: the timeline it records into while that is still the one open, the loop it goes round, an
+	// edit of its run, and a clip for the roll to show.
+	const takeHost: TakeHost = {
+		doc: (key) => (saved && timelineDoc && draftKey('timeline', saved.id) === key ? timelineDoc : null),
+		loop: () => (looping && timelineDoc ? (loop ?? wholeSong(timelineDoc)) : null),
+		write: (doc) => timelineEdited({ text: JSON.stringify(doc, null, 1) }, 'typing'),
+		shown: (track, clip) => void rendered().then(() => songEditor?.reveal({ track, clip }))
+	};
 	let liveSong = $state.raw<CompileReport | null>(null); // The song's image that is playing, once one is
 	const keepTracks = $derived(take !== null);
 	const takeIndex = $derived(
@@ -938,7 +944,7 @@
 	});
 	const recordState = $derived.by(() => {
 		if (!take) return 'off';
-		if (takePhase === 'arming') return 'arming';
+		if (take.phase === 'arming') return 'arming';
 		const now = engineState?.recording ?? 0;
 		return now === 1 ? 'counting' : now === 2 ? 'recording' : 'arming';
 	});
@@ -960,9 +966,7 @@
 		const settings = songEditor?.takeSettings() ?? { grid: ppq / 4, velocity: 100 };
 		const key = draftKey('timeline', saved.id);
 		history.end(key); // A take is a step of its own
-		shownClip = null;
-		takePhase = 'arming';
-		take = { track: selectedTrack, key, ...settings, write: newTake(selectedTrack), held: new Map() };
+		take = new TakeRun(takeHost, selectedTrack, key, settings);
 		use('song');
 	}
 
@@ -971,7 +975,7 @@
 	$effect(() => {
 		const ready =
 			take !== null &&
-			takePhase === 'arming' &&
+			take.phase === 'arming' &&
 			live === 'song' &&
 			!!liveSong?.programs[0]?.tracks.some((t) => t.id === take!.track);
 		if (ready) untrack(beginTake);
@@ -980,7 +984,7 @@
 	function beginTake() {
 		if (!take || !songDoc) return;
 		const doc = songDoc;
-		takePhase = 'started';
+		take.start();
 		songEditor?.stopStepping();
 		if (engineState?.playing) {
 			engine.record(doc.ppq, BEATS_PER_BAR, 0, engineState.tick);
@@ -995,52 +999,20 @@
 
 	// Recording stops. The worklet says where the song was when it did, for the notes still held, and then the take is done.
 	function endTake() {
-		if (!take) return;
-		if (takePhase === 'arming') {
-			take = null;
-			return;
-		}
-		if (takePhase === 'started') engine.stopRecording();
-		takePhase = 'ending';
+		const how = take?.stop();
+		if (how === 'dropped') take = null;
+		else if (how === 'stopping') engine.stopRecording();
 	}
 
 	function takeEnded(at: Stamp) {
 		const ending = take;
 		if (!ending) return;
-		for (const [note, on] of ending.held) writeTaken(ending, note, on, at);
+		ending.ended(at);
 		history.end(ending.key);
 		take = null;
 	}
 
-	function keyStamped(key: PlayedKey) {
-		const t = take;
-		if (!t || takePhase === 'arming') return;
-		if (key.on) {
-			t.held.set(key.note, { tick: key.tick, elapsed: key.elapsed });
-			return;
-		}
-		const on = t.held.get(key.note);
-		if (!on) return;
-		t.held.delete(key.note);
-		writeTaken(t, key.note, on, key);
-	}
-
-	// A note played, snapped and written where the take is: one edit of a run, which undoes in one step with the take's others.
-	function writeTaken(t: Taking, note: number, on: Stamp, off: Stamp) {
-		if (!saved || !timelineDoc || draftKey('timeline', saved.id) !== t.key) return;
-		const round = looping ? (loop ?? wholeSong(timelineDoc)) : null;
-		const snapped = snapPlayed({ note, vel: t.velocity, on, off }, t.grid, round);
-		if (!snapped) return;
-		const done = recordNote(timelineDoc, t.write, snapped);
-		if (!done) return;
-		t.write = done.take;
-		timelineEdited({ text: JSON.stringify(done.doc, null, 1) }, 'typing');
-		if (done.clip !== shownClip) {
-			shownClip = done.clip;
-			const clip = done.clip;
-			void rendered().then(() => songEditor?.reveal({ track: t.track, clip }));
-		}
-	}
+	const keyStamped = (key: PlayedKey) => take?.played(key);
 
 	// A Control moves the sound where the Patch view's patch is heard, as it is dragged. Let go on a track of a song that can
 	// change, the value is the track's, saved with the song as a mixer knob's is: one step of the song's undo, and one compile,

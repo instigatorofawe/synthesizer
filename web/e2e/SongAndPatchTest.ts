@@ -56,7 +56,7 @@ test('the roll counts its bars, Snap and Draw offer triplets, and a 1/8T note is
 }) => {
 	await page.goto('/?timeline=song');
 	await expect(page.getByTestId('roll-ruler')).toContainText('2');
-	const snap = page.getByLabel('Snap');
+	const snap = page.getByLabel('Snap', { exact: true }); // Not the Snap nodes in the Patch view, which is hidden
 	await expect(snap.locator('option')).toContainText(['1/4T', '1/8T', '1/16T']);
 	const beat = Number(
 		await snap
@@ -86,7 +86,7 @@ test('the velocity strip and the lanes fold, a lane shows where a click adds, an
 
 	const lane = page.getByTestId('lane-0');
 	const at = (await lane.boundingBox())!;
-	await page.mouse.move(at.x + at.width - 30, at.y + at.height / 2);
+	await page.mouse.move(at.x + 50, at.y + at.height / 2); // Inside the clip, between its points
 	await expect(page.getByTestId('lane-0-ghost')).toBeVisible();
 
 	const strip = (await page.getByTestId('velocity').boundingBox())!;

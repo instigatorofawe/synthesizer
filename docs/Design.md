@@ -1636,6 +1636,8 @@ format or the compiler. Choices made here that the user hasn't weighed in on:
 - **An example's one patch** is called after the example, as its built-in copy is, rather than "p".
 - **Decibels** are formatted in one place, which keeps "silent" in words and "-∞" in a head's figure until decision 18.
 - **Units and tempo** each have one module, `Units.ts` and `Tempo.ts`, and the helpers nothing called are gone.
+- **A take** runs in `Take.svelte.ts`, with tests of its own, and the page only wires it to the engine and the editor. The engine
+  session is still the page's.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

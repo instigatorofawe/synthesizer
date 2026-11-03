@@ -78,7 +78,8 @@
 		onaudition,
 		onundo = () => {},
 		onview = () => {},
-		onsay
+		onsay,
+		toolbarIn = null
 	}: {
 		clip: Clip;
 		ppq: number;
@@ -103,6 +104,7 @@
 		onundo?: () => void; // The timeline's own undo, for the Undo beside "Clip is now 2 bars"
 		onview?: (view: RollView, zoomed: boolean) => void; // As it scrolls, and as someone zooms it, which `zoomed` says
 		onsay: (text: string) => void; // Says why something typed into a field was refused, where the page says such things
+		toolbarIn?: HTMLElement | null; // Where the zoom, Fit, the chosen notes' fields and the hint go: the tab strip, which has room
 	} = $props();
 
 	const KEYS = 48;
@@ -134,6 +136,24 @@
 	let chosen = $state.raw(new Set<number>());
 	let gesture = $state.raw<Gesture | null>(null);
 	let ghost = $state.raw<{ tick: number; note: number } | null>(null); // The empty cell under the pointer
+	// Moves an element into `target`, and back out of the page with the roll. What is inside it moves with it, so the element's
+	// own content keeps working where it is drawn.
+	function drawnIn(element: HTMLElement, target: HTMLElement | null) {
+		const place = (to: HTMLElement | null) => to?.appendChild(element);
+		place(target);
+		return { update: place, destroy: () => element.remove() };
+	}
+
+	// The velocity strip and the lanes fold, to give the notes their room, and stay as they were left across clips and visits.
+	const FOLDS_KEY = 'modsynth.below';
+	let velocityShown = $state(true);
+	let lanesShown = $state(true);
+	function foldBelow(which: 'velocity' | 'lanes') {
+		if (which === 'velocity') velocityShown = !velocityShown;
+		else lanesShown = !lanesShown;
+		localStorage.setItem(FOLDS_KEY, JSON.stringify({ velocity: velocityShown, lanes: lanesShown }));
+	}
+
 	// The chosen notes' menu, or with `ground` the roll's own, for a right-click where there is no note.
 	let menu = $state.raw<{ x: number; y: number; ground?: true } | null>(null);
 	let notice = $state<string | null>(null); // Said after a clip grows, with an Undo beside it
@@ -861,6 +881,13 @@
 
 	onMount(() => {
 		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
+		try {
+			const kept = JSON.parse(localStorage.getItem(FOLDS_KEY) ?? '{}') as { velocity?: boolean; lanes?: boolean };
+			velocityShown = kept.velocity !== false;
+			lanesShown = kept.lanes !== false;
+		} catch {
+			// What was kept is unreadable, so both stay open
+		}
 		// A clip seen before comes back as it was left, and one zoomed before a reload at that zoom, around its notes.
 		if (view?.left !== undefined && view.top !== undefined) {
 			scroller.scrollLeft = view.left;
@@ -887,144 +914,149 @@
 
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} />
 
-<div class="toolbar">
-	<button
-		type="button"
-		onclick={() => zoom(beatWidth / 1.5, rowHeight)}
-		aria-label="Zoom the roll out"
-		title={`Zoom out. ${mod} with the wheel zooms, and ${mod}+Shift with it sets the rows' height.`}>−</button
-	>
-	<button
-		type="button"
-		onclick={() => zoom(beatWidth * 1.5, rowHeight)}
-		aria-label="Zoom the roll in"
-		title={`Zoom in. ${mod} with the wheel zooms, and ${mod}+Shift with it sets the rows' height.`}>+</button
-	>
-	<button type="button" onclick={fit} title="Fit the clip's bars across the roll, and scroll to its notes (.)"
-		>Fit</button
-	>
-	{#if stepping}
-		<span class="at" data-testid="step-at">Step at {position(cursor.tick, ppq)}</span>
-	{/if}
-	{#if one}
-		<fieldset disabled={readonly}>
-			{#if chosen.size === 1}
-				<label title="Its pitch, as a name such as E4, F#3 or Bb2, or a MIDI number"
-					>pitch <UnitField
-						label="Note pitch"
-						value={one.note}
-						format={noteName}
-						read={readPitch}
-						onvalue={(note) => onchange(setNotes(clip, chosen, { note }))}
-						{onsay}
-						width="3.6rem"
-					/></label
-				>
-				<label title="Where it starts, as bar.beat.tick from the clip's start, or a bar"
-					>at <UnitField
-						label="Note tick"
-						value={one.tick}
-						format={(tick) => position(tick, ppq)}
-						read={readPosition(ppq)}
-						onvalue={(tick) => withRoom(setNotes(clip, chosen, { tick }))}
+<!-- The toolbar is drawn into the tab strip, a row the roll had to itself before. Its home stays here, empty, so the roll's
+	 own place in the page is where it was. -->
+<div class="toolhome">
+	<div class="toolbar top" use:drawnIn={toolbarIn}>
+		<button
+			type="button"
+			onclick={() => zoom(beatWidth / 1.5, rowHeight)}
+			aria-label="Zoom the roll out"
+			title={`Zoom out. ${mod} with the wheel zooms, and ${mod}+Shift with it sets the rows' height.`}>−</button
+		>
+		<button
+			type="button"
+			onclick={() => zoom(beatWidth * 1.5, rowHeight)}
+			aria-label="Zoom the roll in"
+			title={`Zoom in. ${mod} with the wheel zooms, and ${mod}+Shift with it sets the rows' height.`}>+</button
+		>
+		<button type="button" onclick={fit} title="Fit the clip's bars across the roll, and scroll to its notes (.)"
+			>Fit</button
+		>
+		{#if stepping}
+			<span class="at" data-testid="step-at">Step at {position(cursor.tick, ppq)}</span>
+		{/if}
+		{#if one}
+			<fieldset disabled={readonly}>
+				{#if chosen.size === 1}
+					<label title="Its pitch, as a name such as E4, F#3 or Bb2, or a MIDI number"
+						>pitch <UnitField
+							label="Note pitch"
+							value={one.note}
+							format={noteName}
+							read={readPitch}
+							onvalue={(note) => onchange(setNotes(clip, chosen, { note }))}
+							{onsay}
+							width="3.6rem"
+						/></label
+					>
+					<label title="Where it starts, as bar.beat.tick from the clip's start, or a bar"
+						>at <UnitField
+							label="Note tick"
+							value={one.tick}
+							format={(tick) => position(tick, ppq)}
+							read={readPosition(ppq)}
+							onvalue={(tick) => withRoom(setNotes(clip, chosen, { tick }))}
+							{onsay}
+							width="5.2rem"
+						/></label
+					>
+				{:else}
+					<span class="muted">{chosen.size} notes</span>
+				{/if}
+				<label title="How long it is, as a note value such as 1/8 or 3/16, in bars, or in ticks"
+					>length <UnitField
+						label="Note length"
+						value={one.dur}
+						format={(dur) => noteValue(dur, ppq)}
+						read={readLength(ppq)}
+						choices={noteLengths(ppq)}
+						onvalue={(dur) => {
+							draw = dur;
+							onchange(setNotes(clip, chosen, { dur }));
+						}}
 						{onsay}
 						width="5.2rem"
 					/></label
 				>
-			{:else}
-				<span class="muted">{chosen.size} notes</span>
-			{/if}
-			<label title="How long it is, as a note value such as 1/8 or 3/16, in bars, or in ticks"
-				>length <UnitField
-					label="Note length"
-					value={one.dur}
-					format={(dur) => noteValue(dur, ppq)}
-					read={readLength(ppq)}
-					choices={noteLengths(ppq)}
-					onvalue={(dur) => {
-						draw = dur;
-						onchange(setNotes(clip, chosen, { dur }));
-					}}
-					{onsay}
-					width="5.2rem"
-				/></label
-			>
-			<label
-				>velocity <input
-					type="number"
-					min="0"
-					max="127"
-					aria-label="Note velocity"
-					value={one.vel}
-					onchange={(e) => field('vel', e.currentTarget.value)}
-				/></label
-			>
-			<span class="shaping" role="group" aria-label="Shape the chosen notes">
-				{#if chosen.size > 1}
+				<label
+					>velocity <input
+						type="number"
+						min="0"
+						max="127"
+						aria-label="Note velocity"
+						value={one.vel}
+						onchange={(e) => field('vel', e.currentTarget.value)}
+					/></label
+				>
+				<span class="shaping" role="group" aria-label="Shape the chosen notes">
+					{#if chosen.size > 1}
+						<label
+							>ramp <input
+								type="number"
+								min="1"
+								max="127"
+								aria-label="Ramp velocities from"
+								bind:value={rampFrom}
+							/></label
+						>
+						<label
+							>to <input type="number" min="1" max="127" aria-label="Ramp velocities to" bind:value={rampTo} /></label
+						>
+						<button
+							type="button"
+							title="Velocities on a line from the first chosen note to the last"
+							onclick={() => shape(rampVelocities(clip, chosen, rampFrom, rampTo))}>Ramp</button
+						>
+					{/if}
 					<label
-						>ramp <input
+						>× <input
 							type="number"
-							min="1"
-							max="127"
-							aria-label="Ramp velocities from"
-							bind:value={rampFrom}
+							min="0"
+							max="4"
+							step="0.05"
+							aria-label="Scale velocities by"
+							bind:value={scaleBy}
 						/></label
-					>
-					<label>to <input type="number" min="1" max="127" aria-label="Ramp velocities to" bind:value={rampTo} /></label
 					>
 					<button
 						type="button"
-						title="Velocities on a line from the first chosen note to the last"
-						onclick={() => shape(rampVelocities(clip, chosen, rampFrom, rampTo))}>Ramp</button
+						title="Every chosen velocity times this, so their shape stays"
+						onclick={() => shape(scaleVelocities(clip, chosen, scaleBy))}>Scale</button
 					>
+					<button
+						type="button"
+						title="Nudge each start by up to a 1/64 note and each velocity by up to 8, either way"
+						onclick={() => shape(humanize(clip, chosen, Math.round(ppq / 16), 8, ++nudges))}>Humanize</button
+					>
+					<button
+						type="button"
+						title="Move each start to the nearest line of the grid"
+						onclick={() => shape(quantize(clip, chosen, grid))}>Quantize</button
+					>
+				</span>
+				{#if slots.length > 1}
+					<label>
+						slot
+						<select
+							aria-label="Note slot"
+							value={one.slot === undefined ? '' : String(one.slot)}
+							onchange={(e) => slotChanged(e.currentTarget.value)}
+						>
+							<option value="">first</option>
+							{#each slots as slot, index (index)}<option value={String(index)}>{slot}</option>{/each}
+						</select>
+					</label>
 				{/if}
-				<label
-					>× <input
-						type="number"
-						min="0"
-						max="4"
-						step="0.05"
-						aria-label="Scale velocities by"
-						bind:value={scaleBy}
-					/></label
-				>
-				<button
-					type="button"
-					title="Every chosen velocity times this, so their shape stays"
-					onclick={() => shape(scaleVelocities(clip, chosen, scaleBy))}>Scale</button
-				>
-				<button
-					type="button"
-					title="Nudge each start by up to a 1/64 note and each velocity by up to 8, either way"
-					onclick={() => shape(humanize(clip, chosen, Math.round(ppq / 16), 8, ++nudges))}>Humanize</button
-				>
-				<button
-					type="button"
-					title="Move each start to the nearest line of the grid"
-					onclick={() => shape(quantize(clip, chosen, grid))}>Quantize</button
-				>
-			</span>
-			{#if slots.length > 1}
-				<label>
-					slot
-					<select
-						aria-label="Note slot"
-						value={one.slot === undefined ? '' : String(one.slot)}
-						onchange={(e) => slotChanged(e.currentTarget.value)}
-					>
-						<option value="">first</option>
-						{#each slots as slot, index (index)}<option value={String(index)}>{slot}</option>{/each}
-					</select>
-				</label>
-			{/if}
-		</fieldset>
-	{:else if stepping}
-		{@const hint = `Keys write at the cursor, as long as Draw. Hold keys for a chord, and → while holding makes them longer. → rests, Backspace steps back, a click moves the cursor, and Esc leaves.`}
-		<span class="muted hint" title={hint}>{hint}</span>
-	{:else if !readonly}
-		{@const hint = `Click to add a note, and drag to set its length. Drag a note to move it, its end to resize it, and hold ${mod} to copy it. Delete or a right-click removes it. Shift-drag selects, and arrows nudge.`}
-		<span class="muted hint" title={hint}>{hint}</span>
-	{/if}
+			</fieldset>
+		{:else if stepping}
+			{@const hint = `Keys write at the cursor, as long as Draw. Hold keys for a chord, and → while holding makes them longer. → rests, Backspace steps back, a click moves the cursor, and Esc leaves.`}
+			<span class="muted hint" title={hint}>{hint}</span>
+		{:else if !readonly}
+			{@const hint = `Click to add a note, and drag to set its length. Drag a note to move it, its end to resize it, and hold ${mod} to copy it. Delete or a right-click removes it. Shift-drag selects, and arrows nudge.`}
+			<span class="muted hint" title={hint}>{hint}</span>
+		{/if}
+	</div>
 </div>
 
 <div class="frame">
@@ -1257,70 +1289,90 @@
 
 <div class="below" use:follows>
 	<div style:width="{KEYS + width}px" style:padding-left="{KEYS}px" style:box-sizing="border-box">
-		<svg
-			{width}
-			height={VELOCITY}
-			role="application"
-			aria-label="Velocity"
-			data-testid="velocity"
-			onpointerdown={pressStrip}
-		>
-			<rect class="strip" {width} height={VELOCITY} />
-			{#each stems as { note, index } (index)}
-				{@const height = (note.vel / 127) * VELOCITY}
-				{@const x = note.tick * perTick}
-				{@const across = Math.max(note.dur * perTick, 3)}
-				<g class="stem" class:chosen={chosen.has(index)} data-index={index}>
-					<rect
-						class="velocity"
-						style:fill-opacity={0.12 + (0.5 * note.vel) / 127}
-						{x}
-						y={VELOCITY - height}
-						width={across}
-						{height}
-						role="presentation"
-						data-testid={`velocity-${index}`}
-						data-vel={note.vel}><title>{`Velocity ${note.vel}`}</title></rect
-					>
-					<rect class="cap" {x} y={VELOCITY - height} width={across} height="2" />
-				</g>
-			{/each}
-			{#if gesture?.kind === 'velocity'}
-				<!-- What the drag sets, beside the pointer, as a fader says its level while it moves. -->
-				{@const value = velocityAt(gesture.at.y)}
-				<text
-					class="velreadout"
-					x={Math.min(gesture.at.x + 8, Math.max(0, width - 24))}
-					y={Math.max(11, Math.min(VELOCITY - 3, gesture.at.y - 4))}
-					data-testid="velocity-readout">{value}</text
-				>
-			{/if}
-		</svg>
-		{#each lanes as lane, index (lane.key)}
-			{@const about = describeLane(lane, choices)}
-			<AutomationLane
-				{clip}
-				{lane}
-				label={about.label}
-				min={about.min}
-				max={about.max}
-				start={about.start}
-				{ppq}
-				{perTick}
+		{#if velocityShown}
+			<svg
 				{width}
-				{grid}
-				{readonly}
-				testid={`lane-${index}`}
-				{onchange}
-				{onsay}
-				onremove={() => onchange(removeLane(clip, lane.key))}
-			/>
-		{/each}
+				height={VELOCITY}
+				role="application"
+				aria-label="Velocity"
+				data-testid="velocity"
+				onpointerdown={pressStrip}
+			>
+				<rect class="strip" {width} height={VELOCITY} />
+				{#each stems as { note, index } (index)}
+					{@const height = (note.vel / 127) * VELOCITY}
+					{@const x = note.tick * perTick}
+					{@const across = Math.max(note.dur * perTick, 3)}
+					<g class="stem" class:chosen={chosen.has(index)} data-index={index}>
+						<rect
+							class="velocity"
+							style:fill-opacity={0.12 + (0.5 * note.vel) / 127}
+							{x}
+							y={VELOCITY - height}
+							width={across}
+							{height}
+							role="presentation"
+							data-testid={`velocity-${index}`}
+							data-vel={note.vel}><title>{`Velocity ${note.vel}`}</title></rect
+						>
+						<rect class="cap" {x} y={VELOCITY - height} width={across} height="2" />
+					</g>
+				{/each}
+				{#if gesture?.kind === 'velocity'}
+					<!-- What the drag sets, beside the pointer, as a fader says its level while it moves. -->
+					{@const value = velocityAt(gesture.at.y)}
+					<text
+						class="velreadout"
+						x={Math.min(gesture.at.x + 8, Math.max(0, width - 24))}
+						y={Math.max(11, Math.min(VELOCITY - 3, gesture.at.y - 4))}
+						data-testid="velocity-readout">{value}</text
+					>
+				{/if}
+			</svg>
+		{/if}
+		{#if lanesShown}
+			{#each lanes as lane, index (lane.key)}
+				{@const about = describeLane(lane, choices)}
+				<AutomationLane
+					{clip}
+					{lane}
+					label={about.label}
+					min={about.min}
+					max={about.max}
+					start={about.start}
+					{ppq}
+					{perTick}
+					{width}
+					{grid}
+					{readonly}
+					testid={`lane-${index}`}
+					{onchange}
+					{onsay}
+					onremove={() => onchange(removeLane(clip, lane.key))}
+				/>
+			{/each}
+		{/if}
 	</div>
 </div>
 
-{#if !readonly && free.length}
-	<div class="toolbar">
+<div class="toolbar">
+	<button
+		type="button"
+		class="foldbelow"
+		aria-expanded={velocityShown}
+		title={velocityShown ? 'Fold the velocity strip, for more room for notes' : 'Show the velocity strip'}
+		onclick={() => foldBelow('velocity')}><span aria-hidden="true">{velocityShown ? '▾' : '▸'}</span> Velocity</button
+	>
+	<button
+		type="button"
+		class="foldbelow"
+		aria-expanded={lanesShown}
+		disabled={!lanes.length}
+		title={lanesShown ? 'Fold the lanes, for more room for notes' : 'Show the lanes'}
+		onclick={() => foldBelow('lanes')}
+		><span aria-hidden="true">{lanesShown ? '▾' : '▸'}</span> Lanes{lanes.length ? ` ${lanes.length}` : ''}</button
+	>
+	{#if !readonly && free.length}
 		<select
 			aria-label="Add a lane"
 			value=""
@@ -1344,8 +1396,8 @@
 		{:else}
 			<span class="muted" title={LANE_HINT}>{LANE_HINT}</span>
 		{/if}
-	</div>
-{/if}
+	{/if}
+</div>
 
 <style>
 	/* One line, whatever is chosen: a click that adds a note chooses it, and if the hint gave way to taller fields, the roll
@@ -1364,6 +1416,12 @@
 	}
 	.toolbar button {
 		padding: 0 0.5rem;
+	}
+	/* In the tab strip, it takes the strip's height and what width the tabs leave. */
+	.toolbar.top {
+		height: 100%;
+		margin: 0;
+		min-width: 0;
 	}
 	.toolbar > * {
 		flex: none;
@@ -1582,6 +1640,12 @@
 	.notice button {
 		flex: none;
 		padding: 0.1rem 0.5rem;
+	}
+	.foldbelow {
+		flex: none;
+		padding: 0.1rem 0.4rem;
+		font-size: 0.72rem;
+		color: var(--muted);
 	}
 	.below {
 		flex: none;

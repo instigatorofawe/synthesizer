@@ -174,6 +174,7 @@
 	function pressGround(event: PointerEvent) {
 		roll.focus({ preventScroll: true });
 		offer = null;
+		pressed = null;
 		if (secondary(event)) return;
 		if (event.shiftKey) {
 			gesture = { kind: 'band', from: canvas(event), at: canvas(event) };
@@ -184,6 +185,7 @@
 			return;
 		}
 		const { tick, note } = cellAt(event);
+		pressed = { tick, note };
 		// A note already there is too short to hit, or the first click of a double-click put it there.
 		const there = clip.notes.findIndex((n) => n.tick === tick && n.note === note);
 		if (there >= 0) {
@@ -197,10 +199,13 @@
 		audition(note);
 	}
 
-	// A double-click on empty grid adds a note too. Its first click almost always has, so this adds one only if it hasn't.
-	function doubleGround(event: MouseEvent) {
-		if (readonly) return;
-		const { tick, note } = cellAt(event);
+	// A double-click on empty grid adds a note too. Its first click almost always has, so this adds one only if it hasn't, in
+	// the cell that click chose. The double-click's own position is in whole pixels where a press's isn't, so near the edge
+	// of a row it can fall in the next one, and a note there would be a second.
+	let pressed: { tick: number; note: number } | null = null;
+	function doubleGround() {
+		if (readonly || !pressed) return;
+		const { tick, note } = pressed;
 		if (clip.notes.some((n) => n.tick === tick && n.note === note)) return;
 		place({ tick, note, vel: 100, dur: draw });
 	}
@@ -607,10 +612,8 @@
 			{/if}
 		</fieldset>
 	{:else if !readonly}
-		<span class="muted">
-			Click to add a note, and drag to set its length. Drag a note to move it, its end to resize it, and hold {mod} to copy
-			it. Delete or a right-click removes it. Shift-drag selects, and arrows nudge.
-		</span>
+		{@const hint = `Click to add a note, and drag to set its length. Drag a note to move it, its end to resize it, and hold ${mod} to copy it. Delete or a right-click removes it. Shift-drag selects, and arrows nudge.`}
+		<span class="muted hint" title={hint}>{hint}</span>
 	{/if}
 </div>
 
@@ -842,18 +845,32 @@
 {/if}
 
 <style>
+	/* One line, whatever is chosen: a click that adds a note chooses it, and if the hint gave way to taller fields, the roll
+	   would move under the pointer, and a double-click's second click would land on another row. What doesn't fit scrolls. */
 	.toolbar {
 		flex: none;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		min-height: 2rem;
+		height: 2rem;
 		font-size: 0.8rem;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: none;
 		margin: 0.2rem 0;
 	}
 	.toolbar button {
 		padding: 0 0.5rem;
+	}
+	.toolbar > * {
+		flex: none;
+	}
+	.toolbar > .hint {
+		flex: 1 1 0;
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	fieldset {
 		display: flex;

@@ -107,6 +107,30 @@ test('dragging before letting go sets a new note to a length in Snap steps', asy
 	await expect(page.getByLabel('Draw length').locator('option:checked')).toHaveText('3/8');
 });
 
+// A click that adds a note chooses it, and the roll's toolbar then shows the note's fields in place of the hint. If that
+// changed the toolbar's height, the roll would move under the pointer, and a double-click's second click would add a
+// second note on another row. CI's fonts wrapped the hint where a Mac's didn't, so a narrow window checks that here.
+for (const width of [1280, 700]) {
+	test(`choosing a note leaves the roll where it was, and a double-click adds one note, at ${width} px`, async ({
+		page
+	}) => {
+		await trackWithClip(page, 'Still'); // At its own size
+		await page.setViewportSize({ width, height: 720 });
+		await page.getByTestId('key-62').scrollIntoViewIfNeeded();
+		const roll = page.getByTestId('roll');
+		const before = (await roll.boundingBox())!.y;
+		const at = await rollPoint(page, 480, 60);
+		await page.mouse.click(at.x, at.y);
+		await expect(notes(page)).toHaveCount(1);
+		expect((await roll.boundingBox())!.y).toBe(before);
+		const next = await rollPoint(page, 0, 64);
+		await page.mouse.dblclick(next.x, next.y);
+		await expect(notes(page)).toHaveCount(2);
+		await expect(page.locator('[data-testid^="note-"][data-note="64"]')).toHaveCount(1);
+		expect((await roll.boundingBox())!.y).toBe(before);
+	});
+}
+
 test('a right-click on a note opens its menu, which deletes and duplicates, and a double-click never deletes', async ({
 	page
 }) => {

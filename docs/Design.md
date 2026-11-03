@@ -1024,6 +1024,27 @@ image holds, can't bring a track back, and it is written to the mix registers at
 Export WAV writes what is heard, so with a solo it writes only the soloed tracks, as a DAW's bounce does, and that makes a
 stem. Export saved version compiles the saved document, which has none.
 
+Each track head also has a small volume fader, with its level in dB, and a pan knob, so the mix's most used controls are in sight
+without the Mixer tab. They are the track's own `gain` and `pan`, the Mixer's fader and pan, so either moves the other: live through
+the mix registers while dragged, and one step of undo when let go. The fader has the Mixer's cubic travel. A drag moves a control on
+from where it is rather than jumping to the pointer, so a click changes nothing, Shift drags a tenth as fast, the arrow keys step one
+with focus, and a double-click resets it to 0 dB or the centre. The head stays 150 px wide, so the arrangement fits 1280 px with the
+inspector open.
+
+Between the loop strip and the first track is the song layer, lanes for what belongs to the whole song rather than to one track
+(`SongLayer.ts`). Its one lane is Tempo, a second view of the same list of changes as the inspector's, which stays for typing exact
+values. Folded, as it starts, it is a row 18 px tall with a flag at each change reading its BPM, and a slope from a change that glides
+to the next one, so the song's tempo reads with no clicks. ▸ in its head, or a double-click on it, unfolds it to 72 px: a curve of BPM
+over the song, steps where a change holds and lines where it glides, scaled to the song's tempos with room above and below, and the
+playhead and the bar lines pass through it. A click on empty lane adds a change on the Snap grid at the tempo playing there, and
+dragging before letting go sets its tempo. A point drags up and down for its tempo, to a whole BPM or with Shift a tenth, and sideways
+on the grid, never past its neighbours, and the first moves only up and down. A click on the line from a change, or the change's menu,
+switches it between holding until the next change and gliding to it. ↑ and ↓ nudge the chosen change by 1 BPM, or 10 with Shift, and
+Delete takes it away, except the first. Each gesture is one step of undo, and as with a fader the song compiles when a drag is let go,
+while the curve and the top bar's tempo follow it. An example's lane can be unfolded and read, not changed. Which lanes are unfolded is
+the editor's, kept in localStorage for each timeline, never in the document. Time signatures, open 26, and markers would each be a lane
+here once the format has a field for them. The rules are pure functions in `TempoLane.ts`.
+
 Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the song's image. `live` keeps unused tracks, so it could pass a document
 that an export refuses, and an editor that previews one thing and exports another is worse than a silent key. So the keys play such a track on its own instead.
 

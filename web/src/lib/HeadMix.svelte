@@ -81,18 +81,15 @@
 	function pointerMove(event: PointerEvent) {
 		if (!held) return;
 		const point = { x: event.clientX, y: event.clientY };
-		if (!held.moved) {
-			if (Math.abs(point.x - held.from.x) + Math.abs(point.y - held.from.y) < DRAG) return;
-			held = { ...held, moved: true, last: point };
-			return;
-		}
+		// Past the first few pixels it is a drag, which goes on from where it was pressed.
+		if (!held.moved && Math.abs(point.x - held.from.x) + Math.abs(point.y - held.from.y) < DRAG) return;
 		const scale = event.shiftKey ? FINE : 1;
 		const [dx, dy] = [point.x - held.last.x, point.y - held.last.y];
 		const at =
 			held.what === 'gain'
 				? Math.max(0, Math.min(held.top, held.at + (dx / held.width) * scale))
 				: Math.max(-1, Math.min(1, held.at + ((dx - dy) / PAN_TRAVEL) * 2 * scale));
-		held = { ...held, at, last: point };
+		held = { ...held, at, last: point, moved: true };
 		onmix(held.what === 'gain' ? { gain: gainOf(at) } : { pan: panOf(at) }, false);
 	}
 

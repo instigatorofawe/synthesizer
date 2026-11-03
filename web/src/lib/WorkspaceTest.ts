@@ -7,13 +7,18 @@ import {
 	edited,
 	graphError,
 	hearing,
+	landing,
 	parseGraph,
+	placeParams,
+	songPlaceOf,
 	trackAlone,
 	viewOf,
 	withDrafts,
+	withoutPlace,
 	withParams,
 	withView,
-	type Draft
+	type Draft,
+	type SongPlace
 } from '#lib/Workspace.ts';
 
 const voice: Graph = EMPTY_GRAPH;
@@ -188,5 +193,116 @@ describe('addresses', () => {
 		expect(withView('?recipe=R&part=p&view=song', 'patch')).toBe('?recipe=R&part=p&view=patch');
 		for (const search of ['?timeline=a', '?timeline=a&patch=b', '?recipe=R&part=p&view=patch'])
 			for (const view of ['song', 'patch'] as const) expect(viewOf(withView(search, view))).toBe(view);
+	});
+});
+
+describe('where the Song view is', () => {
+	const place = (track: number | null, clip: string | null, tab: string | null): SongPlace => ({ track, clip, tab });
+
+	it('reads the track, the clip and the tab from the address', () => {
+		expect(songPlaceOf('?timeline=song&track=2&clip=pluck-a&pane=mixer')).toEqual(place(2, 'pluck-a', 'mixer'));
+		expect(songPlaceOf('?timeline=song')).toEqual(place(null, null, null));
+		expect(songPlaceOf('?track=two&clip=&pane=')).toEqual(place(null, null, null));
+		expect(songPlaceOf('?track=1.5')).toEqual(place(null, null, null));
+		expect(songPlaceOf('?track=%202%20&clip=a%20b')).toEqual(place(2, 'a b', null));
+	});
+
+	it('writes them, leaving out Notes and what is not chosen, and reads back what it wrote', () => {
+		expect(withParams('?timeline=song', placeParams(place(2, 'pluck-a', 'mixer')))).toBe(
+			'?timeline=song&track=2&clip=pluck-a&pane=mixer'
+		);
+		expect(withParams('?timeline=song&track=2&clip=a&pane=mixer', placeParams(place(1, null, 'notes')))).toBe(
+			'?timeline=song&track=1'
+		);
+		for (const each of [place(2, 'pluck-a', 'mixer'), place(1, 'a b&c', 'json'), place(null, null, null)])
+			expect(songPlaceOf(withParams('?timeline=x', placeParams(each)))).toEqual(each);
+	});
+
+	it('leaves the place out of an address for another song, and the view and patch in', () => {
+		expect(withoutPlace('?timeline=song&track=2&clip=a&pane=mixer&view=patch&patch=p')).toBe(
+			'?timeline=song&view=patch&patch=p'
+		);
+		expect(withoutPlace('?track=2')).toBe('?');
+	});
+
+	it('keeps the view an address shows, whatever place it names', () => {
+		expect(viewOf('?timeline=a&track=2&clip=c&pane=mixer')).toBe('song');
+		expect(viewOf('?timeline=a&track=2&patch=b')).toBe('patch');
+	});
+
+	const tabs = ['notes', 'mixer', 'json', 'image'];
+	const song = timelineSchema.parse({
+		clips: [
+			{ id: 'a', length: 480 },
+			{ id: 'b', length: 480 },
+			{ id: 'loose', length: 480 }
+		],
+		tracks: [
+			{ id: 1, name: 'Empty', slots: ['x'] },
+			{
+				id: 2,
+				name: 'Lead',
+				slots: ['x'],
+				placements: [
+					{ clip: 'a', tick: 0 },
+					{ clip: 'b', tick: 480 }
+				]
+			},
+			{ id: 3, name: 'Pad', slots: ['x'], placements: [{ clip: 'b', tick: 0 }] }
+		]
+	});
+
+	it('lands where the address says', () => {
+		expect(landing(song, place(3, 'b', 'mixer'), tabs)).toEqual({ track: 3, placement: 0, clip: 'b', tab: 'mixer' });
+		expect(landing(song, place(2, 'b', 'json'), tabs)).toEqual({ track: 2, placement: 1, clip: 'b', tab: 'json' });
+		// A clip the track doesn't play is still the one the roll shows, as a track head chosen after a clip leaves it
+		expect(landing(song, place(1, 'a', null), tabs)).toEqual({ track: 1, placement: null, clip: 'a', tab: 'notes' });
+	});
+
+	it('opens as the editor would with nothing asked: the first track with a clip, on its first, and the notes', () => {
+		const opening = { track: 2, placement: 0, clip: 'a', tab: 'notes' };
+		expect(landing(song, null, tabs)).toEqual(opening);
+		expect(landing(song, place(null, null, null), tabs)).toEqual(opening);
+	});
+
+	it('ignores what the song has not got, and chooses as it would have', () => {
+		expect(landing(song, place(9, 'gone', 'bogus'), tabs)).toEqual({ track: 2, placement: 0, clip: 'a', tab: 'notes' });
+		// A track alone is chosen on its first placement, and a clip alone where it is first placed
+		expect(landing(song, place(3, null, null), tabs)).toEqual({ track: 3, placement: 0, clip: 'b', tab: 'notes' });
+		expect(landing(song, place(1, null, 'mixer'), tabs)).toEqual({
+			track: 1,
+			placement: null,
+			clip: null,
+			tab: 'mixer'
+		});
+		expect(landing(song, place(null, 'b', null), tabs)).toEqual({ track: 2, placement: 1, clip: 'b', tab: 'notes' });
+		expect(landing(song, place(9, 'b', null), tabs)).toEqual({ track: 2, placement: 1, clip: 'b', tab: 'notes' });
+		// A clip nobody places is shown beside the track the editor would choose
+		expect(landing(song, place(null, 'loose', null), tabs)).toEqual({
+			track: 2,
+			placement: null,
+			clip: 'loose',
+			tab: 'notes'
+		});
+		// A tab is one the editor has
+		expect(landing(song, place(null, null, 'image'), ['notes', 'mixer']).tab).toBe('notes');
+	});
+
+	it('lands on what there is in a song with no clips placed, or no tracks', () => {
+		const unplaced = timelineSchema.parse({ clips: [{ id: 'a', length: 480 }], tracks: [{ id: 4, slots: ['x'] }] });
+		expect(landing(unplaced, null, tabs)).toEqual({ track: 4, placement: null, clip: null, tab: 'notes' });
+		expect(landing(unplaced, place(null, 'a', null), tabs)).toEqual({
+			track: 4,
+			placement: null,
+			clip: 'a',
+			tab: 'notes'
+		});
+		const empty = timelineSchema.parse({});
+		expect(landing(empty, place(1, 'a', 'mixer'), tabs)).toEqual({
+			track: null,
+			placement: null,
+			clip: null,
+			tab: 'mixer'
+		});
 	});
 });

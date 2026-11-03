@@ -846,6 +846,9 @@ to.
   Back goes to the view before.
 - A browser down the side holds the library and the examples, and a timeline in it opens in Song and a patch in Patch. B
   folds it to a rail of icons. Below 1400 px wide it is always the rail, and opens over the page rather than pushing it aside.
+  It is 220 px wide, and what each list is for is behind a ? in its heading, which an empty list shows of itself, so with the
+  examples shut it fits a laptop's height. A + in a heading opens a field for a new timeline, patch or bundle, which Enter
+  makes and Esc closes, and the Samples + asks for WAV files and imports them as they are chosen.
 - In Song the arrangement is as tall as its ruler and tracks, up to about a third of the window, past which it scrolls, and the
   notes have the rest, so the roll's room doesn't depend on a splitter dragged for another song. Expand, ⤢ at the right of the
   tabs or a double-click on a clip, gives the notes the whole view, and ⤢ again or Esc brings the arrangement back. Esc closes
@@ -864,6 +867,11 @@ to.
   load reruns for the parameters it reads, so choosing a patch or a view costs no round trip, and the library, which carries
   every sample in use, loads only when an action changes it. A fresh visit opens the timeline saved last, and the old
   addresses redirect to the same views.
+- The address also says where the Song view is, as `track`, `clip` and `pane`, so
+  `?timeline=song&track=2&clip=pluck-a&pane=mixer` opens on Pluck, with its clip in the roll, on the Mixer tab, after a
+  reload or in a new tab. The server reads none of them either. A choice replaces the step of the browser's history it is
+  on, so Back goes to the view before rather than through every click, and Back or Forward put the Song view where that step
+  says. What the song hasn't got is passed over for the editor's own choice: the first track with a clip, on its notes.
 
 - Edits to any number of patches and timelines are kept as drafts while other things are opened, and Save writes them all
   in one transaction, patches first, so a timeline is never saved against a patch edit that was refused. Each draft names

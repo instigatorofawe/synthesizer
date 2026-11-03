@@ -161,6 +161,7 @@ test("the Song tab's menu holds what is done to the song as a whole", async ({ p
 	expect((await download).suggestedFilename()).toBe('Ballad.msimg');
 
 	// Delete timeline, on one made for it
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill('Short lived');
 	await page.getByLabel('New timeline name').press('Enter');
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Short lived');

@@ -34,6 +34,7 @@ async function newTimeline(page: Page, name: string) {
 	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill(name);
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
@@ -111,6 +112,7 @@ test('typing filters a patch picker, the arrows move through it, and Enter choos
 test('a track head names its patch, not its id, and the name opens that patch', async ({ page }) => {
 	await newTimeline(page, 'Named heads');
 	const long = 'A patch whose name is far too long for a track head';
+	await page.getByRole('button', { name: 'New patch', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New patch name').fill(long);
 	await page.getByLabel('New patch name').press('Enter');
 	await page.waitForURL(/patch=/);

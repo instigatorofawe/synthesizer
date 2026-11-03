@@ -21,6 +21,7 @@
 	import { History } from '#lib/History.ts';
 	import Keyboard from '#lib/Keyboard.svelte';
 	import Meter from '#lib/Meter.svelte';
+	import { withParameter } from '#lib/Modulate.ts';
 	import { friendlyName } from '#lib/NodeHelp.ts';
 	import PatchPanel from '#lib/PatchPanel.svelte';
 	import { setSongValue, songValue } from '#lib/ParamValues.ts';
@@ -230,18 +231,23 @@
 	}
 
 	function patchEdited(change: { name?: string; text?: string; graph?: Graph }, how: How = 'edit') {
-		if (!savedPatch || savedPatch.builtin) return;
-		const key = draftKey('patch', savedPatch.id);
+		if (savedPatch) editPatch(savedPatch, change, how);
+	}
+
+	// An edit of a library patch, the one on screen or another, such as the one a lane is put inside from the Song view.
+	function editPatch(
+		patch: (typeof data.library.patches)[number],
+		change: { name?: string; text?: string; graph?: Graph },
+		how: How = 'edit'
+	) {
+		if (patch.builtin) return;
+		const key = draftKey('patch', patch.id);
+		const savedText = JSON.stringify(patch.graph, null, 1);
+		const now = drafts[key]?.text ?? savedText;
 		const text = change.graph ? JSON.stringify(change.graph, null, 1) : change.text;
-		remember(key, patchText, text, how);
-		if (text === patchText && change.name === undefined) return;
-		const base = {
-			kind: 'patch' as const,
-			id: savedPatch.id,
-			revision: savedPatch.revision,
-			name: savedPatch.name,
-			text: savedPatchText
-		};
+		remember(key, now, text, how);
+		if (text === now && change.name === undefined) return;
+		const base = { kind: 'patch' as const, id: patch.id, revision: patch.revision, name: patch.name, text: savedText };
 		const graph = change.graph ?? (text === undefined ? undefined : (parseGraph(text) ?? undefined));
 		put(
 			key,
@@ -296,6 +302,40 @@
 			void open({ patch: made.to, part: null }, false, 'patch');
 		};
 	};
+
+	// "In the patch…": a lane on an input inside the track's patch. The input gets a parameter of its own, wired to it at the value
+	// it had, as one edit of the patch, and the lane, the song's edit, then moves it. A built-in patch can't change, so Edit a
+	// copy makes one first, which takes its place in the song as an edit of its own. Gives the parameter's id once it's there.
+	async function laneInPatch(at: { patch: string; node: number; input: string }): Promise<number | null> {
+		if (!saved || !timelineDoc) return null;
+		let id = at.patch;
+		if (data.library.patches.find((p) => p.id === id)?.builtin) {
+			const body = new FormData();
+			body.set('id', id);
+			const response = await fetch(actionOn(search, 'editCopy'), {
+				method: 'POST',
+				body,
+				headers: { accept: 'application/json', 'x-sveltekit-action': 'true' }
+			});
+			const result = deserialize(await response.text());
+			const made =
+				result.type === 'success' ? (result.data?.duplicated as { from: string; to: string } | undefined) : undefined;
+			if (!made) {
+				if (result.type === 'failure') await applyAction(result);
+				return null;
+			}
+			await invalidateAll();
+			swapIn(made.from, made.to);
+			id = made.to;
+		}
+		const patch = data.library.patches.find((p) => p.id === id);
+		const graph = library.find((p) => p.id === id)?.graph;
+		if (!patch || !graph) return null;
+		const given = withParameter(graph, at, data.catalog, library);
+		if (!given) return null;
+		editPatch(patch, { graph: given.graph });
+		return given.param;
+	}
 
 	// Use on track: the patch the Patch view shows, put on the track the Song view chose, in place of what it plays, as one
 	// edit. Only a library timeline can be changed, and an insert has no notes to play, so neither is offered.
@@ -1602,6 +1642,8 @@
 							onkey={(note, on) => soundNote(note, on)}
 							onsay={say}
 							{velocity}
+							catalog={data.catalog}
+							onpatchinput={laneInPatch}
 						/>
 					{/key}
 				{:else}

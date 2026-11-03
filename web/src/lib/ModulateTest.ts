@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { edgeInto, type GraphNode } from '#lib/GraphEdit.ts';
-import { amountParam, modulate, offsetOf, outputRange, readsOnceAFrame, sources } from '#lib/Modulate.ts';
+import {
+	amountParam,
+	modulate,
+	offsetOf,
+	outputRange,
+	patchInputChoices,
+	readsOnceAFrame,
+	sources,
+	withParameter
+} from '#lib/Modulate.ts';
 import { NODE_HELP } from '#lib/NodeHelp.ts';
 import type { Graph } from '#lib/Schema.ts';
 import { nodeCatalog } from '#lib/server/Compile.ts';
@@ -127,5 +136,38 @@ describe('a modulation put in', () => {
 		);
 		expect(done.added.map((id) => node(done.graph, id).type)).toEqual(['param', 'mul', 'add']);
 		expect(edgeInto(done.graph, done.added[1], 'a')).toMatchObject({ from: 6 });
+	});
+});
+
+describe('lanes in the patch', () => {
+	it('offers each input read once a frame that nothing is wired to, by node, under the patch', async () => {
+		const catalog = await nodeCatalog();
+		const choices = patchInputChoices(['lead'], [{ id: 'lead', name: 'Lead', graph: GRAPH }], catalog);
+		expect(choices.map((choice) => choice.name)).toEqual([
+			'Oscillator 2 · freq',
+			'Envelope 3 · attack',
+			'Envelope 3 · decay',
+			'Envelope 3 · sustain',
+			'Envelope 3 · release',
+			'Filter 4 · cutoff',
+			'Filter 4 · q'
+		]);
+		const cutoff = choices.find((choice) => choice.name === 'Filter 4 · cutoff')!;
+		expect(cutoff).toMatchObject({ group: 'In Lead', start: 900, min: 10, max: 20000 });
+		expect(cutoff.input).toEqual({ patch: 'lead', node: 4, input: 'cutoff' });
+	});
+
+	it('gives an input a parameter of its own, at its value, wired from a Parameter node', async () => {
+		const catalog = await nodeCatalog();
+		const given = withParameter(GRAPH, { node: 4, input: 'cutoff' }, catalog, [])!;
+		expect(given.param).toBe(1);
+		expect(given.graph.params).toEqual([
+			{ id: 1, name: 'cutoff', scope: 'track', min: 10, max: 20000, default: 900, smooth_ms: 10 }
+		]);
+		const wire = edgeInto(given.graph, 4, 'cutoff')!;
+		expect(node(given.graph, wire.from)).toMatchObject({ type: 'param', param: 1 });
+		expect(
+			patchInputChoices(['lead'], [{ id: 'lead', name: 'Lead', graph: given.graph }], catalog).map((c) => c.name)
+		).not.toContain('Filter 4 · cutoff');
 	});
 });

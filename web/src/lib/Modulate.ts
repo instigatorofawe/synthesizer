@@ -4,9 +4,23 @@
 // choose (section 5 of Design.md), so the editor offers this and never does it unasked. The snap comes first rather than last,
 // so the multiply and the add are KMul and KAdd, run once a frame, rather than Mul and AddS on every sample: what is heard is
 // the same, since the input reads one value a frame either way, and on a Cortex-M4 it costs a frame's two scalar steps.
-import { addNode, connect, setLiteral, type CatalogInput, type GraphNode } from '#lib/GraphEdit.ts';
-import { helpOf, shown, type InputHelp } from '#lib/NodeHelp.ts';
+import {
+	addNode,
+	connect,
+	edgeInto,
+	freeSpot,
+	inputsOf,
+	nodeHeight,
+	setLiteral,
+	NODE_WIDTH,
+	type CatalogEntry,
+	type CatalogInput,
+	type GraphNode,
+	type LibraryPatch
+} from '#lib/GraphEdit.ts';
+import { friendlyName, helpOf, shown, type InputHelp } from '#lib/NodeHelp.ts';
 import type { Graph, Param } from '#lib/Schema.ts';
+import type { LaneChoice, PatchLike } from '#lib/TimelineEdit.ts';
 
 // The inputs that take audio, as Format.md's opcode table has them: B and E operands. Every other input of these types is an S
 // operand, read once a frame. An oscillator in a "mod" mode is OscMod, all of whose inputs take either.
@@ -153,4 +167,81 @@ export function modulate(
 export function offsetOf(node: GraphNode, input: CatalogInput): number {
 	const own = node.inputs?.[input.name];
 	return typeof own === 'number' ? own : Number(shown(input.default));
+}
+
+// ------------------------------------------------------------------------------------------------------------ in the patch
+
+// "In the patch…", in Add a lane: each input inside the track's patches that is read once a frame and that nothing is wired
+// to, so a lane can move it. Choosing one gives it a parameter (`withParameter`), as Live and Bitwig automate any device's
+// value. A port, a parameter and a subpatch have none of their own to offer.
+const NO_INPUTS: ReadonlySet<string> = new Set(['note', 'param', 'const', 'in', 'out', 'inlet', 'outlet', 'subpatch']);
+
+export function patchInputChoices(
+	slots: readonly string[],
+	patches: PatchLike[],
+	catalog: CatalogEntry[]
+): LaneChoice[] {
+	const choices: LaneChoice[] = [];
+	for (const slot of new Set(slots)) {
+		const patch = patches.find((p) => p.id === slot);
+		if (!patch) continue;
+		for (const node of patch.graph.nodes) {
+			if (NO_INPUTS.has(node.type)) continue;
+			for (const input of inputsOf(node, catalog, patches as LibraryPatch[])) {
+				if (!readsOnceAFrame(node, input.name) || edgeInto(patch.graph, node.id, input.name)) continue;
+				const value = offsetOf(node, input);
+				const { min, max } = span(helpOf(node.type)?.inputs[input.name], value);
+				const name = `${friendlyName(node.type)} ${node.id} · ${input.name}`;
+				choices.push({
+					key: `input:${patch.id}:${node.id}:${input.name}`,
+					label: `${patch.name} ${name}`,
+					group: `In ${patch.name}`,
+					name,
+					min: Math.min(min, value),
+					max: Math.max(max, value),
+					start: value,
+					input: { patch: patch.id, node: node.id, input: input.name }
+				});
+			}
+		}
+	}
+	return choices;
+}
+
+// An input given a parameter of its own: one over the input's range, at the value it had, read by a Parameter node wired to
+// it, which sits to its left where there is room. It is an edit of the patch, as Add parameter and a wire would be, and gives
+// the parameter's id, which a lane then moves.
+export function withParameter(
+	graph: Graph,
+	at: { node: number; input: string },
+	catalog: CatalogEntry[],
+	library: LibraryPatch[]
+): { graph: Graph; param: number } | null {
+	const node = graph.nodes.find((candidate) => candidate.id === at.node);
+	const about = node ? inputsOf(node, catalog, library).find((input) => input.name === at.input) : undefined;
+	if (!node || !about) return null;
+	const value = offsetOf(node, about);
+	const { min, max } = span(helpOf(node.type)?.inputs[at.input], value);
+	const id = Math.max(0, ...graph.params.map((param) => param.id)) + 1;
+	const words = graph.params.map((param) => param.name);
+	let name = at.input;
+	for (let n = 2; words.includes(name); n++) name = `${at.input} ${n}`;
+	const param: Param = {
+		id,
+		name,
+		scope: 'track',
+		min: Math.min(min, value),
+		max: Math.max(max, value),
+		default: value,
+		smooth_ms: 10
+	};
+	const sizeOf = (n: GraphNode) => ({ width: NODE_WIDTH, height: nodeHeight(n, catalog, library) });
+	const want = {
+		x: (typeof node.x === 'number' ? node.x : 0) - NODE_WIDTH - 40,
+		y: (typeof node.y === 'number' ? node.y : 0) - 60
+	};
+	const spot = freeSpot(graph, want, sizeOf({ id: 0, type: 'param' }), sizeOf);
+	const made = addNode({ ...graph, params: [...graph.params, param] }, 'param', spot.x, spot.y);
+	const placed = { ...made.graph, nodes: made.graph.nodes.map((n) => (n.id === made.id ? { ...n, param: id } : n)) };
+	return { graph: connect(placed, made.id, 'out', at.node, at.input), param: id };
 }

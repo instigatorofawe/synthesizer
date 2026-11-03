@@ -789,6 +789,9 @@ export interface LaneChoice {
 	// It moves more than its own track: the mix, an insert or a global. A track with no notes never plays, and the compiler
 	// refuses such a lane on one, as it would be lost without a sound.
 	reaches?: true;
+	// An input inside the track's patch that no parameter reaches yet: choosing it gives the input a parameter of its own, in
+	// the patch, which the lane then moves.
+	input?: { patch: string; node: number; input: string };
 }
 
 const paramsOf = (patch: PatchLike | undefined): Param[] => patch?.graph.params ?? [];

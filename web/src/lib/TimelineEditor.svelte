@@ -5,6 +5,8 @@
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { leavesFields } from '#lib/Fields.ts';
+	import type { CatalogEntry } from '#lib/GraphEdit.ts';
+	import { patchInputChoices } from '#lib/Modulate.ts';
 	import { SPLIT_KEY, keepSplit, keptSplit, splitAt } from '#lib/Split.ts';
 	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
@@ -99,6 +101,8 @@
 		ontempo = () => {},
 		onkey,
 		onsay = () => {},
+		catalog = [],
+		onpatchinput,
 		velocity = 100
 	}: {
 		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
@@ -133,6 +137,8 @@
 		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do
 		onsay?: (text: string) => void; // Says why something typed into a field was refused, where the page says such things
 		velocity?: number; // The velocity of new notes, clicked or stepped, which is the keys' Vel, the page's
+		catalog?: CatalogEntry[]; // The compiler's nodes, for the inputs inside a patch that a lane can be put on
+		onpatchinput?: (at: { patch: string; node: number; input: string }) => Promise<number | null>;
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -178,7 +184,12 @@
 	const voices = $derived(patches.filter((patch) => !patch.graph.nodes.some((node) => node.type === 'in')));
 	const used = $derived(doc.tracks.flatMap((t) => t.slots));
 	const newPatchAction = $derived(onnewpatch && !readonly ? 'New patch for this track' : '');
-	const choices = $derived(laneChoices(doc, home?.id ?? null, patches));
+	// What a lane can move: the patch's parameters, the inserts' and the mix, and in a library song, any input inside the
+	// track's patch, which then gets a parameter of its own.
+	const choices = $derived([
+		...laneChoices(doc, home?.id ?? null, patches),
+		...(onpatchinput && !readonly ? patchInputChoices(home?.slots ?? [], patches, catalog) : [])
+	]);
 	// A track with no notes in any clip is left out of the image, so it never plays.
 	const silent = $derived(!!home && !home.placements.some((p) => doc.clips.find((c) => c.id === p.clip)?.notes.length));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
@@ -1228,6 +1239,7 @@
 							onchange={clipChanged}
 							onaudition={audition}
 							onundo={undo}
+							{onpatchinput}
 							onview={(view, zoomed) => clip && viewed(clip.id, view, zoomed)}
 							{onsay}
 						/>

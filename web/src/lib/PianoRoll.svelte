@@ -3,7 +3,7 @@
 	import AutomationLane from '#lib/AutomationLane.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { followScroll } from '#lib/Follow.ts';
-	import { isMod, onMac } from '#lib/Modifier.ts';
+	import { matches, modHeld, modKey } from '#lib/Shortcuts.ts';
 	import {
 		addNote,
 		addPoint,
@@ -122,6 +122,9 @@
 		return { tick: Math.max(0, Math.floor(at.x / perTick / grid) * grid), note: noteAt(at.y) };
 	}
 
+	// A right-click chooses what it is on and opens its menu, and Ctrl-click is a right-click on a Mac, so neither drags.
+	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && modKey() === 'Meta');
+
 	const describe = (note: Pick<Note, 'tick' | 'note' | 'dur'>) =>
 		`${noteName(note.note)} · ${noteValue(note.dur, ppq)} · ${position(note.tick, ppq)}`;
 
@@ -141,9 +144,8 @@
 		roll.focus({ preventScroll: true });
 		ghost = null;
 		offer = null;
-		// A right-click chooses the note for its menu, and Ctrl-click is a right-click on a Mac.
-		const secondary = event.button !== 0 || (event.ctrlKey && onMac());
-		if (event.shiftKey && !secondary) {
+		const menuing = secondary(event);
+		if (event.shiftKey && !menuing) {
 			const next = new Set(chosen);
 			if (next.has(index)) next.delete(index);
 			else next.add(index);
@@ -151,10 +153,10 @@
 		} else if (!chosen.has(index)) {
 			chosen = new Set([index]);
 		}
-		if (readonly || secondary) return;
+		if (readonly || menuing) return;
 		if (!event.shiftKey) draw = clip.notes[index].dur;
 		const from = canvas(event);
-		if (kind === 'move' && isMod(event)) {
+		if (kind === 'move' && modHeld(event)) {
 			// The copies go on the end, and they are what moves.
 			const order = [...chosen].sort((a, b) => a - b);
 			const base = { ...clip, notes: [...clip.notes, ...order.map((i) => clip.notes[i])] };
@@ -172,7 +174,7 @@
 	function pressGround(event: PointerEvent) {
 		roll.focus({ preventScroll: true });
 		offer = null;
-		if (event.button !== 0 || (event.ctrlKey && onMac())) return;
+		if (secondary(event)) return;
 		if (event.shiftKey) {
 			gesture = { kind: 'band', from: canvas(event), at: canvas(event) };
 			return;
@@ -352,34 +354,35 @@
 		if (chosen.size) onchange(moveNotes(clip, chosen, ticks, notes));
 	}
 
+	// The roll's keys, from the editor's one table of them. Each needs exactly its own modifiers.
 	function keydown(event: KeyboardEvent) {
 		if (readonly) return;
-		const command = event.metaKey || event.ctrlKey;
-		if (event.key === 'Delete' || event.key === 'Backspace') {
+		const by = (id: Parameters<typeof matches>[1]) => matches(event, id);
+		if (by('roll.delete') || by('roll.backspace')) {
 			event.preventDefault();
 			const gone = chosen;
 			chosen = new Set();
 			if (gone.size) onchange(removeNotes(clip, gone));
-		} else if (command && event.key === 'a') {
+		} else if (by('select-all')) {
 			event.preventDefault();
 			chosen = new Set(clip.notes.keys());
-		} else if (command && event.key === 'd') {
+		} else if (by('duplicate')) {
 			event.preventDefault();
 			const copied = duplicateNotes(clip, chosen);
 			chosen = copied.chosen;
 			onchange(copied.clip);
-		} else if (event.key === 'Escape') {
+		} else if (by('escape')) {
 			// The first Esc lets go of what is held or offered, and the next lets go of the notes.
 			if (gesture?.kind === 'draw') chosen = new Set();
 			if (gesture) gesture = null;
 			else if (offer) offer = null;
 			else chosen = new Set();
-		} else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+		} else if (by('roll.up') || by('roll.down') || by('roll.octave-up') || by('roll.octave-down')) {
 			event.preventDefault();
-			nudge(0, (event.key === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1));
-		} else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+			nudge(0, (event.code === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1));
+		} else if (by('roll.earlier') || by('roll.later')) {
 			event.preventDefault();
-			nudge((event.key === 'ArrowLeft' ? -1 : 1) * grid, 0);
+			nudge((event.code === 'ArrowLeft' ? -1 : 1) * grid, 0);
 		}
 	}
 
@@ -480,7 +483,7 @@
 	});
 
 	onMount(() => {
-		mod = onMac() ? '⌘' : 'Ctrl';
+		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
 		// A whole clip if it fits, up to a size where a short one doesn't turn into a few very long notes.
 		beatWidth = Math.min(96, Math.max(16, (scroller.clientWidth - KEYS) / (clip.length / ppq + 1)));
 		const pitches = clip.notes.map((note) => note.note);

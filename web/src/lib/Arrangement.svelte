@@ -17,9 +17,9 @@
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { followScroll } from '#lib/Follow.ts';
 	import Meter from '#lib/Meter.svelte';
-	import { isMod, onMac } from '#lib/Modifier.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
+	import { modHeld, modKey } from '#lib/Shortcuts.ts';
 
 	export interface Selection {
 		track: number | null;
@@ -194,7 +194,7 @@
 	}
 
 	// A right-click chooses what it is on, and Ctrl-click is a right-click on a Mac, so neither starts a drag.
-	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && onMac());
+	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && modKey() === 'Meta');
 
 	function startMove(event: PointerEvent, block: Block) {
 		event.stopPropagation();
@@ -208,7 +208,7 @@
 			grab,
 			tick: block.tick,
 			row: block.row,
-			copy: isMod(event)
+			copy: modHeld(event)
 		};
 	}
 

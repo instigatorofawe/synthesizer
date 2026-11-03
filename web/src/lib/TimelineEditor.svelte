@@ -5,13 +5,12 @@
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
-	import { onMac } from '#lib/Modifier.ts';
 	import PianoRoll from '#lib/PianoRoll.svelte';
 	import Splitter from '#lib/Splitter.svelte';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
-	import { matches } from '#lib/Shortcuts.ts';
+	import { matches, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -274,17 +273,18 @@
 		}
 	};
 
-	// [ and ] step the Draw length. They go by where the keys are, as the piano keys do, and a field keeps them.
+	// [ and ] step the Draw length. They go by where the keys are, as the piano keys do, and a field keeps them. They have
+	// their own listener, so the editor's `keydown` stays as it is.
 	function stepDraw(event: KeyboardEvent) {
-		if (readonly || !active || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-		if (event.code !== 'BracketLeft' && event.code !== 'BracketRight') return;
-		if ((event.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) return;
+		if (readonly || !active || typingIn(event.target)) return;
+		const by = matches(event, 'draw-shorter') ? -1 : matches(event, 'draw-longer') ? 1 : 0;
+		if (!by) return;
 		event.preventDefault();
-		draw = stepLength(draw, doc.ppq, event.code === 'BracketLeft' ? -1 : 1);
+		draw = stepLength(draw, doc.ppq, by);
 	}
 
 	onMount(() => {
-		mod = onMac() ? '⌘' : 'Ctrl';
+		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
 		return on(window, 'keydown', stepDraw);
 	});
 

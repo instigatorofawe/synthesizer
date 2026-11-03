@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ContextMenu from '#lib/ContextMenu.svelte';
-	import { onMac } from '#lib/Modifier.ts';
+	import { matches, modKey } from '#lib/Shortcuts.ts';
 	import { addPoint, laneCurve, removePoint, setPoint, snapTick, type Clip, type Lane } from '#lib/TimelineEdit.ts';
 
 	let {
@@ -67,7 +67,7 @@
 	);
 
 	// A right-click chooses the point for its menu, and Ctrl-click is a right-click on a Mac, so neither drags.
-	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && onMac());
+	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && modKey() === 'Meta');
 
 	function startPoint(event: PointerEvent, index: number) {
 		event.stopPropagation();
@@ -123,11 +123,11 @@
 
 	// Delete in a lane is about its points, so it never reaches the arrangement, where it would take the clip away.
 	function keydown(event: KeyboardEvent) {
-		if (event.key === 'Delete' || event.key === 'Backspace') {
+		if (matches(event, 'roll.delete') || matches(event, 'roll.backspace')) {
 			event.preventDefault();
 			event.stopPropagation();
 			if (!readonly && chosen !== null) removed(chosen);
-		} else if (event.key === 'Escape') {
+		} else if (matches(event, 'escape')) {
 			event.stopPropagation();
 			if (held) held = null;
 			else chosen = null;

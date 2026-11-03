@@ -885,10 +885,10 @@ Notes, clips and points go in as most DAWs take them. A click on empty grid in t
 follows the last note added, resized or chosen, as FL Studio's does, and steps with `[` and `]`. Dragging before letting go sets the length in Snap steps,
 and a ghost under the pointer says what a click would add, as `E4 · 1/8 · 1.4.000`. A click on a lane adds a point, and dragging across an empty row of
 the arrangement draws a clip of whole bars, in the gap it was drawn in. A double-click on empty space adds as well, and on a note or point it deletes
-nothing: Delete or the right-click menu does. Mod-drag copies notes and clips, where Mod is ⌘ on a Mac, whose Ctrl-click is a right-click, and Ctrl
-elsewhere, and no gesture uses Alt. A note past a clip's end grows the clip to the bar that holds it, which says so with an Undo. Here the editor does
-decide what is legal: it won't grow a clip if that would run any placement of it into the next on its track, which the compiler would refuse, and
-offers to lengthen it anyway instead. The roll shows four bars past the end, so there is room to do it.
+nothing: Delete or the right-click menu does. Mod-drag copies notes and clips, as Alt-drag used to, and no gesture uses Alt. A note past a clip's
+end grows the clip to the bar that holds it, which says so with an Undo. Here the editor does decide what is legal: it won't grow a clip if that
+would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
+four bars past the end, so there is room to do it.
 
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
 a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in

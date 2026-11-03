@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test as base, type Page } from '@playwright/test';
-import { fromSongMenu, loopButton, openLight, undoButton } from './Chrome.ts';
+import { fromSongMenu, loopButton, openLight, pianoKey, undoButton } from './Chrome.ts';
 import { engineRenders, goesRound, loudest } from './Engine.ts';
 import { emptyNewSong } from './NewSong.ts';
 import { openView } from './Views.ts';
@@ -563,7 +563,7 @@ test('the computer keyboard plays the patch, Z and X move its octave, and a fiel
 	await page.goto('/?timeline=song');
 	await openView(page, 'patch');
 	await expect(page.getByTestId('hearing')).toContainText('Keys play it on Lead, in the song');
-	const key = (note: number) => page.getByRole('button', { name: String(note), exact: true });
+	const key = (note: number) => pianoKey(page, note);
 	await expect(key(48)).toHaveAttribute('aria-keyshortcuts', 'A');
 	await page.keyboard.down('g'); // G, a fifth above the lowest C, which starts audio as a click on a key does
 	await expect(key(55)).toHaveClass(/down/);

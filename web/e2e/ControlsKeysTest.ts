@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { loopButton, undoButton } from './Chrome.ts';
+import { loopButton, pianoKey, undoButton } from './Chrome.ts';
 import { engineRenders, loudest, settled } from './Engine.ts';
 import { openView } from './Views.ts';
 
@@ -361,7 +361,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 }) => {
 	await newPatch(page, 'Held', tone({ scope: 'track', default: 1 }));
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'alone');
-	const key = (note: number) => page.getByRole('button', { name: String(note), exact: true });
+	const key = (note: number) => pianoKey(page, note);
 
 	// The keys play at the velocity by them: this tone is as loud as its velocity.
 	const velocity = page.getByLabel('Velocity of the keys');

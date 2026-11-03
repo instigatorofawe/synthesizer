@@ -1687,6 +1687,7 @@
 							onwriting={(writing) => (stepWriting = writing)}
 							onsolo={toggleSolo}
 							onkey={(note, on) => started && soundNote(note, on)}
+							onsay={say}
 							bind:velocity
 						/>
 					{/key}

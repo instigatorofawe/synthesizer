@@ -25,20 +25,15 @@
 	import {
 		addNote,
 		addPoint,
-		BEATS_PER_BAR,
 		describeLane,
 		duplicateNotes,
 		growToHold,
 		humanize,
-		isBlackKey,
 		lanesOf,
 		moveNotes,
-		noteName,
 		noteSpan,
-		noteValue,
 		pasteAt,
 		pasteNotes,
-		position,
 		quantize,
 		rampVelocities,
 		removeLane,
@@ -46,14 +41,24 @@
 		resizeNotes,
 		scaleVelocities,
 		setNotes,
-		snapTick,
-		ticksPerBar,
 		type Clip,
 		type LaneChoice,
 		type Note
 	} from '#lib/TimelineEdit.ts';
+	import {
+		BEATS_PER_BAR,
+		isBlackKey,
+		noteName,
+		noteValue,
+		position,
+		snapTick,
+		ticksPerBar,
+		noteLengths,
+		readLength,
+		readPitch,
+		readPosition
+	} from '#lib/Units.ts';
 	import UnitField from '#lib/UnitField.svelte';
-	import { noteLengths, readLength, readPitch, readPosition } from '#lib/Units.ts';
 
 	let {
 		clip,

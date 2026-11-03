@@ -88,19 +88,23 @@
 	onkeydown={keydown}
 	oncontextmenu={(event) => event.preventDefault()}
 >
+	<!-- An item's key is drawn beside it rather than in it, so the item is called what it does, and says its key as
+		 `aria-keyshortcuts`. -->
 	{#each items as item, index (item.label)}
-		<button
-			type="button"
-			role="menuitem"
-			tabindex="-1"
-			data-index={index}
-			disabled={item.disabled}
-			onclick={() => choose(item)}
-			aria-keyshortcuts={item.keys ? ariaKeys(item.keys) : undefined}
-			onpointerenter={(event) => event.currentTarget.focus({ preventScroll: true })}
-			><span>{item.label}</span>{#if item.keys}<span class="keys" aria-hidden="true">{keyLabel(item.keys)}</span
-				>{/if}</button
-		>
+		<div class="item">
+			<button
+				type="button"
+				role="menuitem"
+				tabindex="-1"
+				data-index={index}
+				disabled={item.disabled}
+				class:keyed={!!item.keys}
+				onclick={() => choose(item)}
+				aria-keyshortcuts={item.keys ? ariaKeys(item.keys) : undefined}
+				onpointerenter={(event) => event.currentTarget.focus({ preventScroll: true })}>{item.label}</button
+			>
+			{#if item.keys}<span class="keys" aria-hidden="true">{keyLabel(item.keys)}</span>{/if}
+		</div>
 	{/each}
 </div>
 
@@ -118,10 +122,12 @@
 		box-shadow: 0 6px 18px #00000080;
 		outline: none;
 	}
-	button {
+	.item {
+		position: relative;
 		display: flex;
-		justify-content: space-between;
-		gap: 1.5rem;
+	}
+	button {
+		flex: 1;
 		border: 0;
 		border-radius: 4px;
 		background: transparent;
@@ -130,8 +136,17 @@
 		font-size: 0.8rem;
 		outline: none;
 	}
+	button.keyed {
+		padding-right: 5rem;
+	}
 	.keys {
+		position: absolute;
+		right: 0.6rem;
+		top: 50%;
+		transform: translateY(-50%);
 		color: var(--muted);
+		font-size: 0.75rem;
+		pointer-events: none;
 	}
 	button:focus-visible,
 	button:focus {

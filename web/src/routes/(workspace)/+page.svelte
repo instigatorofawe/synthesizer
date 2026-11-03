@@ -42,24 +42,21 @@
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
 	import { stepVelocity } from '#lib/StepEntry.ts';
-	import { bpmText } from '#lib/TempoLane.ts';
+	import { bpmText, tempoAt, gliding, parseBpm, shownTempo, tempoTyped, tempoWords } from '#lib/Tempo.ts';
 	import {
-		BEATS_PER_BAR,
-		barOf,
 		mixWrites,
 		patchUses,
-		position,
 		addSlot,
 		replacePatch,
 		setSlot,
 		settlingWrites,
 		soloed,
-		tempoAt,
 		trackKey,
 		type PatchUse
 	} from '#lib/TimelineEdit.ts';
+	import { wholeSong } from '#lib/Transport.ts';
+	import { BEATS_PER_BAR, barOf, position, parsePosition } from '#lib/Units.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
-	import { gliding, parseBpm, parsePosition, shownTempo, tempoTyped, tempoWords, wholeSong } from '#lib/Transport.ts';
 	import { playedBy, playedOn, usedBy } from '#lib/UsedBy.ts';
 	import ViewTabs from '#lib/ViewTabs.svelte';
 	import {
@@ -1153,10 +1150,10 @@
 	// What the light lists. Each problem says where it is in words, and its link goes there: a node's opens the Patch view with the
 	// node chosen, and a track's, a clip's or the mix's opens the Song view with it chosen.
 	// A node the address names, as a reload or a link left it, is asked for as the patch opens.
-	let nodeAsked = $state.raw<{ node: number } | null>(
+	let nodeAsked = $state.raw<{ node: number; quiet?: true } | null>(
 		untrack(() => {
 			const node = Number(address.searchParams.get('node'));
-			return Number.isInteger(node) && address.searchParams.has('node') ? { node } : null;
+			return Number.isInteger(node) && address.searchParams.has('node') ? { node, quiet: true } : null;
 		})
 	);
 
@@ -1885,7 +1882,7 @@
 					onsong={() => void show('song')}
 					{useOn}
 					onuse={useOnTrack}
-					bind:keyStrip
+					onstrip={(strip) => (keyStrip = strip)}
 					bind:tab={sideTab}
 					onchosen={nodeChosen}
 					onname={(name) => patchEdited({ name })}

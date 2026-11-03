@@ -1,10 +1,121 @@
+// The song's tempo, in one place: what it is at a tick, the edits to its list of changes, the top bar's field and words, and
+// the Tempo lane's model.
+//
 // The Tempo lane in the song layer, apart from drawing it: what its gestures do to the song's tempo, how far up and down it
 // reaches, and where a tempo is drawn. The song's tempo is a list of changes, each holding until the next or, marked `ramp`,
 // gliding to it. The lane and the inspector's list are two views of that one list, so every edit here is one of the
 // timeline's own, and undoes as any other does.
-import { MAX_BPM, MIN_BPM } from '#lib/Transport.ts';
-import { addTempo, barOf, setTempo, snapTick, tempoAt, type Tempo } from '#lib/TimelineEdit.ts';
+import type { Tempo } from '#lib/TimelineEdit.ts';
+import { barOf, snapTick } from '#lib/Units.ts';
 import type { Timeline } from '#lib/Schema.ts';
+
+export const MIN_BPM = 1;
+export const MAX_BPM = 1000; // What the schema allows
+
+const byTick = (tempo: Tempo[]) => [...tempo].sort((a, b) => a.tick - b.tick);
+
+// In order, and marked as a ramp only where a later change gives it somewhere to go, which the compiler insists on.
+function tidy(tempo: Tempo[]): Tempo[] {
+	const sorted = byTick(tempo);
+	const last = sorted.at(-1)?.tick;
+	return sorted.map(({ ramp, ...change }) => (ramp && change.tick !== last ? { ...change, ramp } : change));
+}
+
+// The tempo at a tick, as the compiler plays it: a change holds until the next, and a ramp glides to the next, linearly in
+// bpm over ticks. The engine takes the ramp in steps of a 1/32 note, which this doesn't show. Before the first change it is
+// the engine's own 120.
+export function tempoAt(tempo: Tempo[], tick: number): number {
+	const sorted = byTick(tempo);
+	const at = sorted.findLastIndex((t) => t.tick <= tick);
+	if (at < 0) return 120;
+	const from = sorted[at];
+	const to = sorted[at + 1];
+	if (!from.ramp || !to) return from.bpm;
+	return from.bpm + ((to.bpm - from.bpm) * (tick - from.tick)) / (to.tick - from.tick);
+}
+
+// A change added inside a ramp carries it on, so at the tempo the ramp had there, it leaves the curve as it was.
+export function addTempo(doc: Timeline, tick: number, bpm: number): Timeline {
+	if (doc.tempo.some((t) => t.tick === tick)) return doc;
+	const before = byTick(doc.tempo).findLast((t) => t.tick < tick);
+	const added: Tempo = before?.ramp ? { tick, bpm, ramp: true } : { tick, bpm };
+	return { ...doc, tempo: tidy([...doc.tempo, added]) };
+}
+
+export function setTempo(doc: Timeline, index: number, change: Partial<Tempo>): Timeline {
+	return { ...doc, tempo: tidy(doc.tempo.map((t, i) => (i === index ? { ...t, ...change } : t))) };
+}
+
+// The first one sets the tempo the song opens at, so it stays.
+export function removeTempo(doc: Timeline, index: number): Timeline {
+	return doc.tempo.length > 1 ? { ...doc, tempo: tidy(doc.tempo.filter((_, i) => i !== index)) } : doc;
+}
+
+// A tempo typed as a number of beats a minute, within what the schema allows.
+export function parseBpm(text: string): number | null {
+	const bpm = Number(text.trim());
+	return text.trim() && Number.isFinite(bpm) && bpm >= MIN_BPM && bpm <= MAX_BPM ? bpm : null;
+}
+
+// Which of the song's tempo changes is in effect at a tick: the latest at or before it. Before the first, the engine plays its own
+// 120 until the first change, and the first is what a tempo typed there changes, since that is where the song's own tempo starts.
+export function tempoIndexAt(tempo: Tempo[], tick: number): number {
+	let found = -1;
+	tempo.forEach((change, index) => {
+		if (change.tick <= tick && (found < 0 || change.tick >= tempo[found].tick)) found = index;
+	});
+	if (found >= 0) return found;
+	return tempo.reduce((first, change, index) => (change.tick < tempo[first].tick ? index : first), 0);
+}
+
+// The change a ramp in effect at a tick glides to, if it is gliding there.
+function rampTo(tempo: Tempo[], index: number): Tempo | undefined {
+	const from = tempo[index];
+	if (!from?.ramp) return undefined;
+	return tempo.filter((change) => change.tick > from.tick).sort((a, b) => a.tick - b.tick)[0];
+}
+
+// What the tempo field shows at a tick: the tempo playing there, to a tenth of a bpm, which a ramp needs and a held tempo doesn't
+// show. While it is typed into it shows the change being edited instead, which inside a ramp is where the glide starts.
+export function shownTempo(tempo: Tempo[], tick: number, editing: boolean): number {
+	if (editing) return tempo[tempoIndexAt(tempo, tick)]?.bpm ?? 120;
+	return Math.round(tempoAt(tempo, tick) * 10) / 10;
+}
+
+// The tempo typed at a tick, as an edit: it changes the change in effect there and no other, so a song with several keeps them.
+export function tempoTyped(doc: Timeline, tick: number, bpm: number): Timeline {
+	const index = tempoIndexAt(doc.tempo, tick);
+	return doc.tempo[index]?.bpm === bpm ? doc : setTempo(doc, index, { bpm });
+}
+
+// What the tempo field's tooltip says about the song's tempo at a tick, and what typing into it changes.
+export function tempoWords(tempo: Tempo[], tick: number, ppq: number): string {
+	const index = tempoIndexAt(tempo, tick);
+	const change = tempo[index];
+	if (!change) return 'The tempo';
+	const to = rampTo(tempo, index);
+	const bar = barOf(change.tick, ppq);
+	// Each says where the rest is: the Tempo lane, above the tracks, which ▸ Tempo unfolds.
+	const lane = 'The Tempo lane above the tracks, which ▸ Tempo unfolds,';
+	if (to) {
+		return (
+			`Gliding from ${change.bpm} BPM at bar ${bar} to ${to.bpm} at bar ${barOf(to.tick, ppq)}. ` +
+			`Typing sets where the glide starts. ${lane} draws the glide.`
+		);
+	}
+	if (tempo.length === 1) {
+		return `The song's tempo. Type another to change it. ${lane} takes more tempos and glides between them.`;
+	}
+	return `The tempo from bar ${bar}, one of the song's ${tempo.length} tempos. Typing changes this one. ${lane} draws them all.`;
+}
+
+// Whether the tempo is gliding at a tick, and which way.
+export function gliding(tempo: Tempo[], tick: number): 'up' | 'down' | null {
+	const index = tempoIndexAt(tempo, tick);
+	const to = rampTo(tempo, index);
+	if (!to || to.bpm === tempo[index].bpm || tick < tempo[index].tick) return null;
+	return to.bpm > tempo[index].bpm ? 'up' : 'down';
+}
 
 export interface TempoRange {
 	low: number; // The BPM at the foot of the lane

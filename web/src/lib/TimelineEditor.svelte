@@ -10,30 +10,18 @@
 	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
 	import UnitField from '#lib/UnitField.svelte';
-	import { barLength, barLengths, readLength, readPosition } from '#lib/Units.ts';
-	import type { ProgramReport } from '#lib/Request.ts';
-	import { ZOOM_KEY, dropGone, gone, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
-	import type { Timeline } from '#lib/Schema.ts';
-	import type { Ring } from '#lib/ScopeMath.ts';
-	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
-	import { clampVelocity, type Cursor } from '#lib/StepEntry.ts';
+	import { addTempo, removeTempo, setTempo, tempoAt } from '#lib/Tempo.ts';
 	import {
 		addClip,
 		addPlayChange,
 		addSlot,
-		addTempo,
 		addTrack,
-		barOf,
 		canGrow,
-		drawLengths,
 		duplicatePlacement,
-		grids,
 		laneChoices,
 		makeUnique,
 		mixWrites,
-		noteValue,
 		place,
-		position,
 		placementIndex,
 		placementSpan,
 		placeOfError,
@@ -41,7 +29,6 @@
 		removePlacement,
 		removePlayChange,
 		removeSlot,
-		removeTempo,
 		removeTrack,
 		renameClip,
 		setClip,
@@ -49,18 +36,33 @@
 		setPlay,
 		setPlayChange,
 		setSlot,
-		setTempo,
-		tempoAt,
 		setTrack,
-		snapTick,
 		soloed,
-		stepLength,
 		trackKey,
 		windowOf,
-		ticksPerBar,
 		type Clip,
 		type PatchLike
 	} from '#lib/TimelineEdit.ts';
+	import {
+		barLength,
+		barLengths,
+		readLength,
+		readPosition,
+		barOf,
+		drawLengths,
+		grids,
+		noteValue,
+		position,
+		snapTick,
+		stepLength,
+		ticksPerBar
+	} from '#lib/Units.ts';
+	import type { ProgramReport } from '#lib/Request.ts';
+	import { ZOOM_KEY, dropGone, gone, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
+	import type { Timeline } from '#lib/Schema.ts';
+	import type { Ring } from '#lib/ScopeMath.ts';
+	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { clampVelocity, type Cursor } from '#lib/StepEntry.ts';
 	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import { landing, type SongPlace } from '#lib/Workspace.ts';
 

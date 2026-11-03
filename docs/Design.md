@@ -1,4 +1,4 @@
-# modsynth design, revision 27
+# modsynth design, revision 28
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -1000,6 +1000,31 @@ end grows the clip to the bar that holds it, which says so with an Undo. Here th
 would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
 four bars past the end, so there is room to do it.
 
+Every key is on a sheet that ? opens, drawn from `Shortcuts.ts`, which the browser's foot and its rail open too, and a menu item shows
+the key that does the same. Mod+K opens a song, an example or a patch by part of its name. Every track head has a menu (Rename, a new
+clip at the playhead, Mute, Solo, Delete track), and so do an empty row of the arrangement (a clip there, or a paste) and the roll
+where there is no note (Paste, Choose all, Fit). The on-screen keys are one Tab stop: the arrows move along them and Enter plays one.
+B gives the browser's filter focus, and Esc in an empty one gives focus back, closing a browser that is over the views. What the
+browser makes takes focus where it opens: a new song's roll, or a new patch's graph. In step entry ↑ and ↓ move the notes of the
+step just written by a semitone, and Shift with them by an octave. The ▾ beside BPM lists the song's tempo changes and goes to one.
+
+The arrangement's ruler, loop strip and song lanes stay at the top as its tracks scroll, and the roll has a ruler of its clip's bars
+and beats, which stays as its rows scroll. Snap and Draw offer triplets, 1/4T, 1/8T and 1/16T, which a length field reads and writes
+too. The roll's zoom, Fit, the chosen notes' fields and its hint sit in the tab strip, which gives the notes the row they had. The
+velocity strip and the lanes fold, and stay as they were left. A note's body is shaded by its velocity, a stem says its velocity, and
+a drag across the strip says what it sets. A lane shows where a click would add a point, and its choices are grouped under what they
+belong to: the track's patch, each insert, and the mix. The tempo field's tooltip names the Tempo lane, whose head is 12 px text, and
+the unfolded lane says how to add a change and how to glide to the next until the song has one of each.
+
+The Patch view puts the patch shown on the track the Song view chose, with Use on that track, as one edit. New patch numbers a name
+that is taken ("Bass 2"). The browser's built-in patches are grouped under the examples' headings. Each node shows the values of
+the inputs no wire feeds, brighter where the node sets one itself, and a drag across a value changes it, along the input's range and
+logarithmically where its slider would be, with Shift a tenth as fast. A click on a value goes to its field. A snap put on a wire
+too short for one makes room by moving what is from the input's node rightwards a column, and Tidy keeps the out node in sight when
+the graph is too wide to fit. Keys, in the Patch view's header, draws the keys across the view's foot, bigger and as many octaves as
+fit, with the computer keys' letters on them. The address keeps Expand (`expand=1`), the chosen node (`node`) and the JSON tab
+(`side=json`), so a reload comes back to them. Undo keeps at most 20 MB of each document's steps, and the JSON fields don't wrap.
+
 The fields read as music while the document holds ticks and MIDI numbers (`Units.ts`). A position reads as bar.beat.tick, as the ghost does,
 counted from the clip's start inside a clip, as the roll's ruler is, and from the song's for a placement. A pitch reads as a name and a
 length as a note value, a clip's and a window's in bars. Each takes what a musician would type: a bar or bar.beat, `E4`, `F#3`, `Bb2` or a
@@ -1101,7 +1126,7 @@ switches it between holding until the next change and gliding to it. ↑ and ↓
 Delete takes it away, except the first. Each gesture is one step of undo, and as with a fader the song compiles when a drag is let go,
 while the curve and the top bar's tempo follow it. An example's lane can be unfolded and read, not changed. Which lanes are unfolded is
 the editor's, kept in localStorage for each timeline, never in the document. Time signatures, open 26, and markers would each be a lane
-here once the format has a field for them. The rules are pure functions in `TempoLane.ts`.
+here once the format has a field for them. The rules are pure functions in `Tempo.ts`.
 
 Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the song's image. A take is the exception: while
 one runs the image keeps every track, so a track recorded into from nothing plays from its first note. `live` keeps unused tracks, so it could pass a document
@@ -1580,6 +1605,37 @@ fixes without changing the format or the compiler. Choices made here that the us
   its release, both oscillators at zero phase, so a looped A4 at 120 BPM, a whole number of cycles a bar, adds in phase to 1.84 times at
   every wrap, in any image. A live swap adds nothing. The test's tone now has a 0.1 ms release. Whether the engine should reuse the
   releasing voice is the postmortem's decision 16, recommended no.
+
+**Built from what the postmortem left that needed no decision** (revision 28), as section 19 describes. None of it changes the
+format or the compiler. Choices made here that the user hasn't weighed in on:
+- **The sheet of shortcuts** is ?, which is Shift+/ where a key is matched by its place. It lists the gestures that a key changes too.
+- **Quick open** is Mod+K, which also works from a field. It finds the library's songs, the examples and every patch, the library's
+  before the built-in ones, and ranks a name that starts with what was typed, then one with a word that does, then any that holds it.
+- **The head menu's Rename** types into the head, and a double-click on the head's name does too. **New clip at the playhead** is four
+  bars, as New clip's is, and **New clip here** on an empty row is a bar, as a double-click's is.
+- **The keys' Enter** plays the key with focus for as long as it is held, as a click does.
+- **B** gives the filter focus each time it opens the browser, which a rail's button doesn't, so a click there keeps focus where it was.
+- **Step entry's ↑ and ↓** move only the notes the last step wrote that are still as it wrote them, so Backspace still takes them back.
+- **Triplets** read as triplets for one or two of them down to a 1/32T, and as ticks past that: five 1/16Ts are "400 ticks". [ and ]
+  step through the straight lengths, so a triplet steps to the one beside it.
+- **The roll's ruler** counts the clip's own bars from 1, not the song's, since a clip can be placed at several. It names beats once a
+  beat is 48 px wide.
+- **The tab strip** keeps its tabs at the left and Step and ⤢ at the right, and the roll's toolbar scrolls between them where it can't fit.
+- **The velocity strip and the lanes** are folded for the page, not for each clip, and remembered in the browser.
+- **A note's shade** runs from 45% to full by velocity, so a soft note is still seen.
+- **A lane's ghost** says the value and the position a click would add, and shows nowhere a point is already.
+- **Use on track** puts the patch in the track's first slot, and isn't offered for an insert, an example, or the track that plays it.
+- **A new patch's name** is numbered only from the browser's and a track's New patch; a copy is still "copy", as before.
+- **Values on nodes** show four figures and a unit of up to three letters. A drag goes across an input's whole range in 200 px, or by
+  the value's own size where the input has no range.
+- **Making room for a snap** moves the nodes from the input's node rightwards by a node's width and a margin, as one edit with the snap.
+- **The key strip** is folded until Keys is pressed, and remembered. Its keys start so that those the computer keys play are in the
+  middle.
+- **The address** writes `node` only for one node chosen, and drops it when another patch opens. `side` is only ever `json`.
+- **Undo** forgets a document's oldest steps past 20 MB, but always keeps the last.
+- **An example's one patch** is called after the example, as its built-in copy is, rather than "p".
+- **Decibels** are formatted in one place, which keeps "silent" in words and "-∞" in a head's figure until decision 18.
+- **Units and tempo** each have one module, `Units.ts` and `Tempo.ts`, and the helpers nothing called are gone.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

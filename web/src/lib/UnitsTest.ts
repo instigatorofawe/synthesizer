@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { noteName, noteValue, position } from '#lib/TimelineEdit.ts';
 import {
+	noteName,
+	noteValue,
+	position,
 	barLength,
 	barLengths,
 	noteLengths,

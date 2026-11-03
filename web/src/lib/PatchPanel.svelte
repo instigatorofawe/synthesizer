@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance, type SubmitFunction } from '$app/forms';
+	import { onMount } from 'svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
 	import GraphEditor, { type SideTab } from '#lib/GraphEditor.svelte';
@@ -44,7 +45,7 @@
 		onsong,
 		useOn = null,
 		onuse = () => {},
-		keyStrip = $bindable(null),
+		onstrip = () => {},
 		tab = $bindable('patch'),
 		onchosen = () => {},
 		onname,
@@ -87,7 +88,7 @@
 		onsong: () => void; // Back to the Song view
 		useOn?: { id: number; name: string } | null; // The track the Song view chose, if this patch can go on it
 		onuse?: () => void; // Puts this patch on that track, in place of what it plays
-		keyStrip?: HTMLElement | null; // The strip at the foot, while it is open, which the page's keys are drawn into
+		onstrip?: (strip: HTMLElement | null) => void; // The strip at the foot while it is open, which the page's keys are drawn into
 		tab?: SideTab; // What the side column shows, kept by the page from one patch to the next, and in the address
 		onchosen?: (node: number | null) => void; // The one node chosen in the graph, for the address
 		onname: (name: string) => void;
@@ -132,7 +133,7 @@
 	// left, across patches and visits.
 	const STRIP_KEY = 'modsynth.keystrip';
 	let stripOpen = $state(false);
-	$effect(() => {
+	onMount(() => {
 		stripOpen = localStorage.getItem(STRIP_KEY) === 'open';
 	});
 	function toggleStrip() {
@@ -141,7 +142,7 @@
 	}
 	let strip = $state<HTMLElement | null>(null);
 	$effect(() => {
-		keyStrip = stripOpen && patch ? strip : null;
+		onstrip(stripOpen && patch ? strip : null);
 	});
 </script>
 

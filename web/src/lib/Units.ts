@@ -1,10 +1,99 @@
-import { BEATS_PER_BAR, noteValue, position } from '#lib/TimelineEdit.ts';
-import { parsePosition } from '#lib/Transport.ts';
+import type { Timeline } from '#lib/Schema.ts';
 
-// The fields that hold a time, a pitch or a length read as music, and take what a musician would type. A position reads as
+// Musical units, in one place: bars and beats, positions, note names and values, Snap's and Draw's choices, and what a
+// musician types for each. The fields that hold a time, a pitch or a length read as music, and take what a musician would type. A position reads as
 // bar.beat.tick, as the ghost note and the top bar's field do (`position` and Transport's `parsePosition`), a pitch as a name
 // (`noteName`) and a length as a note value (`noteValue`). The document still holds ticks and MIDI numbers: these only read and
 // write them.
+
+// The grid is 4/4 and nothing stores that. A document holds ticks, so a time signature would change how it is drawn and
+// nothing about how it plays.
+export const BEATS_PER_BAR = 4;
+export const ticksPerBar = (doc: Pick<Timeline, 'ppq'>) => doc.ppq * BEATS_PER_BAR;
+
+// Snap's choices. A triplet, T, puts three in the time of two, so 1/8T is a third of a beat. Those this ppq can't hold in whole
+// ticks are left out.
+export function grids(ppq: number) {
+	const each = (beats: number) => Math.max(1, Math.round(ppq * beats));
+	const triplet = (label: string, beats: number) =>
+		Number.isInteger(ppq * beats) && ppq * beats >= 1 ? [{ label, ticks: ppq * beats }] : [];
+	return [
+		{ label: 'Bar', ticks: each(BEATS_PER_BAR) },
+		{ label: '1/4', ticks: each(1) },
+		...triplet('1/4T', 2 / 3),
+		{ label: '1/8', ticks: each(1 / 2) },
+		...triplet('1/8T', 1 / 3),
+		{ label: '1/16', ticks: each(1 / 4) },
+		...triplet('1/16T', 1 / 6),
+		{ label: '1/32', ticks: each(1 / 8) },
+		{ label: 'Off', ticks: 1 }
+	];
+}
+
+export const snapTick = (tick: number, grid: number) => Math.max(0, Math.round(tick / grid) * grid);
+
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+// With 60 as C4, which is what most tools show and all that a name can do here: the engine only sees the number.
+export const noteName = (note: number) => `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
+export const isBlackKey = (note: number) => NOTE_NAMES[note % 12].length > 1;
+
+export const barOf = (tick: number, ppq: number) => Math.floor(tick / (ppq * BEATS_PER_BAR)) + 1;
+
+// Where a tick falls as bar.beat.tick, with bars and beats counted from 1 and the tick from 0, as most DAWs show it: 1.4.000 is
+// the last beat of the first bar.
+export function position(tick: number, ppq: number): string {
+	const beat = Math.floor(tick / ppq);
+	const bar = Math.floor(beat / BEATS_PER_BAR) + 1;
+	return `${bar}.${(beat % BEATS_PER_BAR) + 1}.${String(tick % ppq).padStart(3, '0')}`;
+}
+
+const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+
+// A length as a note value: 1/8, 3/16, 1 bar. A bar is a whole note, as 4/4 has it. A length that no note value down to a
+// 1/128 can name, a triplet's or one typed in, stays in ticks.
+export function noteValue(ticks: number, ppq: number): string {
+	const whole = ppq * BEATS_PER_BAR;
+	const common = gcd(ticks, whole);
+	const [over, under] = [ticks / common, whole / common];
+	const twos = (n: number) => n <= 128 && (n & (n - 1)) === 0;
+	if (under === 1) return over === 1 ? '1 bar' : `${over} bars`;
+	if (twos(under)) return `${over}/${under}`;
+	// A triplet's third is in its denominator: a 1/8T, a third of a beat, is 1/12 of a bar. One or two of them read as a
+	// triplet, down to a 1/32T, and more read as ticks, which says more than 25/32T would.
+	if (under % 3 === 0 && twos(under / 3) && under <= 48 && over <= 2) return `${over}/${(under / 3) * 2}T`;
+	return ticks === 1 ? '1 tick' : `${ticks} ticks`;
+}
+
+// What the Draw length offers, a 1/32 note to a bar, and the 1/16, 1/8 and 1/4 triplets: those this ppq can hold in whole
+// ticks, shortest first.
+export function drawLengths(ppq: number, triplets = true): { label: string; ticks: number }[] {
+	const straight = [32, 16, 8, 4, 2, 1].map((under) => (ppq * BEATS_PER_BAR) / under);
+	const thirds = triplets ? [24, 12, 6].map((under) => (ppq * BEATS_PER_BAR) / under) : [];
+	return [...straight, ...thirds]
+		.filter((ticks) => Number.isInteger(ticks))
+		.sort((a, b) => a - b)
+		.map((ticks) => ({ label: noteValue(ticks, ppq), ticks }));
+}
+
+// The Draw length one step shorter or longer than this one, which needn't be one of them. It stops at either end. [ and ] step
+// through the straight lengths, so a triplet steps to the straight one beside it.
+export function stepLength(ticks: number, ppq: number, by: -1 | 1): number {
+	const lengths = drawLengths(ppq, false).map((length) => length.ticks);
+	const next = by > 0 ? lengths.find((length) => length > ticks) : lengths.findLast((length) => length < ticks);
+	return next ?? ticks;
+}
+
+// A position typed as bar.beat.tick, bars and beats counted from 1 and the tick from 0, as the ghost note and the field read it.
+// A bar alone, or a bar and a beat, will do, and a space, a colon or a comma can stand for a dot. A beat past the bar's last or a
+// tick past the beat's last is no position, rather than a guess at what was meant.
+export function parsePosition(text: string, ppq: number): number | null {
+	const parts = text.trim().split(/\s*[.:,]\s*|\s+/);
+	if (parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return null;
+	const [bar, beat = 1, tick = 0] = parts.map(Number);
+	if (bar < 1 || beat < 1 || beat > BEATS_PER_BAR || tick >= ppq) return null;
+	return ((bar - 1) * BEATS_PER_BAR + beat - 1) * ppq + tick;
+}
 
 const LETTERS: Record<string, number> = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 };
 

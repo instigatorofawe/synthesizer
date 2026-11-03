@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { timelineSchema, type Timeline } from '#lib/Schema.ts';
+import { addTempo, removeTempo, setTempo, tempoAt } from '#lib/Tempo.ts';
 import {
 	addBus,
 	addClip,
@@ -9,20 +10,16 @@ import {
 	addPlayChange,
 	addPoint,
 	addSend,
-	addTempo,
 	addTrack,
-	barOf,
 	busKey,
 	byOwner,
 	canGrow,
 	copiedSpan,
 	describeLane,
 	drawnClip,
-	drawLengths,
 	duplicateClip,
 	duplicateNotes,
 	duplicatePlacement,
-	grids,
 	growToHold,
 	laneChoices,
 	laneCurve,
@@ -35,16 +32,13 @@ import {
 	moveInsert,
 	moveNotes,
 	movePlacement,
-	noteName,
 	noteSpan,
-	noteValue,
 	pasteAt,
 	pasteNotes,
 	pastePlacement,
 	patchUses,
 	place,
 	placeOfError,
-	position,
 	removeBus,
 	removeClip,
 	removeInsert,
@@ -54,7 +48,6 @@ import {
 	removePlacement,
 	removePlayChange,
 	removeSend,
-	removeTempo,
 	removeTrack,
 	renameClip,
 	replacePatch,
@@ -78,13 +71,9 @@ import {
 	setPlay,
 	setPlayChange,
 	settlingWrites,
-	setTempo,
 	setTrack,
-	tempoAt,
-	snapTick,
 	soloed,
 	songLength,
-	stepLength,
 	trackKey,
 	type Clip,
 	type Lane,
@@ -92,6 +81,7 @@ import {
 	type PatchLike,
 	type Point
 } from '#lib/TimelineEdit.ts';
+import { barOf, drawLengths, grids, noteName, noteValue, position, snapTick, stepLength } from '#lib/Units.ts';
 
 // A point given a ramp as a document can hold it, for the lanes' own tests to draw.
 const ramped = (clip: Clip, index: number, change: { ramp: number; curve?: 'exp' }): Clip => ({

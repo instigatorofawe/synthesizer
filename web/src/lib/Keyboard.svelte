@@ -6,7 +6,7 @@
 	import { baseAfter, belongsElsewhere, keyFor, noteForKey } from '#lib/KeyboardKeys.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { clampVelocity } from '#lib/StepEntry.ts';
-	import { isBlackKey, noteName } from '#lib/TimelineEdit.ts';
+	import { isBlackKey, noteName } from '#lib/Units.ts';
 
 	// Two octaves of keys in the top bar, for whichever view is on screen to play. Each key is a button named by its note,
 	// and the computer keyboard plays them too: A to ' from the lowest C shown, with Z and X moving the keys an octave.
@@ -118,7 +118,7 @@
 
 	function keyKeys(event: KeyboardEvent, note: number) {
 		const at = notes.indexOf(note);
-		let to: number | null = null;
+		let to: number;
 		if (event.key === 'ArrowRight' || event.key === 'ArrowUp') to = Math.min(notes.length - 1, at + 1);
 		else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') to = Math.max(0, at - 1);
 		else if (event.key === 'Home') to = 0;

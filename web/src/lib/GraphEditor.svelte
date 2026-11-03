@@ -88,7 +88,9 @@
 		maxProbes: number;
 		readonly?: boolean; // For looking at: a node can be chosen and probed, and nothing changes
 		active?: boolean; // Whether keys are for this editor, when it shares a page with others
-		choose?: { node: number } | null; // A node to choose and bring into view, asked for from outside, each time a new one
+		// A node to choose and bring into view, asked for from outside, each time a new one. `quiet` leaves the side column on the
+		// tab it is on, as the address does when it names a node and the JSON tab both.
+		choose?: { node: number; quiet?: true } | null;
 		onchosen?: (node: number | null) => void; // The one node chosen, or null for none or several, for the address
 		tab?: SideTab; // What the side column shows, kept by the page from one patch to the next
 		side?: Snippet; // Drawn above the inspector
@@ -799,7 +801,7 @@
 			const node = laid.nodes.find((candidate) => candidate.id === asked.node);
 			if (!node) return;
 			select([node.id]);
-			tab = 'node';
+			if (!asked.quiet) tab = 'node';
 			reveal(node);
 		});
 	});

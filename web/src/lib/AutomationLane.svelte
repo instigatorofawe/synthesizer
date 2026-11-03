@@ -7,18 +7,15 @@
 		laneCurve,
 		lanePoints,
 		lanesOf,
-		noteValue,
-		position,
 		removeLanePoint,
 		setLanePoint,
-		snapTick,
 		type Clip,
 		type Lane,
 		type LanePoint,
 		type Shape
 	} from '#lib/TimelineEdit.ts';
+	import { noteValue, position, snapTick, noteLengths, readLength, readPosition } from '#lib/Units.ts';
 	import UnitField from '#lib/UnitField.svelte';
-	import { noteLengths, readLength, readPosition } from '#lib/Units.ts';
 
 	let {
 		clip,

@@ -20,9 +20,11 @@
 		tempoThere,
 		toggleGlide,
 		yToBpm,
-		type TempoSegment
-	} from '#lib/TempoLane.ts';
-	import { barOf, position, removeTempo, snapTick, type Tempo } from '#lib/TimelineEdit.ts';
+		type TempoSegment,
+		removeTempo
+	} from '#lib/Tempo.ts';
+	import type { Tempo } from '#lib/TimelineEdit.ts';
+	import { barOf, position, snapTick } from '#lib/Units.ts';
 
 	// The song's tempo as a lane of the song layer, over the arrangement's bars, so the playhead and the bar lines pass through
 	// it. Folded it is a thin row of flags, each change's BPM where it starts, with a slope where one glides to the next, so the

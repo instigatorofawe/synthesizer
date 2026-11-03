@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { onMount, tick as settle } from 'svelte';
+	import { bpmText, tempoRange } from '#lib/Tempo.ts';
 	import {
-		barOf,
 		copiedSpan,
 		drawnClip,
 		movePlacement,
-		noteValue,
 		pasteAt,
 		pastePlacement,
 		place,
@@ -13,15 +12,15 @@
 		removeTrack,
 		setPlacement,
 		setTrack,
-		snapTick,
 		songLength,
-		ticksPerBar,
 		windowOf,
 		type Clip,
 		type PatchLike,
 		type Tempo,
 		type Track
 	} from '#lib/TimelineEdit.ts';
+	import { wholeSong } from '#lib/Transport.ts';
+	import { barOf, noteValue, snapTick, ticksPerBar } from '#lib/Units.ts';
 	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { escapeCancels } from '#lib/Drag.ts';
@@ -35,8 +34,6 @@
 	import { LANES_KEY, SONG_LANES, keepOpen, keptOpen, laneHeight, layerHeight } from '#lib/SongLayer.ts';
 	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import TempoLane from '#lib/TempoLane.svelte';
-	import { bpmText, tempoRange } from '#lib/TempoLane.ts';
-	import { wholeSong } from '#lib/Transport.ts';
 
 	export interface Selection {
 		track: number | null;

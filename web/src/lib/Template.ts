@@ -2,7 +2,8 @@
 // bar 1, which the editor opens in the roll. So the keys play something at once, and a click in the roll adds a note that is
 // heard. It is an ordinary timeline, which saves, undoes and compiles as any other, so nothing about it is special after that.
 import { EMPTY_TIMELINE, type Timeline } from '#lib/Schema.ts';
-import { addClip, addTrack, place, ticksPerBar } from '#lib/TimelineEdit.ts';
+import { addClip, addTrack, place } from '#lib/TimelineEdit.ts';
+import { ticksPerBar } from '#lib/Units.ts';
 
 // The tine electric piano Für Elise is played on. An electric piano is what Logic and GarageBand open a new song with: it
 // sounds right on its own, with no insert or bus behind it, and it answers velocity. It has no recordings to fetch, so the

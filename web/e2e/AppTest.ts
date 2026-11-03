@@ -650,6 +650,12 @@ async function newPatch(page: Page, name: string) {
 
 const shownPatchId = (page: Page) => new URL(page.url()).searchParams.get('patch')!;
 
+// Far enough that all of a new patch is on the canvas.
+async function zoomGraphOut(page: Page) {
+	await patchEditor(page).getByRole('button', { name: 'Zoom the graph out' }).click();
+	await patchEditor(page).getByRole('button', { name: 'Zoom the graph out' }).click();
+}
+
 async function drag(page: Page, from: string, to: string) {
 	const start = await page.getByTestId(from).boundingBox();
 	const end = await page.getByTestId(to).boundingBox();
@@ -681,8 +687,9 @@ test('a wire drawn by hand compiles, and an error lands on its node until it is 
 test('a node added from the toolbar is set up from the inspector', async ({ page }) => {
 	await newPatch(page, 'Built from parts');
 	const editor = patchEditor(page);
-	await editor.getByLabel('Node type').selectOption('math');
-	await editor.getByRole('button', { name: 'Add node' }).click();
+	await editor.getByRole('button', { name: '+ Node' }).click();
+	await editor.getByRole('combobox', { name: 'Search nodes' }).fill('math');
+	await page.keyboard.press('Enter');
 	await expect(page.getByTestId('node-7')).toHaveAttribute('data-dead', 'true');
 	await editor.getByLabel('mode', { exact: true }).selectOption('clip');
 	await expect(page.getByTestId('in-7-c')).toBeAttached();
@@ -696,6 +703,7 @@ test('a node added from the toolbar is set up from the inspector', async ({ page
 
 test('a moved node stays where it was put', async ({ page }) => {
 	await newPatch(page, 'Rearranged');
+	await zoomGraphOut(page); // Text is never drawn too small to read, so the out node is off the canvas until then
 	const before = await page.getByTestId('node-6').getAttribute('transform');
 	const box = await page.getByRole('button', { name: 'out 6' }).boundingBox();
 	await page.mouse.move(box!.x + 40, box!.y + 8);
@@ -714,9 +722,11 @@ test('a patch uses another as a subpatch, and it plays', async ({ page }) => {
 	await newPatch(page, 'Part');
 	const part = shownPatchId(page);
 	await newPatch(page, 'Whole');
+	await zoomGraphOut(page);
 	const editor = patchEditor(page);
-	await editor.getByLabel('Node type').selectOption('subpatch');
-	await editor.getByRole('button', { name: 'Add node' }).click();
+	await editor.getByRole('button', { name: '+ Node' }).click();
+	await editor.getByRole('combobox', { name: 'Search nodes' }).fill('subpatch');
+	await page.keyboard.press('Enter');
 	await editor.getByLabel('patch', { exact: true }).selectOption(part);
 	await expect(page.getByTestId('out-7-l')).toBeAttached();
 	await drag(page, 'out-7-l', 'in-6-r');
@@ -819,7 +829,7 @@ test("every example's patches are in the library from the start, and can't be ch
 	await expect(patchEditor(page).getByText('built in', { exact: true })).toBeVisible();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Delete patch' })).toHaveCount(0);
-	await expect(page.getByRole('button', { name: 'Add node' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: '+ Node' })).toHaveCount(0);
 	await expect(await graphJson(page)).not.toBeEditable();
 	await expect(
 		browser(page)
@@ -878,11 +888,12 @@ test('a recipe shows the patch it is made of, with nothing to change', async ({ 
 	await expect(page.locator('path.wire.audio').first()).toBeAttached();
 	await expect(page.locator('path.wire.control').first()).toBeAttached();
 	await expect(page.getByTestId('patch-use')).toContainText('the voice of track 1');
-	await expect(page.getByRole('button', { name: 'Add node' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: '+ Node' })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Delete patch' })).toHaveCount(0);
 
 	const node = page.locator('g.node:has(text:has-text("osc"))').first();
-	await node.locator('rect.title').click();
+	await node.locator('rect.title').focus(); // From the keyboard, which reaches a node off the canvas
+	await page.keyboard.press('Enter');
 	await expect(patchEditor(page).locator('aside.inspector select').first()).toBeDisabled();
 	await expect(page.getByRole('button', { name: 'Delete node' })).toHaveCount(0);
 
@@ -1687,7 +1698,8 @@ test("a probe stops when another patch is chosen, even one that can't be probed"
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await openView(page, 'patch');
 	await page.getByRole('group', { name: 'Patches in this recipe' }).getByRole('button', { name: 'pad' }).click();
-	await page.locator('g.node:has(text:has-text("env"))').first().locator('rect.title').click();
+	await page.locator('g.node:has(text:has-text("env"))').first().locator('rect.title').focus(); // Off the canvas
+	await page.keyboard.press('Enter');
 	await page.getByRole('button', { name: 'Probe out' }).click();
 	const label = page.locator('span').filter({ hasText: /env\.out$/ });
 	await expect(label).toBeVisible();

@@ -896,6 +896,18 @@ changes no hash. It takes its node table from the compiler's catalog, the table 
 from section 13, which colours wires by rate, dims nodes that compiled away and places probes. An error's `where` names its node, and an error inside a subpatch lands on
 the subpatch. The compiler stops at the first error, so an editor shows one at a time. The JSON stays on the page, and text that doesn't parse leaves the last drawing alone.
 
+- A node shows a name a person looks for, such as Filter, over the compiler's, biquad. Those names, a group, a line on what each node does, other words
+  for it and each input's unit and range are a table in the web app, `NodeHelp.ts`, which a test holds to the catalog in both directions. A range is the
+  clamp `docs/Format.md` gives, and an input with none written down shows none. The catalog could carry them, but that would be a compiler change for
+  nothing an image holds.
+- Fit never draws text smaller than 11 CSS pixels, and what doesn't fit is panned to: at 1280 by 800 it had drawn the graph's text at 5. A wheel or two
+  fingers pan, as they scroll a page, and Mod with the wheel or a pinch zooms where the pointer is. Wires read once a frame are dashed as well as blue.
+- A node is added from one search, which a double-click on empty canvas, N, + Node, or a wire let go of on empty canvas opens. It finds a node by any of
+  its names, other words for it or what it does, so "filter" finds biquad. The node lands at the pointer, the wire's end or beside the chosen node, at
+  the nearest place that covers no other node, and one from a wire arrives wired to its first input. Tidy lays the graph out again as one edit.
+- A rate error offers to put a snap on its wire, as one edit, and never puts one in unasked, since section 5 leaves that choice to the patch's author.
+  A node that compiled away says why where the graph shows it, which is when none of its wires lead to the out node.
+
 **The timeline editor.** Arrangement, piano roll, lanes and mixer are views of one document, which stays on the page as JSON. Every edit is a pure function from a document to a document, so undo is a list of
 old ones, and as in the graph editor these decide little about what is legal: overlapping clips can be drawn, and the compiler says what is wrong and marks the track. What an edit does take care of is references, so
 deleting a bus takes its sends, outputs, sidechains and lanes with it. Placements stay in tick order, because the compiler takes one that goes backwards for an overlap. The grid is 4/4, and nothing stores that:

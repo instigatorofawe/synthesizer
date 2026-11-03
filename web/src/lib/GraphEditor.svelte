@@ -3,11 +3,14 @@
 	import {
 		addNode,
 		addZone,
+		COLUMN,
 		connect,
 		detailOf,
 		disconnect,
 		edgeInto,
+		freeSpot,
 		inputsOf,
+		insertSnap,
 		moveNode,
 		NODE_HEADER,
 		NODE_WIDTH,
@@ -17,19 +20,26 @@
 		parseCurve,
 		placed,
 		PORT_SPACING,
+		rateErrorInput,
 		removeNode,
 		removeZone,
 		setField,
 		setLiteral,
 		setOption,
 		setZone,
+		tidy,
+		whyCompiledAway,
 		zonesOf,
 		type CatalogEntry,
 		type GraphNode,
-		type LibraryPatch
+		type LibraryPatch,
+		type Point
 	} from '#lib/GraphEdit.ts';
+	import { friendlyName, helpOf, rangeText, shown } from '#lib/NodeHelp.ts';
+	import NodePalette from '#lib/NodePalette.svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { Undoable } from '#lib/History.ts';
+	import { matches, modHeld, typingIn } from '#lib/Shortcuts.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 
@@ -69,25 +79,61 @@
 		onprobes: (probes: Probe[]) => void;
 	} = $props();
 
-	type Point = { x: number; y: number };
 	type Gesture =
 		| { kind: 'pan'; from: Point; view: Point }
 		| { kind: 'move'; id: number; offset: Point; at: Point }
 		| { kind: 'wire'; from: number; port: string; start: Point; at: Point };
 
+	// The node search, open. A node it adds goes at `at` or the nearest free place, and one opened from a wire dropped on empty
+	// canvas arrives wired from that output.
+	type Palette = {
+		left: number; // Where the search opens, in CSS pixels from the canvas's top left
+		top: number;
+		at: Point;
+		wire: { from: number; port: string; start: Point; end: Point } | null;
+		back: HTMLElement | SVGElement | null; // What had focus, which gets it back
+	};
+
+	// The smallest text on the canvas is a port's label, 11 units high. Fit never draws it below 11 CSS pixels, about as small as
+	// text on a laptop can be read, and what doesn't fit is panned to. Zooming by hand goes further either way.
+	const SMALLEST_TEXT = 11;
+	const READABLE_PX = 11;
+	const FIT_FLOOR = READABLE_PX / SMALLEST_TEXT;
+	const FIT_CEILING = 1.5; // A graph of two nodes isn't blown up to fill the canvas
+	const ZOOM_MIN = 0.2;
+	const ZOOM_MAX = 3;
+	const ZOOM_STEP = 1.25;
+	const MARGIN = 40; // Around a fitted graph, which leaves room for a message under a node
+	const PALETTE_WIDTH = 300;
+	const PALETTE_HEIGHT = 340; // At most: the search and a list of 280 pixels
+
 	let svg: SVGSVGElement;
-	let view = $state({ x: -30, y: -30, width: 1000, height: 560 });
-	let aspect = 0.56; // Of the canvas on screen, height over width, so the view fills it without bars
+	let size = $state({ width: 1000, height: 560 }); // Of the canvas on screen, in CSS pixels
+	let view = $state({ x: -30, y: -30, scale: 1 }); // The graph point at the canvas's top left, and CSS pixels to a unit
 	let selected = $state<number | null>(null);
 	let gesture = $state<Gesture | null>(null);
-	let adding = $state('osc');
+	let palette = $state<Palette | null>(null);
+	let hover: { x: number; y: number } | null = null; // The pointer over the canvas, where N opens the search
 	const canUndo = $derived(history?.canUndo ?? false);
 	const canRedo = $derived(history?.canRedo ?? false);
 
-	const laid = $derived(placed(graph));
+	const heightOf = (node: GraphNode) => nodeHeight(node, catalog, library);
+	const sizeOf = (node: GraphNode) => ({ width: NODE_WIDTH, height: heightOf(node) });
+	const laid = $derived(placed(graph, heightOf));
 	const others = $derived(library.filter((patch) => patch.id !== self));
-	const types = $derived(catalog.map((entry) => entry.type).sort());
+	const types = $derived(catalog.map((entry) => entry.type));
 	const chosen = $derived(laid.nodes.find((node) => node.id === selected) ?? null);
+
+	// A node of a type as the search adds it, which is what decides its ports. A subpatch starts as the first patch it can be.
+	const fresh = (type: string): GraphNode =>
+		type === 'subpatch' && others[0]
+			? { id: 0, type: 'subpatch', patch: others[0].id }
+			: { id: 0, type: type as GraphNode['type'] };
+
+	// From a wire, only what has an input for it to go to.
+	const offered = $derived(
+		palette?.wire ? types.filter((type) => inputsOf(fresh(type), catalog, library).length > 0) : types
+	);
 
 	// The page records each edit, so its history outlasts this editor.
 	const commit = (next: Graph) => onchange(next);
@@ -166,11 +212,11 @@
 	}
 
 	function pointerMove(event: PointerEvent) {
+		hover = { x: event.clientX, y: event.clientY };
 		if (!gesture) return;
 		if (gesture.kind === 'pan') {
-			const scale = view.width / svg.clientWidth;
-			view.x = gesture.view.x - (event.clientX - gesture.from.x) * scale;
-			view.y = gesture.view.y - (event.clientY - gesture.from.y) * scale;
+			view.x = gesture.view.x - (event.clientX - gesture.from.x) / view.scale;
+			view.y = gesture.view.y - (event.clientY - gesture.from.y) / view.scale;
 		} else if (gesture.kind === 'move') {
 			const pointer = toCanvas(event);
 			gesture.at = { x: pointer.x - gesture.offset.x, y: pointer.y - gesture.offset.y };
@@ -179,11 +225,21 @@
 		}
 	}
 
-	function pointerUp() {
+	function pointerUp(event: PointerEvent) {
 		if (gesture?.kind === 'move') {
 			const node = laid.nodes.find((candidate) => candidate.id === (gesture as { id: number }).id);
 			const { id, at } = gesture;
 			if (node && (node.x !== at.x || node.y !== at.y)) commit(moveNode(laid, id, Math.round(at.x), Math.round(at.y)));
+		} else if (gesture?.kind === 'wire') {
+			// A wire let go of on empty canvas asks what it should go to. Under the pointer is what it was dropped on: a touch keeps
+			// sending events to where it started.
+			const under = document.elementFromPoint(event.clientX, event.clientY);
+			if (under && svg.contains(under) && !under.closest('g.node')) {
+				const { from, port, start } = gesture;
+				gesture = null;
+				openPalette({ x: event.clientX, y: event.clientY }, { from, port, start, end: toCanvas(event) });
+				return;
+			}
 		}
 		gesture = null;
 	}
@@ -195,39 +251,141 @@
 		gesture = null;
 	}
 
-	function zoom(event: WheelEvent) {
-		event.preventDefault();
-		const factor = event.deltaY > 0 ? 1.1 : 1 / 1.1;
-		const width = Math.min(4000, Math.max(300, view.width * factor));
-		const scale = width / view.width;
-		const pointer = toCanvas(event);
+	// Keeps the graph point under `at` where it is on screen.
+	function zoomAt(at: Point, factor: number) {
+		const scale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.scale * factor));
 		view = {
-			x: pointer.x - (pointer.x - view.x) * scale,
-			y: pointer.y - (pointer.y - view.y) * scale,
-			width,
-			height: view.height * scale
+			x: at.x - ((at.x - view.x) * view.scale) / scale,
+			y: at.y - ((at.y - view.y) * view.scale) / scale,
+			scale
 		};
 	}
 
-	function fit() {
-		if (!laid.nodes.length) return;
-		const left = Math.min(...laid.nodes.map((node) => node.x as number));
-		const top = Math.min(...laid.nodes.map((node) => node.y as number));
-		const right = Math.max(...laid.nodes.map((node) => (node.x as number) + NODE_WIDTH));
-		const bottom = Math.max(...laid.nodes.map((node) => (node.y as number) + nodeHeight(node, catalog, library)));
-		const width = Math.max(right - left + 80, (bottom - top + 80) / aspect, 500);
-		view = { x: left - 40, y: top - 40, width, height: width * aspect };
+	const middle = (): Point => ({
+		x: view.x + size.width / view.scale / 2,
+		y: view.y + size.height / view.scale / 2
+	});
+
+	// A wheel or two fingers pan, as they scroll a page, and Shift with a wheel pans sideways. Mod with the wheel zooms around
+	// the pointer, and so does a pinch, which a browser sends as a wheel with ctrlKey set. A notch of a wheel is clamped, so that
+	// it zooms about as far as a short pinch does.
+	function wheel(event: WheelEvent) {
+		event.preventDefault();
+		const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.height : 1;
+		if (event.ctrlKey || modHeld(event)) {
+			const delta = Math.max(-50, Math.min(50, event.deltaY * unit));
+			zoomAt(toCanvas(event), 2 ** (-delta / 150));
+			return;
+		}
+		let dx = event.deltaX * unit;
+		let dy = event.deltaY * unit;
+		if (event.shiftKey && !dx) [dx, dy] = [dy, 0];
+		view = { ...view, x: view.x + dx / view.scale, y: view.y + dy / view.scale };
 	}
 
-	function add() {
-		const { graph: next, id } = addNode(
-			laid,
-			adding as GraphNode['type'],
-			Math.round(view.x + 60),
-			Math.round(view.y + 60)
-		);
-		commit(adding === 'subpatch' && others[0] ? setOption(next, id, 'patch', others[0].id, catalog, library) : next);
+	// All of the graph, if it can be read at that size, and otherwise its top left, where its signals start, at the smallest size
+	// that can be read.
+	function fit(shown: Graph = laid) {
+		if (!shown.nodes.length) return;
+		const left = Math.min(...shown.nodes.map((node) => node.x as number)) - MARGIN;
+		const top = Math.min(...shown.nodes.map((node) => node.y as number)) - MARGIN;
+		const right = Math.max(...shown.nodes.map((node) => (node.x as number) + NODE_WIDTH)) + MARGIN;
+		const bottom = Math.max(...shown.nodes.map((node) => (node.y as number) + heightOf(node))) + MARGIN;
+		const scale = Math.max(FIT_FLOOR, Math.min(FIT_CEILING, size.width / (right - left), size.height / (bottom - top)));
+		const width = size.width / scale;
+		const height = size.height / scale;
+		view = {
+			x: width >= right - left ? (left + right - width) / 2 : left,
+			y: height >= bottom - top ? (top + bottom - height) / 2 : top,
+			scale
+		};
+	}
+
+	// A node reached from the keyboard comes into view, by as little panning as that takes. A click doesn't move the view, since
+	// what was clicked is in it, and a node about to be dragged mustn't move.
+	function reveal(node: GraphNode) {
+		const width = size.width / view.scale;
+		const height = size.height / view.scale;
+		const [x, y] = [node.x as number, node.y as number];
+		const into = (start: number, length: number, at: number, extent: number) =>
+			at < start ? at - MARGIN : at + extent > start + length ? at + extent + MARGIN - length : start;
+		view = { ...view, x: into(view.x, width, x, NODE_WIDTH), y: into(view.y, height, y, heightOf(node)) };
+	}
+
+	// The node search opens at the pointer, or at the canvas's top left under the toolbar's button. What it adds goes where the
+	// pointer was, at the end of a dropped wire, beside the chosen node, or in the middle of the view, in that order.
+	function openPalette(client: { x: number; y: number } | null, wire: Palette['wire'] = null) {
+		if (readonly) return;
+		const rect = svg.getBoundingClientRect();
+		const canvas = client ? toCanvas({ clientX: client.x, clientY: client.y }) : null;
+		const centre = middle();
+		const at = wire
+			? { x: wire.end.x, y: wire.end.y - inputY(0) }
+			: canvas
+				? { x: canvas.x - NODE_WIDTH / 2, y: canvas.y - NODE_HEADER / 2 }
+				: chosen
+					? { x: (chosen.x as number) + COLUMN, y: chosen.y as number }
+					: { x: centre.x - NODE_WIDTH / 2, y: centre.y - NODE_HEADER };
+		const left = client ? client.x - rect.left : 8;
+		const top = client ? client.y - rect.top : 8;
+		palette = {
+			// It may hang below the canvas, over what is under it, as a menu does, but not off the bottom of the window.
+			left: Math.max(0, Math.min(left, rect.width - PALETTE_WIDTH)),
+			top: Math.max(0, Math.min(top, window.innerHeight - rect.top - PALETTE_HEIGHT)),
+			at,
+			wire,
+			back:
+				document.activeElement instanceof HTMLElement || document.activeElement instanceof SVGElement
+					? document.activeElement
+					: null
+		};
+	}
+
+	function closePalette(refocus: boolean) {
+		const back = palette?.back;
+		palette = null;
+		if (refocus) (back?.isConnected && back !== document.body ? back : svg)?.focus({ preventScroll: true });
+	}
+
+	function pick(type: string) {
+		if (!palette) return;
+		const { at, wire } = palette;
+		const node = fresh(type);
+		const spot = freeSpot(laid, at, sizeOf(node), sizeOf);
+		const { graph: added, id } = addNode(laid, node.type, spot.x, spot.y);
+		let next = node.patch ? setOption(added, id, 'patch', node.patch as string, catalog, library) : added;
+		const first = inputsOf(node, catalog, library)[0];
+		if (wire && first) next = connect(next, wire.from, wire.port, id, first.name);
+		closePalette(true);
+		commit(next);
 		selected = id;
+	}
+
+	function tidyUp() {
+		const next = tidy(laid, heightOf);
+		commit(next);
+		fit(next);
+	}
+
+	// The input a node's error says can't take audio, where a snap on its wire would mend it. Inside a subpatch the wire is in
+	// another graph, so none is offered there.
+	function snapFor(node: GraphNode): string | null {
+		const problem = errors.get(node.id);
+		const input = problem && node.type !== 'subpatch' ? rateErrorInput(problem) : null;
+		return input && edgeInto(laid, node.id, input) ? input : null;
+	}
+
+	// Halfway along the wire, or as near as is free.
+	function putSnap(node: GraphNode, input: string) {
+		const wire = edgeInto(laid, node.id, input);
+		const from = laid.nodes.find((candidate) => candidate.id === wire?.from);
+		if (!wire || !from) return;
+		const a = outputPoint(from, wire.port ?? 'out');
+		const b = inputPoint(node, input);
+		const want = { x: (a.x + b.x - NODE_WIDTH) / 2, y: (a.y + b.y) / 2 - inputY(0) };
+		const spot = freeSpot(laid, want, sizeOf({ id: 0, type: 'snap' }), sizeOf);
+		const fixed = insertSnap(laid, node.id, input, spot.x, spot.y);
+		if (fixed) commit(fixed.graph);
 	}
 
 	function removeSelected() {
@@ -239,10 +397,20 @@
 		selected = null;
 	}
 
+	// N and the full stop go by where the key is, as the piano keys do, and take no modifier, which leaves them to the browser.
 	function keydown(event: KeyboardEvent) {
-		const target = event.target as HTMLElement;
-		if (readonly || !active || target.closest('input, textarea, select')) return;
-		if ((event.key === 'Delete' || event.key === 'Backspace') && selected !== null) {
+		if (!active || typingIn(event.target)) return;
+		if (matches(event, 'escape') && gesture) {
+			gesture = null;
+		} else if (matches(event, 'fit')) {
+			event.preventDefault();
+			fit();
+		} else if (readonly) {
+			return;
+		} else if (matches(event, 'node-search')) {
+			event.preventDefault();
+			openPalette(hover);
+		} else if ((matches(event, 'graph.delete') || matches(event, 'graph.backspace')) && selected !== null) {
 			event.preventDefault();
 			removeSelected();
 		}
@@ -282,6 +450,16 @@
 		return edge ? `${edge.from}:${edge.port ?? 'out'}` : '';
 	};
 
+	// A number as a field shows it, rounded, and anything else as it is.
+	const field = (value: unknown) => (typeof value === 'number' ? shown(value) : ((value as string | undefined) ?? ''));
+
+	// The compiler's name under the one a person reads, with what the node is set to, cut to fit the node.
+	function kindOf(node: GraphNode) {
+		const detail = detailOf(node, laid, library);
+		const text = detail ? `${node.type} · ${detail}` : node.type;
+		return text.length > 24 ? `${text.slice(0, 23)}…` : text;
+	}
+
 	const paramFields = ['name', 'min', 'max', 'default'] as const;
 
 	function changeParam(index: number, change: Partial<Param>) {
@@ -294,26 +472,24 @@
 		commit({ ...laid, params: [...laid.params, param] });
 	}
 
-	// Twice the drawn size is about as small as a node can be and still be read.
-	const READABLE_WIDTH = 2000;
-
-	// The canvas takes whatever room its panel has. The view keeps its width and takes the canvas's shape, so a panel dragged
-	// taller shows more below rather than zooming.
+	// The canvas takes whatever room its panel has, and the view keeps its scale, so a panel dragged taller shows more below
+	// rather than zooming. The first view of a graph is a fit, once the canvas has a size, and only once, or each edit or
+	// resize would move it.
+	let measured = false;
 	function measure() {
 		if (!svg?.clientWidth || !svg.clientHeight) return;
-		aspect = svg.clientHeight / svg.clientWidth;
-		view = { ...view, height: view.width * aspect };
+		// Inside the border, and unrounded, as clientWidth isn't: a text size worked out from a rounded width is a little small.
+		const box = svg.getBoundingClientRect();
+		size = { width: box.width - 2 * svg.clientLeft, height: box.height - 2 * svg.clientTop };
+		if (!measured) {
+			measured = true;
+			fit();
+		}
 	}
 
 	$effect(() => {
-		// The first view of a graph is all of it, if that can be read, and otherwise where its signals start. Only once, or each
-		// edit would move the canvas.
-		untrack(() => {
-			measure();
-			fit();
-			if (view.width > READABLE_WIDTH) view = { ...view, width: READABLE_WIDTH, height: READABLE_WIDTH * aspect };
-		});
-		const observer = new ResizeObserver(measure);
+		untrack(measure);
+		const observer = new ResizeObserver(() => untrack(measure));
 		observer.observe(svg);
 		return () => observer.disconnect();
 	});
@@ -324,123 +500,222 @@
 <div class="grapheditor">
 	<div class="toolbar">
 		{#if !readonly}
-			<select bind:value={adding} aria-label="Node type">
-				{#each types as type (type)}<option value={type}>{type}</option>{/each}
-			</select>
-			<button type="button" onclick={add}>Add node</button>
+			<button
+				type="button"
+				class="add"
+				title="Search for a node to add. N, or a double-click on the canvas, opens it too."
+				aria-haspopup="dialog"
+				aria-expanded={palette !== null}
+				onclick={() => openPalette(null)}>+ Node</button
+			>
 			<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
 			<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
+			<button type="button" onclick={tidyUp} title="Lay the graph out again, left to right as signals flow">Tidy</button
+			>
 		{/if}
-		<button type="button" onclick={fit}>Fit</button>
-		<span class="muted">
+		<button type="button" onclick={() => fit()} title="Show the whole graph, or its start if it can't all be read (.)"
+			>Fit</button
+		>
+		<div class="zoom" role="group" aria-label="Zoom the graph">
+			<button
+				type="button"
+				aria-label="Zoom the graph out"
+				title="Zoom out. Pinch, or scroll with ⌘ or Ctrl, to zoom where the pointer is."
+				disabled={view.scale <= ZOOM_MIN}
+				onclick={() => zoomAt(middle(), 1 / ZOOM_STEP)}>−</button
+			>
+			<button
+				type="button"
+				class="percent"
+				title="Back to 100%"
+				data-testid="zoom"
+				onclick={() => zoomAt(middle(), 1 / view.scale)}>{Math.round(view.scale * 100)}%</button
+			>
+			<button
+				type="button"
+				aria-label="Zoom the graph in"
+				title="Zoom in. Pinch, or scroll with ⌘ or Ctrl, to zoom where the pointer is."
+				disabled={view.scale >= ZOOM_MAX}
+				onclick={() => zoomAt(middle(), ZOOM_STEP)}>+</button
+			>
+		</div>
+		<span class="muted hint">
 			{readonly
-				? 'Drag the background to move around, and scroll to zoom.'
-				: 'Drag from an output to an input to wire them.'}
-			Green wires are audio, blue are read once a frame.
+				? 'Drag the background or scroll to move around.'
+				: 'Double-click or press N to add a node, and drag from an output to an input to wire it.'}
+			Green wires are audio, dashed blue ones are read once a frame.
 		</span>
 	</div>
 
 	<div class="editor">
-		<svg
-			bind:this={svg}
-			viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
-			role="application"
-			aria-label="Patch graph"
-			data-testid="graph"
-			onpointerdown={startPan}
-			onpointermove={pointerMove}
-			onwheel={zoom}
-		>
-			{#each wires as wire (wire.key)}
-				<path class={`wire ${wire.rate}`} d={wire.path} data-testid={`wire-${wire.to}-${wire.input}`} />
-			{/each}
-			{#if gesture?.kind === 'wire'}
-				<path class="wire drawing" d={curve(gesture.start, gesture.at)} />
-			{/if}
-			{#each laid.nodes as node (node.id)}
-				{@const at = positionOf(node)}
-				{@const height = nodeHeight(node, catalog, library)}
-				{@const problem = errors.get(node.id)}
-				{@const dead = !failed && nodes !== undefined && !nodes[node.id]}
-				<g
-					class="node"
-					class:chosen={node.id === selected}
-					class:dead
-					class:problem={problem !== undefined}
-					transform={`translate(${at.x} ${at.y})`}
-					data-testid={`node-${node.id}`}
-					data-error={problem !== undefined}
-					data-dead={dead}
-				>
-					<rect
-						class="body"
-						width={NODE_WIDTH}
-						{height}
-						rx="5"
-						role="presentation"
-						onpointerdown={(event) => startMove(event, node)}
-					/>
-					<rect
-						class="title"
-						width={NODE_WIDTH}
-						height={NODE_HEADER - 4}
-						rx="5"
-						role="button"
-						tabindex="0"
-						aria-label={`${node.type} ${node.id}`}
-						onpointerdown={(event) => startMove(event, node)}
-						onkeydown={(event) => {
-							if (event.key === 'Enter') selected = node.id;
-						}}
-					/>
-					<text class="heading" x="8" y="16"
-						>{node.type} <tspan class="detail">{detailOf(node, laid, library)}</tspan></text
+		<div class="canvas">
+			<!-- The canvas takes focus, so that N and the full stop act on the graph and the search gives focus back to it. -->
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+			<svg
+				bind:this={svg}
+				viewBox={`${view.x} ${view.y} ${size.width / view.scale} ${size.height / view.scale}`}
+				role="application"
+				aria-label="Patch graph"
+				tabindex="0"
+				data-testid="graph"
+				data-scale={view.scale}
+				onpointerdown={startPan}
+				onpointermove={pointerMove}
+				onpointerleave={() => (hover = null)}
+				ondblclick={(event) => {
+					if (!(event.target as Element).closest('g.node')) openPalette({ x: event.clientX, y: event.clientY });
+				}}
+				onwheel={wheel}
+			>
+				{#each wires as wire (wire.key)}
+					<path class={`wire ${wire.rate}`} d={wire.path} data-testid={`wire-${wire.to}-${wire.input}`} />
+				{/each}
+				{#if gesture?.kind === 'wire'}
+					<path class="wire drawing" d={curve(gesture.start, gesture.at)} />
+				{:else if palette?.wire}
+					<path class="wire drawing" d={curve(palette.wire.start, palette.wire.end)} />
+				{/if}
+				{#each laid.nodes as node (node.id)}
+					{@const at = positionOf(node)}
+					{@const height = nodeHeight(node, catalog, library)}
+					{@const problem = errors.get(node.id)}
+					{@const dead = !failed && nodes !== undefined && !nodes[node.id]}
+					{@const why = dead ? whyCompiledAway(laid, node.id) : null}
+					<g
+						class="node"
+						class:chosen={node.id === selected}
+						class:dead
+						class:problem={problem !== undefined}
+						transform={`translate(${at.x} ${at.y})`}
+						data-testid={`node-${node.id}`}
+						data-error={problem !== undefined}
+						data-dead={dead}
 					>
-					{#each inputsOf(node, catalog, library) as input, index (input.name)}
-						<circle
-							class="port"
-							class:wired={edgeInto(laid, node.id, input.name) !== undefined}
-							cx="0"
-							cy={inputY(index)}
-							r="6"
-							role="button"
-							tabindex="-1"
-							aria-label={`${node.id} input ${input.name}`}
-							data-testid={`in-${node.id}-${input.name}`}
-							onpointerup={(event) => finishWire(event, node, input.name)}
+						{#if problem}<title>{problem}</title>{:else if why}<title>{why}</title>{/if}
+						<rect
+							class="body"
+							width={NODE_WIDTH}
+							{height}
+							rx="5"
+							role="presentation"
+							onpointerdown={(event) => startMove(event, node)}
 						/>
-						<text class="label" x="11" y={inputY(index) + 4}>{input.name}</text>
-					{/each}
-					{#each outputsOf(node, catalog, library) as port, index (port)}
-						<circle
-							class="port output"
-							class:probed={probed(node.id, port)}
-							cx={NODE_WIDTH}
-							cy={inputY(index)}
-							r="6"
+						<rect
+							class="title"
+							width={NODE_WIDTH}
+							height={NODE_HEADER - 4}
+							rx="5"
 							role="button"
-							tabindex="-1"
-							aria-label={`${node.id} output ${port}`}
-							data-testid={`out-${node.id}-${port}`}
-							onpointerdown={(event) => startWire(event, node, port)}
+							tabindex="0"
+							aria-label={`${friendlyName(node.type)}, ${node.type} ${node.id}`}
+							onpointerdown={(event) => startMove(event, node)}
+							onfocus={(event) => {
+								if (event.currentTarget.matches(':focus-visible')) reveal(node);
+							}}
+							onkeydown={(event) => {
+								if (event.key === 'Enter') selected = node.id;
+							}}
 						/>
-						<text class="label end" x={NODE_WIDTH - 11} y={inputY(index) + 4}>{port}</text>
-					{/each}
+						<text class="heading" x="8" y="16">{friendlyName(node.type)}</text>
+						<text class="kind" x="8" y="31">{kindOf(node)}</text>
+						{#each inputsOf(node, catalog, library) as input, index (input.name)}
+							<circle
+								class="port"
+								class:wired={edgeInto(laid, node.id, input.name) !== undefined}
+								cx="0"
+								cy={inputY(index)}
+								r="6"
+								role="button"
+								tabindex="-1"
+								aria-label={`${node.id} input ${input.name}`}
+								data-testid={`in-${node.id}-${input.name}`}
+								onpointerup={(event) => finishWire(event, node, input.name)}
+							/>
+							<text class="label" x="11" y={inputY(index) + 4}>{input.name}</text>
+						{/each}
+						{#each outputsOf(node, catalog, library) as port, index (port)}
+							<circle
+								class="port output"
+								class:probed={probed(node.id, port)}
+								cx={NODE_WIDTH}
+								cy={inputY(index)}
+								r="6"
+								role="button"
+								tabindex="-1"
+								aria-label={`${node.id} output ${port}`}
+								data-testid={`out-${node.id}-${port}`}
+								onpointerdown={(event) => startWire(event, node, port)}
+							/>
+							<text class="label end" x={NODE_WIDTH - 11} y={inputY(index) + 4}>{port}</text>
+						{/each}
+					</g>
+				{/each}
+				<!-- A node's error, and the snap that mends it, hang below the node, where the next node in its column may be. They are
+				     drawn after every node, so that none covers them. -->
+				{#each laid.nodes as node (node.id)}
+					{@const problem = errors.get(node.id)}
 					{#if problem}
-						<title>{problem}</title>
-						<text class="message" x="0" y={height + 13}
-							>{problem.length > 44 ? `${problem.slice(0, 43)}…` : problem}</text
-						>
+						{@const at = positionOf(node)}
+						{@const height = nodeHeight(node, catalog, library)}
+						{@const snap = readonly ? null : snapFor(node)}
+						<g class="trouble" transform={`translate(${at.x} ${at.y + height})`}>
+							<text class="message" x="0" y="13">{problem.length > 44 ? `${problem.slice(0, 43)}…` : problem}</text>
+							{#if snap}
+								<g
+									class="fix"
+									role="button"
+									tabindex="0"
+									aria-label="Put a snap on this wire"
+									transform="translate(0 20)"
+									onpointerdown={(event) => event.stopPropagation()}
+									onclick={() => putSnap(node, snap)}
+									onkeydown={(event) => {
+										if (event.key === 'Enter' || event.key === ' ') {
+											event.preventDefault();
+											putSnap(node, snap);
+										}
+									}}
+								>
+									<rect width={NODE_WIDTH} height="20" rx="4" />
+									<text x={NODE_WIDTH / 2} y="14">Put a snap on this wire</text>
+								</g>
+							{/if}
+						</g>
 					{/if}
-				</g>
-			{/each}
-		</svg>
+				{/each}
+			</svg>
+			{#if palette}
+				<NodePalette
+					types={offered}
+					left={palette.left}
+					top={palette.top}
+					label={palette.wire ? 'Add a node wired from this output' : 'Add a node'}
+					onpick={pick}
+					onclose={closePalette}
+				/>
+			{/if}
+		</div>
 
 		<aside class="inspector">
 			{@render side?.()}
 			{#if chosen}
-				<h3>{chosen.id} {chosen.type}</h3>
+				{@const help = helpOf(chosen.type)}
+				{@const snap = readonly ? null : snapFor(chosen)}
+				{@const dead = !failed && nodes !== undefined && !nodes[chosen.id]}
+				<h3>{friendlyName(chosen.type)} <span class="muted">{chosen.type} {chosen.id}</span></h3>
+				{#if help}<p class="muted about">{help.description}</p>{/if}
 				{#if errors.get(chosen.id)}<p class="problem" data-testid="node-error">{errors.get(chosen.id)}</p>{/if}
+				{#if snap}
+					<button type="button" class="fix" onclick={() => putSnap(chosen, snap)}>Put a snap on this wire</button>
+					<p class="muted about">
+						It reads {snap} once a frame. That is right for an envelope and wrong for anything faster.
+					</p>
+				{/if}
+				{#if dead}
+					<p class="muted about" data-testid="node-dead">
+						{whyCompiledAway(laid, chosen.id) ?? 'It compiled away, so it makes nothing that is heard.'}
+					</p>
+				{/if}
 				<fieldset class="bare" disabled={readonly}>
 					{#if chosen.type === 'shape'}
 						<label>
@@ -606,7 +881,7 @@
 									aria-label={option.name}
 									type={option.number ? 'number' : 'text'}
 									step="any"
-									value={chosen[option.name] ?? ''}
+									value={field(chosen[option.name])}
 									onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, option.number)}
 								/>
 							{/if}
@@ -614,8 +889,12 @@
 					{/each}
 					{#if inputsOf(chosen, catalog, library).length}<h4>Inputs</h4>{/if}
 					{#each inputsOf(chosen, catalog, library) as input (input.name)}
+						{@const about = help?.inputs[input.name]}
+						{@const range = rangeText(about)}
 						<div class="input">
-							<span>{input.name}</span>
+							<span class="name"
+								>{input.name}{#if about?.unit}<span class="unit">{about.unit}</span>{/if}</span
+							>
 							<select
 								aria-label={`source of ${input.name}`}
 								value={sourceOf(chosen, input.name)}
@@ -633,11 +912,12 @@
 									type="number"
 									step="any"
 									aria-label={`value of ${input.name}`}
-									placeholder={String(input.default)}
-									value={chosen.inputs?.[input.name] ?? ''}
+									placeholder={shown(input.default)}
+									value={field(chosen.inputs?.[input.name])}
 									onchange={(e) => literalChanged(chosen, input.name, e.currentTarget.value)}
 								/>
 							{/if}
+							{#if range}<span class="range" data-testid={`range-${input.name}`}>{range}</span>{/if}
 						</div>
 					{/each}
 				</fieldset>
@@ -662,17 +942,17 @@
 				{#each laid.params as param, index (param.id)}
 					<fieldset disabled={readonly}>
 						<legend>{param.id}</legend>
-						{#each paramFields as field (field)}
+						{#each paramFields as name (name)}
 							<label>
-								{field}
+								{name}
 								<input
-									type={field === 'name' ? 'text' : 'number'}
+									type={name === 'name' ? 'text' : 'number'}
 									step="any"
-									aria-label={`param ${param.id} ${field}`}
-									value={param[field]}
+									aria-label={`param ${param.id} ${name}`}
+									value={field(param[name])}
 									onchange={(e) =>
 										changeParam(index, {
-											[field]: field === 'name' ? e.currentTarget.value : Number(e.currentTarget.value)
+											[name]: name === 'name' ? e.currentTarget.value : Number(e.currentTarget.value)
 										})}
 								/>
 							</label>
@@ -720,9 +1000,37 @@
 		flex-wrap: wrap;
 		font-size: 0.8rem;
 	}
-	.toolbar button,
-	.toolbar select {
+	.toolbar button {
 		padding: 0.1rem 0.5rem;
+	}
+	.toolbar .add {
+		font-weight: 600;
+	}
+	.zoom {
+		display: flex;
+	}
+	.zoom button {
+		border-radius: 0;
+		min-width: 1.8rem;
+	}
+	.zoom button:first-child {
+		border-radius: 5px 0 0 5px;
+	}
+	.zoom button:last-child {
+		border-radius: 0 5px 5px 0;
+	}
+	.zoom .percent {
+		min-width: 3.4rem;
+		border-left: 0;
+		border-right: 0;
+		font-variant-numeric: tabular-nums;
+	}
+	.hint {
+		flex: 1;
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.editor {
 		flex: 1;
@@ -730,6 +1038,11 @@
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 260px;
 		gap: 0.5rem;
+	}
+	.canvas {
+		position: relative;
+		min-width: 0;
+		min-height: 0;
 	}
 	svg {
 		display: block;
@@ -742,6 +1055,10 @@
 		touch-action: none;
 		cursor: grab;
 		user-select: none;
+		outline: none;
+	}
+	svg:focus-visible {
+		border-color: var(--accent);
 	}
 	.wire {
 		fill: none;
@@ -753,10 +1070,12 @@
 	}
 	.wire.control {
 		stroke: var(--accent);
+		stroke-dasharray: 6 3;
 	}
 	.wire.drawing {
 		stroke: var(--text);
 		stroke-dasharray: 4 3;
+		pointer-events: none;
 	}
 	.node .body {
 		fill: var(--panel);
@@ -783,9 +1102,10 @@
 		font-weight: 600;
 		pointer-events: none;
 	}
-	.detail {
+	.kind {
 		fill: var(--muted);
-		font-weight: 400;
+		font-size: 11px;
+		pointer-events: none;
 	}
 	.label {
 		fill: var(--muted);
@@ -798,6 +1118,30 @@
 	.message {
 		fill: #f85149;
 		font-size: 11px;
+		/* A halo of the canvas's colour, so that it reads over a node it runs across */
+		stroke: #0d1117;
+		stroke-width: 3px;
+		stroke-linejoin: round;
+		paint-order: stroke;
+	}
+	.fix {
+		cursor: pointer;
+		outline: none;
+	}
+	.fix rect {
+		fill: #1f6feb40;
+		stroke: var(--accent);
+	}
+	.fix:hover rect,
+	.fix:focus-visible rect {
+		fill: #1f6feb80;
+		stroke-width: 2;
+	}
+	.fix text {
+		fill: var(--text);
+		font-size: 11px;
+		text-anchor: middle;
+		pointer-events: none;
 	}
 	.port {
 		fill: #0d1117;
@@ -822,8 +1166,20 @@
 		font-size: 0.85rem;
 	}
 	.inspector h3 {
-		margin: 0 0 0.4rem;
+		margin: 0 0 0.2rem;
 		font-size: 0.95rem;
+	}
+	.inspector h3 .muted {
+		font-weight: 400;
+		font-size: 0.8rem;
+	}
+	.about {
+		margin: 0 0 0.4rem;
+		font-size: 0.78rem;
+	}
+	button.fix {
+		margin: 0 0 0.3rem;
+		border-color: var(--accent);
 	}
 	.inspector h4 {
 		margin: 0.7rem 0 0.2rem;
@@ -844,14 +1200,28 @@
 	}
 	.input {
 		display: grid;
-		grid-template-columns: 3.6rem 1fr;
+		grid-template-columns: 4.6rem 1fr;
 		align-items: center;
 		gap: 0.25rem;
-		margin-bottom: 0.25rem;
+		margin-bottom: 0.35rem;
+	}
+	.input .name {
+		overflow-wrap: anywhere;
+	}
+	.unit {
+		margin-left: 0.3rem;
+		color: var(--muted);
+		font-size: 0.75rem;
 	}
 	.input input {
 		grid-column: 2;
 		width: auto;
+	}
+	.range {
+		grid-column: 2;
+		margin-top: -0.15rem;
+		color: var(--muted);
+		font-size: 0.72rem;
 	}
 	.input button {
 		grid-column: 1 / -1;

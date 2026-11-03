@@ -855,6 +855,11 @@ the page, hidden and inert, so its scroll, zoom and choices are there to come ba
   in one transaction, patches first, so a timeline is never saved against a patch edit that was refused. Each draft names
   the revision it started from, so a stale one refuses the whole save and loses nothing. A draft edited back to what was
   saved stops being one, and leaving with drafts asks first.
+- A patch is a track's instrument. + Track asks which patch the new track plays, and Esc makes no track. A track head names its patch,
+  not its id: the name opens that patch in the Patch view, and ▾ beside it chooses another. Wherever a patch is chosen, the inspector's slots too,
+  one picker filters as it is typed in, and lists what the song already plays, then the library's own patches, then the built-ins grouped
+  as the browser groups the examples. Its last entry, New patch for this track, saves a new patch at once, the same sine and envelope the
+  browser's New patch makes, and puts it on the track as an unsaved edit before opening it.
 - One engine plays one image: the song, compiled from the drafts, or the Patch view's patch on its own. A patch a track plays
   is heard in the song, through that track's mix and inserts, so a patch edit is heard in context as it is made. A voice no
   track plays is compiled on its own as above, and its keys switch the engine to it. Play, a locate, or a note from the

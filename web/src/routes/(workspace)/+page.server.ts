@@ -127,11 +127,16 @@ export const actions = {
 		}
 		return guarded(() => ({ revisions: saveEdits(db(), edits), saved: true }));
 	},
+	// A new patch starts as a sine with an envelope, which sounds at once. The browser's form says where it was sent from, and
+	// goes back there with the patch open. A track's New patch sends no `back`: it gets the id, to put the patch on the track
+	// before opening it.
 	createPatch: async ({ request }) => {
 		const form = await request.formData();
 		const name = field(form, 'name');
 		if (!name) return fail(400, { message: 'a patch needs a name' });
-		redirect(303, back(form, { patch: createPatch(db(), name, EMPTY_GRAPH), part: null }));
+		const id = createPatch(db(), name, EMPTY_GRAPH);
+		if (form.has('back')) redirect(303, back(form, { patch: id, part: null }));
+		return { created: id };
 	},
 	createTimeline: async ({ request }) => {
 		const form = await request.formData();

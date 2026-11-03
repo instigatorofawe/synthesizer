@@ -787,7 +787,7 @@ test('a recipe added to the library is an ordinary timeline that plays the built
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveValue('builtin-PluckedString');
+	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveAttribute('data-patch', 'builtin-PluckedString');
 
 	await page.goto('/?patch=builtin-PluckedString');
 	await expect(page.locator('path.wire.audio').first()).toBeAttached();
@@ -841,7 +841,7 @@ test('a built-in patch with a recording plays on its own, though nothing in the 
 
 test('a track can play a built-in patch, and a duplicate of it takes its place to be changed', async ({ page }) => {
 	await trackWithClip(page, 'Borrowed');
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption('builtin-OneShotSample');
+	await choosePatch(page, 'builtin-OneShotSample', 1);
 	await addNoteAt(page, 0, 60);
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
@@ -856,7 +856,7 @@ test('a track can play a built-in patch, and a duplicate of it takes its place t
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('OneShotSample copy');
 	const copy = shownPatchId(page);
 	expect(copy).not.toContain('builtin');
-	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveValue(copy);
+	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveAttribute('data-patch', copy);
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 	await page.getByLabel('Patch name', { exact: true }).fill('My piano');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -951,10 +951,21 @@ async function centre(page: Page, id: string) {
 	return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+// Chooses a patch by its id in the patch picker that is open, or in a slot's, which a click opens.
+async function choosePatch(page: Page, id: string, slot?: number) {
+	if (slot) await page.getByLabel(`Patch slot ${slot}`, { exact: true }).click();
+	await page.getByRole('listbox', { name: 'Patches' }).locator(`[data-patch="${id}"]`).click();
+}
+
+// A track asks which patch it plays as it is added.
+async function addTrack(page: Page, patch: string) {
+	await page.getByRole('button', { name: 'Add track' }).click();
+	await choosePatch(page, patch);
+}
+
 async function trackWithClip(page: Page, name: string) {
 	await newTimeline(page, name);
-	await page.getByRole('button', { name: 'Add track' }).click();
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption('lead');
+	await addTrack(page, 'lead');
 	const row = (await page.getByTestId('row-1').boundingBox())!;
 	await page.mouse.dblclick(row.x + 10, row.y + 20);
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
@@ -1078,8 +1089,7 @@ test('velocity is dragged, and a double-click takes a note away', async ({ page 
 test('a clip is moved, repeated and copied in the arrangement, and an overlap lands on its track', async ({ page }) => {
 	await trackWithClip(page, 'Arranged');
 	await addNoteAt(page, 0, 60);
-	await page.getByRole('button', { name: 'Add track' }).click();
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption('pluck');
+	await addTrack(page, 'pluck');
 	const block = page.getByTestId('placement-1-0');
 	const barPixels = 96;
 
@@ -1414,7 +1424,7 @@ test('insert and global sliders are heard as they move, and stay where they are 
 	const voice = await savedPatch(page, 'Tone', tone);
 	const insert = await savedPatch(page, 'Trim', trim);
 	await trackWithClip(page, 'Sliders');
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption(voice);
+	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
 	await page.mouse.dblclick(x, y);
 	await page.getByLabel('Note length').fill('1900');
@@ -1460,7 +1470,7 @@ test('insert and global sliders are heard as they move, and stay where they are 
 test('a value edited in the JSON is what plays, over what a swap would carry', async ({ page }) => {
 	const voice = await savedPatch(page, 'Tone two', { ...tone, params: [{ ...tone.params[0], scope: 'track' }] });
 	await trackWithClip(page, 'Edited values');
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption(voice);
+	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
 	await page.mouse.dblclick(x, y);
 	await page.getByLabel('Note length').fill('1900');
@@ -1658,10 +1668,9 @@ test('an image too large for the engine says so instead of going quiet', async (
 		ids.push(shownPatchId(page));
 	}
 	await trackWithClip(page, 'Too large');
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption(ids[0]);
+	await choosePatch(page, ids[0], 1);
 	await addNoteAt(page, 0, 60);
-	await page.getByRole('button', { name: 'Add track' }).click();
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption(ids[1]);
+	await addTrack(page, ids[1]);
 	const row = (await page.getByTestId('row-2').boundingBox())!;
 	await page.mouse.dblclick(row.x + 10, row.y + 20);
 	await expect(page.getByTestId('placement-2-0')).toBeVisible();
@@ -1689,7 +1698,7 @@ test('a clip repeated as far as a document allows leaves the page working', asyn
 	const editor = await timelineJson(page);
 	await editor.fill((await editor.inputValue()).replace('"repeat": 1', '"repeat": 100000'));
 	await expect(page.getByTestId('placement-1-0')).toHaveAttribute('data-repeat', '100000', { timeout: 8000 });
-	await page.getByRole('button', { name: 'Add track' }).click();
+	await addTrack(page, 'lead');
 	await expect(page.getByTestId('row-2')).toBeAttached();
 });
 

@@ -105,9 +105,10 @@ test('a clip opens its patch, and the song comes back on the same clip, as it wa
 	await expect(page.getByTestId('track-2')).toHaveAttribute('aria-pressed', 'true');
 	expect((await rollView(page)).scroll).toBe(scroll);
 
-	// By the Song tab
-	await page.getByRole('button', { name: 'Open patch slot 1' }).click();
+	// By the Song tab, from the patch the track's head names
+	await page.getByTestId('track-patch-2').click();
 	await shows(page, 'patch');
+	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Sampled pluck');
 	await openView(page, 'song');
 	await expect(notesTab(page)).toHaveText('Notes: pluck-a');
 	expect((await rollView(page)).scroll).toBe(scroll);

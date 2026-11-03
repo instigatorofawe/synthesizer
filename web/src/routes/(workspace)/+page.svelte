@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { enhance, type SubmitFunction } from '$app/forms';
-	import { goto } from '$app/navigation';
+	import { applyAction, deserialize, enhance, type SubmitFunction } from '$app/forms';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
@@ -720,6 +720,26 @@
 		open(recipe ? { part: id, patch: null } : { patch: id, part: null }, false, 'patch');
 	}
 
+	// New patch for this track. The patch is saved at once, as the browser's New patch is, and the library loads again so it's
+	// in it. Then the timeline editor puts it on the track, which is an unsaved edit like any other, and opens it.
+	async function newPatchForTrack(name: string): Promise<string | null> {
+		const body = new FormData();
+		body.set('name', name);
+		const response = await fetch(actionOn(search, 'createPatch'), {
+			method: 'POST',
+			body,
+			headers: { accept: 'application/json', 'x-sveltekit-action': 'true' }
+		});
+		const result = deserialize(await response.text());
+		const id = result.type === 'success' ? result.data?.created : undefined;
+		if (typeof id !== 'string') {
+			if (result.type === 'failure') await applyAction(result);
+			return null;
+		}
+		await invalidateAll();
+		return id;
+	}
+
 	// The browser sits beside the views on a wide screen, and folds to a rail of icons when asked. Below 1400 px there isn't the
 	// room, so it is always the rail there, and opens over the views until something in it is chosen.
 	const WIDE = 1400;
@@ -931,9 +951,11 @@
 								{ id: 'image', label: 'Image', content: image }
 							]}
 							{heading}
+							examples={data.examples}
 							onchange={(next) => timelineEdited({ text: JSON.stringify(next, null, 1) })}
 							ontrack={trackChosen}
 							onopen={patchOpened}
+							onnewpatch={newPatchForTrack}
 						/>
 					{/key}
 				{:else}

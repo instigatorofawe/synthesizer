@@ -101,6 +101,7 @@
 	const ZOOM_STEP = 1.25;
 	const MARGIN = 40; // Around a fitted graph, which leaves room for a message under a node
 	const PALETTE_WIDTH = 300;
+	const PALETTE_HEIGHT = 340; // At most: the search and a list of 280 pixels
 
 	let svg: SVGSVGElement;
 	let size = $state({ width: 1000, height: 560 }); // Of the canvas on screen, in CSS pixels
@@ -347,8 +348,9 @@
 		const left = client ? client.x - rect.left : 8;
 		const top = client ? client.y - rect.top : 8;
 		palette = {
+			// It may hang below the canvas, over what is under it, as a menu does, but not off the bottom of the window.
 			left: Math.max(0, Math.min(left, rect.width - PALETTE_WIDTH)),
-			top: Math.max(0, top),
+			top: Math.max(0, Math.min(top, window.innerHeight - rect.top - PALETTE_HEIGHT)),
 			at,
 			wire,
 			back:
@@ -604,7 +606,6 @@
 					{@const problem = errors.get(node.id)}
 					{@const dead = !failed && nodes !== undefined && !nodes[node.id]}
 					{@const why = dead ? whyCompiledAway(laid, node.id) : null}
-					{@const snap = readonly ? null : snapFor(node)}
 					<g
 						class="node"
 						class:chosen={node.id === selected}
@@ -672,17 +673,25 @@
 							/>
 							<text class="label end" x={NODE_WIDTH - 11} y={inputY(index) + 4}>{port}</text>
 						{/each}
-						{#if problem}
-							<text class="message" x="0" y={height + 13}
-								>{problem.length > 44 ? `${problem.slice(0, 43)}…` : problem}</text
-							>
+					</g>
+				{/each}
+				<!-- A node's error, and the snap that mends it, hang below the node, where the next node in its column may be. They are
+				     drawn after every node, so that none covers them. -->
+				{#each laid.nodes as node (node.id)}
+					{@const problem = errors.get(node.id)}
+					{#if problem}
+						{@const at = positionOf(node)}
+						{@const height = nodeHeight(node, catalog, library)}
+						{@const snap = readonly ? null : snapFor(node)}
+						<g class="trouble" transform={`translate(${at.x} ${at.y + height})`}>
+							<text class="message" x="0" y="13">{problem.length > 44 ? `${problem.slice(0, 43)}…` : problem}</text>
 							{#if snap}
 								<g
 									class="fix"
 									role="button"
 									tabindex="0"
 									aria-label="Put a snap on this wire"
-									transform={`translate(0 ${height + 20})`}
+									transform="translate(0 20)"
 									onpointerdown={(event) => event.stopPropagation()}
 									onclick={() => putSnap(node, snap)}
 									onkeydown={(event) => {
@@ -696,8 +705,8 @@
 									<text x={NODE_WIDTH / 2} y="14">Put a snap on this wire</text>
 								</g>
 							{/if}
-						{/if}
-					</g>
+						</g>
+					{/if}
 				{/each}
 			</svg>
 			{#if palette}
@@ -1134,6 +1143,11 @@
 	.message {
 		fill: #f85149;
 		font-size: 11px;
+		/* A halo of the canvas's colour, so that it reads over a node it runs across */
+		stroke: #0d1117;
+		stroke-width: 3px;
+		stroke-linejoin: round;
+		paint-order: stroke;
 	}
 	.fix {
 		cursor: pointer;

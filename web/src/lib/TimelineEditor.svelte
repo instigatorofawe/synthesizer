@@ -8,6 +8,8 @@
 	import type { ExampleGroup } from '#lib/PatchGroups.ts';
 	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
+	import UnitField from '#lib/UnitField.svelte';
+	import { barLength, barLengths, readLength, readPosition } from '#lib/Units.ts';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import { ZOOM_KEY, dropGone, gone, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
@@ -30,6 +32,7 @@
 		mixWrites,
 		noteValue,
 		place,
+		position,
 		placementIndex,
 		placementSpan,
 		placeOfError,
@@ -87,7 +90,8 @@
 		onnewpatch,
 		onwriting = () => {},
 		onsolo = () => {},
-		onkey
+		onkey,
+		onsay = () => {}
 	}: {
 		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
 		doc: Timeline;
@@ -118,6 +122,7 @@
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
 		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, once audio has started
+		onsay?: (text: string) => void; // Says why something typed into a field was refused, where the page says such things
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -669,7 +674,11 @@
 					<summary>Tempo, {doc.tempo[0]?.bpm} BPM</summary>
 					{#each doc.tempo as change, index (index)}
 						<div class="line">
-							<span class="muted">bar {barOf(change.tick, doc.ppq)}</span>
+							<span class="muted"
+								>{change.tick % ticksPerBar(doc)
+									? position(change.tick, doc.ppq)
+									: `bar ${barOf(change.tick, doc.ppq)}`}</span
+							>
 							<input
 								type="number"
 								min="1"
@@ -852,29 +861,34 @@
 							onchange={(e) => rename(e.currentTarget.value)}
 						/></label
 					>
-					<label
-						>length <input
-							type="number"
-							min="1"
-							aria-label="Clip length"
+					<label title="How long the clip is, in bars, as a note value such as 1/2, or in ticks"
+						>length <UnitField
+							label="Clip length"
 							value={clip.length}
-							onchange={(e) => commit(setClip(doc, clip.id, { ...clip, length: number(e) }))}
+							format={(length) => barLength(length, doc.ppq)}
+							read={readLength(doc.ppq)}
+							choices={barLengths(doc.ppq)}
+							onvalue={(length) => commit(setClip(doc, clip.id, { ...clip, length }))}
+							{onsay}
+							width="9.5rem"
 						/></label
 					>
 					{#if placed && selection.track !== null && selection.placement !== null}
 						{@const at = { track: selection.track, index: selection.placement }}
-						<label>
+						<label title="Where it starts in the song, as bar.beat.tick, or a bar">
 							starts
-							<input
-								type="number"
-								min="0"
-								aria-label="Clip start"
+							<UnitField
+								label="Clip start"
 								value={placed.tick}
-								onchange={(e) => {
-									const next = setPlacement(doc, at.track, at.index, { tick: number(e) });
+								format={(tick) => position(tick, doc.ppq)}
+								read={readPosition(doc.ppq)}
+								onvalue={(tick) => {
+									const next = setPlacement(doc, at.track, at.index, { tick });
 									commit(next);
-									selection = { track: at.track, placement: placementIndex(next, at.track, placed.clip, number(e)) };
+									selection = { track: at.track, placement: placementIndex(next, at.track, placed.clip, tick) };
 								}}
+								{onsay}
+								width="8rem"
 							/>
 						</label>
 						<label
@@ -888,24 +902,27 @@
 						>
 						{@const window = windowOf(doc, placed)}
 						<div class="placement" role="group" aria-label="What this placement plays">
-							<label title="Plays the clip from this tick of it"
-								>from <input
-									type="number"
-									min="0"
-									max={clip.length - 1}
-									aria-label="Window start"
+							<label title="Plays the clip from here in it, as bar.beat.tick from the clip's start"
+								>from <UnitField
+									label="Window start"
 									value={window.start}
-									onchange={(e) =>
-										commit(setPlacement(doc, at.track, at.index, { start: number(e), length: undefined }))}
+									format={(tick) => position(tick, doc.ppq)}
+									read={readPosition(doc.ppq, clip.length)}
+									onvalue={(start) => commit(setPlacement(doc, at.track, at.index, { start, length: undefined }))}
+									{onsay}
+									width="8rem"
 								/></label
 							>
-							<label title="For this many ticks, each repeat"
-								>for <input
-									type="number"
-									min="1"
-									aria-label="Window length"
+							<label title="For this long, each repeat, in bars, as a note value or in ticks"
+								>for <UnitField
+									label="Window length"
 									value={window.length}
-									onchange={(e) => commit(setPlacement(doc, at.track, at.index, { length: number(e) }))}
+									format={(length) => barLength(length, doc.ppq)}
+									read={readLength(doc.ppq)}
+									choices={barLengths(doc.ppq)}
+									onvalue={(length) => commit(setPlacement(doc, at.track, at.index, { length }))}
+									{onsay}
+									width="9.5rem"
 								/></label
 							>
 							<label
@@ -936,12 +953,15 @@
 						</p>{/if}
 					{#each clip.play as change, index (index)}
 						<div class="change">
-							<input
-								type="number"
-								min="0"
-								aria-label={`Play change ${index + 1} tick`}
+							<UnitField
+								label={`Play change ${index + 1} tick`}
+								title="Where in the clip it changes, as bar.beat.tick from the clip's start"
 								value={change.tick}
-								onchange={(e) => clipChanged(setPlayChange(clip, index, { tick: number(e) }))}
+								format={(tick) => position(tick, doc.ppq)}
+								read={readPosition(doc.ppq, clip.length)}
+								onvalue={(tick) => clipChanged(setPlayChange(clip, index, { tick }))}
+								{onsay}
+								width="5.5rem"
 							/>
 							<select
 								aria-label={`Play change ${index + 1} mode`}
@@ -1043,6 +1063,7 @@
 							onaudition={audition}
 							onundo={undo}
 							onview={(view, zoomed) => clip && viewed(clip.id, view, zoomed)}
+							{onsay}
 						/>
 					{/key}
 				{:else}
@@ -1331,7 +1352,7 @@
 		gap: 0.2rem;
 		margin-bottom: 0.2rem;
 	}
-	.change input,
+	.change :global(input.unit),
 	.change select {
 		width: auto;
 		flex: 1;

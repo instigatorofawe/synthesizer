@@ -976,6 +976,22 @@ end grows the clip to the bar that holds it, which says so with an Undo. Here th
 would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
 four bars past the end, so there is room to do it.
 
+The fields read as music while the document holds ticks and MIDI numbers (`Units.ts`). A position reads as bar.beat.tick, as the ghost does,
+counted from the clip's start inside a clip, as the roll's ruler is, and from the song's for a placement. A pitch reads as a name and a
+length as a note value, a clip's and a window's in bars. Each takes what a musician would type: a bar or bar.beat, `E4`, `F#3`, `Bb2` or a
+MIDI number, `3/16`, a dotted `1/8.` or `2 bars`. A bare number in a length is ticks, so a length no note value names can still be had,
+and a bare number in a position is a bar, as in the top bar. What isn't one is refused with a message that says what to type, and the field
+goes back to what it held. Velocity stems run from each note's start to its end, as tall and as deeply shaded as it is loud, so a chord's
+overlap and still read apart. A click on a stem sets its note, or every chosen note, and a drag across the strip paints: each note whose
+start it passes takes the velocity the drag had there, and the drag is one edit.
+
+A lane's points are joined by lines, as DAW breakpoints are. The compiler starts a point's ramp at the point's own tick and ramps from
+wherever the lane is then, so a point is drawn where its ramp ends, and a line from the point before is a ramp that starts at that
+point. A click after another point adds one joined to it, and each point is a step, a line or an exp curve into it, set in its fields or its
+right-click menu. Moving or removing a point keeps the lines either side of it joined, and a ramp shorter than its gap holds and then
+ramps, as it always has. The lane draws what the compiler plays, which `lanePoints` and `laneCurve` in `TimelineEdit.ts` work out as the
+compiler does, so a document from before reads as it plays: most of the examples' ramps already start at the point before.
+
 Step entry writes notes from the keyboard with the song stopped, and is the way to write them without a mouse. R, or the Step toggle at the
 right of the roll's tabs, turns it on, and a line in the roll marks where the next step goes: where it was last in that clip, or else the
 clip's start, and a click moves it to the nearest line of the grid. The piano keys write notes there as long as the Draw length, so every start

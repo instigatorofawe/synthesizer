@@ -900,8 +900,11 @@ export function laneChoices(doc: Timeline, trackId: number | null, patches: Patc
 }
 
 // A lane's range and name come from what it moves. One that moves nothing the page knows of still has to draw, so its range
-// comes from its own points.
-export function describeLane(lane: Lane, choices: LaneChoice[]): { label: string; min: number; max: number } {
+// comes from its own points. `start` is where what it moves stands before the lane moves it, if the page knows.
+export function describeLane(
+	lane: Lane,
+	choices: LaneChoice[]
+): { label: string; min: number; max: number; start?: number } {
 	const choice = choices.find((c) => c.key === lane.key);
 	if (choice) return choice;
 	const values = lane.points.map(({ point }) => point.value);
@@ -916,6 +919,8 @@ const fromChoice = (choice: Pick<LaneChoice, 'param' | 'target'>) => ({
 	...(choice.target === undefined ? {} : { target: choice.target })
 });
 
+// These three change the document's points as they are, each holding its value from its tick or ramping from there for its own
+// ticks. What a lane's own gestures do, which keeps points joined by lines, is further down: `addLanePoint` and the rest.
 export function addPoint(clip: Clip, lane: Pick<LaneChoice, 'param' | 'target'>, tick: number, value: number): Clip {
 	return { ...clip, automation: [...clip.automation, { ...fromChoice(lane), tick, value }] };
 }
@@ -952,37 +957,251 @@ export function curveAt(from: number, to: number, t: number): number {
 	return a * (b / a) ** t;
 }
 
-// The polyline a lane traces. A value holds until the next point's tick, and a ramp then runs from there to that point's value,
-// in a straight line or along its curve. A ramp the next point interrupts stops where it had got to.
-export function laneCurve(lane: Lane, length: number): { tick: number; value: number }[] {
+// What one point of a lane does as the compiler plays it (Compiler.hpp, `compile_clip`): from `begin`, its tick, the lane goes
+// from where it is then, `from`, to the point's value, at once or by `due` in a line or along its curve. A point that comes
+// before that cuts it short, so it stops at `end` where it had got to.
+interface Run {
+	index: number;
+	point: Point;
+	begin: number;
+	due: number;
+	end: number;
+	from: number;
+	exp: boolean;
+}
+
+function runValue(run: Run, tick: number): number {
+	if (tick >= run.due) return run.point.value;
+	if (tick <= run.begin) return run.from;
+	const t = (tick - run.begin) / (run.due - run.begin);
+	return run.exp ? curveAt(run.from, run.point.value, t) : run.from + (run.point.value - run.from) * t;
+}
+
+// A lane's points in the order the compiler takes them, which is by tick and then as the clip lists them, and what each does.
+// Before the first, the lane's target is wherever it stood, which is `start` if the page knows it and the first point's own
+// value if it doesn't.
+function runsOf(lane: Lane, start?: number): Run[] {
+	const runs: Run[] = [];
+	for (const { index, point } of lane.points) {
+		const last = runs.at(-1);
+		if (last && last.end > point.tick) last.end = Math.max(last.begin, point.tick);
+		const from = last ? runValue(last, point.tick) : (start ?? point.value);
+		const due = point.tick + (point.ramp ?? 0);
+		runs.push({ index, point, begin: point.tick, due, end: due, from, exp: point.curve === 'exp' && due > point.tick });
+	}
+	return runs;
+}
+
+// The polyline a lane traces, which is what the compiler plays. A value holds until the next point's tick, and a ramp then
+// runs from there to that point's value, in a straight line or along its curve. A ramp the next point interrupts stops where
+// it had got to. Before its first point a lane draws nothing, unless that point ramps, from `start`.
+export function laneCurve(lane: Lane, length: number, start?: number): { tick: number; value: number }[] {
 	const curve: { tick: number; value: number }[] = [];
-	const points = lane.points.map(({ point }) => point);
-	points.forEach((point, i) => {
+	for (const run of runsOf(lane, start)) {
 		const last = curve.at(-1);
-		if (last && last.tick < point.tick) curve.push({ tick: point.tick, value: last.value });
-		if (!point.ramp || !last) {
-			curve.push({ tick: point.tick, value: point.value });
-			return;
+		if (last && last.tick < run.begin) curve.push({ tick: run.begin, value: last.value });
+		if (run.due === run.begin) {
+			curve.push({ tick: run.begin, value: run.point.value });
+			continue;
 		}
-		const from = last.value;
-		const stop = Math.min(point.tick + point.ramp, points[i + 1]?.tick ?? Infinity);
-		const at = (tick: number) => {
-			const t = (tick - point.tick) / point.ramp!;
-			return point.curve === 'exp' ? curveAt(from, point.value, t) : from + (point.value - from) * t;
-		};
-		const steps = point.curve === 'exp' ? 32 : 1;
+		if (!last) curve.push({ tick: run.begin, value: run.from });
+		const steps = run.exp ? 32 : 1;
 		for (let k = 1; k <= steps; ++k) {
-			const tick = point.tick + (point.ramp * k) / steps;
-			if (tick >= stop) {
-				curve.push({ tick: stop, value: at(stop) });
+			const tick = run.begin + ((run.due - run.begin) * k) / steps;
+			if (tick >= run.end) {
+				curve.push({ tick: run.end, value: runValue(run, run.end) });
 				break;
 			}
-			curve.push({ tick, value: at(tick) });
+			curve.push({ tick, value: runValue(run, tick) });
 		}
-	});
+	}
 	const last = curve.at(-1);
 	if (last && last.tick < length) curve.push({ tick: length, value: last.value });
 	return curve;
+}
+
+// ---------------------------------------------------------------------------------------------------------- lane points
+
+// How a lane gets to a point from the one before: at once, or over the point's ramp, in a straight line or along an exp curve.
+export type Shape = 'step' | 'line' | 'exp';
+export const SHAPES: Shape[] = ['step', 'line', 'exp'];
+
+// A point as a lane shows it: where the lane gets to its value, and how. The document keeps a ramp at the tick it starts, which
+// is where the compiler starts it, so a point that ramps shows `ramp` ticks after its own tick, where the ramp ends. A line
+// from the point before is then a ramp that starts at that point, which is how a lane's points stay joined.
+export interface LanePoint {
+	index: number; // Its place in `clip.automation`
+	tick: number; // Where the lane gets to `value`
+	value: number;
+	ramp: number; // How long it takes to get there from where it starts, which is 0 for a step
+	shape: Shape;
+}
+
+// A lane's points as it shows them, in the order it gets to them. A ramp that the next point cuts short shows where it had got
+// to, which is what plays.
+export function lanePoints(lane: Lane, start?: number): LanePoint[] {
+	const points = runsOf(lane, start).map((run) => {
+		const ramp = run.end - run.begin;
+		const shape: Shape = !ramp ? 'step' : run.exp ? 'exp' : 'line';
+		return { index: run.index, tick: run.end, value: runValue(run, run.end), ramp, shape };
+	});
+	return points.sort((a, b) => a.tick - b.tick);
+}
+
+// Where the line into the point at `k` would start: the point before, or for the first, the start of the clip.
+const before = (points: { tick: number }[], k: number) => (k > 0 ? points[k - 1].tick : 0);
+
+// A point joined to the one before by a line or a curve, which ramps over all of the gap between them.
+const isJoined = (points: LanePoint[], k: number) =>
+	points[k].shape !== 'step' && points[k].tick - points[k].ramp === before(points, k);
+
+interface Laid extends LanePoint {
+	joined: boolean; // Whether it stays joined to whatever point comes before it
+	mine?: true; // The point the edit was for, whose place comes back with it
+}
+
+// The document's point for a lane point: its ramp where it starts, and nothing it doesn't need.
+function written(base: Point, point: Pick<LanePoint, 'tick' | 'value' | 'ramp' | 'shape'>): Point {
+	const { ramp: _, curve: __, ...rest } = base;
+	const next: Point = { ...rest, tick: point.tick - point.ramp, value: point.value };
+	if (point.ramp > 0 && point.shape !== 'step') {
+		next.ramp = point.ramp;
+		if (point.shape === 'exp') next.curve = 'exp';
+	}
+	return next;
+}
+
+const samePoint = (a: Point, b: Point) =>
+	a.tick === b.tick &&
+	a.value === b.value &&
+	(a.ramp ?? 0) === (b.ramp ?? 0) &&
+	(a.curve ?? 'linear') === (b.curve ?? 'linear');
+
+// Lays out one lane again after an edit to its points. Each point that was joined to the one before it stays joined to
+// whatever point comes before it now, or the clip's start if none does. Any other ramp keeps its length, short enough not to
+// start before the point before it. Each point stays at its place in `clip.automation`, and one the edit adds goes on the end.
+// Points that start at one tick play in the order the clip lists them, so a step and the line that starts from it are put in
+// the order the lane gets to them: the step first.
+function relay(
+	clip: Clip,
+	lane: Pick<Lane, 'key' | 'param' | 'target'>,
+	start: number | undefined,
+	edit: (points: Laid[]) => Laid[]
+): { clip: Clip; index: number } {
+	const found = lanesOf(clip).find((l) => l.key === lane.key);
+	const shown = found ? lanePoints(found, start) : [];
+	const laid = edit(shown.map((point, k) => ({ ...point, joined: isJoined(shown, k) })));
+	laid.sort((a, b) => a.tick - b.tick);
+	laid.forEach((point, k) => {
+		const gap = point.tick - before(laid, k);
+		point.ramp = point.joined ? gap : Math.min(point.ramp, gap);
+		if (!point.ramp) point.shape = 'step';
+	});
+
+	// What each place in `clip.automation` holds now. A point that comes out as it was stays as it was, keys and all.
+	const template = { ...fromChoice(lane), tick: 0, value: 0 };
+	type Entry = { point: Point; rank?: number; mine?: true };
+	const rewritten = new Map<number, Entry>();
+	const added: Entry[] = [];
+	laid.forEach((point, rank) => {
+		const old = point.index >= 0 ? clip.automation[point.index] : undefined;
+		const next = written(old ?? template, point);
+		const entry: Entry = { point: old && samePoint(old, next) ? old : next, rank, ...(point.mine && { mine: true }) };
+		if (old) rewritten.set(point.index, entry);
+		else added.push(entry);
+	});
+	const own = new Set(found?.points.map(({ index }) => index) ?? []);
+	const entries: Entry[] = clip.automation.flatMap((point, i) => {
+		if (!own.has(i)) return [{ point }];
+		const entry = rewritten.get(i);
+		return entry ? [entry] : [];
+	});
+	const ordered = inPlayOrder([...entries, ...added]);
+	const index = ordered.findIndex((entry) => entry.mine);
+	const same = ordered.length === clip.automation.length && ordered.every((e, i) => e.point === clip.automation[i]);
+	return { clip: same ? clip : { ...clip, automation: ordered.map((entry) => entry.point) }, index };
+}
+
+// The compiler takes points that start at one tick in the order the clip lists them, so a lane's points that do are put in
+// the order the lane gets to them, `rank`, in the places they already have. Points that start at different ticks stay where
+// they are, wherever the clip lists them.
+function inPlayOrder<T extends { point: Point; rank?: number }>(entries: T[]): T[] {
+	const groups = new Map<string, number[]>();
+	entries.forEach((entry, i) => {
+		if (entry.rank === undefined) return;
+		const key = JSON.stringify([laneKey(entry.point.param, entry.point.target), entry.point.tick]);
+		groups.set(key, [...(groups.get(key) ?? []), i]);
+	});
+	const ordered = [...entries];
+	for (const places of groups.values()) {
+		const byRank = places.map((i) => entries[i]).sort((a, b) => a.rank! - b.rank!);
+		places.forEach((place, k) => (ordered[place] = byRank[k]));
+	}
+	return ordered;
+}
+
+// A point added where a click puts it. After another it is joined to that one by a line, or by a curve if it lands on one, and
+// the point after it, if that was joined to the one before, is joined to it instead. A lane's first point is a step. Its
+// place in `clip.automation` comes back with it.
+export function addLanePoint(
+	clip: Clip,
+	lane: Pick<LaneChoice, 'key' | 'param' | 'target'>,
+	tick: number,
+	value: number,
+	start?: number
+): { clip: Clip; index: number } {
+	return relay(clip, lane, start, (points) => {
+		const next = points.find((point) => point.tick > tick);
+		const shape: Shape = !points.some((point) => point.tick < tick)
+			? 'step'
+			: next?.joined && next.shape === 'exp'
+				? 'exp'
+				: 'line';
+		return [...points, { index: -1, tick, value, ramp: 0, shape, joined: shape !== 'step', mine: true }];
+	});
+}
+
+// A point moved, or its value, ramp or shape changed. A point moved keeps its line from the point before it, whichever that is
+// now, and the lines into the points either side stay joined. A line or a curve given to a step ramps from the point before,
+// and a ramp is never longer than the gap it fills. The point's place in `clip.automation` comes back with it.
+export function setLanePoint(
+	clip: Clip,
+	index: number,
+	change: Partial<Pick<LanePoint, 'tick' | 'value' | 'ramp' | 'shape'>>,
+	start?: number
+): { clip: Clip; index: number } {
+	const point = clip.automation[index];
+	if (!point) return { clip, index };
+	const lane = { key: laneKey(point.param, point.target), param: point.param, target: point.target };
+	return relay(clip, lane, start, (points) =>
+		points.map((old) => {
+			if (old.index !== index) return old;
+			const next: Laid = { ...old, mine: true };
+			if (change.tick !== undefined) next.tick = Math.max(0, change.tick);
+			if (change.value !== undefined) next.value = change.value;
+			if (change.shape) {
+				next.shape = change.shape;
+				if (change.shape === 'step') next.ramp = 0;
+				if (change.shape === 'step' || old.shape === 'step') next.joined = change.shape !== 'step';
+			}
+			if (change.ramp !== undefined) {
+				next.ramp = Math.max(0, change.ramp);
+				next.joined = false; // A ramp as long as the gap or longer fills it, and so joins them
+				if (!next.ramp) next.shape = 'step';
+				else if (next.shape === 'step') next.shape = 'line';
+			}
+			return next;
+		})
+	);
+}
+
+// A point taken out. The point after it, if it was joined to it, is joined to the one before it instead, or to the clip's
+// start if there is none, and the point before it holds if there is none after.
+export function removeLanePoint(clip: Clip, index: number, start?: number): Clip {
+	const point = clip.automation[index];
+	if (!point) return clip;
+	const lane = { key: laneKey(point.param, point.target), param: point.param, target: point.target };
+	return relay(clip, lane, start, (points) => points.filter((p) => p.index !== index)).clip;
 }
 
 // --------------------------------------------------------------------------------------------------------------- tempo

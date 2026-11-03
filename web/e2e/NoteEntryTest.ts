@@ -167,18 +167,18 @@ test('a right-click on a note opens its menu, which deletes and duplicates, and 
 
 test('a note past the end grows the clip to the bar that holds it, and Undo takes both back', async ({ page }) => {
 	await trackWithClip(page, 'Grown');
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('1 bar');
 	const at = await rollPoint(page, BAR + 480, 62);
 	await page.mouse.move(at.x, at.y);
 	await expect(page.getByTestId('ghost')).toHaveText('D4 · 1/4 · 2.2.000 · makes the clip 2 bars');
 	await page.mouse.click(at.x, at.y);
 	await expect(page.getByTestId('clip-grown')).toContainText('Clip is now 2 bars');
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-tick', String(BAR + 480));
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(2 * BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('2 bars');
 
 	await page.getByTestId('clip-grown').getByRole('button', { name: 'Undo' }).click();
 	await expect(notes(page)).toHaveCount(0);
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('1 bar');
 	await expect(page.getByTestId('clip-grown')).toHaveCount(0);
 });
 
@@ -195,11 +195,11 @@ test('a clip that would grow into the next placement offers to lengthen instead,
 	const offer = page.getByTestId('lengthen-offer');
 	await expect(offer).toContainText('would run it into the next clip');
 	await expect(notes(page)).toHaveCount(0);
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('1 bar');
 
 	await offer.getByRole('button', { name: 'Lengthen to 2 bars' }).click();
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-tick', String(BAR + 480));
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(2 * BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('2 bars');
 	await expect(page.getByTestId('compile-error')).toContainText('clips overlap');
 });
 
@@ -211,12 +211,12 @@ test('dragging across an empty row draws a clip of whole bars, and a double-clic
 	const barPixels = 96;
 	await press(page, { x: row.x + 10, y: row.y + 20 }, { x: row.x + barPixels * 2 + 40, y: row.y + 20 });
 	await expect(page.getByTestId('placement-1-0')).toHaveAttribute('data-tick', '0');
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(3 * BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('3 bars');
 	await expect(page.getByTestId('roll')).toBeVisible();
 
 	await page.mouse.dblclick(row.x + barPixels * 5 + 10, row.y + 20);
 	await expect(page.getByTestId('placement-1-1')).toBeVisible();
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('1 bar');
 });
 
 test('Mod-drag copies a placement, and its menu makes it unique and takes it away', async ({ page }) => {

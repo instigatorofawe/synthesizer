@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { loopButton, undoButton } from './Chrome.ts';
 
 // A page load waits until the page has hydrated, as AppTest's do.
 const test = base.extend({
@@ -128,7 +129,7 @@ test('M and S in the track heads and the Mixer agree: a mute is saved and undone
 		page.getByTestId('mixer').getByRole('button', { name: `Mute ${name}`, exact: true });
 	const mixerSolo = (name: string) =>
 		page.getByTestId('mixer').getByRole('button', { name: `Solo ${name}`, exact: true });
-	const undo = page.getByRole('group', { name: 'Undo and redo' }).getByRole('button', { name: 'Undo' });
+	const undo = undoButton(page);
 	await tab(page, 'Mixer');
 
 	// A head's M is the track's mute, which the Mixer shows and the document holds, and it is one step of undo
@@ -164,12 +165,14 @@ test('M and S in the track heads and the Mixer agree: a mute is saved and undone
 	// It is heard: with Lead soloed and muted, nothing plays, and without the solo Pluck comes back
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
-	await page.getByRole('button', { name: 'Loop off' }).click();
+	await loopButton(page).click();
+	await expect(loopButton(page)).toHaveAttribute('aria-pressed', 'true');
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await tab(page, 'Mixer');
 	await headMute('Lead').click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 6000 }).toBeLessThan(0.002);
-	await page.waitForTimeout(1500); // Long enough for Pluck to have played, were it heard
+	// Pluck plays, as its own scope shows, which is before its mute, and the master hears none of it
+	await expect.poll(() => stripPeak(page, 'track:2'), { timeout: 8000 }).toBeGreaterThan(0.01);
 	expect(await stripPeak(page, 'master')).toBeLessThan(0.002);
 	await headSolo('Lead').click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);

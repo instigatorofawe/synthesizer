@@ -93,7 +93,8 @@ test('a clip opens its patch, and the song comes back on the same clip, as it wa
 	const { scroll } = await rollView(page, 120);
 	expect(scroll).toBeGreaterThan(0);
 
-	// By the trail back from the Patch view
+	// By the trail back from the Patch view, from the inspector, which starts folded below 1400 px
+	await page.getByRole('button', { name: 'Inspector' }).click();
 	await page.getByRole('button', { name: 'Open patch slot 1' }).click();
 	await shows(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Sampled pluck');

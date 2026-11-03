@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test as base, type Page } from '@playwright/test';
+import { fromSongMenu, loopButton, openLight, undoButton } from './Chrome.ts';
 import { emptyNewSong } from './NewSong.ts';
 import { openView } from './Views.ts';
 
@@ -233,7 +234,7 @@ test('rapid edits settle on the newest image, with scopes on its registers', asy
 	await everyStripHeard(page);
 });
 
-test('the status bar says an edit is compiling until its image plays', async ({ page }) => {
+test('the compile light says an edit is compiling until its image plays', async ({ page }) => {
 	// Slow every reply from the compiler, and every image on its way to the engine, so the edit is seen waiting for each.
 	await page.addInitScript(() => {
 		window.Worker = class extends window.Worker {
@@ -298,7 +299,8 @@ test('the JSON stays open while it is typed into, and an edit survives opening s
 	await expect(editor).toBeVisible();
 	await editor.fill('{ not json');
 	await expect(editor).toBeVisible();
-	await expect(page.getByText('JSON at position').or(page.getByText('Expected'))).toBeVisible();
+	const light = await openLight(page);
+	await expect(light.getByText('JSON at position').or(light.getByText('Expected'))).toBeVisible();
 
 	await browser(page).getByRole('link', { name: 'Stereo lead' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Stereo lead');
@@ -307,7 +309,7 @@ test('the JSON stays open while it is typed into, and an edit survives opening s
 	await expect(graph).toBeVisible();
 	await graph.fill('{ not json');
 	await expect(graph).toBeVisible();
-	await expect(page.getByText(/^Graph JSON: /)).toBeVisible();
+	await expect((await openLight(page)).getByText('Graph JSON')).toBeVisible();
 
 	// Both are still there, unsaved, after another timeline and back.
 	await browser(page).getByRole('link', { name: 'Song' }).click();
@@ -330,7 +332,7 @@ test('a tempo ramp glides to the next change, and the transport shows how far it
 	await page.goto('/?timeline=song');
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
-	await expect(page.getByTestId('tempo')).toHaveText('140 BPM');
+	await expect(page.getByTestId('tempo')).toHaveValue('140');
 	// Bars are 96 pixels and 1920 ticks.
 	const ruler = (await page.getByTestId('ruler').boundingBox())!;
 	const locate = async (bar: number, tick: string) => {
@@ -348,9 +350,9 @@ test('a tempo ramp glides to the next change, and the transport shows how far it
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	expect(await page.getByTestId('generation').textContent()).not.toBe('1');
-	await expect(page.getByTestId('tempo')).toHaveText('100 BPM');
+	await expect(page.getByTestId('tempo')).toHaveValue('100');
 	await locate(2, '1920');
-	await expect(page.getByTestId('tempo')).toHaveText('120 BPM');
+	await expect(page.getByTestId('tempo')).toHaveValue('120');
 	const json = await timelineJson(page);
 	expect(JSON.parse(await json.inputValue()).tempo).toEqual([
 		{ tick: 0, bpm: 140, ramp: true },
@@ -361,7 +363,7 @@ test('a tempo ramp glides to the next change, and the transport shows how far it
 		.getByRole('tab', { name: /^Notes/ })
 		.click();
 	await page.getByLabel('Ramp from bar 1').uncheck();
-	await expect(page.getByTestId('tempo')).toHaveText('140 BPM');
+	await expect(page.getByTestId('tempo')).toHaveValue('140');
 });
 
 test('seeking chases held notes and a knob works', async ({ page }) => {
@@ -624,7 +626,7 @@ test('a bundle exports with shared patches, and thin without them', async ({ pag
 test('a single timeline exports only what it reaches', async ({ page }) => {
 	await page.goto('/?timeline=ballad');
 	const download = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Export saved version' }).click();
+	await fromSongMenu(page, 'Export saved version');
 	expect((await download).suggestedFilename()).toBe('Ballad.msimg');
 });
 
@@ -680,7 +682,7 @@ test('a wire drawn by hand compiles, and an error lands on its node until it is 
 	await drag(page, 'out-4-out', 'in-2-in'); // Audio into a pitch read once a frame
 	await expect(page.getByTestId('compile-error')).toContainText('put a snap node on the wire');
 	await expect(page.getByTestId('node-2')).toHaveAttribute('data-error', 'true');
-	await patchEditor(page).getByRole('button', { name: 'Undo' }).click();
+	await undoButton(page).click();
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await expect(page.getByTestId('node-2')).toHaveAttribute('data-error', 'false');
 });
@@ -795,7 +797,7 @@ test('the pieces come first among the examples, and play as they are', async ({ 
 
 test('a recipe added to the library is an ordinary timeline that plays the built-in patch', async ({ page }) => {
 	await page.goto('/?recipe=PluckedString');
-	await page.getByRole('button', { name: 'Add to library' }).click();
+	await fromSongMenu(page, 'Add to library');
 	await page.waitForURL('**/?timeline=recipe-PluckedString');
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('PluckedString');
 	await page.getByRole('button', { name: 'Start audio' }).click();
@@ -808,13 +810,15 @@ test('a recipe added to the library is an ordinary timeline that plays the built
 	await expect(page.getByTestId('used-by')).toContainText('PluckedString');
 
 	await page.goto('/?recipe=PluckedString');
-	await expect(page.getByRole('button', { name: 'Add to library' })).toHaveCount(0);
-	await expect(page.getByRole('link', { name: 'Open in the library' })).toBeVisible();
+	await page.getByRole('button', { name: 'Song menu' }).click();
+	await expect(page.getByRole('menuitem', { name: 'Add to library' })).toHaveCount(0);
+	await page.getByRole('menuitem', { name: 'Open in the library' }).click();
+	await page.waitForURL('**/?timeline=recipe-PluckedString');
 });
 
 test('a recipe with recordings keeps them when it is added', async ({ page }) => {
 	await page.goto('/?recipe=OneShotSample');
-	await page.getByRole('button', { name: 'Add to library' }).click();
+	await fromSongMenu(page, 'Add to library');
 	await page.waitForURL('**/?timeline=recipe-OneShotSample');
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Start audio' }).click();
@@ -935,7 +939,6 @@ test('a probe in a recipe reads the voice of the patch on screen', async ({ page
 });
 
 async function newTimeline(page: Page, name: string) {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
 	await page.getByLabel('New timeline name').fill(name);
@@ -1009,7 +1012,7 @@ async function startAudio(page: Page) {
 const stripPeak = async (page: Page, chain: string) =>
 	Number(await page.getByTestId(`strip-${chain}`).getByTestId('peak').getAttribute('data-peak'));
 
-const undo = (page: Page) => timelineEditor(page).getByRole('button', { name: 'Undo' }).click();
+const undo = (page: Page) => undoButton(page).click();
 
 test('a song built from nothing plays, saves and comes back', async ({ page }) => {
 	const problems: string[] = [];
@@ -1021,7 +1024,7 @@ test('a song built from nothing plays, saves and comes back', async ({ page }) =
 	await expect(page.getByTestId('note-2')).toHaveAttribute('data-note', '67');
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
-	await page.getByRole('button', { name: 'Loop off' }).click();
+	await loopButton(page).click();
 	await startAudio(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await tab(page, 'Mixer');
@@ -1157,18 +1160,18 @@ test('a drawn loop reaches an engine that starts later', async ({ page }) => {
 	const strip = (await page.getByTestId('loop-strip').boundingBox())!;
 	await press(page, { x: strip.x + 1, y: strip.y + 5 }, { x: strip.x + 48, y: strip.y + 5 });
 	await expect(page.getByTestId('loop-brace')).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Loop on' })).toBeVisible();
+	await expect(loopButton(page)).toHaveAttribute('aria-pressed', 'true');
 	await startAudio(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await page.waitForTimeout(1500);
 	expect(Number(await page.getByTestId('tick').textContent())).toBeLessThan(960);
-	await expect(page.getByTestId('voices')).toBeVisible();
+	await expect(page.getByTestId('voices')).toBeAttached(); // Under the compile light's list
 });
 
 test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({ page }) => {
 	await trackWithClip(page, 'Lanes');
 	await addNoteAt(page, 0, 60);
-	await page.getByRole('button', { name: 'Loop off' }).click();
+	await loopButton(page).click();
 	await page.getByLabel('Add a lane').selectOption({ label: 'cutoff' });
 	await expect(page.getByTestId('lane-0')).toBeVisible();
 
@@ -1243,9 +1246,8 @@ test('an insert opens in the patch editor from the mixer', async ({ page }) => {
 });
 
 test('a fader is heard as it moves, and only compiles when let go', async ({ page }) => {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await startPlaying(page);
-	await page.getByRole('button', { name: 'Loop off' }).click();
+	await loopButton(page).click();
 	await tab(page, 'Mixer');
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);
 	const fader = page.getByLabel('Fader for Master');
@@ -1269,9 +1271,8 @@ test('a fader is heard as it moves, and only compiles when let go', async ({ pag
 });
 
 test('a mute silences a track, and buses, sends and inserts are wired from the mixer', async ({ page }) => {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await startPlaying(page);
-	await page.getByRole('button', { name: 'Loop off' }).click();
+	await loopButton(page).click();
 	await tab(page, 'Mixer');
 	await page.getByRole('button', { name: 'Mute Lead' }).click();
 	await page.getByRole('button', { name: 'Mute Pluck' }).click();
@@ -1346,7 +1347,6 @@ test('the velocities of chosen notes are ramped, scaled and quantized', async ({
 });
 
 test('a send goes before the fader from the mixer', async ({ page }) => {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await page.goto('/?timeline=song');
 	await tab(page, 'Mixer');
 	const pre = page.getByRole('button', { name: 'Send from Lead to room before the fader' });
@@ -1359,7 +1359,8 @@ test('a send goes before the fader from the mixer', async ({ page }) => {
 
 test('a song exports as a WAV file, to its end and its tail', async ({ page }) => {
 	await page.goto('/?recipe=Kick808');
-	const button = page.getByRole('button', { name: 'Export WAV' });
+	await page.getByRole('button', { name: 'Song menu' }).click();
+	const button = page.getByRole('menuitem', { name: 'Export WAV' });
 	await expect(button).toBeEnabled({ timeout: 10000 });
 	const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), button.click()]);
 	expect(download.suggestedFilename()).toBe('Kick808.wav');
@@ -1450,7 +1451,7 @@ test('insert and global sliders are heard as they move, and stay where they are 
 	await tab(page, 'Mixer');
 	await page.getByLabel('Add an insert to Track 1').selectOption(insert);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await page.getByRole('button', { name: 'Loop off' }).click();
+	await loopButton(page).click();
 	await startAudio(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.1);
@@ -1493,7 +1494,7 @@ test('a value edited in the JSON is what plays, over what a swap would carry', a
 	await page.mouse.dblclick(x, y);
 	await page.getByLabel('Note length').fill('1900');
 	await page.getByLabel('Note length').blur();
-	await page.getByRole('button', { name: 'Loop off' }).click();
+	await loopButton(page).click();
 	await startAudio(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect
@@ -1547,7 +1548,6 @@ test('a patch edit is heard in the song as it is made', async ({ page }) => {
 });
 
 test('a recipe shows its notes and mix, and none of it can be changed', async ({ page }) => {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await page.goto('/?recipe=FrenchHorn');
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('note-0')).toBeAttached();
@@ -1557,7 +1557,7 @@ test('a recipe shows its notes and mix, and none of it can be changed', async ({
 	await expect(page.getByLabel('Fader for Master')).toBeDisabled();
 	await tab(page, 'Notes');
 	await expect(page.getByRole('button', { name: 'Add track' })).toHaveCount(0);
-	await expect(timelineEditor(page).getByRole('button', { name: 'Undo' })).toHaveCount(0);
+	await expect(undoButton(page)).toBeDisabled();
 	await expect(page.getByTestId('repeat-1-0')).toHaveCount(0);
 
 	const row = (await page.getByTestId('row-1').boundingBox())!;

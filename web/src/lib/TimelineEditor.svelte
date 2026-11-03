@@ -1,18 +1,19 @@
 <script lang="ts">
 	import { onMount, tick as settle, untrack, type Snippet } from 'svelte';
 	import { on } from 'svelte/events';
-	import Arrangement, { type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
+	import Arrangement, { type Loop, type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
 	import type { ExampleGroup } from '#lib/PatchGroups.ts';
 	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
-	import Splitter from '#lib/Splitter.svelte';
 	import type { ProgramReport } from '#lib/Request.ts';
+	import { ZOOM_KEY, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
-	import { matches, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { clampVelocity, stepVelocity, type Cursor } from '#lib/StepEntry.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -30,6 +31,7 @@
 		noteValue,
 		place,
 		placementIndex,
+		placementSpan,
 		placeOfError,
 		removeClip,
 		removePlacement,
@@ -48,7 +50,6 @@
 		setTrack,
 		snapTick,
 		soloed,
-		songLength,
 		stepLength,
 		trackKey,
 		windowOf,
@@ -58,6 +59,7 @@
 	} from '#lib/TimelineEdit.ts';
 
 	let {
+		id = '',
 		doc,
 		patches,
 		program,
@@ -68,6 +70,8 @@
 		rings,
 		engine,
 		history = null,
+		loop = null,
+		looping = false,
 		readonly = false,
 		active = true,
 		tabs = [],
@@ -75,12 +79,15 @@
 		examples = [],
 		solo = new Set(),
 		onchange,
+		onloop = () => {},
 		ontrack = () => {},
 		onopen = () => {},
 		onnewpatch,
+		onwriting = () => {},
 		onsolo = () => {},
 		onkey
 	}: {
+		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
 		doc: Timeline;
 		patches: PatchLike[];
 		program: ProgramReport | null;
@@ -91,6 +98,8 @@
 		rings: Ring[];
 		engine: SongControls;
 		history?: Undoable | null; // The timeline's undo, which the page keeps while other things are open
+		loop?: Loop | null; // The loop, which the page keeps since the top bar turns it on and off. Null is the whole song.
+		looping?: boolean;
 		readonly?: boolean;
 		active?: boolean; // Whether keys are for this editor, which they are while its view is on screen
 		tabs?: { id: string; label: string; content: Snippet }[]; // More views of the document, after the notes and the mixer
@@ -98,9 +107,11 @@
 		examples?: ExampleGroup[]; // How the browser groups the examples, which the patch pickers group built-in patches by
 		solo?: ReadonlySet<number>; // The tracks soloed, which the page keeps, since it is no part of the document
 		onchange: (doc: Timeline) => void;
+		onloop?: (loop: Loop | null, on: boolean) => void; // A loop set or changed here, and whether it is on
 		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
+		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
 		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, once audio has started
 	} = $props();
@@ -120,20 +131,19 @@
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
+	let velocity = $state(100); // The velocity of new notes, clicked or stepped, which C and V step
+	// Step entry, which R or the Step toggle turns on and Esc leaves. It outlasts a change of clip, and its cursor is kept for
+	// each clip, so coming back to one carries on where it left off.
+	let stepping = $state(false);
+	const cursors = new Map<string, Cursor>();
+	let roll = $state<ReturnType<typeof PianoRoll>>();
 	const drawChoices = $derived.by(() => {
 		const lengths = drawLengths(doc.ppq);
 		if (lengths.some((length) => length.ticks === draw)) return lengths;
 		return [...lengths, { label: noteValue(draw, doc.ppq), ticks: draw }].sort((a, b) => a.ticks - b.ticks);
 	});
 	let barWidth = $state(96);
-	let loop = $state<{ start: number; end: number } | null>(null);
-	let looping = $state(false);
 	let tab = $state('notes');
-	let dragged = $state<number | null>(null); // The arrangement's height, once someone has dragged it
-	// Until then it fits its tracks, up to a size that leaves room for the notes.
-	const height = $derived(dragged ?? Math.min(270, 34 + Math.max(doc.tracks.length, 1) * 60 + 20));
-	const canUndo = $derived(history?.canUndo ?? false);
-	const canRedo = $derived(history?.canRedo ?? false);
 
 	const track = $derived(doc.tracks.find((t) => t.id === selection.track));
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
@@ -149,9 +159,18 @@
 	const used = $derived(doc.tracks.flatMap((t) => t.slots));
 	const newPatchAction = $derived(onnewpatch && !readonly ? 'New patch for this track' : '');
 	const choices = $derived(laneChoices(doc, home?.id ?? null, patches));
-	const length = $derived(program?.length_ticks ?? songLength(doc));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
 	const badClips = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).clip ?? [])));
+
+	// The piano keys write into the roll while step entry is on and the roll shows a clip. The page asks before it routes them.
+	const writing = $derived(stepping && active && !readonly && tab === 'notes' && !!clip);
+	$effect(() => onwriting(writing));
+	$effect(() => () => onwriting(false));
+
+	// A piano key from the page, for step entry to write. The roll ignores it unless it is writing.
+	export function stepKey(note: number, on: boolean) {
+		roll?.stepKey(note, on);
+	}
 
 	const playhead = $derived.by(() => {
 		if (!clip || !placed || placed.clip !== clip.id) return null;
@@ -167,8 +186,8 @@
 		if (next !== doc) onchange(next);
 	}
 
+	// The roll's "Clip is now N bars · Undo" takes back the growing. The top bar has the Undo and Redo for everything else.
 	const undo = () => history?.undo();
-	const redo = () => history?.redo();
 
 	// The page shows the chosen track's patch, so it hears about every choice of track.
 	let told = false;
@@ -259,21 +278,82 @@
 		tab = 'notes';
 	}
 
-	const HEIGHT_KEY = 'modsynth.arrangement';
+	// The arrangement is as tall as its tracks, and the notes have the rest. Expand gives the notes the whole view, the
+	// arrangement's height and the inspector's width too, until ⤢ or Esc brings them back.
+	let expanded = $state(false);
+	let peek = $state(false); // The inspector, shown beside expanded notes all the same
+	function expand(on = !expanded) {
+		expanded = on;
+		peek = false;
+	}
+
+	// A double-click on a clip opens it: its notes, with the whole view.
+	function expandClip(at: { track: number; placement: number }) {
+		select(at);
+		expand(true);
+	}
+
+	// The inspector is a column down the right of the view, and folds to a rail. Below 1400 px wide it starts folded, as the
+	// browser does there, and each side of 1400 remembers what was chosen on it, so unfolding it on a laptop doesn't unfold it
+	// on a wide screen. Until the page knows how wide the window is, the width decides.
+	const WIDE = 1400;
+	let wide = $state<boolean | null>(null);
+	let folded = $state({ wide: false, narrow: true });
+	const inspectorKey = (wide: boolean) => `modsynth.inspector.${wide ? 'wide' : 'narrow'}`;
+	const inspecting = $derived(expanded ? peek : wide === null ? null : !folded[wide ? 'wide' : 'narrow']);
+
+	function toggleInspector() {
+		if (expanded) {
+			peek = !peek;
+			return;
+		}
+		if (wide === null) return;
+		const side = wide ? 'wide' : 'narrow';
+		folded[side] = !folded[side];
+		localStorage.setItem(inspectorKey(wide), folded[side] ? 'folded' : 'open');
+	}
+
 	onMount(() => {
-		const kept = Number(localStorage.getItem(HEIGHT_KEY));
-		if (kept > 0) dragged = kept;
+		for (const side of [true, false]) {
+			const kept = localStorage.getItem(inspectorKey(side));
+			if (kept) folded[side ? 'wide' : 'narrow'] = kept === 'folded';
+		}
+		const query = matchMedia(`(min-width: ${WIDE}px)`);
+		wide = query.matches;
+		return on(query, 'change', () => (wide = query.matches));
 	});
 
-	function resize(pixels: number) {
-		dragged = Math.max(70, Math.min(900, height + pixels));
-		localStorage.setItem(HEIGHT_KEY, String(dragged));
+	// Each clip keeps how the roll showed it: its zoom and row height across a reload, and its scroll while the page is open.
+	const viewKey = (clip: string) => zoomKey(id, clip);
+	function rollViewOf(clip: string): RollView | null {
+		const seen = rollViews.get(viewKey(clip));
+		if (seen) return seen;
+		// The server draws the roll as a clip first looks, and the browser then puts it as it was kept.
+		if (typeof localStorage === 'undefined') return null;
+		return keptZoom(localStorage.getItem(ZOOM_KEY), viewKey(clip));
+	}
+	function viewed(clip: string, view: RollView, zoomed: boolean) {
+		rollViews.set(viewKey(clip), view);
+		if (zoomed) localStorage.setItem(ZOOM_KEY, keepZoom(localStorage.getItem(ZOOM_KEY), viewKey(clip), view));
 	}
 
-	function unresize() {
-		dragged = null;
-		localStorage.removeItem(HEIGHT_KEY);
+	// I folds the inspector, `.` fits the roll to its clip's notes, and Esc leaves Expand once nothing nearer has taken it: a
+	// menu, a drag, or what the roll is doing. They have their own listener, so the editor's `keydown` stays as it is.
+	function viewKeys(event: KeyboardEvent) {
+		if (!active || event.defaultPrevented || typingIn(event.target)) return;
+		if (matches(event, 'inspector')) {
+			event.preventDefault();
+			if (!event.repeat) toggleInspector();
+		} else if (matches(event, 'fit') && tab === 'notes' && roll) {
+			event.preventDefault();
+			void roll.fit();
+		} else if (matches(event, 'escape') && expanded) {
+			event.preventDefault();
+			expand(false);
+		}
 	}
+
+	onMount(() => on(window, 'keydown', viewKeys));
 
 	const ringOf = (id: number) => {
 		const target = targets.find((t) => t.chain === `track:${id}`);
@@ -322,6 +402,8 @@
 		const next = renameClip(doc, clipId, name.trim());
 		if (next === doc) return;
 		commit(next);
+		const seen = rollViews.get(viewKey(clipId)); // A clip renamed keeps how the roll showed it
+		if (seen) rollViews.set(viewKey(name.trim()), seen);
 		clipId = name.trim();
 	}
 
@@ -347,8 +429,30 @@
 		delete: (at) => {
 			select(at);
 			deleteClip();
+		},
+		// The loop goes over the placement and its repeats, and the playhead into it, so Play plays the loop.
+		loop: (at) => {
+			select(at);
+			const placed = doc.tracks.find((t) => t.id === at.track)?.placements[at.placement];
+			if (!placed) return;
+			const range = { start: placed.tick, end: placed.tick + placementSpan(doc, placed) };
+			onloop(range, true);
+			if (tick < range.start || tick >= range.end) engine.locate(range.start);
 		}
 	};
+
+	// Shows where a problem is, for the compile light's links: a track, a clip and where it is placed, or a tab.
+	export function reveal(place: { track?: number | null; clip?: string | null; tab?: string }) {
+		const clip = place.clip ?? null;
+		const on =
+			place.track === undefined || place.track === null
+				? doc.tracks.find((t) => clip !== null && t.placements.some((p) => p.clip === clip))
+				: doc.tracks.find((t) => t.id === place.track);
+		const index = clip === null ? -1 : (on?.placements.findIndex((p) => p.clip === clip) ?? -1);
+		if (on) selection = { track: on.id, placement: index >= 0 ? index : null };
+		if (clip !== null && doc.clips.some((c) => c.id === clip)) clipId = clip;
+		tab = place.tab ?? 'notes';
+	}
 
 	// [ and ] step the Draw length. They go by where the keys are, as the piano keys do, and a field keeps them. They have
 	// their own listener, so the editor's `keydown` stays as it is.
@@ -359,6 +463,24 @@
 		event.preventDefault();
 		draw = stepLength(draw, doc.ppq, by);
 	}
+
+	// R turns step entry on or off, wherever focus is but a field or a dialog. From another tab it opens the notes to write
+	// in, and with no clip there is nothing to write into. C and V step the velocity of new notes.
+	function noteKeys(event: KeyboardEvent) {
+		const target = event.target as Element | null;
+		if (readonly || !active || typingIn(target) || target?.closest?.('dialog')) return;
+		if (matches(event, 'step-entry')) {
+			event.preventDefault();
+			if (event.repeat || !clip) return;
+			stepping = tab !== 'notes' || !stepping;
+			tab = 'notes';
+		} else if (matches(event, 'softer') || matches(event, 'louder')) {
+			event.preventDefault();
+			velocity = stepVelocity(velocity, matches(event, 'louder') ? 1 : -1);
+		}
+	}
+
+	onMount(() => on(window, 'keydown', noteKeys));
 
 	onMount(() => {
 		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
@@ -381,27 +503,6 @@
 		engine.locate(at);
 	}
 
-	function setLoop(start: number, end: number) {
-		loop = end > start ? { start, end } : null;
-		looping = loop !== null;
-		engine.setLoop(start, end);
-	}
-
-	function toggleLoop() {
-		looping = !looping;
-		if (!looping) engine.setLoop(0, 0);
-		else if (loop) engine.setLoop(loop.start, loop.end);
-		else {
-			loop = { start: 0, end: Math.max(length, ticksPerBar(doc)) };
-			engine.setLoop(loop.start, loop.end);
-		}
-	}
-
-	// A loop can be drawn before there is an engine to tell, and a new image can arrive in a new engine.
-	$effect(() => {
-		if (targets.length && looping && loop) engine.setLoop(loop.start, loop.end);
-	});
-
 	// Undo and Redo are the page's keys, since they act on whichever panel is in use.
 	function keydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
@@ -417,7 +518,13 @@
 
 <svelte:window onkeydown={keydown} />
 
-<section class="timeline" aria-label="Timeline editor">
+<section
+	class="timeline"
+	class:expanded
+	class:inspecting={inspecting === true}
+	class:folded={inspecting === false}
+	aria-label="Timeline editor"
+>
 	<div class="toolbar">
 		{@render heading?.()}
 		{#if !readonly}
@@ -430,8 +537,6 @@
 				onmousedown={(event) => event.preventDefault()}
 				onclick={(event) => toggle({ kind: 'add', anchor: event.currentTarget })}>+ Track</button
 			>
-			<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
-			<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
 		{/if}
 		{#if !readonly}
 			<label
@@ -442,6 +547,23 @@
 					{#each drawChoices as choice (choice.ticks)}<option value={choice.ticks}>{choice.label}</option>{/each}
 				</select>
 			</label>
+			<label
+				title={`How hard a new note is played, from 1 to 127. ${label('softer')} and ${label('louder')} step it by 10.`}
+			>
+				Vel
+				<input
+					class="velocity"
+					type="number"
+					min="1"
+					max="127"
+					aria-label="Velocity of new notes"
+					value={velocity}
+					onchange={(e) => {
+						velocity = clampVelocity(Number(e.currentTarget.value) || velocity);
+						e.currentTarget.value = String(velocity);
+					}}
+				/>
+			</label>
 		{/if}
 		<label>
 			Snap
@@ -451,16 +573,16 @@
 		</label>
 		<button type="button" onclick={() => (barWidth = Math.max(24, barWidth / 1.5))} aria-label="Zoom out">−</button>
 		<button type="button" onclick={() => (barWidth = Math.min(800, barWidth * 1.5))} aria-label="Zoom in">+</button>
-		<button type="button" onclick={toggleLoop} aria-pressed={looping}>Loop {looping ? 'on' : 'off'}</button>
 		<span class="muted hint">
-			Click the numbers to move the playhead, and drag under them for a loop.
+			Click the numbers to move the playhead.
 			{#if !readonly}Drag across a row for a new clip, or double-click it for a bar. Drag a clip's right edge to repeat
 				it, hold
 				{mod} to copy it, and right-click it for more.{/if}
 		</span>
 	</div>
 
-	<div class="top" style:height="{height}px">
+	<!-- The arrangement and the inspector take their places in the editor's grid: see `.top` below. -->
+	<div class="top">
 		<Arrangement
 			{doc}
 			{selection}
@@ -468,7 +590,8 @@
 			{grid}
 			{tick}
 			{playing}
-			loop={looping ? loop : null}
+			{loop}
+			{looping}
 			{readonly}
 			{badTracks}
 			{badClips}
@@ -486,10 +609,22 @@
 			onnew={newClip}
 			actions={placementActions}
 			onlocate={locate}
-			onloop={setLoop}
+			{onloop}
+			onexpand={expandClip}
 		/>
 
-		<aside class="inspector">
+		<aside class="inspector" id="inspector">
+			<div class="fold">
+				<span class="muted">Inspector</span>
+				<button
+					type="button"
+					aria-label="Inspector"
+					aria-expanded="true"
+					aria-controls="inspector"
+					title={`Fold the inspector (${label('inspector')})`}
+					onclick={toggleInspector}>»</button
+				>
+			</div>
 			<fieldset disabled={readonly}>
 				<details>
 					<summary>Tempo, {doc.tempo[0]?.bpm} BPM</summary>
@@ -797,9 +932,16 @@
 				{/if}
 			</fieldset>
 		</aside>
+		<button
+			type="button"
+			class="rail"
+			aria-label="Inspector"
+			aria-expanded="false"
+			aria-controls="inspector"
+			title={`Show the inspector (${label('inspector')})`}
+			onclick={toggleInspector}><span aria-hidden="true">«</span> Inspector</button
+		>
 	</div>
-
-	<Splitter label="Resize the arrangement" onmove={resize} onreset={unresize} />
 
 	<div class="detail">
 		<div class="tabs" role="tablist" aria-label="Timeline views">
@@ -812,6 +954,28 @@
 					>{extra.label}</button
 				>
 			{/each}
+		</div>
+		<!-- Step is for the notes, and ⤢ for whichever tab is open. -->
+		<div class="rolltools" role="toolbar" aria-label="Notes">
+			{#if tab === 'notes' && clip && !readonly}
+				<button
+					type="button"
+					class="step"
+					aria-pressed={stepping}
+					title={`Step entry (${label('step-entry')}): the piano keys write notes at a cursor, each as long as Draw`}
+					onclick={() => (stepping = !stepping)}><span aria-hidden="true">●</span> Step</button
+				>
+			{/if}
+			<button
+				type="button"
+				class="expand"
+				aria-label="Expand"
+				aria-pressed={expanded}
+				title={expanded
+					? 'Bring the arrangement and the inspector back (Esc)'
+					: 'Give this the whole view. A double-click on a clip does too, and Esc comes back.'}
+				onclick={() => expand()}>⤢</button
+			>
 		</div>
 		<div class="pane" class:notes={tab === 'notes'} role="tabpanel">
 			{#if tab === 'notes'}
@@ -828,10 +992,18 @@
 							canAudition={reported !== undefined || auditionByKeys}
 							{readonly}
 							bind:draw
+							bind:this={roll}
+							bind:stepping
+							{velocity}
+							{active}
+							{cursors}
 							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
+							view={rollViewOf(clip.id)}
+							{expanded}
 							onchange={clipChanged}
 							onaudition={audition}
 							onundo={undo}
+							onview={(view, zoomed) => clip && viewed(clip.id, view, zoomed)}
 						/>
 					{/key}
 				{:else}
@@ -890,14 +1062,19 @@
 		flex-wrap: wrap;
 		gap: 0.25rem 0.75rem;
 	}
+	/* The toolbar across the top, the arrangement over the notes, and the inspector down the right of both. The arrangement is
+	   as tall as its tracks, up to a limit it sets itself, and the notes have the rest. */
 	.timeline {
-		display: flex;
-		flex-direction: column;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-rows: auto auto minmax(0, 1fr);
+		grid-template-areas: 'toolbar toolbar' 'arrangement side' 'detail side';
+		column-gap: 0.5rem;
 		height: 100%;
 		min-height: 0;
 	}
 	.toolbar {
-		flex: none;
+		grid-area: toolbar;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -922,17 +1099,66 @@
 		text-overflow: ellipsis;
 		font-size: 0.75rem;
 	}
+	/* `.top` holds the arrangement and the inspector, and puts no box of its own in the grid, so each takes its own place. */
 	.top {
-		flex: none;
-		max-height: calc(100% - 9rem);
-		min-height: 70px;
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 250px;
-		gap: 0.5rem;
-		padding-bottom: 0.4rem;
-		box-sizing: border-box;
+		display: contents;
+	}
+	.top > :global(.arrangement) {
+		grid-area: arrangement;
+		margin-bottom: 0.4rem;
+	}
+	.expanded .top > :global(.arrangement) {
+		display: none;
+	}
+	/* The inspector shows, or its rail does. Until the page knows how wide the window is, the width decides. */
+	.inspecting .rail,
+	.folded .inspector {
+		display: none;
+	}
+	@media (min-width: 1400px) {
+		.timeline:not(.inspecting, .folded) .rail {
+			display: none;
+		}
+	}
+	@media (max-width: 1399.98px) {
+		.timeline:not(.inspecting, .folded) .inspector {
+			display: none;
+		}
+	}
+	.rail {
+		grid-area: side;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		width: 1.6rem;
+		margin: 0;
+		padding: 0.5rem 0;
+		writing-mode: vertical-rl;
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		color: var(--muted);
+		font-size: 0.75rem;
+	}
+	.rail:hover {
+		color: var(--text);
+	}
+	.rail span {
+		writing-mode: horizontal-tb;
+	}
+	.fold {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin: -0.2rem 0 0.2rem;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
 	}
 	.inspector {
+		grid-area: side;
+		width: 250px;
+		box-sizing: border-box;
 		background: var(--panel);
 		border: 1px solid var(--line);
 		border-radius: 6px;
@@ -942,10 +1168,39 @@
 		font-size: 0.8rem;
 	}
 	.detail {
-		flex: 1;
+		grid-area: detail;
 		min-height: 0;
 		display: flex;
 		flex-direction: column;
+		position: relative;
+	}
+	/* The roll's own controls, and ⤢, sit at the right end of the tab strip. */
+	.rolltools {
+		position: absolute;
+		top: 0;
+		right: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding-top: 0.3rem;
+		font-size: 0.8rem;
+	}
+	.rolltools button {
+		padding: 0.1rem 0.6rem;
+		font-size: 0.8rem;
+	}
+	.step span {
+		color: var(--muted);
+	}
+	.step[aria-pressed='true'] {
+		border-color: #3fb950;
+	}
+	.step[aria-pressed='true'] span {
+		color: #3fb950;
+	}
+	.toolbar input.velocity {
+		width: 3.2rem;
+		padding: 0.1rem 0.25rem;
 	}
 	.tabs {
 		flex: none;
@@ -967,6 +1222,15 @@
 		background: var(--panel);
 		border-color: var(--line);
 		color: var(--text);
+	}
+	.rolltools .expand {
+		padding: 0 0.4rem;
+		font-size: 1rem;
+		line-height: 1.2;
+	}
+	.expand[aria-pressed='true'] {
+		color: var(--accent);
+		border-color: var(--accent);
 	}
 	.pane {
 		flex: 1;

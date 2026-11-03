@@ -25,10 +25,17 @@
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { wholeSong } from '#lib/Transport.ts';
 
 	export interface Selection {
 		track: number | null;
 		placement: number | null; // An index into that track's placements
+	}
+
+	// The loop, in the song's ticks. It is the editor's, not the song's, so it isn't saved.
+	export interface Loop {
+		start: number;
+		end: number;
 	}
 
 	// What a clip's right-click menu does, each to the placement it was opened on.
@@ -38,6 +45,7 @@
 		unique: (at: { track: number; placement: number }) => void;
 		remove: (at: { track: number; placement: number }) => void; // The placement, and not its clip
 		delete: (at: { track: number; placement: number }) => void; // The clip, and every placement of it
+		loop: (at: { track: number; placement: number }) => void; // The loop, over the placement and its repeats, and on
 	}
 
 	let {
@@ -48,6 +56,7 @@
 		tick,
 		playing = false,
 		loop,
+		looping = false,
 		readonly = false,
 		badTracks,
 		badClips,
@@ -65,6 +74,7 @@
 		onnew,
 		onlocate,
 		onloop,
+		onexpand = () => {},
 		actions
 	}: {
 		doc: Timeline;
@@ -73,7 +83,8 @@
 		grid: number;
 		tick: number;
 		playing?: boolean; // Whether the song is playing, which the view follows
-		loop: { start: number; end: number } | null;
+		loop: Loop | null; // Where the loop is, or null for the whole song, which the strip shows whether or not it is on
+		looping?: boolean; // Whether it is on
 		readonly?: boolean;
 		badTracks: Set<number>; // What the last compile complained about
 		badClips: Set<string>;
@@ -90,7 +101,8 @@
 		onchange: (doc: Timeline, selection?: Selection) => void;
 		onnew: (track: number, tick: number, length?: number) => void; // A new clip there, a bar long unless it says
 		onlocate: (tick: number) => void;
-		onloop: (start: number, end: number) => void;
+		onloop: (loop: Loop | null, on: boolean) => void; // A loop drawn, moved or stretched on the strip, or turned on or off
+		onexpand?: (at: { track: number; placement: number }) => void; // A double-click on a clip, which opens its notes in the whole view
 		actions?: PlacementActions;
 	} = $props();
 
@@ -100,6 +112,7 @@
 	const LOOP = 14;
 	const TOP = RULER + LOOP;
 	const HANDLE = 7;
+	const LOOP_EDGE = 6; // Pixels either side of a loop's end that take hold of that end rather than the whole loop
 	const DRAG = 4; // Pixels a press moves before it is a drag rather than a click
 	const MOST_REPEATS_DRAWN = 32; // A placement can repeat 100,000 times, and past this it's only a texture
 	const MOST_BARS_DRAWN = 1000; // Each bar is a line and a number, so a song that long would stop the page
@@ -107,7 +120,16 @@
 	type Gesture =
 		| { kind: 'move'; track: number; index: number; grab: number; tick: number; row: number; copy: boolean }
 		| { kind: 'repeat'; track: number; index: number; start: number; length: number; repeat: number }
-		| { kind: 'loop'; from: number; to: number }
+		| { kind: 'loop'; from: number; to: number; x: number; drawn: boolean }
+		| {
+				kind: 'loop-change';
+				hold: 'start' | 'end' | 'both';
+				grab: number;
+				x: number;
+				was: Loop;
+				now: Loop;
+				moved: boolean;
+		  }
 		| { kind: 'draw'; track: number; row: number; x: number; from: number; to: number; drawn: boolean };
 
 	let svg: SVGSVGElement;
@@ -251,9 +273,41 @@
 		};
 	}
 
+	// On the strip, a drag where there is no loop draws one, and a drag on the loop moves it, or stretches it by an end. A click
+	// turns the loop on or off, as a cycle strip's does. Until a loop is drawn it is the whole song, which a drag anywhere
+	// replaces.
 	function startLoop(event: PointerEvent) {
-		const at = snapTick(ticksAt(canvas(event).x), grid);
-		gesture = { kind: 'loop', from: at, to: at };
+		if (event.button !== 0) return;
+		const x = canvas(event).x;
+		if (loop) {
+			const [left, right] = [loop.start * perTick, loop.end * perTick];
+			const hold =
+				Math.abs(x - left) <= LOOP_EDGE
+					? 'start'
+					: Math.abs(x - right) <= LOOP_EDGE
+						? 'end'
+						: x > left && x < right
+							? 'both'
+							: null;
+			if (hold) {
+				gesture = { kind: 'loop-change', hold, grab: ticksAt(x), x, was: loop, now: loop, moved: false };
+				return;
+			}
+		}
+		const at = snapTick(ticksAt(x), grid);
+		gesture = { kind: 'loop', from: at, to: at, x, drawn: false };
+	}
+
+	function changeLoop(held: Extract<Gesture, { kind: 'loop-change' }>, x: number): Loop {
+		const { was } = held;
+		if (held.hold === 'both') {
+			const by = Math.max(-was.start, snapTick(ticksAt(x) - held.grab + was.start, grid) - was.start);
+			return { start: was.start + by, end: was.end + by };
+		}
+		const at = snapTick(Math.max(0, ticksAt(x)), grid);
+		const other = held.hold === 'start' ? was.end : was.start;
+		if (at === other) return held.now; // A loop is never empty
+		return { start: Math.min(at, other), end: Math.max(at, other) };
 	}
 
 	function pointerMove(event: PointerEvent) {
@@ -267,8 +321,12 @@
 		} else if (gesture.kind === 'draw') {
 			if (!gesture.drawn && Math.abs(at.x - gesture.x) < DRAG) return;
 			gesture = { ...gesture, to: Math.max(0, ticksAt(at.x)), drawn: true };
+		} else if (gesture.kind === 'loop-change') {
+			if (!gesture.moved && Math.abs(at.x - gesture.x) < DRAG) return;
+			gesture = { ...gesture, now: changeLoop(gesture, at.x), moved: true };
 		} else {
-			gesture = { ...gesture, to: snapTick(ticksAt(at.x), grid) };
+			if (!gesture.drawn && Math.abs(at.x - gesture.x) < DRAG) return;
+			gesture = { ...gesture, to: snapTick(ticksAt(at.x), grid), drawn: true };
 		}
 	}
 
@@ -296,8 +354,16 @@
 		else if (held.kind === 'draw') {
 			const drawn = held.drawn && drawnClip(doc, held.track, held.from, held.to);
 			if (drawn) onnew(held.track, drawn.tick, drawn.length);
-		} else if (held.from === held.to) onloop(0, 0);
-		else onloop(Math.min(held.from, held.to), Math.max(held.from, held.to));
+		} else if (held.kind === 'loop-change') {
+			if (!held.moved) toggleLoop();
+			else onloop(held.now, true);
+		} else if (!held.drawn) toggleLoop();
+		else if (held.from !== held.to)
+			onloop({ start: Math.min(held.from, held.to), end: Math.max(held.from, held.to) }, true);
+	}
+
+	function toggleLoop() {
+		onloop(loop, !looping);
 	}
 
 	// A press on an empty row chooses its track, and dragging across it draws a clip, whole bars long.
@@ -340,9 +406,10 @@
 	function placementItems(opened: NonNullable<typeof menu>): MenuItem[] {
 		const at = { track: opened.track, placement: opened.placement };
 		if (!actions) return [];
-		const { open, duplicate, unique, remove, delete: deleteClip } = actions;
+		const { open, duplicate, unique, remove, delete: deleteClip, loop: loopThis } = actions;
 		return [
 			{ label: 'Open notes', action: () => open(at) },
+			{ label: 'Loop this clip', action: () => loopThis(at) },
 			{ label: 'Duplicate after', action: () => duplicate(at) },
 			{ label: 'Make unique', action: () => unique(at), disabled: uses(opened.clip) < 2 },
 			{ label: 'Remove from track', action: () => remove(at) },
@@ -406,10 +473,16 @@
 
 	const soloing = $derived(doc.tracks.some((track) => solo.has(track.id)));
 
+	// While the loop is being drawn or changed, the strip shows where it would go, on.
 	const shownLoop = $derived(
-		gesture?.kind === 'loop'
+		gesture?.kind === 'loop' && gesture.drawn
 			? { start: Math.min(gesture.from, gesture.to), end: Math.max(gesture.from, gesture.to) }
-			: loop
+			: gesture?.kind === 'loop-change' && gesture.moved
+				? gesture.now
+				: (loop ?? wholeSong(doc))
+	);
+	const shownOn = $derived(
+		(gesture?.kind === 'loop' && gesture.drawn) || (gesture?.kind === 'loop-change' && gesture.moved) || looping
 	);
 </script>
 
@@ -513,15 +586,22 @@
 				role="presentation"
 				data-testid="loop-strip"
 				onpointerdown={startLoop}
-			/>
+				><title
+					>Drag for a loop. A click turns it on or off, and a drag on it moves it, or by an end stretches it.</title
+				></rect
+			>
 			{#if shownLoop}
 				<rect
 					class="brace"
+					class:off={!shownOn}
 					x={shownLoop.start * perTick}
 					y={RULER + 2}
 					width={(shownLoop.end - shownLoop.start) * perTick}
 					height={LOOP - 4}
 					data-testid="loop-brace"
+					data-on={shownOn}
+					data-start={shownLoop.start}
+					data-end={shownLoop.end}
 				/>
 			{/if}
 
@@ -568,6 +648,7 @@
 						tabindex="0"
 						aria-label={`${block.name} at bar ${barOf(block.tick, doc.ppq)}`}
 						onpointerdown={(event) => startMove(event, block)}
+						ondblclick={() => onexpand({ track: block.track.id, placement: block.index })}
 						oncontextmenu={(event) => blockMenu(event, block)}
 						onkeydown={(event) => {
 							if (event.key === 'Enter') onselect({ track: block.track.id, placement: block.index });
@@ -625,7 +706,9 @@
 		background: #0d1117;
 		min-width: 0;
 		min-height: 0;
-		height: 100%;
+		/* As tall as the ruler, the loop strip and the tracks, so the notes below have the rest. Past about four tracks on a
+		   laptop it scrolls instead, so the notes keep most of the height however many tracks there are. */
+		max-height: 35vh;
 		box-sizing: border-box;
 	}
 	.heads {
@@ -778,6 +861,12 @@
 		fill: #d2992255;
 		stroke: #d29922;
 		pointer-events: none;
+	}
+	/* Off, the loop is still there to see and take hold of, dimmed. */
+	.brace.off {
+		fill: #d2992214;
+		stroke: #d2992270;
+		stroke-dasharray: 3 2;
 	}
 	.row {
 		fill: transparent;

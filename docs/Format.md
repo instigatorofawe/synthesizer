@@ -405,8 +405,8 @@ What each one does:
   `in + low * feedback` and the output is `y`, the delayed sample. Feedback is clamped to ±0.995 and damp to 0 to 0.99.
 - **Allpass.** The line takes `in + y * feedback`, and the output is `y - in`. Feedback is clamped to ±0.995.
 - **DelayWriteI16, DelayReadI16, CombI16, AllpassI16.** DelayWrite, DelayRead, Comb and Allpass on a line of 16-bit samples, which takes half
-  the memory. A value `x` goes into the line as `round(clamp(x * 32768, -32768, 32767))`, rounding half away from zero, so anything past full
-  scale is held there and a NaN is −32768. A sample `s` comes out as `s * (1 / 32768)`, which is exact. Everything else is as their f32 forms.
+  the memory. A value `x` goes into the line as `clamp(x * 32768, -32768, 32767)` truncated towards zero, so anything past full scale is
+  held there and a NaN is −32768. A sample `s` comes out as `s * (1 / 32768)`, which is exact. Everything else is as their f32 forms.
 - **Follow.** A peak follower: `level = max(|in|, level * exp_minus(1 / (release * rate)))`. Release is clamped to 0.0001 to 60.
 - **KMul, KAdd.** One scalar operation.
 - **KMtoF.** `440 * pow2((note - 69) / 12)`, with `note` clamped to −48 to 200.

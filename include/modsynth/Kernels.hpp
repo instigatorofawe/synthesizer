@@ -1230,7 +1230,9 @@ struct Kernels {
     }
 
     // A line holds floats, or for the I16 ops 16-bit samples: x * 32768, held to the i16 range, so a NaN is -32768,
-    // and rounded half away from zero. Reading one back is exact.
+    // and truncated towards zero, which every target's conversion does in one instruction. Rounding to nearest would
+    // keep a sample of 1 in a loop whose gain is above a half for ever, so a tail would never reach silence. Reading
+    // one back is exact.
     template <class T>
     [[nodiscard]] static T* line_data(const DelayLine& line) {
         return reinterpret_cast<T*>(line.data);
@@ -1242,7 +1244,7 @@ struct Kernels {
         if constexpr (std::is_same_v<T, float>) {
             return x;
         } else {
-            return static_cast<T>(round_to_int(clamp(x * 32768.0f, -32768.0f, 32767.0f)));
+            return static_cast<T>(static_cast<std::int32_t>(clamp(x * 32768.0f, -32768.0f, 32767.0f)));
         }
     }
 

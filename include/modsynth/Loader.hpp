@@ -71,6 +71,11 @@ struct PatchView {
     [[nodiscard]] float delay(u32 i) const { return load<float>(base + delays + i * sizeof(float)); }
     [[nodiscard]] u16 in_port(u32 i) const { return load<u16>(base + in_ports + i * sizeof(u16)); }
     [[nodiscard]] WireStep step(u32 i) const { return load<WireStep>(base + steps + i * sizeof(WireStep)); }
+    // Two fields of a step, for a walk that needs only those, so it doesn't copy the whole step each time.
+    [[nodiscard]] u8 step_op(u32 i) const { return load<u8>(base + steps + i * sizeof(WireStep)); }
+    [[nodiscard]] u16 step_resource(u32 i) const {
+        return load<u16>(base + steps + i * sizeof(WireStep) + offsetof(WireStep, resource));
+    }
 };
 
 namespace detail {

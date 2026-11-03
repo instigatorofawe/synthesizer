@@ -787,11 +787,11 @@ std::vector<float> wobble(u32 samples, float level) {
     return x;
 }
 
-float rounded(float x) { return static_cast<float>(round_to_int(x * 32768.0f)) / 32768.0f; }
+float truncated(float x) { return static_cast<float>(static_cast<std::int32_t>(x * 32768.0f)) / 32768.0f; }
 
 }  // namespace
 
-TEST(I16Lines, ADelayGivesBackWhatWentInRoundedToSixteenBits) {
+TEST(I16Lines, ADelayGivesBackWhatWentInCutToSixteenBits) {
     const auto in = wobble(4096, 0.9f);
     for (const u8 mode : {u8{0}, kReadBeforeWrite}) {
         Line<> f32({Op::DelayWrite, Op::DelayRead}, mode, {0.01f});
@@ -804,20 +804,20 @@ TEST(I16Lines, ADelayGivesBackWhatWentInRoundedToSixteenBits) {
         ASSERT_EQ(exact.size(), narrow.size());
         u32 delayed = 0;
         for (std::size_t i = 0; i < exact.size(); ++i) {
-            ASSERT_EQ(narrow[i], rounded(exact[i])) << "mode " << int(mode) << " at " << i;
+            ASSERT_EQ(narrow[i], truncated(exact[i])) << "mode " << int(mode) << " at " << i;
             delayed += exact[i] != 0.0f;
         }
         EXPECT_GT(delayed, 3000u);
     }
 }
 
-TEST(I16Lines, HoldFullScaleRoundHalfAwayFromZeroAndSendANanToTheBottom) {
+TEST(I16Lines, HoldFullScaleCutTowardsZeroAndSendANanToTheBottom) {
     const float lsb = 1.0f / 32768.0f;
     std::vector<float> in(kFrame * 4, 0.0f);
     const std::vector<std::pair<float, float>> cases = {
-        {2.0f, 32767 * lsb},   {-2.0f, -1.0f},      {kNan, -1.0f},       {kInfinity, 32767 * lsb},
-        {1.0f, 32767 * lsb},   {-1.0f, -1.0f},      {0.5f * lsb, lsb},   {-0.5f * lsb, -lsb},
-        {1.5f * lsb, 2 * lsb}, {0.49f * lsb, 0.0f}, {-kInfinity, -1.0f}, {0.25f, 0.25f},
+        {2.0f, 32767 * lsb}, {-2.0f, -1.0f},      {kNan, -1.0f},       {kInfinity, 32767 * lsb},
+        {1.0f, 32767 * lsb}, {-1.0f, -1.0f},      {0.99f * lsb, 0.0f}, {-0.99f * lsb, 0.0f},
+        {1.5f * lsb, lsb},   {-1.5f * lsb, -lsb}, {-kInfinity, -1.0f}, {0.25f, 0.25f},
     };
     for (std::size_t i = 0; i < cases.size(); ++i) in[i] = cases[i].first;
     Line<> line({Op::DelayWriteI16, Op::DelayReadI16}, 0, {0.0f}, 0.01f);
@@ -841,7 +841,7 @@ TEST(I16Lines, ACombAndAnAllpassStayNearTheirF32Forms) {
             worst = std::max(worst, std::fabs(a[i] - b[i]));
         }
         EXPECT_GT(peak, 0.05f);
-        EXPECT_LT(20.0f * std::log10(worst / peak), -75.0f) << static_cast<int>(k.exact);
+        EXPECT_LT(20.0f * std::log10(worst / peak), -65.0f) << static_cast<int>(k.exact);
     }
 }
 
@@ -851,5 +851,18 @@ TEST(I16Lines, ACombDrivenPastFullScaleStaysFinite) {
     for (const float s : line.run(in)) {
         ASSERT_TRUE(std::isfinite(s));
         ASSERT_LE(std::fabs(s), 1.0f);
+    }
+}
+
+// A line that rounded to nearest would keep a sample of 1 in a comb whose feedback is above a half for ever, as a buzz
+// at -90 dB that never ends. Truncating towards zero lets every tail reach silence.
+TEST(I16Lines, ATailDiesAwayToNothing) {
+    for (const Op op : {Op::CombI16, Op::AllpassI16}) {
+        std::vector<float> in(48000 * 4, 0.0f);
+        for (u32 i = 0; i < 4800; ++i) in[i] = 0.3f * static_cast<float>(std::sin(0.05 * i));
+        Line<> line({op}, 0, {0.0f, 0.0297f, 0.9f, 0.1f});
+        const auto out = line.run(in);
+        for (std::size_t i = out.size() - 4800; i < out.size(); ++i)
+            ASSERT_EQ(out[i], 0.0f) << static_cast<int>(op) << " at " << i;
     }
 }

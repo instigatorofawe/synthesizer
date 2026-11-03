@@ -48,6 +48,7 @@
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { leavesFields } from '#lib/Fields.ts';
 	import { friendlyName, helpOf, rangeText, shown } from '#lib/NodeHelp.ts';
+	import { amountParam, modulate, offsetOf, outputRange, readsOnceAFrame, sources } from '#lib/Modulate.ts';
 	import NodePalette from '#lib/NodePalette.svelte';
 	import { scrubbed, valueText } from '#lib/NodeValues.ts';
 	import type { Probe } from '#lib/AudioEngine.ts';
@@ -131,6 +132,7 @@
 	const FIT_FLOOR = READABLE_PX / SMALLEST_TEXT;
 	const FIT_CEILING = 1.5; // A graph of two nodes isn't blown up to fill the canvas
 	const ZOOM_MIN = 0.2;
+	const WHOLE_LEAST = 0.05; // How small Fit pressed again goes, to show a whole graph however wide
 	const ZOOM_MAX = 3;
 	const ZOOM_STEP = 1.25;
 	const MARGIN = 40; // Around a fitted graph, which leaves room for a message under a node
@@ -457,16 +459,18 @@
 	}
 
 	// All of the graph, if it can be read at that size, and otherwise its top left, where its signals start, at the smallest size
-	// that can be read.
+	// that can be read. With `whole`, all of it however small its text gets, as Bitwig's, VCV's and Max's overviews show it.
 	// With `toOut`, a graph too wide to fit at the text's floor is shown from its out node leftwards rather than from its
 	// start, so what it all leads to stays in sight, as after Tidy.
-	function fit(shown: Graph = laid, toOut = false) {
+	let fitted = $state.raw<{ view: typeof view; whole: boolean } | null>(null); // What Fit last showed, until the view moves
+	function fit(shown: Graph = laid, toOut = false, whole = false) {
 		if (!shown.nodes.length) return;
 		const left = Math.min(...shown.nodes.map((node) => node.x as number)) - MARGIN;
 		const top = Math.min(...shown.nodes.map((node) => node.y as number)) - MARGIN;
 		const right = Math.max(...shown.nodes.map((node) => (node.x as number) + NODE_WIDTH)) + MARGIN;
 		const bottom = Math.max(...shown.nodes.map((node) => (node.y as number) + heightOf(node))) + MARGIN;
-		const scale = Math.max(FIT_FLOOR, Math.min(FIT_CEILING, size.width / (right - left), size.height / (bottom - top)));
+		const all = Math.min(FIT_CEILING, size.width / (right - left), size.height / (bottom - top));
+		const scale = Math.max(whole ? WHOLE_LEAST : FIT_FLOOR, all);
 		const width = size.width / scale;
 		const height = size.height / scale;
 		const out = toOut ? shown.nodes.find((node) => node.type === 'out') : undefined;
@@ -480,7 +484,18 @@
 					: Math.min(Math.max(top, outMiddle - height / 2), bottom - height),
 			scale
 		};
+		fitted = { view, whole: whole && all < FIT_FLOOR };
 	}
+
+	// Fit, and pressed again with nothing moved since, the whole graph under the text's floor, if it didn't all fit above it.
+	// A third press goes back to the first.
+	function fitAgain() {
+		const again = fitted !== null && fitted.view === view;
+		fit(laid, false, again && !fitted?.whole);
+	}
+
+	// Whether a press of Fit now would show more than the last: the view is a fit that cut the graph short.
+	const cut = $derived(fitted !== null && fitted.view === view && !fitted.whole && view.scale <= FIT_FLOOR);
 
 	// A node reached from the keyboard comes into view, by as little panning as that takes. A click doesn't move the view, since
 	// what was clicked is in it, and a node about to be dragged mustn't move.
@@ -582,6 +597,99 @@
 		if (fixed) commit(fixed.graph);
 	}
 
+	// "Modulate this input…": the source, read once a frame first if it is audio, times a new Control, plus what the input was
+	// set to, each a column apart between the source and the input, with room made for them as a snap's is, as one edit. With
+	// no source, a new envelope is one, as a filter envelope wants. The nodes added are chosen, so the Control is in sight.
+	const AUDIO_TYPES = new Set([
+		'env',
+		'osc',
+		'noise',
+		'sample',
+		'follow',
+		'biquad',
+		'comb',
+		'allpass',
+		'delay',
+		'pan',
+		'shape'
+	]);
+	function audioOut(from: GraphNode, port: string) {
+		const rate = nodes?.[from.id]?.ports[port]?.rate;
+		return rate ? rate === 'audio' : AUDIO_TYPES.has(from.type);
+	}
+
+	function putModulation(node: GraphNode, input: string, source: { from: number; port: string } | null) {
+		const about = inputsOf(node, catalog, library).find((candidate) => candidate.name === input);
+		if (!about) return;
+		const offset = offsetOf(node, about);
+		const step = NODE_WIDTH + 2 * SNAP_ROOM;
+		const origin = source ? laid.nodes.find((candidate) => candidate.id === source.from) : undefined;
+		const audio = origin ? audioOut(origin, source!.port) : true;
+		const columns = (audio ? 1 : 0) + 2 + (source ? 0 : 1);
+		const x = node.x as number;
+		const left = origin ? (origin.x as number) + NODE_WIDTH : x - columns * step - SNAP_ROOM;
+		const short = Math.max(0, columns * step + SNAP_ROOM - (x - left));
+		let graph = short ? makeRoom(laid, x, short) : laid;
+		const right = x + short;
+		const y = (node.y as number) + inputY(inputsOf(node, catalog, library).indexOf(about)) - inputY(0);
+		const spot = (column: number, type: GraphNode['type'], below = 0) =>
+			freeSpot(graph, { x: right - column * step, y: y + below }, sizeOf({ id: 0, type }), sizeOf);
+		let from = source;
+		if (!from) {
+			const at = spot(columns, 'env');
+			const made = addNode(graph, 'env', at.x, at.y);
+			graph = made.graph;
+			from = { from: made.id, port: 'out' };
+		}
+		const fromNode = graph.nodes.find((candidate) => candidate.id === from!.from);
+		const amount = amountParam(
+			graph,
+			input,
+			helpOf(node.type)?.inputs[input],
+			offset,
+			fromNode ? outputRange(fromNode, from.port, graph) : null
+		);
+		const spots = {
+			snap: audio ? spot(3, 'snap') : undefined,
+			mul: spot(2, 'mul'),
+			add: spot(1, 'add'),
+			param: spot(2, 'param', -70)
+		};
+		const done = modulate(graph, { to: node.id, input, offset }, { ...from, audio }, amount, spots);
+		commit(done.graph);
+		select(done.added);
+	}
+
+	// What an input's menu offers: to modulate it by what is wired to it, or else by a new envelope or another source here.
+	function inputItems(node: GraphNode, input: string, at: { x: number; y: number }): MenuItem[] {
+		const wire = edgeInto(laid, node.id, input);
+		if (wire) {
+			return [
+				{
+					label: 'Modulate this input',
+					action: () => putModulation(node, input, { from: wire.from, port: wire.port ?? 'out' })
+				}
+			];
+		}
+		const by = (from: number, port: string) => {
+			const source = laid.nodes.find((candidate) => candidate.id === from);
+			return `${source ? friendlyName(source.type) : 'Node'} ${from}${port === 'out' ? '' : ` ${port}`}`;
+		};
+		const choices: MenuItem[] = [
+			{ label: 'A new envelope', action: () => putModulation(node, input, null) },
+			...sources(laid, node.id).map(({ from, port }) => ({
+				label: by(from, port),
+				action: () => putModulation(node, input, { from, port })
+			}))
+		];
+		return [
+			{
+				label: 'Modulate this input…',
+				action: () => (menu = { x: at.x, y: at.y, label: `Modulate ${input} with`, items: choices })
+			}
+		];
+	}
+
 	// Delete takes the chosen wire, which leaves its input at its own value, or the chosen nodes with their wires and probes,
 	// as one edit.
 	function removeChosen() {
@@ -639,7 +747,7 @@
 			else if (selection.size || chosenWire) select();
 		} else if (matches(event, 'fit')) {
 			event.preventDefault();
-			fit();
+			fitAgain();
 		} else if (matches(event, 'select-all')) {
 			event.preventDefault();
 			select(laid.nodes.map((node) => node.id));
@@ -668,6 +776,7 @@
 		cancelGesture();
 		const target = event.target as Element;
 		const nodeId = target.closest('g.node')?.getAttribute('data-node');
+		const inputName = target.closest('[data-input]')?.getAttribute('data-input');
 		const wireKey = target.closest('[data-wire]')?.getAttribute('data-wire');
 		const node = laid.nodes.find((candidate) => String(candidate.id) === nodeId);
 		const wire = wires.find((candidate) => candidate.key === wireKey);
@@ -675,7 +784,11 @@
 			event.preventDefault();
 			menu = { x: event.clientX, y: event.clientY, label, items };
 		};
-		if (node) {
+		if (node && inputName && !readonly && readsOnceAFrame(node, inputName)) {
+			select([node.id]);
+			const client = { x: event.clientX, y: event.clientY };
+			open(`${inputName} of ${friendlyName(node.type)} ${node.id}`, inputItems(node, inputName, client));
+		} else if (node) {
 			if (!selection.has(node.id)) select([node.id]);
 			open(picked.length > 1 ? `${picked.length} nodes` : `${friendlyName(node.type)} ${node.id}`, nodeItems());
 		} else if (wire) {
@@ -708,9 +821,20 @@
 
 	function wireItems(): MenuItem[] {
 		const snap = wireShown && snapFor(wireShown.to) === wireShown.input ? wireShown : null;
+		const wire = wireShown;
+		const modulated =
+			wire && readsOnceAFrame(wire.to, wire.input)
+				? [
+						{
+							label: 'Modulate this input',
+							action: () => putModulation(wire.to, wire.input, { from: wire.from.id, port: wire.port })
+						}
+					]
+				: [];
 		return [
 			{ label: 'Delete', keys: 'graph.delete', action: removeChosen },
-			...(snap ? [{ label: 'Put a snap on this wire', action: () => putSnap(snap.to, snap.input) }] : [])
+			...(snap ? [{ label: 'Put a snap on this wire', action: () => putSnap(snap.to, snap.input) }] : []),
+			...modulated
 		];
 	}
 
@@ -823,7 +947,14 @@
 			<button type="button" onclick={tidyUp} title="Lay the graph out again, left to right as signals flow">Tidy</button
 			>
 		{/if}
-		<button type="button" onclick={() => fit()} title="Show the whole graph, or its start if it can't all be read (.)"
+		<button
+			type="button"
+			data-testid="fit"
+			data-fit={fitted?.view === view ? (fitted.whole ? 'whole' : 'readable') : ''}
+			onclick={fitAgain}
+			title={cut
+				? 'Fit again: the whole graph, though its text is smaller than can be read. A third press goes back (.)'
+				: "Show the whole graph, or its start if it can't all be read. Pressed again, all of it however small (.)"}
 			>Fit</button
 		>
 		<div class="zoom" role="group" aria-label="Zoom the graph">
@@ -957,9 +1088,10 @@
 								tabindex="-1"
 								aria-label={`${node.id} input ${input.name}`}
 								data-testid={`in-${node.id}-${input.name}`}
+								data-input={input.name}
 								onpointerup={(event) => finishWire(event, node, input.name)}
 							/>
-							<text class="label" x="11" y={inputY(index) + 4}>{input.name}</text>
+							<text class="label" x="11" y={inputY(index) + 4} data-input={input.name}>{input.name}</text>
 							{#if !edgeInto(laid, node.id, input.name)}
 								{@const own = node.inputs?.[input.name]}
 								{@const dragged =
@@ -979,6 +1111,7 @@
 									aria-label={`${input.name} of ${node.id}`}
 									aria-valuenow={value}
 									data-testid={`value-${node.id}-${input.name}`}
+									data-input={input.name}
 									onpointerdown={(event) => startScrub(event, node, input.name, value)}
 									>{valueText(value, helpOf(node.type)?.inputs[input.name]?.unit)}<title
 										>{readonly
@@ -1034,6 +1167,27 @@
 									<rect width={NODE_WIDTH} height="20" rx="4" />
 									<text x={NODE_WIDTH / 2} y="14">Put a snap on this wire</text>
 								</g>
+								{@const wire = edgeInto(laid, node.id, snap)}
+								{#if wire}
+									<g
+										class="fix"
+										role="button"
+										tabindex="0"
+										aria-label="Modulate this input"
+										transform="translate(0 44)"
+										onpointerdown={(event) => event.stopPropagation()}
+										onclick={() => putModulation(node, snap, { from: wire.from, port: wire.port ?? 'out' })}
+										onkeydown={(event) => {
+											if (event.key === 'Enter' || event.key === ' ') {
+												event.preventDefault();
+												putModulation(node, snap, { from: wire.from, port: wire.port ?? 'out' });
+											}
+										}}
+									>
+										<rect width={NODE_WIDTH} height="20" rx="4" />
+										<text x={NODE_WIDTH / 2} y="14">Modulate this input</text>
+									</g>
+								{/if}
 							{/if}
 						</g>
 					{/if}
@@ -1044,7 +1198,9 @@
 				{/if}
 			</svg>
 			{#if menu}
-				<ContextMenu x={menu.x} y={menu.y} label={menu.label} items={menu.items} onclose={() => (menu = null)} />
+				{#key menu}
+					<ContextMenu x={menu.x} y={menu.y} label={menu.label} items={menu.items} onclose={() => (menu = null)} />
+				{/key}
 			{/if}
 			{#if palette}
 				<NodePalette
@@ -1087,6 +1243,14 @@
 							{#if snapFor(to) === input}
 								<button type="button" class="fix" onclick={() => putSnap(to, input)}>Put a snap on this wire</button>
 							{/if}
+							{#if readsOnceAFrame(to, input)}
+								<button
+									type="button"
+									class="fix"
+									title={`${input}, plus this times a new Control, read once a frame`}
+									onclick={() => putModulation(to, input, { from: from.id, port })}>Modulate this input</button
+								>
+							{/if}
 							{#if own !== undefined}
 								<p class="muted about">
 									Without it, {input} takes its own value, {shown(own)}{unit ? ` ${unit}` : ''}.
@@ -1124,9 +1288,19 @@
 						{#if help}<p class="muted about">{help.description}</p>{/if}
 						{#if errors.get(chosen.id)}<p class="problem" data-testid="node-error">{errors.get(chosen.id)}</p>{/if}
 						{#if snap}
+							{@const wire = edgeInto(laid, chosen.id, snap)}
 							<button type="button" class="fix" onclick={() => putSnap(chosen, snap)}>Put a snap on this wire</button>
+							{#if wire}
+								<button
+									type="button"
+									class="fix"
+									onclick={() => putModulation(chosen, snap, { from: wire.from, port: wire.port ?? 'out' })}
+									>Modulate this input</button
+								>
+							{/if}
 							<p class="muted about">
-								It reads {snap} once a frame. That is right for an envelope and wrong for anything faster.
+								It reads {snap} once a frame. That is right for an envelope and wrong for anything faster. Modulate puts
+								{snap}, plus the wire's signal times a new Control, after a snap.
 							</p>
 						{/if}
 						{#if dead}

@@ -62,6 +62,7 @@
 		selection,
 		barWidth,
 		grid,
+		height: dragged = null,
 		tick,
 		playing = false,
 		loop,
@@ -93,7 +94,8 @@
 		doc: Timeline;
 		selection: Selection;
 		barWidth: number;
-		grid: number;
+		grid: number; // The arrangement's Snap, which clips, the loop and the Tempo lane go by, in ticks
+		height?: number | null; // As tall as the tab strip below was dragged to make it, or null for its own height
 		tick: number;
 		playing?: boolean; // Whether the song is playing, which the view follows
 		loop: Loop | null; // Where the loop is, or null for the whole song, which the strip shows whether or not it is on
@@ -648,7 +650,14 @@
 
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} onkeydown={keydown} />
 
-<div class="arrangement" bind:this={view} data-testid="arrangement-view" onwheel={wheel}>
+<div
+	class="arrangement"
+	class:sized={dragged !== null}
+	style:height={dragged === null ? undefined : `${dragged}px`}
+	bind:this={view}
+	data-testid="arrangement-view"
+	onwheel={wheel}
+>
 	<div class="heads" bind:this={heads}>
 		<!-- The ruler's corner and the song layer's heads, which stay at the top as the tracks scroll under them. ▸ or a
 			 double-click on a folded lane unfolds it, and ▾ folds it again. -->
@@ -966,6 +975,10 @@
 		   laptop it scrolls instead, so the notes keep most of the height however many tracks there are. */
 		max-height: 35vh;
 		box-sizing: border-box;
+	}
+	/* Dragged to a height of its own, which a window made smaller still leaves the notes some of. */
+	.arrangement.sized {
+		max-height: calc(100vh - 14rem);
 	}
 	.heads {
 		position: sticky;

@@ -3,7 +3,9 @@
 	import { on } from 'svelte/events';
 	import Arrangement, { type Loop, type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
+	import { escapeCancels } from '#lib/Drag.ts';
 	import { leavesFields } from '#lib/Fields.ts';
+	import { SPLIT_KEY, keepSplit, keptSplit, splitAt } from '#lib/Split.ts';
 	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
 	import type { ExampleGroup } from '#lib/PatchGroups.ts';
@@ -378,6 +380,65 @@
 		peek = false;
 	}
 
+	// The tab strip is the handle between the arrangement and the notes: dragged, it gives one the other's room, and a
+	// double-click gives the arrangement back its own height. Esc puts back what the drag found. Each song keeps its own.
+	let split = $state<number | null>(null);
+	let editor = $state<HTMLElement>();
+	type Resizing = { y: number; from: number; room: number; before: number | null; moved: boolean; stop: () => void };
+	let resizing = $state.raw<Resizing | null>(null);
+	onMount(() => (split = keptSplit(localStorage.getItem(SPLIT_KEY), id)));
+
+	function keep(next: number | null) {
+		split = next;
+		localStorage.setItem(SPLIT_KEY, keepSplit(localStorage.getItem(SPLIT_KEY), id, next));
+	}
+
+	const onHandle = (event: Event) => !(event.target as Element).closest('button, input, select, label, a, textarea');
+
+	function startSplit(event: PointerEvent) {
+		if (event.button !== 0 || expanded || !onHandle(event)) return;
+		const arrangement = editor?.querySelector<HTMLElement>('[data-testid="arrangement-view"]');
+		const detail = editor?.querySelector<HTMLElement>('.detail');
+		if (!arrangement || !detail) return;
+		event.preventDefault();
+		const before = split;
+		const from = arrangement.offsetHeight;
+		const stop = escapeCancels(() => {
+			resizing?.stop();
+			resizing = null;
+			split = before;
+		});
+		resizing = { y: event.clientY, from, room: from + detail.offsetHeight, before, moved: false, stop };
+		(event.currentTarget as Element).setPointerCapture(event.pointerId);
+	}
+
+	function moveSplit(event: PointerEvent) {
+		if (!resizing) return;
+		const by = event.clientY - resizing.y;
+		if (!resizing.moved && Math.abs(by) < 3) return;
+		if (!resizing.moved) resizing = { ...resizing, moved: true };
+		split = splitAt(resizing.from, by, resizing.room);
+	}
+
+	function endSplit() {
+		const done = resizing;
+		if (!done) return;
+		done.stop();
+		resizing = null;
+		if (done.moved) keep(split);
+	}
+
+	// The arrows move the line too, from the handle along the strip's top.
+	function splitKeys(event: KeyboardEvent) {
+		const by = event.key === 'ArrowUp' ? -24 : event.key === 'ArrowDown' ? 24 : 0;
+		if (!by) return;
+		const arrangement = editor?.querySelector<HTMLElement>('[data-testid="arrangement-view"]');
+		const detail = editor?.querySelector<HTMLElement>('.detail');
+		if (!arrangement || !detail) return;
+		event.preventDefault();
+		keep(splitAt(arrangement.offsetHeight, by, arrangement.offsetHeight + detail.offsetHeight));
+	}
+
 	// A double-click on a clip opens it: its notes, with the whole view.
 	function expandClip(at: { track: number; placement: number }) {
 		select(at);
@@ -628,6 +689,7 @@
 
 <section
 	use:leavesFields
+	bind:this={editor}
 	class="timeline"
 	class:expanded
 	class:inspecting={inspecting === true}
@@ -695,6 +757,7 @@
 			{selection}
 			{barWidth}
 			grid={clipGrid}
+			height={split}
 			{tick}
 			{playing}
 			{loop}
@@ -1072,7 +1135,35 @@
 	</div>
 
 	<div class="detail">
-		<div class="strip">
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="strip"
+			class:resizing={resizing !== null}
+			title={expanded
+				? undefined
+				: 'Drag the strip to give the arrangement or the notes more room. A double-click gives the arrangement its own height.'}
+			onpointerdown={startSplit}
+			onpointermove={moveSplit}
+			onpointerup={endSplit}
+			onpointercancel={endSplit}
+			ondblclick={(event) => {
+				if (!expanded && onHandle(event)) keep(null);
+			}}
+		>
+			{#if !expanded}
+				<!-- A separator that takes focus is a control, which moves with the arrows. -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+				<div
+					class="grip"
+					role="separator"
+					tabindex="0"
+					aria-orientation="horizontal"
+					aria-label="Resize the arrangement"
+					aria-valuenow={split ?? undefined}
+					data-testid="split"
+					onkeydown={splitKeys}
+				></div>
+			{/if}
 			<div class="tabs" role="tablist" aria-label="Song views">
 				<button type="button" role="tab" aria-selected={tab === 'notes'} onclick={() => (tab = 'notes')}>
 					Notes{clip ? `: ${clip.id}` : ''}
@@ -1324,10 +1415,37 @@
 	/* The tabs, the roll's toolbar in what room they leave, and Step and ⤢ at the right end. */
 	.strip {
 		flex: none;
+		position: relative;
 		display: flex;
 		align-items: stretch;
 		height: 2rem;
 		border-bottom: 1px solid var(--line);
+	}
+	.timeline:not(.expanded) .strip {
+		cursor: row-resize;
+	}
+	.strip :global(button),
+	.strip :global(select),
+	.strip :global(input),
+	.strip :global(label) {
+		cursor: auto;
+	}
+	/* The handle's own line, along the strip's top, which takes focus and the arrows. */
+	.grip {
+		position: absolute;
+		top: 0;
+		left: 30%;
+		right: 30%;
+		height: 4px;
+		border-radius: 2px;
+		background: var(--line);
+		opacity: 0.6;
+	}
+	.strip:hover .grip,
+	.strip.resizing .grip,
+	.grip:focus-visible {
+		background: var(--accent);
+		opacity: 1;
 	}
 	.rollbar {
 		flex: 1;

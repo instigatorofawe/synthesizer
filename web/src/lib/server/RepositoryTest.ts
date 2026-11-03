@@ -3,11 +3,13 @@ import { openDatabase, type Db } from '#lib/server/Db.ts';
 import {
 	bundlesWithMembers,
 	Conflict,
+	copyName,
 	createAsset,
 	createBundle,
 	createPatch,
 	createTimeline,
 	deleteBundle,
+	duplicatePatch,
 	deletePatch,
 	deleteTimeline,
 	getBundle,
@@ -15,6 +17,7 @@ import {
 	InUse,
 	latestTimeline,
 	listPatches,
+	listTimelines,
 	NotFound,
 	patchUsers,
 	saveBundle,
@@ -334,5 +337,39 @@ describe('exports from saved rows', () => {
 		expect(thin.image.length).toBeLessThan(full.image.length / 2);
 		expect(thin.report.chunks.length).toBe(full.report.chunks.length);
 		expect(thin.report.chunks.filter((c) => c.present).map((c) => c.kind)).toEqual(['program']);
+	});
+});
+
+describe('a copy', () => {
+	it('is named after the original, and numbered while that name is taken', () => {
+		expect(copyName('Lead', new Set())).toBe('Lead copy');
+		expect(copyName('Lead', new Set(['Lead copy']))).toBe('Lead copy 2');
+		expect(copyName('Lead', new Set(['Lead copy', 'Lead copy 2']))).toBe('Lead copy 3');
+		// A copy of a copy counts on from the first one's name.
+		expect(copyName('Lead copy', new Set(['Lead', 'Lead copy']))).toBe('Lead copy 2');
+		expect(copyName('Lead copy 2', new Set(['Lead copy', 'Lead copy 2']))).toBe('Lead copy 3');
+		expect(copyName('Hard copy', new Set(['Hard copy']))).toBe('Hard copy 2');
+	});
+
+	it('of a patch gets a name no other patch has', () => {
+		const id = createPatch(db, 'Lead', EMPTY_GRAPH);
+		createPatch(db, 'Lead copy', EMPTY_GRAPH);
+		const copy = duplicatePatch(db, id);
+		expect(listPatches(db).find((patch) => patch.id === copy)?.name).toBe('Lead copy 2');
+		const again = duplicatePatch(db, copy);
+		expect(listPatches(db).find((patch) => patch.id === again)?.name).toBe('Lead copy 3');
+	});
+});
+
+describe('the timelines listed', () => {
+	it('say which patches each plays as saved', () => {
+		const a = createPatch(db, 'A', EMPTY_GRAPH);
+		const b = createPatch(db, 'B', EMPTY_GRAPH);
+		createTimeline(db, 'Both', timeline([b, a]), 'both');
+		createTimeline(db, 'None', timeline([]), 'none');
+		expect(listTimelines(db)).toEqual([
+			{ id: 'both', name: 'Both', revision: 1, patches: [a, b].sort() },
+			{ id: 'none', name: 'None', revision: 1, patches: [] }
+		]);
 	});
 });

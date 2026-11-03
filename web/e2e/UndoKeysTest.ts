@@ -36,6 +36,7 @@ async function patchView(page: Page, name: 'Graph' | 'JSON') {
 
 async function newPatch(page: Page, name: string) {
 	await page.goto('/');
+	await page.getByRole('button', { name: 'New patch', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New patch name').fill(name);
 	await page.getByLabel('New patch name').press('Enter');
 	await page.waitForURL(/patch=/);

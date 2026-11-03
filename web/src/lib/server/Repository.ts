@@ -20,8 +20,7 @@ export class Conflict extends Error {}
 export class InUse extends Error {}
 export class ReadOnly extends Error {} // A built-in patch or its recording, which only the examples change
 
-const readOnly = (name: string) =>
-	new ReadOnly(`${name} is built in, so it can't be changed. Duplicate it to change a copy.`);
+const readOnly = (name: string) => new ReadOnly(`${name} is built in, so it can't be changed. Edit a copy instead.`);
 
 function assetEntry(row: typeof assets.$inferSelect): AssetEntry {
 	return {
@@ -209,12 +208,21 @@ export function deletePatch(db: Db, id: string) {
 	});
 }
 
+// Each with the patches it plays as saved, so the page can say which timelines use a patch with its unsaved edits counted.
 export function listTimelines(db: Db) {
+	const uses = db.select().from(timelinePatches).all();
 	return db
 		.select({ id: timelines.id, name: timelines.name, revision: timelines.revision })
 		.from(timelines)
 		.orderBy(asc(timelines.name))
-		.all();
+		.all()
+		.map((row) => ({
+			...row,
+			patches: uses
+				.filter((use) => use.timelineId === row.id)
+				.map((use) => use.patchId)
+				.sort()
+		}));
 }
 
 // The timeline saved last, which is the one a fresh visit opens.
@@ -361,11 +369,29 @@ export function createAsset(db: Db, entry: AssetEntry) {
 	db.insert(assets).values(assetRow(entry)).run();
 }
 
-// An ordinary patch with another's name and graph, which is how a built-in one is changed. Its recordings are shared rather
-// than copied, as two patches naming one asset always share it.
+// "Name copy", or "Name copy 2" and on while that is taken. A copy of a copy counts on from the first one's name, as a file
+// manager does, rather than growing "copy copy".
+export function copyName(name: string, taken: ReadonlySet<string>): string {
+	const base = name.replace(/ copy(?: \d+)?$/, '') || name;
+	if (!taken.has(`${base} copy`)) return `${base} copy`;
+	for (let n = 2; ; ++n) if (!taken.has(`${base} copy ${n}`)) return `${base} copy ${n}`;
+}
+
+// An ordinary patch with another's graph, which is how a built-in one is changed, under a name no other patch has. Its
+// recordings are shared rather than copied, as two patches naming one asset always share it.
 export function duplicatePatch(db: Db, id: string): string {
-	const row = getPatch(db, id);
-	return createPatch(db, `${row.name} copy`, row.graph as Graph);
+	return db.transaction((tx) => {
+		const t = tx as unknown as Db;
+		const row = getPatch(t, id);
+		const taken = new Set(
+			t
+				.select({ name: patches.name })
+				.from(patches)
+				.all()
+				.map((other) => other.name)
+		);
+		return createPatch(t, copyName(row.name, taken), row.graph as Graph);
+	});
 }
 
 // The assets a set of patches needs, and no others.

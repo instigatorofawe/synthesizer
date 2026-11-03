@@ -21,6 +21,7 @@
 		builtin,
 		duplicate,
 		duplicating,
+		example = null,
 		dirty,
 		users,
 		parts,
@@ -55,8 +56,9 @@
 		builtin: boolean; // One of the library's built-in patches, which can't be changed
 		duplicate: string | null; // The library patch Duplicate copies, which for an example's patch is its built-in one
 		duplicating: SubmitFunction;
+		example?: { name: string; inLibrary: boolean } | null; // The example whose copy in the library Edit a copy goes into
 		dirty: boolean;
-		users: { id: string; name: string }[]; // Timelines a saved edit changes
+		users: { id: string; name: string }[]; // Timelines an edit changes, as they are now, unsaved edits included
 		parts: { id: string; name: string }[]; // An example's patches, to choose between
 		use: string; // What an example does with this patch
 		search: string;
@@ -104,6 +106,14 @@
 				: hearing.why
 	);
 	const playable = $derived(hearing.kind !== 'none');
+	const copyTitle = $derived.by(() => {
+		if (!readonly) return 'Make a copy of this patch, as it is saved';
+		if (!example)
+			return 'Copy this patch into your library to change it. The song open plays the copy where it played this.';
+		return example.inLibrary
+			? `Copy this patch into your library's ${example.name}, in place of the original, to change it there`
+			: `Add ${example.name} to your library, with a copy of this patch in place of the original, to change it there`;
+	});
 	const params = $derived(graph?.params ?? []);
 </script>
 
@@ -159,12 +169,16 @@
 				>
 				<button type="button" role="tab" aria-selected={view === 'json'} onclick={() => (view = 'json')}>JSON</button>
 			</div>
+			<!-- A patch that can't be changed is changed by Edit a copy, which puts the copy where the original plays. -->
 			{#if duplicate}
-				<form method="POST" action={actionOn(search, 'duplicatePatch')} use:enhance={duplicating}>
+				<form
+					method="POST"
+					action={actionOn(search, readonly ? 'editCopy' : 'duplicatePatch')}
+					use:enhance={duplicating}
+				>
 					<input type="hidden" name="id" value={duplicate} />
-					<button class="duplicate" title="Make a copy of this patch, as it is saved, that can be changed"
-						>{readonly ? 'Duplicate to edit' : 'Duplicate'}</button
-					>
+					{#if readonly && example}<input type="hidden" name="recipe" value={example.name} />{/if}
+					<button class="duplicate" title={copyTitle}>{readonly ? 'Edit a copy' : 'Duplicate'}</button>
 				</form>
 			{/if}
 			{#if !readonly}

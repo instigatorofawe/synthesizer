@@ -720,6 +720,8 @@
 		return { destroy: () => followers.delete(element) };
 	}
 	function scrolled() {
+		// The scroll a roll makes as it opens can arrive once another clip's roll has taken its place.
+		if (!scroller) return;
 		for (const element of followers) element.scrollLeft = scroller.scrollLeft;
 		report();
 	}

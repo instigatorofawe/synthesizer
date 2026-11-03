@@ -149,7 +149,11 @@ async function toneSong(page: Page, name: string) {
 	const doc = {
 		ppq: 480,
 		tempo: [{ tick: 0, bpm: 120 }],
-		clips: [{ id: 'held', length: 1920, notes: [{ tick: 0, note: 69, vel: 127, dur: 1920 }] }],
+		// One note held through eight bars, so the loop comes round only after 16 s. The first wrap after a live swap is louder
+		// for a moment, as if the note let go rang on under the one that starts, which a freshly loaded image doesn't do. That's
+		// the engine's, not the Controls', and no measurement here should take it in: on CI's slower runner a one-bar loop came
+		// round inside one and read 1.8 times the level the Control had set.
+		clips: [{ id: 'held', length: 15360, notes: [{ tick: 0, note: 69, vel: 127, dur: 15360 }] }],
 		tracks: [{ id: 1, name: 'Tone', voices: 4, slots: [patch], placements: [{ clip: 'held', tick: 0 }] }]
 	};
 	await (await timelineJson(page)).fill(JSON.stringify(doc, null, 1));

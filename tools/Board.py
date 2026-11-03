@@ -379,6 +379,11 @@ def main() -> int:
         type=float,
         help="how long to render each, by default to its end and tail as the Python module renders it",
     )
+    time_.add_argument(
+        "--bench",
+        action="store_true",
+        help="render each for the frames tools/Bench.py does, from its folder's Index.json, so the two compare",
+    )
     time_.add_argument("--json", type=Path, help="also write the results here")
     args = parser.parse_args()
 
@@ -433,13 +438,18 @@ def main() -> int:
     elif args.command == "test":
         return delivery_test(board)
     elif args.command == "time":
-        files = []
+        files, bench_frames = [], {}
         for path in args.paths:
             files += (
-                sorted(path.glob("*.json")) + sorted(path.glob("*.image"))
+                [p for p in sorted(path.glob("*.json")) if p.name != "Index.json"]
+                + sorted(path.glob("*.image"))
                 if path.is_dir()
                 else [path]
             )
+            index = (path if path.is_dir() else path.parent) / "Index.json"
+            if args.bench and index.exists():
+                for entry in json.loads(index.read_text()):
+                    bench_frames[entry["name"]] = int(entry["seconds"] * 48000 / FRAME)
         results = {}
         for path in files:
             try:
@@ -454,7 +464,11 @@ def main() -> int:
                 print(f"{path.stem:28} {e}")
                 results[path.stem] = {"refused": str(e)}
                 continue
-            if args.seconds is None:
+            if args.bench:
+                if path.stem not in bench_frames:
+                    raise SystemExit(f"{path} isn't in its folder's Index.json")
+                samples = bench_frames[path.stem] * FRAME
+            elif args.seconds is None:
                 import modsynth  # only needed to find how long it plays
 
                 samples = len(modsynth.render(image))

@@ -112,7 +112,7 @@ endforeach()
 # Instruction counts for tools/Bench.py, which compiles the recipes these link. On the mps2-an386 as they need the room.
 set(MODSYNTH_BENCH_RECIPES "" CACHE FILEPATH "The list of recipes tools/Bench.py wrote")
 if(MODSYNTH_BENCH_RECIPES)
-    foreach(build "BenchStereo 2 scalar" "BenchMono 1 scalar" "BenchCmsis 2 cmsis")
+    foreach(build "BenchStereo 2 scalar" "BenchMono 1 scalar" "BenchCmsis 2 cmsis" "BenchMonoCmsis 1 cmsis")
         separate_arguments(build)
         list(GET build 0 name)
         list(GET build 1 channels)

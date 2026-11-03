@@ -1,0 +1,8053 @@
+{
+ "compiler": "arm-none-eabi-g++ (15:14.2.rel1-1) 14.2.1 20241119",
+ "builds": {
+  "Stereo": {
+   "kernels": {
+    "Dispatch only": 57.01,
+    "Fill": 166.01,
+    "Noise": 358.01,
+    "Osc": 589.01,
+    "Saw, naive": 322.01,
+    "Saw, 110 Hz": 457.56,
+    "Saw, 4186 Hz": 517.46,
+    "Pulse, naive": 408.01,
+    "Pulse, 110 Hz": 611.34,
+    "Pulse, 4186 Hz": 736.39,
+    "Saw, Nyquist": 808.01,
+    "Pulse, Nyquist": 1344.01,
+    "Triangle": 384.01,
+    "Tone": 270.01,
+    "Tone, at 0 Hz": 376.01,
+    "Biquad, still": 551.01,
+    "Biquad, moving": 659.01,
+    "Biquad, high pass, moving": 661.01,
+    "Biquad, band pass, moving": 658.01,
+    "Env, attack": 489.01,
+    "Env, decay": 583.01,
+    "Env, sustain": 293.01,
+    "Env, release": 489.01,
+    "Env, decay, moving": 701.51,
+    "Sample, mono i16": 1748.03,
+    "Sample, mono f32": 1556.03,
+    "Sample, stereo i16": 2196.03,
+    "Sample, stereo f32": 1780.03,
+    "Sample, mono f32, moving": 1550.54,
+    "Sample2, mono i16": 2491.06,
+    "Sample2, stereo i16": 2939.05,
+    "Sample2, stereo i16, moving": 2958.74,
+    "Sample2, stereo i16, reverse, moving": 2932.78,
+    "Sample2, stereo i16, tail, moving": 2964.74,
+    "Sample2, mono f32, moving": 2318.75,
+    "Sample3, mono i16": 2939.05,
+    "Sample3, stereo i16, moving": 3403.74,
+    "Sample3, stereo i16, reverse, moving": 3375.78,
+    "Sample3, mono f32, moving": 2763.75,
+    "Sample3, crossfade, mono i16": 5550.09,
+    "Sample3, crossfade, stereo i16, moving": 6475.97,
+    "Sample3, crossfade, stereo i16, reverse, moving": 6420.04,
+    "Sample3, crossfade, mono f32, moving": 5195.98,
+    "Mul": 260.01,
+    "MulS": 232.01,
+    "Add": 260.01,
+    "AddS": 232.01,
+    "Pan": 412.01,
+    "DelayWrite": 366.01,
+    "DelayRead": 548.01,
+    "DelayRead, feedback": 551.01,
+    "Comb": 1005.07,
+    "Allpass": 913.76,
+    "Follow": 455.01,
+    "Follow, moving": 510.51,
+    "KMul": 79.01,
+    "KAdd": 79.01,
+    "KMtoF, still": 93.01,
+    "KMtoF, moving": 150.01,
+    "KRatio, still": 93.01,
+    "KRatio, moving": 149.01,
+    "KSnap": 72.01,
+    "KLfo": 152.23,
+    "KLfo2": 154.23,
+    "OscMod, sine": 4151.84,
+    "OscMod, sine, phase audio": 4148.93,
+    "OscMod, sine, feedback": 4130.27,
+    "OscMod, triangle": 2062.0,
+    "OscMod, saw, 110 Hz": 2095.49,
+    "OscMod, saw, 4186 Hz": 2152.64,
+    "OscMod, saw, sync audio": 2243.0,
+    "OscMod, sine, sync every other sample": 5691.98,
+    "OscMod, pulse, 4186 Hz": 3006.81,
+    "OscMod, saw, naive": 1772.0,
+    "OscMod, pulse, naive": 2307.0,
+    "Math, min, audio and scalar": 439.01,
+    "Math, clip, audio": 642.01,
+    "Math, floor, audio": 657.01,
+    "Math, divide, audio": 503.01,
+    "Math, select, audio": 478.01,
+    "KMath, divide": 93.01,
+    "Shape": 973.01
+   },
+   "recipes": {
+    "AdditiveBell": {
+     "image": 9680,
+     "fast": 4560,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7500,
+     "mean": 1492.41,
+     "p999": 1799.39,
+     "peak": 1827.14,
+     "load": 130495,
+     "guards": 0
+    },
+    "AudioRateAmplitudeModulation": {
+     "image": 8920,
+     "fast": 1872,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5550,
+     "mean": 274.89,
+     "p999": 303.59,
+     "peak": 312.4,
+     "load": 108856,
+     "guards": 0
+    },
+    "DrawbarOrgan": {
+     "image": 9736,
+     "fast": 3488,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 4800,
+     "mean": 1305.73,
+     "p999": 1366.17,
+     "peak": 1462.49,
+     "load": 129098,
+     "guards": 0
+    },
+    "FrenchHorn": {
+     "image": 1184,
+     "fast": 3520,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 9750,
+     "mean": 389.4,
+     "p999": 570.56,
+     "peak": 642.43,
+     "load": 34887,
+     "guards": 0
+    },
+    "PhaseModElectricPiano": {
+     "image": 9464,
+     "fast": 4032,
+     "bulk": 23904,
+     "voices": 6,
+     "frames": 5775,
+     "mean": 1439.93,
+     "p999": 1591.58,
+     "peak": 1634.74,
+     "load": 124669,
+     "guards": 0
+    },
+    "RingModulation": {
+     "image": 8792,
+     "fast": 1696,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 212.64,
+     "p999": 231.12,
+     "peak": 240.46,
+     "load": 105883,
+     "guards": 0
+    },
+    "Trumpet": {
+     "image": 1320,
+     "fast": 3904,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 464.64,
+     "p999": 654.34,
+     "peak": 693.62,
+     "load": 38465,
+     "guards": 0
+    },
+    "Clap": {
+     "image": 792,
+     "fast": 2464,
+     "bulk": 30432,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 238.38,
+     "p999": 463.52,
+     "peak": 463.8,
+     "load": 24717,
+     "guards": 0
+    },
+    "DrumLoop": {
+     "image": 10600,
+     "fast": 7168,
+     "bulk": 60864,
+     "voices": 9,
+     "frames": 6450,
+     "mean": 731.47,
+     "p999": 1179.09,
+     "peak": 1211.99,
+     "load": 164989,
+     "guards": 0
+    },
+    "HiHat": {
+     "image": 728,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6300,
+     "mean": 146.55,
+     "p999": 230.43,
+     "peak": 236.75,
+     "load": 23193,
+     "guards": 0
+    },
+    "Kick808": {
+     "image": 8864,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7125,
+     "mean": 226.04,
+     "p999": 256.81,
+     "peak": 271.71,
+     "load": 107503,
+     "guards": 0
+    },
+    "Snare": {
+     "image": 776,
+     "fast": 2576,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6000,
+     "mean": 306.66,
+     "p999": 524.08,
+     "peak": 543.4,
+     "load": 24751,
+     "guards": 0
+    },
+    "ChebyshevWavefold": {
+     "image": 8944,
+     "fast": 2112,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4275,
+     "mean": 287.92,
+     "p999": 344.43,
+     "peak": 370.53,
+     "load": 109992,
+     "guards": 0
+    },
+    "Chorus": {
+     "image": 1104,
+     "fast": 3136,
+     "bulk": 11808,
+     "voices": 4,
+     "frames": 4050,
+     "mean": 647.57,
+     "p999": 698.93,
+     "peak": 721.9,
+     "load": 36324,
+     "guards": 0
+    },
+    "Compressor": {
+     "image": 1096,
+     "fast": 2960,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5250,
+     "mean": 454.36,
+     "p999": 523.59,
+     "peak": 524.27,
+     "load": 35706,
+     "guards": 0
+    },
+    "CubicSaturation": {
+     "image": 640,
+     "fast": 1792,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 222.86,
+     "p999": 263.81,
+     "peak": 268.43,
+     "load": 21128,
+     "guards": 0
+    },
+    "Flanger": {
+     "image": 800,
+     "fast": 2048,
+     "bulk": 2064,
+     "voices": 1,
+     "frames": 7500,
+     "mean": 253.02,
+     "p999": 256.09,
+     "peak": 269.18,
+     "load": 27810,
+     "guards": 0
+    },
+    "HaasWidener": {
+     "image": 704,
+     "fast": 2192,
+     "bulk": 3984,
+     "voices": 4,
+     "frames": 3750,
+     "mean": 385.34,
+     "p999": 450.71,
+     "peak": 452.09,
+     "load": 25957,
+     "guards": 0
+    },
+    "InsertFilterSweep": {
+     "image": 1344,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 257.31,
+     "p999": 274.87,
+     "peak": 308.9,
+     "load": 37858,
+     "guards": 0
+    },
+    "ParametricEq": {
+     "image": 1840,
+     "fast": 2432,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4125,
+     "mean": 327.49,
+     "p999": 345.24,
+     "peak": 382.52,
+     "load": 48533,
+     "guards": 0
+    },
+    "Phaser": {
+     "image": 976,
+     "fast": 2992,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7125,
+     "mean": 525.33,
+     "p999": 568.59,
+     "peak": 603.59,
+     "load": 33868,
+     "guards": 0
+    },
+    "PingPongDelay": {
+     "image": 752,
+     "fast": 2656,
+     "bulk": 230688,
+     "voices": 1,
+     "frames": 8325,
+     "mean": 193.54,
+     "p999": 247.93,
+     "peak": 258.37,
+     "load": 27908,
+     "guards": 0
+    },
+    "PrecutGrainCloud": {
+     "image": 158664,
+     "fast": 5552,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 136.94,
+     "p999": 239.25,
+     "peak": 241.18,
+     "load": 1824085,
+     "guards": 0
+    },
+    "Reverb": {
+     "image": 1696,
+     "fast": 4400,
+     "bulk": 187776,
+     "voices": 3,
+     "frames": 5250,
+     "mean": 1026.19,
+     "p999": 1139.61,
+     "peak": 1139.93,
+     "load": 52065,
+     "guards": 0
+    },
+    "SidechainDucking": {
+     "image": 9504,
+     "fast": 3728,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 7425,
+     "mean": 647.6,
+     "p999": 687.4,
+     "peak": 696.87,
+     "load": 130982,
+     "guards": 0
+    },
+    "Vocoder": {
+     "image": 2000,
+     "fast": 5648,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5100,
+     "mean": 919.94,
+     "p999": 958.93,
+     "peak": 1087.87,
+     "load": 63106,
+     "guards": 0
+    },
+    "FormantVowels": {
+     "image": 872,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5250,
+     "mean": 187.32,
+     "p999": 198.34,
+     "peak": 258.46,
+     "load": 24393,
+     "guards": 0
+    },
+    "KeyboardTrackedFilter": {
+     "image": 616,
+     "fast": 1712,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 208.02,
+     "p999": 233.12,
+     "peak": 233.96,
+     "load": 19923,
+     "guards": 0
+    },
+    "ResonantSawBass": {
+     "image": 704,
+     "fast": 2112,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 289.54,
+     "p999": 336.75,
+     "peak": 337.49,
+     "load": 22115,
+     "guards": 0
+    },
+    "VelocityFilterAmp": {
+     "image": 624,
+     "fast": 1776,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 3750,
+     "mean": 220.61,
+     "p999": 246.61,
+     "peak": 246.61,
+     "load": 20425,
+     "guards": 0
+    },
+    "Wind": {
+     "image": 592,
+     "fast": 1760,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 9000,
+     "mean": 144.92,
+     "p999": 149.87,
+     "peak": 164.84,
+     "load": 19692,
+     "guards": 0
+    },
+    "Arpeggio": {
+     "image": 944,
+     "fast": 1808,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6375,
+     "mean": 276.83,
+     "p999": 308.96,
+     "peak": 309.65,
+     "load": 26627,
+     "guards": 0
+    },
+    "AutoPan": {
+     "image": 8872,
+     "fast": 2208,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6000,
+     "mean": 457.63,
+     "p999": 463.21,
+     "peak": 506.49,
+     "load": 108586,
+     "guards": 0
+    },
+    "ChannelAftertouch": {
+     "image": 688,
+     "fast": 2144,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 4875,
+     "mean": 376.97,
+     "p999": 387.59,
+     "peak": 432.15,
+     "load": 22470,
+     "guards": 0
+    },
+    "CurvedEnvelope": {
+     "image": 600,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 3750,
+     "mean": 346.01,
+     "p999": 441.65,
+     "peak": 442.34,
+     "load": 20711,
+     "guards": 0
+    },
+    "LegatoPortamento": {
+     "image": 568,
+     "fast": 1552,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4875,
+     "mean": 131.71,
+     "p999": 139.46,
+     "peak": 161.78,
+     "load": 18193,
+     "guards": 0
+    },
+    "LoopingEnvelope": {
+     "image": 5440,
+     "fast": 2032,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4800,
+     "mean": 273.83,
+     "p999": 351.18,
+     "peak": 373.18,
+     "load": 71332,
+     "guards": 0
+    },
+    "MacroKnob": {
+     "image": 864,
+     "fast": 2304,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4575,
+     "mean": 211.17,
+     "p999": 217.44,
+     "peak": 235.05,
+     "load": 26593,
+     "guards": 0
+    },
+    "MonoLead": {
+     "image": 648,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4275,
+     "mean": 172.68,
+     "p999": 187.24,
+     "peak": 189.37,
+     "load": 20467,
+     "guards": 0
+    },
+    "PerVoiceLfo": {
+     "image": 568,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6149,
+     "mean": 290.43,
+     "p999": 322.3,
+     "peak": 336.96,
+     "load": 19624,
+     "guards": 0
+    },
+    "PitchBend": {
+     "image": 568,
+     "fast": 1728,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5250,
+     "mean": 137.89,
+     "p999": 141.9,
+     "peak": 161.09,
+     "load": 18771,
+     "guards": 0
+    },
+    "SampleAndHold": {
+     "image": 1120,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 6000,
+     "mean": 192.51,
+     "p999": 197.53,
+     "peak": 211.05,
+     "load": 24905,
+     "guards": 0
+    },
+    "SawLfoFilter": {
+     "image": 592,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 239.74,
+     "p999": 281.18,
+     "peak": 291.09,
+     "load": 19920,
+     "guards": 0
+    },
+    "SharedLfo": {
+     "image": 552,
+     "fast": 1920,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 5400,
+     "mean": 281.02,
+     "p999": 315.71,
+     "peak": 329.49,
+     "load": 19423,
+     "guards": 0
+    },
+    "SquareLfoFilter": {
+     "image": 592,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 239.72,
+     "p999": 287.84,
+     "peak": 301.71,
+     "load": 19968,
+     "guards": 0
+    },
+    "StepSequencer": {
+     "image": 640,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6000,
+     "mean": 211.86,
+     "p999": 239.74,
+     "peak": 240.25,
+     "load": 20216,
+     "guards": 0
+    },
+    "TempoSyncedLfo": {
+     "image": 608,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 211.62,
+     "p999": 274.74,
+     "peak": 285.55,
+     "load": 20507,
+     "guards": 0
+    },
+    "TranceGate": {
+     "image": 640,
+     "fast": 2048,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6375,
+     "mean": 233.04,
+     "p999": 355.65,
+     "peak": 379.56,
+     "load": 21401,
+     "guards": 0
+    },
+    "Tremolo": {
+     "image": 8832,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6000,
+     "mean": 256.07,
+     "p999": 288.22,
+     "peak": 301.27,
+     "load": 106849,
+     "guards": 0
+    },
+    "TriangleLfoFilter": {
+     "image": 592,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 236.01,
+     "p999": 276.68,
+     "peak": 286.59,
+     "load": 19919,
+     "guards": 0
+    },
+    "VibratoModWheel": {
+     "image": 568,
+     "fast": 1664,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5700,
+     "mean": 145.52,
+     "p999": 148.74,
+     "peak": 167.93,
+     "load": 18734,
+     "guards": 0
+    },
+    "VoiceStealing": {
+     "image": 560,
+     "fast": 1664,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5325,
+     "mean": 209.37,
+     "p999": 233.74,
+     "peak": 234.43,
+     "load": 18718,
+     "guards": 0
+    },
+    "DetunedSupersaw": {
+     "image": 1056,
+     "fast": 4080,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 6375,
+     "mean": 970.5,
+     "p999": 1091.68,
+     "peak": 1179.55,
+     "load": 33153,
+     "guards": 0
+    },
+    "LoopedSample": {
+     "image": 29904,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 6,
+     "frames": 4500,
+     "mean": 541.94,
+     "p999": 642.93,
+     "peak": 681.43,
+     "load": 330384,
+     "guards": 0
+    },
+    "OneShotSample": {
+     "image": 134968,
+     "fast": 1792,
+     "bulk": 0,
+     "voices": 6,
+     "frames": 4500,
+     "mean": 221.46,
+     "p999": 534.59,
+     "peak": 547.65,
+     "load": 1437780,
+     "guards": 0
+    },
+    "PluckedString": {
+     "image": 688,
+     "fast": 2576,
+     "bulk": 58464,
+     "voices": 6,
+     "frames": 5700,
+     "mean": 550.99,
+     "p999": 696.27,
+     "peak": 714.71,
+     "load": 23659,
+     "guards": 0
+    },
+    "PwmPad": {
+     "image": 520,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7125,
+     "mean": 312.63,
+     "p999": 343.65,
+     "peak": 378.4,
+     "load": 19022,
+     "guards": 0
+    },
+    "StereoUnison": {
+     "image": 1104,
+     "fast": 3232,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 570.02,
+     "p999": 615.71,
+     "peak": 636.21,
+     "load": 33593,
+     "guards": 0
+    },
+    "SubOscillator": {
+     "image": 648,
+     "fast": 1856,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 3750,
+     "mean": 262.26,
+     "p999": 305.15,
+     "peak": 305.84,
+     "load": 21192,
+     "guards": 0
+    },
+    "VelocityLayers": {
+     "image": 269664,
+     "fast": 2304,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 296.57,
+     "p999": 360.18,
+     "peak": 369.12,
+     "load": 2861423,
+     "guards": 0
+    },
+    "WavetableMorph": {
+     "image": 25528,
+     "fast": 2592,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7125,
+     "mean": 492.42,
+     "p999": 608.62,
+     "peak": 617.02,
+     "load": 287020,
+     "guards": 0
+    },
+    "FourVoices": {
+     "image": 392,
+     "fast": 1424,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 206.3,
+     "p999": 206.71,
+     "peak": 247.65,
+     "load": 15929,
+     "guards": 0
+    },
+    "OneVoice": {
+     "image": 368,
+     "fast": 1232,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 92.84,
+     "p999": 93.28,
+     "peak": 105.43,
+     "load": 14126,
+     "guards": 0
+    },
+    "Silent": {
+     "image": 152,
+     "fast": 480,
+     "bulk": 0,
+     "voices": 0,
+     "frames": 1500,
+     "mean": 29.02,
+     "p999": 29.47,
+     "peak": 29.47,
+     "load": 5468,
+     "guards": 0
+    },
+    "Idle": {
+     "image": 368,
+     "fast": 1232,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 56.12,
+     "p999": 93.5,
+     "peak": 106.93,
+     "load": 14127,
+     "guards": 0
+    },
+    "IdleVoices": {
+     "image": 368,
+     "fast": 5504,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 91.56,
+     "p999": 128.93,
+     "peak": 142.37,
+     "load": 42161,
+     "guards": 0
+    },
+    "Tracks": {
+     "image": 1296,
+     "fast": 8192,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 423.11,
+     "p999": 1020.68,
+     "peak": 1225.36,
+     "load": 81055,
+     "guards": 0
+    },
+    "Slots": {
+     "image": 504,
+     "fast": 1344,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 59.23,
+     "p999": 96.56,
+     "peak": 181.27,
+     "load": 27425,
+     "guards": 0
+    },
+    "Held1": {
+     "image": 368,
+     "fast": 1232,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 93.35,
+     "p999": 98.4,
+     "peak": 106.93,
+     "load": 14127,
+     "guards": 0
+    },
+    "Held2": {
+     "image": 376,
+     "fast": 1296,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 131.17,
+     "p999": 138.78,
+     "peak": 153.84,
+     "load": 14727,
+     "guards": 0
+    },
+    "Held4": {
+     "image": 392,
+     "fast": 1424,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 206.81,
+     "p999": 219.53,
+     "peak": 249.15,
+     "load": 15929,
+     "guards": 0
+    },
+    "Held8": {
+     "image": 424,
+     "fast": 1696,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 358.1,
+     "p999": 381.02,
+     "peak": 445.77,
+     "load": 18333,
+     "guards": 0
+    },
+    "Held16": {
+     "image": 488,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 660.69,
+     "p999": 704.02,
+     "peak": 863.02,
+     "load": 23142,
+     "guards": 0
+    },
+    "Segments1": {
+     "image": 96352,
+     "fast": 1232,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 143.57,
+     "p999": 152.62,
+     "peak": 157.15,
+     "load": 1883352,
+     "guards": 0
+    },
+    "Segments16": {
+     "image": 96472,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 747.52,
+     "p999": 871.67,
+     "peak": 949.8,
+     "load": 1892368,
+     "guards": 0
+    },
+    "Params": {
+     "image": 2424,
+     "fast": 2896,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 92.47,
+     "p999": 316.68,
+     "peak": 1705.21,
+     "load": 54275,
+     "guards": 0
+    },
+    "Inserts": {
+     "image": 600,
+     "fast": 2080,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 437.47,
+     "p999": 442.52,
+     "peak": 451.06,
+     "load": 36471,
+     "guards": 0
+    },
+    "Buses1": {
+     "image": 1584,
+     "fast": 8576,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 678.33,
+     "p999": 1275.89,
+     "peak": 1480.58,
+     "load": 84808,
+     "guards": 0
+    },
+    "Buses2": {
+     "image": 1608,
+     "fast": 8848,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 699.55,
+     "p999": 1297.11,
+     "peak": 1501.8,
+     "load": 85233,
+     "guards": 0
+    },
+    "Notes2": {
+     "image": 368,
+     "fast": 1296,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 212.59,
+     "p999": 212.59,
+     "peak": 212.59,
+     "load": 14571,
+     "guards": 0
+    },
+    "Notes4": {
+     "image": 368,
+     "fast": 1424,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 295.4,
+     "p999": 295.4,
+     "peak": 295.4,
+     "load": 15461,
+     "guards": 0
+    },
+    "Notes8": {
+     "image": 368,
+     "fast": 1696,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 454.53,
+     "p999": 454.65,
+     "peak": 454.65,
+     "load": 17241,
+     "guards": 0
+    },
+    "Notes64": {
+     "image": 368,
+     "fast": 5504,
+     "bulk": 0,
+     "voices": 64,
+     "frames": 1500,
+     "mean": 2671.49,
+     "p999": 2684.14,
+     "peak": 2684.14,
+     "load": 42161,
+     "guards": 0
+    },
+    "NotesParams": {
+     "image": 1648,
+     "fast": 4256,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 2051.71,
+     "p999": 2052.33,
+     "peak": 2052.33,
+     "load": 43804,
+     "guards": 0
+    },
+    "HeldParams": {
+     "image": 1704,
+     "fast": 4256,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1870.39,
+     "p999": 1893.21,
+     "peak": 2128.95,
+     "load": 44896,
+     "guards": 0
+    },
+    "SetParams": {
+     "image": 96400,
+     "fast": 1280,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 104.0,
+     "p999": 147.25,
+     "peak": 159.15,
+     "load": 1872362,
+     "guards": 0
+    },
+    "IdleKnob": {
+     "image": 408,
+     "fast": 1280,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 56.56,
+     "p999": 99.81,
+     "peak": 113.81,
+     "load": 14981,
+     "guards": 0
+    },
+    "Mono": {
+     "image": 376,
+     "fast": 1536,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 669.96,
+     "p999": 670.84,
+     "peak": 670.84,
+     "load": 14823,
+     "guards": 0
+    },
+    "Poly": {
+     "image": 368,
+     "fast": 1296,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 212.59,
+     "p999": 212.59,
+     "peak": 212.59,
+     "load": 14572,
+     "guards": 0
+    },
+    "MixRamps": {
+     "image": 1472,
+     "fast": 4672,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 534.3,
+     "p999": 573.09,
+     "peak": 811.77,
+     "load": 56816,
+     "guards": 0
+    },
+    "MixStill": {
+     "image": 800,
+     "fast": 4480,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 525.03,
+     "p999": 565.43,
+     "peak": 628.87,
+     "load": 44959,
+     "guards": 0
+    },
+    "Zones1": {
+     "image": 10120,
+     "fast": 1904,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 909.64,
+     "p999": 909.93,
+     "peak": 909.93,
+     "load": 96764,
+     "guards": 0
+    },
+    "Zones256": {
+     "image": 18280,
+     "fast": 1904,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1292.14,
+     "p999": 1292.43,
+     "peak": 1292.43,
+     "load": 234004,
+     "guards": 0
+    },
+    "Fades": {
+     "image": 376,
+     "fast": 1520,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 1500,
+     "mean": 345.64,
+     "p999": 345.68,
+     "peak": 345.68,
+     "load": 16150,
+     "guards": 0
+    },
+    "OpNoise": {
+     "image": 712,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 736.81,
+     "p999": 749.52,
+     "peak": 787.65,
+     "load": 24041,
+     "guards": 0
+    },
+    "OpOsc": {
+     "image": 8968,
+     "fast": 2352,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 967.81,
+     "p999": 980.52,
+     "peak": 1012.65,
+     "load": 112072,
+     "guards": 0
+    },
+    "OpSaw": {
+     "image": 712,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1172.14,
+     "p999": 1188.52,
+     "peak": 1209.64,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpPulse": {
+     "image": 720,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1692.13,
+     "p999": 1700.52,
+     "peak": 1721.64,
+     "load": 24757,
+     "guards": 0
+    },
+    "OpTriangle": {
+     "image": 712,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 762.81,
+     "p999": 775.52,
+     "peak": 807.65,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpTone": {
+     "image": 712,
+     "fast": 2576,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 754.81,
+     "p999": 767.52,
+     "peak": 805.15,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpBiquad": {
+     "image": 888,
+     "fast": 3600,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 855.19,
+     "p999": 868.27,
+     "peak": 910.4,
+     "load": 29708,
+     "guards": 0
+    },
+    "OpEnv": {
+     "image": 1048,
+     "fast": 3728,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1004.2,
+     "p999": 1017.27,
+     "peak": 1073.9,
+     "load": 34430,
+     "guards": 0
+    },
+    "OpMul": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 638.81,
+     "p999": 651.52,
+     "peak": 681.15,
+     "load": 24761,
+     "guards": 0
+    },
+    "OpMulS": {
+     "image": 712,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 582.81,
+     "p999": 595.52,
+     "peak": 625.15,
+     "load": 24691,
+     "guards": 0
+    },
+    "OpAdd": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 638.81,
+     "p999": 651.52,
+     "peak": 681.15,
+     "load": 24761,
+     "guards": 0
+    },
+    "OpAddS": {
+     "image": 712,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 582.81,
+     "p999": 595.52,
+     "peak": 625.15,
+     "load": 24691,
+     "guards": 0
+    },
+    "OpPan": {
+     "image": 712,
+     "fast": 2192,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 790.81,
+     "p999": 803.52,
+     "peak": 833.15,
+     "load": 25227,
+     "guards": 0
+    },
+    "OpDelay": {
+     "image": 744,
+     "fast": 2480,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1032.05,
+     "p999": 1032.77,
+     "peak": 1045.52,
+     "load": 24522,
+     "guards": 0
+    },
+    "OpComb": {
+     "image": 592,
+     "fast": 2480,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1172.57,
+     "p999": 1184.77,
+     "peak": 1244.39,
+     "load": 21590,
+     "guards": 0
+    },
+    "OpAllpass": {
+     "image": 592,
+     "fast": 2224,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1079.89,
+     "p999": 1089.77,
+     "peak": 1146.9,
+     "load": 21325,
+     "guards": 0
+    },
+    "OpFollow": {
+     "image": 880,
+     "fast": 2832,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 709.19,
+     "p999": 722.27,
+     "peak": 756.9,
+     "load": 29394,
+     "guards": 0
+    },
+    "OpKMtoF": {
+     "image": 1360,
+     "fast": 3344,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 691.31,
+     "p999": 704.78,
+     "peak": 736.4,
+     "load": 42256,
+     "guards": 0
+    },
+    "OpOscMod": {
+     "image": 504,
+     "fast": 1776,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 911.53,
+     "p999": 918.52,
+     "peak": 920.77,
+     "load": 18261,
+     "guards": 0
+    },
+    "OpMath": {
+     "image": 712,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1432.81,
+     "p999": 1445.52,
+     "peak": 1475.14,
+     "load": 25235,
+     "guards": 0
+    },
+    "OpMathDivide": {
+     "image": 1040,
+     "fast": 2704,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1500.8,
+     "p999": 1513.52,
+     "peak": 1543.14,
+     "load": 34181,
+     "guards": 0
+    },
+    "OpShape": {
+     "image": 792,
+     "fast": 1968,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 2064.8,
+     "p999": 2077.52,
+     "peak": 2107.14,
+     "load": 25924,
+     "guards": 0
+    },
+    "OpSample": {
+     "image": 10224,
+     "fast": 2224,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1166.82,
+     "p999": 1179.52,
+     "peak": 1214.65,
+     "load": 98749,
+     "guards": 0
+    },
+    "OpSample2": {
+     "image": 20096,
+     "fast": 2688,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1782.97,
+     "p999": 1810.52,
+     "peak": 1917.14,
+     "load": 182428,
+     "guards": 0
+    },
+    "OpSample3": {
+     "image": 20192,
+     "fast": 3456,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 3533.07,
+     "p999": 3588.01,
+     "peak": 3777.63,
+     "load": 183850,
+     "guards": 0
+    }
+   },
+   "engine_bytes": 1456,
+   "cases": {
+    "Dispatch only": {
+     "op": 0,
+     "mode": 0,
+     "still": true,
+     "first": 57
+    },
+    "Fill": {
+     "op": 1,
+     "mode": 0,
+     "still": true,
+     "first": 165
+    },
+    "Noise": {
+     "op": 2,
+     "mode": 0,
+     "still": true,
+     "first": 364
+    },
+    "Osc": {
+     "op": 3,
+     "mode": 0,
+     "still": true,
+     "first": 589
+    },
+    "Saw, naive": {
+     "op": 23,
+     "mode": 1,
+     "still": true,
+     "first": 322
+    },
+    "Saw, 110 Hz": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 456
+    },
+    "Saw, 4186 Hz": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 522
+    },
+    "Pulse, naive": {
+     "op": 24,
+     "mode": 1,
+     "still": true,
+     "first": 407
+    },
+    "Pulse, 110 Hz": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 619
+    },
+    "Pulse, 4186 Hz": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 734
+    },
+    "Saw, Nyquist": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 797
+    },
+    "Pulse, Nyquist": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 1321
+    },
+    "Triangle": {
+     "op": 25,
+     "mode": 0,
+     "still": true,
+     "first": 384
+    },
+    "Tone": {
+     "op": 26,
+     "mode": 0,
+     "still": true,
+     "first": 375
+    },
+    "Tone, at 0 Hz": {
+     "op": 26,
+     "mode": 0,
+     "still": true,
+     "first": 375
+    },
+    "Biquad, still": {
+     "op": 4,
+     "mode": 0,
+     "still": true,
+     "first": 652
+    },
+    "Biquad, moving": {
+     "op": 4,
+     "mode": 0,
+     "still": false,
+     "first": 659
+    },
+    "Biquad, high pass, moving": {
+     "op": 4,
+     "mode": 1,
+     "still": false,
+     "first": 661
+    },
+    "Biquad, band pass, moving": {
+     "op": 4,
+     "mode": 2,
+     "still": false,
+     "first": 657
+    },
+    "Env, attack": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 597
+    },
+    "Env, decay": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 690
+    },
+    "Env, sustain": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 400
+    },
+    "Env, release": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 597
+    },
+    "Env, decay, moving": {
+     "op": 5,
+     "mode": 0,
+     "still": false,
+     "first": 705
+    },
+    "Sample, mono i16": {
+     "op": 6,
+     "mode": 128,
+     "still": true,
+     "first": 1747
+    },
+    "Sample, mono f32": {
+     "op": 6,
+     "mode": 128,
+     "still": true,
+     "first": 1555
+    },
+    "Sample, stereo i16": {
+     "op": 6,
+     "mode": 0,
+     "still": true,
+     "first": 2195
+    },
+    "Sample, stereo f32": {
+     "op": 6,
+     "mode": 0,
+     "still": true,
+     "first": 1779
+    },
+    "Sample, mono f32, moving": {
+     "op": 6,
+     "mode": 128,
+     "still": false,
+     "first": 1542
+    },
+    "Sample2, mono i16": {
+     "op": 27,
+     "mode": 128,
+     "still": true,
+     "first": 2722
+    },
+    "Sample2, stereo i16": {
+     "op": 27,
+     "mode": 0,
+     "still": true,
+     "first": 3170
+    },
+    "Sample2, stereo i16, moving": {
+     "op": 27,
+     "mode": 0,
+     "still": false,
+     "first": 3113
+    },
+    "Sample2, stereo i16, reverse, moving": {
+     "op": 27,
+     "mode": 1,
+     "still": false,
+     "first": 3132
+    },
+    "Sample2, stereo i16, tail, moving": {
+     "op": 27,
+     "mode": 2,
+     "still": false,
+     "first": 3119
+    },
+    "Sample2, mono f32, moving": {
+     "op": 27,
+     "mode": 128,
+     "still": false,
+     "first": 2473
+    },
+    "Sample3, mono i16": {
+     "op": 33,
+     "mode": 192,
+     "still": true,
+     "first": 3199
+    },
+    "Sample3, stereo i16, moving": {
+     "op": 33,
+     "mode": 64,
+     "still": false,
+     "first": 3590
+    },
+    "Sample3, stereo i16, reverse, moving": {
+     "op": 33,
+     "mode": 65,
+     "still": false,
+     "first": 3605
+    },
+    "Sample3, mono f32, moving": {
+     "op": 33,
+     "mode": 192,
+     "still": false,
+     "first": 2950
+    },
+    "Sample3, crossfade, mono i16": {
+     "op": 33,
+     "mode": 128,
+     "still": true,
+     "first": 6039
+    },
+    "Sample3, crossfade, stereo i16, moving": {
+     "op": 33,
+     "mode": 0,
+     "still": false,
+     "first": 6816
+    },
+    "Sample3, crossfade, stereo i16, reverse, moving": {
+     "op": 33,
+     "mode": 1,
+     "still": false,
+     "first": 6846
+    },
+    "Sample3, crossfade, mono f32, moving": {
+     "op": 33,
+     "mode": 128,
+     "still": false,
+     "first": 5537
+    },
+    "Mul": {
+     "op": 7,
+     "mode": 0,
+     "still": true,
+     "first": 259
+    },
+    "MulS": {
+     "op": 8,
+     "mode": 0,
+     "still": true,
+     "first": 231
+    },
+    "Add": {
+     "op": 9,
+     "mode": 0,
+     "still": true,
+     "first": 259
+    },
+    "AddS": {
+     "op": 10,
+     "mode": 0,
+     "still": true,
+     "first": 232
+    },
+    "Pan": {
+     "op": 11,
+     "mode": 0,
+     "still": true,
+     "first": 412
+    },
+    "DelayWrite": {
+     "op": 12,
+     "mode": 0,
+     "still": true,
+     "first": 366
+    },
+    "DelayRead": {
+     "op": 13,
+     "mode": 0,
+     "still": true,
+     "first": 547
+    },
+    "DelayRead, feedback": {
+     "op": 13,
+     "mode": 1,
+     "still": true,
+     "first": 551
+    },
+    "Comb": {
+     "op": 14,
+     "mode": 0,
+     "still": true,
+     "first": 1022
+    },
+    "Allpass": {
+     "op": 15,
+     "mode": 0,
+     "still": true,
+     "first": 927
+    },
+    "Follow": {
+     "op": 16,
+     "mode": 0,
+     "still": true,
+     "first": 506
+    },
+    "Follow, moving": {
+     "op": 16,
+     "mode": 0,
+     "still": false,
+     "first": 511
+    },
+    "KMul": {
+     "op": 17,
+     "mode": 0,
+     "still": true,
+     "first": 79
+    },
+    "KAdd": {
+     "op": 18,
+     "mode": 0,
+     "still": true,
+     "first": 79
+    },
+    "KMtoF, still": {
+     "op": 19,
+     "mode": 0,
+     "still": true,
+     "first": 144
+    },
+    "KMtoF, moving": {
+     "op": 19,
+     "mode": 0,
+     "still": false,
+     "first": 149
+    },
+    "KRatio, still": {
+     "op": 20,
+     "mode": 60,
+     "still": true,
+     "first": 142
+    },
+    "KRatio, moving": {
+     "op": 20,
+     "mode": 60,
+     "still": false,
+     "first": 149
+    },
+    "KSnap": {
+     "op": 21,
+     "mode": 0,
+     "still": true,
+     "first": 72
+    },
+    "KLfo": {
+     "op": 22,
+     "mode": 0,
+     "still": true,
+     "first": 154
+    },
+    "KLfo2": {
+     "op": 28,
+     "mode": 0,
+     "still": true,
+     "first": 155
+    },
+    "OscMod, sine": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4214
+    },
+    "OscMod, sine, phase audio": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4181
+    },
+    "OscMod, sine, feedback": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4113
+    },
+    "OscMod, triangle": {
+     "op": 29,
+     "mode": 1,
+     "still": true,
+     "first": 2106
+    },
+    "OscMod, saw, 110 Hz": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2141
+    },
+    "OscMod, saw, 4186 Hz": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2201
+    },
+    "OscMod, saw, sync audio": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2259
+    },
+    "OscMod, sine, sync every other sample": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 5731
+    },
+    "OscMod, pulse, 4186 Hz": {
+     "op": 29,
+     "mode": 3,
+     "still": true,
+     "first": 3074
+    },
+    "OscMod, saw, naive": {
+     "op": 29,
+     "mode": 4,
+     "still": true,
+     "first": 1782
+    },
+    "OscMod, pulse, naive": {
+     "op": 29,
+     "mode": 5,
+     "still": true,
+     "first": 2317
+    },
+    "Math, min, audio and scalar": {
+     "op": 30,
+     "mode": 0,
+     "still": true,
+     "first": 439
+    },
+    "Math, clip, audio": {
+     "op": 30,
+     "mode": 3,
+     "still": true,
+     "first": 642
+    },
+    "Math, floor, audio": {
+     "op": 30,
+     "mode": 4,
+     "still": true,
+     "first": 656
+    },
+    "Math, divide, audio": {
+     "op": 30,
+     "mode": 5,
+     "still": true,
+     "first": 502
+    },
+    "Math, select, audio": {
+     "op": 30,
+     "mode": 7,
+     "still": true,
+     "first": 477
+    },
+    "KMath, divide": {
+     "op": 31,
+     "mode": 5,
+     "still": true,
+     "first": 92
+    },
+    "Shape": {
+     "op": 32,
+     "mode": 0,
+     "still": true,
+     "first": 972
+    }
+   },
+   "clear": 20.58
+  },
+  "Mono": {
+   "kernels": {
+    "Dispatch only": 57.01,
+    "Fill": 166.01,
+    "Noise": 358.01,
+    "Osc": 589.01,
+    "Saw, naive": 322.01,
+    "Saw, 110 Hz": 457.56,
+    "Saw, 4186 Hz": 517.46,
+    "Pulse, naive": 408.01,
+    "Pulse, 110 Hz": 611.34,
+    "Pulse, 4186 Hz": 736.39,
+    "Saw, Nyquist": 808.01,
+    "Pulse, Nyquist": 1344.01,
+    "Triangle": 384.01,
+    "Tone": 270.01,
+    "Tone, at 0 Hz": 376.01,
+    "Biquad, still": 551.01,
+    "Biquad, moving": 659.01,
+    "Biquad, high pass, moving": 661.01,
+    "Biquad, band pass, moving": 658.01,
+    "Env, attack": 489.01,
+    "Env, decay": 583.01,
+    "Env, sustain": 293.01,
+    "Env, release": 489.01,
+    "Env, decay, moving": 701.51,
+    "Sample, mono i16": 1813.03,
+    "Sample, mono f32": 1621.03,
+    "Sample, stereo i16": 2261.03,
+    "Sample, stereo f32": 1845.03,
+    "Sample, mono f32, moving": 1615.54,
+    "Sample2, mono i16": 2556.06,
+    "Sample2, stereo i16": 3004.05,
+    "Sample2, stereo i16, moving": 3023.74,
+    "Sample2, stereo i16, reverse, moving": 2997.78,
+    "Sample2, stereo i16, tail, moving": 3029.74,
+    "Sample2, mono f32, moving": 2383.75,
+    "Sample3, mono i16": 3004.05,
+    "Sample3, stereo i16, moving": 3468.74,
+    "Sample3, stereo i16, reverse, moving": 3440.78,
+    "Sample3, mono f32, moving": 2828.74,
+    "Sample3, crossfade, mono i16": 5680.09,
+    "Sample3, crossfade, stereo i16, moving": 6605.97,
+    "Sample3, crossfade, stereo i16, reverse, moving": 6550.04,
+    "Sample3, crossfade, mono f32, moving": 5325.98,
+    "Mul": 260.01,
+    "MulS": 232.01,
+    "Add": 260.01,
+    "AddS": 232.01,
+    "Pan": 313.01,
+    "DelayWrite": 366.01,
+    "DelayRead": 548.01,
+    "DelayRead, feedback": 551.01,
+    "Comb": 1005.07,
+    "Allpass": 913.76,
+    "Follow": 455.01,
+    "Follow, moving": 510.51,
+    "KMul": 79.01,
+    "KAdd": 79.01,
+    "KMtoF, still": 93.01,
+    "KMtoF, moving": 150.01,
+    "KRatio, still": 93.01,
+    "KRatio, moving": 149.01,
+    "KSnap": 72.01,
+    "KLfo": 152.23,
+    "KLfo2": 154.23,
+    "OscMod, sine": 4151.84,
+    "OscMod, sine, phase audio": 4148.93,
+    "OscMod, sine, feedback": 4130.27,
+    "OscMod, triangle": 2062.0,
+    "OscMod, saw, 110 Hz": 2095.49,
+    "OscMod, saw, 4186 Hz": 2152.64,
+    "OscMod, saw, sync audio": 2243.0,
+    "OscMod, sine, sync every other sample": 5691.98,
+    "OscMod, pulse, 4186 Hz": 3006.81,
+    "OscMod, saw, naive": 1772.0,
+    "OscMod, pulse, naive": 2307.0,
+    "Math, min, audio and scalar": 439.01,
+    "Math, clip, audio": 642.01,
+    "Math, floor, audio": 657.01,
+    "Math, divide, audio": 503.01,
+    "Math, select, audio": 478.01,
+    "KMath, divide": 93.01,
+    "Shape": 973.01
+   },
+   "recipes": {
+    "AdditiveBell": {
+     "image": 9680,
+     "fast": 4304,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7500,
+     "mean": 1451.56,
+     "p999": 1754.92,
+     "peak": 1782.68,
+     "load": 130495,
+     "guards": 0
+    },
+    "AudioRateAmplitudeModulation": {
+     "image": 8920,
+     "fast": 1616,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5550,
+     "mean": 243.09,
+     "p999": 271.18,
+     "peak": 279.99,
+     "load": 108856,
+     "guards": 0
+    },
+    "DrawbarOrgan": {
+     "image": 9736,
+     "fast": 3232,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 4800,
+     "mean": 1261.85,
+     "p999": 1321.71,
+     "peak": 1418.01,
+     "load": 129098,
+     "guards": 0
+    },
+    "FrenchHorn": {
+     "image": 1184,
+     "fast": 3264,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 9750,
+     "mean": 361.0,
+     "p999": 538.15,
+     "peak": 610.02,
+     "load": 34887,
+     "guards": 0
+    },
+    "PhaseModElectricPiano": {
+     "image": 9464,
+     "fast": 3776,
+     "bulk": 23904,
+     "voices": 6,
+     "frames": 5775,
+     "mean": 1386.33,
+     "p999": 1535.05,
+     "peak": 1578.2,
+     "load": 124669,
+     "guards": 0
+    },
+    "RingModulation": {
+     "image": 8792,
+     "fast": 1440,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 181.24,
+     "p999": 198.71,
+     "peak": 208.06,
+     "load": 105883,
+     "guards": 0
+    },
+    "Trumpet": {
+     "image": 1320,
+     "fast": 3648,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 435.71,
+     "p999": 621.93,
+     "peak": 661.21,
+     "load": 38465,
+     "guards": 0
+    },
+    "Clap": {
+     "image": 792,
+     "fast": 2208,
+     "bulk": 30432,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 212.48,
+     "p999": 431.12,
+     "peak": 431.4,
+     "load": 24716,
+     "guards": 0
+    },
+    "DrumLoop": {
+     "image": 10600,
+     "fast": 6528,
+     "bulk": 60864,
+     "voices": 9,
+     "frames": 6450,
+     "mean": 649.05,
+     "p999": 1075.77,
+     "peak": 1108.68,
+     "load": 164988,
+     "guards": 0
+    },
+    "HiHat": {
+     "image": 728,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6300,
+     "mean": 119.62,
+     "p999": 198.02,
+     "peak": 204.34,
+     "load": 23193,
+     "guards": 0
+    },
+    "Kick808": {
+     "image": 8864,
+     "fast": 1488,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7125,
+     "mean": 194.59,
+     "p999": 224.4,
+     "peak": 239.31,
+     "load": 107503,
+     "guards": 0
+    },
+    "Snare": {
+     "image": 776,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6000,
+     "mean": 276.26,
+     "p999": 485.65,
+     "peak": 504.96,
+     "load": 24750,
+     "guards": 0
+    },
+    "ChebyshevWavefold": {
+     "image": 8944,
+     "fast": 1856,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4275,
+     "mean": 257.72,
+     "p999": 312.02,
+     "peak": 338.12,
+     "load": 109992,
+     "guards": 0
+    },
+    "Chorus": {
+     "image": 1104,
+     "fast": 2880,
+     "bulk": 11808,
+     "voices": 4,
+     "frames": 4050,
+     "mean": 604.87,
+     "p999": 655.12,
+     "peak": 678.09,
+     "load": 36323,
+     "guards": 0
+    },
+    "Compressor": {
+     "image": 1096,
+     "fast": 2704,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5250,
+     "mean": 414.21,
+     "p999": 479.77,
+     "peak": 480.46,
+     "load": 35706,
+     "guards": 0
+    },
+    "CubicSaturation": {
+     "image": 640,
+     "fast": 1536,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 192.44,
+     "p999": 231.4,
+     "peak": 236.02,
+     "load": 21127,
+     "guards": 0
+    },
+    "Flanger": {
+     "image": 800,
+     "fast": 1792,
+     "bulk": 2064,
+     "voices": 1,
+     "frames": 7500,
+     "mean": 219.24,
+     "p999": 222.31,
+     "peak": 235.4,
+     "load": 27810,
+     "guards": 0
+    },
+    "HaasWidener": {
+     "image": 704,
+     "fast": 1936,
+     "bulk": 3984,
+     "voices": 4,
+     "frames": 3750,
+     "mean": 345.19,
+     "p999": 406.9,
+     "peak": 408.27,
+     "load": 25957,
+     "guards": 0
+    },
+    "InsertFilterSweep": {
+     "image": 1344,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 225.56,
+     "p999": 243.12,
+     "peak": 277.15,
+     "load": 37857,
+     "guards": 0
+    },
+    "ParametricEq": {
+     "image": 1840,
+     "fast": 2176,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4125,
+     "mean": 295.74,
+     "p999": 313.49,
+     "peak": 350.77,
+     "load": 48533,
+     "guards": 0
+    },
+    "Phaser": {
+     "image": 976,
+     "fast": 2736,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7125,
+     "mean": 476.18,
+     "p999": 516.71,
+     "peak": 551.71,
+     "load": 33867,
+     "guards": 0
+    },
+    "PingPongDelay": {
+     "image": 752,
+     "fast": 2400,
+     "bulk": 230688,
+     "voices": 1,
+     "frames": 8325,
+     "mean": 172.85,
+     "p999": 222.22,
+     "peak": 232.65,
+     "load": 27909,
+     "guards": 0
+    },
+    "PrecutGrainCloud": {
+     "image": 158664,
+     "fast": 5296,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 113.12,
+     "p999": 210.9,
+     "peak": 212.84,
+     "load": 1824085,
+     "guards": 0
+    },
+    "Reverb": {
+     "image": 1696,
+     "fast": 4016,
+     "bulk": 187776,
+     "voices": 3,
+     "frames": 5250,
+     "mean": 981.92,
+     "p999": 1085.21,
+     "peak": 1085.52,
+     "load": 52064,
+     "guards": 0
+    },
+    "SidechainDucking": {
+     "image": 9504,
+     "fast": 3344,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 7425,
+     "mean": 589.52,
+     "p999": 627.93,
+     "peak": 637.4,
+     "load": 130982,
+     "guards": 0
+    },
+    "Vocoder": {
+     "image": 2000,
+     "fast": 5264,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5100,
+     "mean": 858.77,
+     "p999": 897.43,
+     "peak": 1026.37,
+     "load": 63106,
+     "guards": 0
+    },
+    "FormantVowels": {
+     "image": 872,
+     "fast": 1728,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5250,
+     "mean": 160.95,
+     "p999": 171.96,
+     "peak": 232.09,
+     "load": 24393,
+     "guards": 0
+    },
+    "KeyboardTrackedFilter": {
+     "image": 616,
+     "fast": 1456,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 176.23,
+     "p999": 200.71,
+     "peak": 201.56,
+     "load": 19923,
+     "guards": 0
+    },
+    "ResonantSawBass": {
+     "image": 704,
+     "fast": 1856,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 258.09,
+     "p999": 304.34,
+     "peak": 305.09,
+     "load": 22115,
+     "guards": 0
+    },
+    "VelocityFilterAmp": {
+     "image": 624,
+     "fast": 1520,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 3750,
+     "mean": 188.81,
+     "p999": 214.21,
+     "peak": 214.21,
+     "load": 20425,
+     "guards": 0
+    },
+    "Wind": {
+     "image": 592,
+     "fast": 1504,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 9000,
+     "mean": 118.54,
+     "p999": 123.5,
+     "peak": 138.47,
+     "load": 19692,
+     "guards": 0
+    },
+    "Arpeggio": {
+     "image": 944,
+     "fast": 1552,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6375,
+     "mean": 239.54,
+     "p999": 270.53,
+     "peak": 271.21,
+     "load": 26627,
+     "guards": 0
+    },
+    "AutoPan": {
+     "image": 8872,
+     "fast": 1952,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6000,
+     "mean": 443.57,
+     "p999": 449.15,
+     "peak": 492.43,
+     "load": 108586,
+     "guards": 0
+    },
+    "ChannelAftertouch": {
+     "image": 688,
+     "fast": 1888,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 4875,
+     "mean": 338.54,
+     "p999": 349.15,
+     "peak": 393.71,
+     "load": 22470,
+     "guards": 0
+    },
+    "CurvedEnvelope": {
+     "image": 600,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 3750,
+     "mean": 306.68,
+     "p999": 397.18,
+     "peak": 397.87,
+     "load": 20712,
+     "guards": 0
+    },
+    "LegatoPortamento": {
+     "image": 568,
+     "fast": 1296,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4875,
+     "mean": 105.33,
+     "p999": 113.09,
+     "peak": 135.4,
+     "load": 18194,
+     "guards": 0
+    },
+    "LoopingEnvelope": {
+     "image": 5440,
+     "fast": 1776,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4800,
+     "mean": 247.49,
+     "p999": 322.84,
+     "peak": 344.84,
+     "load": 71332,
+     "guards": 0
+    },
+    "MacroKnob": {
+     "image": 864,
+     "fast": 2048,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4575,
+     "mean": 184.79,
+     "p999": 191.06,
+     "peak": 208.68,
+     "load": 26593,
+     "guards": 0
+    },
+    "MonoLead": {
+     "image": 648,
+     "fast": 1568,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4275,
+     "mean": 146.3,
+     "p999": 160.87,
+     "peak": 162.99,
+     "load": 20468,
+     "guards": 0
+    },
+    "PerVoiceLfo": {
+     "image": 568,
+     "fast": 1728,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6149,
+     "mean": 253.22,
+     "p999": 283.87,
+     "peak": 298.52,
+     "load": 19625,
+     "guards": 0
+    },
+    "PitchBend": {
+     "image": 568,
+     "fast": 1472,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5250,
+     "mean": 111.51,
+     "p999": 115.53,
+     "peak": 134.71,
+     "load": 18771,
+     "guards": 0
+    },
+    "SampleAndHold": {
+     "image": 1120,
+     "fast": 1568,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 6000,
+     "mean": 168.17,
+     "p999": 173.18,
+     "peak": 186.71,
+     "load": 24905,
+     "guards": 0
+    },
+    "SawLfoFilter": {
+     "image": 592,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 209.39,
+     "p999": 248.77,
+     "peak": 258.68,
+     "load": 19919,
+     "guards": 0
+    },
+    "SharedLfo": {
+     "image": 552,
+     "fast": 1664,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 5400,
+     "mean": 243.98,
+     "p999": 277.27,
+     "peak": 291.05,
+     "load": 19423,
+     "guards": 0
+    },
+    "SquareLfoFilter": {
+     "image": 592,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 209.38,
+     "p999": 255.43,
+     "peak": 269.31,
+     "load": 19968,
+     "guards": 0
+    },
+    "StepSequencer": {
+     "image": 640,
+     "fast": 1424,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6000,
+     "mean": 179.64,
+     "p999": 207.34,
+     "peak": 207.84,
+     "load": 20216,
+     "guards": 0
+    },
+    "TempoSyncedLfo": {
+     "image": 608,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 182.84,
+     "p999": 242.34,
+     "peak": 253.15,
+     "load": 20508,
+     "guards": 0
+    },
+    "TranceGate": {
+     "image": 640,
+     "fast": 1792,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6375,
+     "mean": 205.39,
+     "p999": 323.25,
+     "peak": 347.15,
+     "load": 21402,
+     "guards": 0
+    },
+    "Tremolo": {
+     "image": 8832,
+     "fast": 1568,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6000,
+     "mean": 225.17,
+     "p999": 255.8,
+     "peak": 268.87,
+     "load": 106849,
+     "guards": 0
+    },
+    "TriangleLfoFilter": {
+     "image": 592,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 205.66,
+     "p999": 244.28,
+     "peak": 254.18,
+     "load": 19920,
+     "guards": 0
+    },
+    "VibratoModWheel": {
+     "image": 568,
+     "fast": 1408,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5700,
+     "mean": 119.15,
+     "p999": 122.37,
+     "peak": 141.56,
+     "load": 18734,
+     "guards": 0
+    },
+    "VoiceStealing": {
+     "image": 560,
+     "fast": 1408,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5325,
+     "mean": 177.39,
+     "p999": 201.34,
+     "peak": 202.03,
+     "load": 18717,
+     "guards": 0
+    },
+    "DetunedSupersaw": {
+     "image": 1056,
+     "fast": 3824,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 6375,
+     "mean": 923.22,
+     "p999": 1041.18,
+     "peak": 1129.05,
+     "load": 33152,
+     "guards": 0
+    },
+    "LoopedSample": {
+     "image": 29904,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 6,
+     "frames": 4500,
+     "mean": 501.59,
+     "p999": 598.59,
+     "peak": 637.08,
+     "load": 330384,
+     "guards": 0
+    },
+    "OneShotSample": {
+     "image": 134968,
+     "fast": 1536,
+     "bulk": 0,
+     "voices": 6,
+     "frames": 4500,
+     "mean": 192.82,
+     "p999": 490.25,
+     "peak": 503.31,
+     "load": 1437780,
+     "guards": 0
+    },
+    "PluckedString": {
+     "image": 688,
+     "fast": 2320,
+     "bulk": 58464,
+     "voices": 6,
+     "frames": 5700,
+     "mean": 502.18,
+     "p999": 639.74,
+     "peak": 658.17,
+     "load": 23659,
+     "guards": 0
+    },
+    "PwmPad": {
+     "image": 520,
+     "fast": 1568,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7125,
+     "mean": 270.28,
+     "p999": 299.18,
+     "peak": 333.93,
+     "load": 19023,
+     "guards": 0
+    },
+    "StereoUnison": {
+     "image": 1104,
+     "fast": 2976,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 524.84,
+     "p999": 568.62,
+     "peak": 589.12,
+     "load": 33592,
+     "guards": 0
+    },
+    "SubOscillator": {
+     "image": 648,
+     "fast": 1600,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 3750,
+     "mean": 231.19,
+     "p999": 272.74,
+     "peak": 273.43,
+     "load": 21193,
+     "guards": 0
+    },
+    "VelocityLayers": {
+     "image": 269664,
+     "fast": 2048,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 273.06,
+     "p999": 335.9,
+     "peak": 344.84,
+     "load": 2861423,
+     "guards": 0
+    },
+    "WavetableMorph": {
+     "image": 25528,
+     "fast": 2336,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7125,
+     "mean": 472.18,
+     "p999": 588.4,
+     "peak": 596.8,
+     "load": 287020,
+     "guards": 0
+    },
+    "FourVoices": {
+     "image": 392,
+     "fast": 1168,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 161.83,
+     "p999": 162.25,
+     "peak": 203.18,
+     "load": 15929,
+     "guards": 0
+    },
+    "OneVoice": {
+     "image": 368,
+     "fast": 976,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 66.46,
+     "p999": 66.9,
+     "peak": 79.06,
+     "load": 14127,
+     "guards": 0
+    },
+    "Silent": {
+     "image": 152,
+     "fast": 352,
+     "bulk": 0,
+     "voices": 0,
+     "frames": 1500,
+     "mean": 18.24,
+     "p999": 18.69,
+     "peak": 18.69,
+     "load": 5468,
+     "guards": 0
+    },
+    "Idle": {
+     "image": 368,
+     "fast": 976,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 35.77,
+     "p999": 67.12,
+     "peak": 80.56,
+     "load": 14126,
+     "guards": 0
+    },
+    "IdleVoices": {
+     "image": 368,
+     "fast": 5248,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 71.2,
+     "p999": 102.56,
+     "peak": 115.99,
+     "load": 42161,
+     "guards": 0
+    },
+    "Tracks": {
+     "image": 1296,
+     "fast": 6016,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 259.2,
+     "p999": 760.4,
+     "peak": 965.09,
+     "load": 81055,
+     "guards": 0
+    },
+    "Slots": {
+     "image": 504,
+     "fast": 1088,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 38.88,
+     "p999": 70.19,
+     "peak": 154.9,
+     "load": 27425,
+     "guards": 0
+    },
+    "Held1": {
+     "image": 368,
+     "fast": 976,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 66.98,
+     "p999": 72.03,
+     "peak": 80.56,
+     "load": 14127,
+     "guards": 0
+    },
+    "Held2": {
+     "image": 376,
+     "fast": 1040,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 98.76,
+     "p999": 106.37,
+     "peak": 121.43,
+     "load": 14727,
+     "guards": 0
+    },
+    "Held4": {
+     "image": 392,
+     "fast": 1168,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 162.34,
+     "p999": 175.06,
+     "peak": 204.68,
+     "load": 15930,
+     "guards": 0
+    },
+    "Held8": {
+     "image": 424,
+     "fast": 1440,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 289.5,
+     "p999": 312.43,
+     "peak": 377.18,
+     "load": 18333,
+     "guards": 0
+    },
+    "Held16": {
+     "image": 488,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 543.84,
+     "p999": 587.18,
+     "peak": 746.18,
+     "load": 23141,
+     "guards": 0
+    },
+    "Segments1": {
+     "image": 96352,
+     "fast": 976,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 117.2,
+     "p999": 126.24,
+     "peak": 130.78,
+     "load": 1883352,
+     "guards": 0
+    },
+    "Segments16": {
+     "image": 96472,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 630.68,
+     "p999": 754.83,
+     "peak": 832.96,
+     "load": 1892368,
+     "guards": 0
+    },
+    "Params": {
+     "image": 2424,
+     "fast": 2640,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 72.12,
+     "p999": 290.31,
+     "peak": 1678.83,
+     "load": 54275,
+     "guards": 0
+    },
+    "Inserts": {
+     "image": 600,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 351.6,
+     "p999": 356.65,
+     "peak": 365.18,
+     "load": 36471,
+     "guards": 0
+    },
+    "Buses1": {
+     "image": 1584,
+     "fast": 6272,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 391.89,
+     "p999": 893.09,
+     "peak": 1097.77,
+     "load": 84808,
+     "guards": 0
+    },
+    "Buses2": {
+     "image": 1608,
+     "fast": 6416,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 403.58,
+     "p999": 904.77,
+     "peak": 1109.46,
+     "load": 85233,
+     "guards": 0
+    },
+    "Notes2": {
+     "image": 368,
+     "fast": 1040,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 180.18,
+     "p999": 180.18,
+     "peak": 180.18,
+     "load": 14572,
+     "guards": 0
+    },
+    "Notes4": {
+     "image": 368,
+     "fast": 1168,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 250.93,
+     "p999": 250.93,
+     "peak": 250.93,
+     "load": 15461,
+     "guards": 0
+    },
+    "Notes8": {
+     "image": 368,
+     "fast": 1440,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 385.96,
+     "p999": 386.06,
+     "peak": 386.06,
+     "load": 17242,
+     "guards": 0
+    },
+    "Notes64": {
+     "image": 368,
+     "fast": 5248,
+     "bulk": 0,
+     "voices": 64,
+     "frames": 1500,
+     "mean": 2267.08,
+     "p999": 2277.8,
+     "peak": 2277.8,
+     "load": 42161,
+     "guards": 0
+    },
+    "NotesParams": {
+     "image": 1648,
+     "fast": 4000,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1983.13,
+     "p999": 1983.73,
+     "peak": 1983.73,
+     "load": 43804,
+     "guards": 0
+    },
+    "HeldParams": {
+     "image": 1704,
+     "fast": 4000,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1801.8,
+     "p999": 1824.61,
+     "peak": 2060.36,
+     "load": 44896,
+     "guards": 0
+    },
+    "SetParams": {
+     "image": 96400,
+     "fast": 1024,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 83.65,
+     "p999": 120.87,
+     "peak": 132.77,
+     "load": 1872362,
+     "guards": 0
+    },
+    "IdleKnob": {
+     "image": 408,
+     "fast": 1024,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 36.21,
+     "p999": 73.43,
+     "peak": 87.43,
+     "load": 14981,
+     "guards": 0
+    },
+    "Mono": {
+     "image": 376,
+     "fast": 1280,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 637.55,
+     "p999": 638.43,
+     "peak": 638.43,
+     "load": 14823,
+     "guards": 0
+    },
+    "Poly": {
+     "image": 368,
+     "fast": 1040,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 180.18,
+     "p999": 180.18,
+     "peak": 180.18,
+     "load": 14571,
+     "guards": 0
+    },
+    "MixRamps": {
+     "image": 1472,
+     "fast": 3520,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 398.77,
+     "p999": 437.56,
+     "peak": 676.24,
+     "load": 56816,
+     "guards": 0
+    },
+    "MixStill": {
+     "image": 800,
+     "fast": 3328,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 389.49,
+     "p999": 429.9,
+     "peak": 493.33,
+     "load": 44959,
+     "guards": 0
+    },
+    "Zones1": {
+     "image": 10120,
+     "fast": 1648,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 854.31,
+     "p999": 854.59,
+     "peak": 854.59,
+     "load": 96764,
+     "guards": 0
+    },
+    "Zones256": {
+     "image": 18280,
+     "fast": 1648,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1236.81,
+     "p999": 1237.08,
+     "peak": 1237.08,
+     "load": 234004,
+     "guards": 0
+    },
+    "Fades": {
+     "image": 376,
+     "fast": 1264,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 1500,
+     "mean": 295.15,
+     "p999": 295.18,
+     "peak": 295.18,
+     "load": 16149,
+     "guards": 0
+    },
+    "OpNoise": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 692.35,
+     "p999": 705.05,
+     "peak": 743.18,
+     "load": 24042,
+     "guards": 0
+    },
+    "OpOsc": {
+     "image": 8968,
+     "fast": 2096,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 923.34,
+     "p999": 936.05,
+     "peak": 968.18,
+     "load": 112072,
+     "guards": 0
+    },
+    "OpSaw": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1127.67,
+     "p999": 1144.05,
+     "peak": 1165.17,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpPulse": {
+     "image": 720,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1647.66,
+     "p999": 1656.05,
+     "peak": 1677.17,
+     "load": 24757,
+     "guards": 0
+    },
+    "OpTriangle": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 718.34,
+     "p999": 731.06,
+     "peak": 763.18,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpTone": {
+     "image": 712,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 710.35,
+     "p999": 723.05,
+     "peak": 760.68,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpBiquad": {
+     "image": 888,
+     "fast": 3344,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 810.72,
+     "p999": 823.8,
+     "peak": 865.93,
+     "load": 29708,
+     "guards": 0
+    },
+    "OpEnv": {
+     "image": 1048,
+     "fast": 3472,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 959.73,
+     "p999": 972.8,
+     "peak": 1029.43,
+     "load": 34430,
+     "guards": 0
+    },
+    "OpMul": {
+     "image": 712,
+     "fast": 1808,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 594.34,
+     "p999": 607.05,
+     "peak": 636.68,
+     "load": 24761,
+     "guards": 0
+    },
+    "OpMulS": {
+     "image": 712,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 538.34,
+     "p999": 551.06,
+     "peak": 580.68,
+     "load": 24691,
+     "guards": 0
+    },
+    "OpAdd": {
+     "image": 712,
+     "fast": 1808,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 594.34,
+     "p999": 607.05,
+     "peak": 636.68,
+     "load": 24761,
+     "guards": 0
+    },
+    "OpAddS": {
+     "image": 712,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 538.34,
+     "p999": 551.05,
+     "peak": 580.68,
+     "load": 24691,
+     "guards": 0
+    },
+    "OpPan": {
+     "image": 712,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 647.34,
+     "p999": 660.05,
+     "peak": 689.68,
+     "load": 25227,
+     "guards": 0
+    },
+    "OpDelay": {
+     "image": 744,
+     "fast": 2224,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 987.58,
+     "p999": 988.3,
+     "peak": 1001.05,
+     "load": 24523,
+     "guards": 0
+    },
+    "OpComb": {
+     "image": 592,
+     "fast": 2224,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1128.1,
+     "p999": 1140.3,
+     "peak": 1199.92,
+     "load": 21590,
+     "guards": 0
+    },
+    "OpAllpass": {
+     "image": 592,
+     "fast": 1968,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1035.42,
+     "p999": 1045.3,
+     "peak": 1102.43,
+     "load": 21324,
+     "guards": 0
+    },
+    "OpFollow": {
+     "image": 880,
+     "fast": 2576,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 664.72,
+     "p999": 677.8,
+     "peak": 712.43,
+     "load": 29394,
+     "guards": 0
+    },
+    "OpKMtoF": {
+     "image": 1360,
+     "fast": 3088,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 646.84,
+     "p999": 660.3,
+     "peak": 691.93,
+     "load": 42256,
+     "guards": 0
+    },
+    "OpOscMod": {
+     "image": 504,
+     "fast": 1520,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 879.13,
+     "p999": 886.11,
+     "peak": 888.36,
+     "load": 18261,
+     "guards": 0
+    },
+    "OpMath": {
+     "image": 712,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1388.33,
+     "p999": 1401.05,
+     "peak": 1430.68,
+     "load": 25235,
+     "guards": 0
+    },
+    "OpMathDivide": {
+     "image": 1040,
+     "fast": 2448,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1456.34,
+     "p999": 1469.05,
+     "peak": 1498.67,
+     "load": 34181,
+     "guards": 0
+    },
+    "OpShape": {
+     "image": 792,
+     "fast": 1712,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 2020.33,
+     "p999": 2033.05,
+     "peak": 2062.67,
+     "load": 25925,
+     "guards": 0
+    },
+    "OpSample": {
+     "image": 10224,
+     "fast": 1968,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1154.85,
+     "p999": 1167.55,
+     "peak": 1202.67,
+     "load": 98748,
+     "guards": 0
+    },
+    "OpSample2": {
+     "image": 20096,
+     "fast": 2432,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1771.0,
+     "p999": 1798.55,
+     "peak": 1905.17,
+     "load": 182428,
+     "guards": 0
+    },
+    "OpSample3": {
+     "image": 20192,
+     "fast": 3200,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 3553.6,
+     "p999": 3608.54,
+     "peak": 3798.16,
+     "load": 183850,
+     "guards": 0
+    }
+   },
+   "engine_bytes": 1456,
+   "cases": {
+    "Dispatch only": {
+     "op": 0,
+     "mode": 0,
+     "still": true,
+     "first": 57
+    },
+    "Fill": {
+     "op": 1,
+     "mode": 0,
+     "still": true,
+     "first": 165
+    },
+    "Noise": {
+     "op": 2,
+     "mode": 0,
+     "still": true,
+     "first": 364
+    },
+    "Osc": {
+     "op": 3,
+     "mode": 0,
+     "still": true,
+     "first": 589
+    },
+    "Saw, naive": {
+     "op": 23,
+     "mode": 1,
+     "still": true,
+     "first": 322
+    },
+    "Saw, 110 Hz": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 456
+    },
+    "Saw, 4186 Hz": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 522
+    },
+    "Pulse, naive": {
+     "op": 24,
+     "mode": 1,
+     "still": true,
+     "first": 407
+    },
+    "Pulse, 110 Hz": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 619
+    },
+    "Pulse, 4186 Hz": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 734
+    },
+    "Saw, Nyquist": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 797
+    },
+    "Pulse, Nyquist": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 1321
+    },
+    "Triangle": {
+     "op": 25,
+     "mode": 0,
+     "still": true,
+     "first": 384
+    },
+    "Tone": {
+     "op": 26,
+     "mode": 0,
+     "still": true,
+     "first": 375
+    },
+    "Tone, at 0 Hz": {
+     "op": 26,
+     "mode": 0,
+     "still": true,
+     "first": 375
+    },
+    "Biquad, still": {
+     "op": 4,
+     "mode": 0,
+     "still": true,
+     "first": 652
+    },
+    "Biquad, moving": {
+     "op": 4,
+     "mode": 0,
+     "still": false,
+     "first": 659
+    },
+    "Biquad, high pass, moving": {
+     "op": 4,
+     "mode": 1,
+     "still": false,
+     "first": 661
+    },
+    "Biquad, band pass, moving": {
+     "op": 4,
+     "mode": 2,
+     "still": false,
+     "first": 657
+    },
+    "Env, attack": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 597
+    },
+    "Env, decay": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 690
+    },
+    "Env, sustain": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 400
+    },
+    "Env, release": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 597
+    },
+    "Env, decay, moving": {
+     "op": 5,
+     "mode": 0,
+     "still": false,
+     "first": 705
+    },
+    "Sample, mono i16": {
+     "op": 6,
+     "mode": 128,
+     "still": true,
+     "first": 1812
+    },
+    "Sample, mono f32": {
+     "op": 6,
+     "mode": 128,
+     "still": true,
+     "first": 1620
+    },
+    "Sample, stereo i16": {
+     "op": 6,
+     "mode": 0,
+     "still": true,
+     "first": 2260
+    },
+    "Sample, stereo f32": {
+     "op": 6,
+     "mode": 0,
+     "still": true,
+     "first": 1844
+    },
+    "Sample, mono f32, moving": {
+     "op": 6,
+     "mode": 128,
+     "still": false,
+     "first": 1607
+    },
+    "Sample2, mono i16": {
+     "op": 27,
+     "mode": 128,
+     "still": true,
+     "first": 2787
+    },
+    "Sample2, stereo i16": {
+     "op": 27,
+     "mode": 0,
+     "still": true,
+     "first": 3235
+    },
+    "Sample2, stereo i16, moving": {
+     "op": 27,
+     "mode": 0,
+     "still": false,
+     "first": 3179
+    },
+    "Sample2, stereo i16, reverse, moving": {
+     "op": 27,
+     "mode": 1,
+     "still": false,
+     "first": 3198
+    },
+    "Sample2, stereo i16, tail, moving": {
+     "op": 27,
+     "mode": 2,
+     "still": false,
+     "first": 3184
+    },
+    "Sample2, mono f32, moving": {
+     "op": 27,
+     "mode": 128,
+     "still": false,
+     "first": 2539
+    },
+    "Sample3, mono i16": {
+     "op": 33,
+     "mode": 192,
+     "still": true,
+     "first": 3264
+    },
+    "Sample3, stereo i16, moving": {
+     "op": 33,
+     "mode": 64,
+     "still": false,
+     "first": 3656
+    },
+    "Sample3, stereo i16, reverse, moving": {
+     "op": 33,
+     "mode": 65,
+     "still": false,
+     "first": 3671
+    },
+    "Sample3, mono f32, moving": {
+     "op": 33,
+     "mode": 192,
+     "still": false,
+     "first": 3016
+    },
+    "Sample3, crossfade, mono i16": {
+     "op": 33,
+     "mode": 128,
+     "still": true,
+     "first": 6169
+    },
+    "Sample3, crossfade, stereo i16, moving": {
+     "op": 33,
+     "mode": 0,
+     "still": false,
+     "first": 6946
+    },
+    "Sample3, crossfade, stereo i16, reverse, moving": {
+     "op": 33,
+     "mode": 1,
+     "still": false,
+     "first": 6976
+    },
+    "Sample3, crossfade, mono f32, moving": {
+     "op": 33,
+     "mode": 128,
+     "still": false,
+     "first": 5666
+    },
+    "Mul": {
+     "op": 7,
+     "mode": 0,
+     "still": true,
+     "first": 259
+    },
+    "MulS": {
+     "op": 8,
+     "mode": 0,
+     "still": true,
+     "first": 231
+    },
+    "Add": {
+     "op": 9,
+     "mode": 0,
+     "still": true,
+     "first": 259
+    },
+    "AddS": {
+     "op": 10,
+     "mode": 0,
+     "still": true,
+     "first": 232
+    },
+    "Pan": {
+     "op": 11,
+     "mode": 0,
+     "still": true,
+     "first": 312
+    },
+    "DelayWrite": {
+     "op": 12,
+     "mode": 0,
+     "still": true,
+     "first": 366
+    },
+    "DelayRead": {
+     "op": 13,
+     "mode": 0,
+     "still": true,
+     "first": 548
+    },
+    "DelayRead, feedback": {
+     "op": 13,
+     "mode": 1,
+     "still": true,
+     "first": 551
+    },
+    "Comb": {
+     "op": 14,
+     "mode": 0,
+     "still": true,
+     "first": 1022
+    },
+    "Allpass": {
+     "op": 15,
+     "mode": 0,
+     "still": true,
+     "first": 927
+    },
+    "Follow": {
+     "op": 16,
+     "mode": 0,
+     "still": true,
+     "first": 507
+    },
+    "Follow, moving": {
+     "op": 16,
+     "mode": 0,
+     "still": false,
+     "first": 512
+    },
+    "KMul": {
+     "op": 17,
+     "mode": 0,
+     "still": true,
+     "first": 79
+    },
+    "KAdd": {
+     "op": 18,
+     "mode": 0,
+     "still": true,
+     "first": 79
+    },
+    "KMtoF, still": {
+     "op": 19,
+     "mode": 0,
+     "still": true,
+     "first": 144
+    },
+    "KMtoF, moving": {
+     "op": 19,
+     "mode": 0,
+     "still": false,
+     "first": 149
+    },
+    "KRatio, still": {
+     "op": 20,
+     "mode": 60,
+     "still": true,
+     "first": 142
+    },
+    "KRatio, moving": {
+     "op": 20,
+     "mode": 60,
+     "still": false,
+     "first": 149
+    },
+    "KSnap": {
+     "op": 21,
+     "mode": 0,
+     "still": true,
+     "first": 71
+    },
+    "KLfo": {
+     "op": 22,
+     "mode": 0,
+     "still": true,
+     "first": 153
+    },
+    "KLfo2": {
+     "op": 28,
+     "mode": 0,
+     "still": true,
+     "first": 155
+    },
+    "OscMod, sine": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4214
+    },
+    "OscMod, sine, phase audio": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4180
+    },
+    "OscMod, sine, feedback": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4114
+    },
+    "OscMod, triangle": {
+     "op": 29,
+     "mode": 1,
+     "still": true,
+     "first": 2106
+    },
+    "OscMod, saw, 110 Hz": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2141
+    },
+    "OscMod, saw, 4186 Hz": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2201
+    },
+    "OscMod, saw, sync audio": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2259
+    },
+    "OscMod, sine, sync every other sample": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 5731
+    },
+    "OscMod, pulse, 4186 Hz": {
+     "op": 29,
+     "mode": 3,
+     "still": true,
+     "first": 3074
+    },
+    "OscMod, saw, naive": {
+     "op": 29,
+     "mode": 4,
+     "still": true,
+     "first": 1782
+    },
+    "OscMod, pulse, naive": {
+     "op": 29,
+     "mode": 5,
+     "still": true,
+     "first": 2317
+    },
+    "Math, min, audio and scalar": {
+     "op": 30,
+     "mode": 0,
+     "still": true,
+     "first": 439
+    },
+    "Math, clip, audio": {
+     "op": 30,
+     "mode": 3,
+     "still": true,
+     "first": 642
+    },
+    "Math, floor, audio": {
+     "op": 30,
+     "mode": 4,
+     "still": true,
+     "first": 656
+    },
+    "Math, divide, audio": {
+     "op": 30,
+     "mode": 5,
+     "still": true,
+     "first": 502
+    },
+    "Math, select, audio": {
+     "op": 30,
+     "mode": 7,
+     "still": true,
+     "first": 477
+    },
+    "KMath, divide": {
+     "op": 31,
+     "mode": 5,
+     "still": true,
+     "first": 92
+    },
+    "Shape": {
+     "op": 32,
+     "mode": 0,
+     "still": true,
+     "first": 972
+    }
+   },
+   "clear": 20.58
+  },
+  "Cmsis": {
+   "kernels": {
+    "Dispatch only": 59.03,
+    "Fill": 137.03,
+    "Noise": 360.02,
+    "Osc": 591.02,
+    "Saw, naive": 324.02,
+    "Saw, 110 Hz": 459.57,
+    "Saw, 4186 Hz": 519.47,
+    "Pulse, naive": 410.02,
+    "Pulse, 110 Hz": 613.35,
+    "Pulse, 4186 Hz": 738.4,
+    "Saw, Nyquist": 810.02,
+    "Pulse, Nyquist": 1346.02,
+    "Triangle": 386.02,
+    "Tone": 272.02,
+    "Tone, at 0 Hz": 378.02,
+    "Biquad, still": 534.02,
+    "Biquad, moving": 648.02,
+    "Biquad, high pass, moving": 650.02,
+    "Biquad, band pass, moving": 647.02,
+    "Env, attack": 491.02,
+    "Env, decay": 585.02,
+    "Env, sustain": 295.03,
+    "Env, release": 491.02,
+    "Env, decay, moving": 703.52,
+    "Sample, mono i16": 1750.04,
+    "Sample, mono f32": 1558.04,
+    "Sample, stereo i16": 2198.04,
+    "Sample, stereo f32": 1782.04,
+    "Sample, mono f32, moving": 1552.55,
+    "Sample2, mono i16": 2493.07,
+    "Sample2, stereo i16": 2941.06,
+    "Sample2, stereo i16, moving": 2960.76,
+    "Sample2, stereo i16, reverse, moving": 2934.79,
+    "Sample2, stereo i16, tail, moving": 2966.76,
+    "Sample2, mono f32, moving": 2320.76,
+    "Sample3, mono i16": 2941.07,
+    "Sample3, stereo i16, moving": 3405.75,
+    "Sample3, stereo i16, reverse, moving": 3377.79,
+    "Sample3, mono f32, moving": 2765.76,
+    "Sample3, crossfade, mono i16": 5552.11,
+    "Sample3, crossfade, stereo i16, moving": 6477.98,
+    "Sample3, crossfade, stereo i16, reverse, moving": 6422.05,
+    "Sample3, crossfade, mono f32, moving": 5197.99,
+    "Mul": 254.02,
+    "MulS": 215.02,
+    "Add": 254.02,
+    "AddS": 215.02,
+    "Pan": 379.02,
+    "DelayWrite": 368.02,
+    "DelayRead": 550.02,
+    "DelayRead, feedback": 553.02,
+    "Comb": 1007.08,
+    "Allpass": 915.77,
+    "Follow": 457.02,
+    "Follow, moving": 512.52,
+    "KMul": 81.03,
+    "KAdd": 81.03,
+    "KMtoF, still": 95.03,
+    "KMtoF, moving": 152.03,
+    "KRatio, still": 95.03,
+    "KRatio, moving": 151.03,
+    "KSnap": 74.03,
+    "KLfo": 154.24,
+    "KLfo2": 156.24,
+    "OscMod, sine": 4153.85,
+    "OscMod, sine, phase audio": 4150.95,
+    "OscMod, sine, feedback": 4132.28,
+    "OscMod, triangle": 2064.01,
+    "OscMod, saw, 110 Hz": 2097.5,
+    "OscMod, saw, 4186 Hz": 2154.66,
+    "OscMod, saw, sync audio": 2245.01,
+    "OscMod, sine, sync every other sample": 5694.0,
+    "OscMod, pulse, 4186 Hz": 3008.82,
+    "OscMod, saw, naive": 1774.02,
+    "OscMod, pulse, naive": 2309.01,
+    "Math, min, audio and scalar": 441.02,
+    "Math, clip, audio": 644.02,
+    "Math, floor, audio": 659.02,
+    "Math, divide, audio": 505.02,
+    "Math, select, audio": 480.02,
+    "KMath, divide": 95.03,
+    "Shape": 975.02
+   },
+   "recipes": {
+    "AdditiveBell": {
+     "image": 9680,
+     "fast": 4560,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7500,
+     "mean": 1473.18,
+     "p999": 1776.86,
+     "peak": 1804.61,
+     "load": 130495,
+     "guards": 0
+    },
+    "AudioRateAmplitudeModulation": {
+     "image": 8920,
+     "fast": 1872,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5550,
+     "mean": 271.21,
+     "p999": 299.93,
+     "peak": 308.74,
+     "load": 108856,
+     "guards": 0
+    },
+    "DrawbarOrgan": {
+     "image": 9736,
+     "fast": 3488,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 4800,
+     "mean": 1282.76,
+     "p999": 1342.64,
+     "peak": 1438.96,
+     "load": 129098,
+     "guards": 0
+    },
+    "FrenchHorn": {
+     "image": 1184,
+     "fast": 3520,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 9750,
+     "mean": 381.57,
+     "p999": 559.15,
+     "peak": 631.58,
+     "load": 34887,
+     "guards": 0
+    },
+    "PhaseModElectricPiano": {
+     "image": 9464,
+     "fast": 4032,
+     "bulk": 23904,
+     "voices": 6,
+     "frames": 5775,
+     "mean": 1406.49,
+     "p999": 1555.24,
+     "peak": 1598.39,
+     "load": 124669,
+     "guards": 0
+    },
+    "RingModulation": {
+     "image": 8792,
+     "fast": 1696,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 211.99,
+     "p999": 230.46,
+     "peak": 239.81,
+     "load": 105883,
+     "guards": 0
+    },
+    "Trumpet": {
+     "image": 1320,
+     "fast": 3904,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 456.01,
+     "p999": 642.43,
+     "peak": 682.46,
+     "load": 38465,
+     "guards": 0
+    },
+    "Clap": {
+     "image": 792,
+     "fast": 2464,
+     "bulk": 30432,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 235.72,
+     "p999": 458.37,
+     "peak": 458.84,
+     "load": 24716,
+     "guards": 0
+    },
+    "DrumLoop": {
+     "image": 10600,
+     "fast": 7168,
+     "bulk": 60864,
+     "voices": 9,
+     "frames": 6450,
+     "mean": 720.11,
+     "p999": 1160.61,
+     "peak": 1193.89,
+     "load": 164989,
+     "guards": 0
+    },
+    "HiHat": {
+     "image": 728,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6300,
+     "mean": 144.92,
+     "p999": 227.9,
+     "peak": 234.4,
+     "load": 23194,
+     "guards": 0
+    },
+    "Kick808": {
+     "image": 8864,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7125,
+     "mean": 222.69,
+     "p999": 253.21,
+     "peak": 268.12,
+     "load": 107503,
+     "guards": 0
+    },
+    "Snare": {
+     "image": 776,
+     "fast": 2576,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6000,
+     "mean": 300.5,
+     "p999": 513.43,
+     "peak": 532.93,
+     "load": 24750,
+     "guards": 0
+    },
+    "ChebyshevWavefold": {
+     "image": 8944,
+     "fast": 2112,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4275,
+     "mean": 282.18,
+     "p999": 337.52,
+     "peak": 363.62,
+     "load": 109992,
+     "guards": 0
+    },
+    "Chorus": {
+     "image": 1104,
+     "fast": 3136,
+     "bulk": 11808,
+     "voices": 4,
+     "frames": 4050,
+     "mean": 639.5,
+     "p999": 690.55,
+     "peak": 714.09,
+     "load": 36323,
+     "guards": 0
+    },
+    "Compressor": {
+     "image": 1096,
+     "fast": 2960,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5250,
+     "mean": 447.19,
+     "p999": 515.96,
+     "peak": 516.65,
+     "load": 35706,
+     "guards": 0
+    },
+    "CubicSaturation": {
+     "image": 640,
+     "fast": 1792,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 218.83,
+     "p999": 259.09,
+     "peak": 263.71,
+     "load": 21128,
+     "guards": 0
+    },
+    "Flanger": {
+     "image": 800,
+     "fast": 2048,
+     "bulk": 2064,
+     "voices": 1,
+     "frames": 7500,
+     "mean": 250.49,
+     "p999": 253.56,
+     "peak": 266.65,
+     "load": 27810,
+     "guards": 0
+    },
+    "HaasWidener": {
+     "image": 704,
+     "fast": 2192,
+     "bulk": 3984,
+     "voices": 4,
+     "frames": 3750,
+     "mean": 384.1,
+     "p999": 449.34,
+     "peak": 450.72,
+     "load": 25957,
+     "guards": 0
+    },
+    "InsertFilterSweep": {
+     "image": 1344,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 255.75,
+     "p999": 273.4,
+     "peak": 307.71,
+     "load": 37857,
+     "guards": 0
+    },
+    "ParametricEq": {
+     "image": 1840,
+     "fast": 2432,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4125,
+     "mean": 324.49,
+     "p999": 342.62,
+     "peak": 379.9,
+     "load": 48533,
+     "guards": 0
+    },
+    "Phaser": {
+     "image": 976,
+     "fast": 2992,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7125,
+     "mean": 521.45,
+     "p999": 564.68,
+     "peak": 599.68,
+     "load": 33867,
+     "guards": 0
+    },
+    "PingPongDelay": {
+     "image": 752,
+     "fast": 2656,
+     "bulk": 230688,
+     "voices": 1,
+     "frames": 8325,
+     "mean": 192.41,
+     "p999": 246.81,
+     "peak": 257.24,
+     "load": 27908,
+     "guards": 0
+    },
+    "PrecutGrainCloud": {
+     "image": 158664,
+     "fast": 5552,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 136.06,
+     "p999": 237.9,
+     "peak": 239.84,
+     "load": 1824084,
+     "guards": 0
+    },
+    "Reverb": {
+     "image": 1696,
+     "fast": 4400,
+     "bulk": 187776,
+     "voices": 3,
+     "frames": 5250,
+     "mean": 1023.47,
+     "p999": 1136.89,
+     "peak": 1137.21,
+     "load": 52064,
+     "guards": 0
+    },
+    "SidechainDucking": {
+     "image": 9504,
+     "fast": 3728,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 7425,
+     "mean": 640.33,
+     "p999": 679.78,
+     "peak": 689.24,
+     "load": 130982,
+     "guards": 0
+    },
+    "Vocoder": {
+     "image": 2000,
+     "fast": 5648,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5100,
+     "mean": 905.08,
+     "p999": 944.34,
+     "peak": 1076.27,
+     "load": 63106,
+     "guards": 0
+    },
+    "FormantVowels": {
+     "image": 872,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5250,
+     "mean": 183.81,
+     "p999": 195.34,
+     "peak": 255.46,
+     "load": 24393,
+     "guards": 0
+    },
+    "KeyboardTrackedFilter": {
+     "image": 616,
+     "fast": 1712,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 206.6,
+     "p999": 231.84,
+     "peak": 232.68,
+     "load": 19923,
+     "guards": 0
+    },
+    "ResonantSawBass": {
+     "image": 704,
+     "fast": 2112,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 285.92,
+     "p999": 332.96,
+     "peak": 333.71,
+     "load": 22114,
+     "guards": 0
+    },
+    "VelocityFilterAmp": {
+     "image": 624,
+     "fast": 1776,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 3750,
+     "mean": 218.3,
+     "p999": 244.4,
+     "peak": 244.4,
+     "load": 20425,
+     "guards": 0
+    },
+    "Wind": {
+     "image": 592,
+     "fast": 1760,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 9000,
+     "mean": 144.42,
+     "p999": 149.37,
+     "peak": 164.34,
+     "load": 19692,
+     "guards": 0
+    },
+    "Arpeggio": {
+     "image": 944,
+     "fast": 1808,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6375,
+     "mean": 274.81,
+     "p999": 307.02,
+     "peak": 307.71,
+     "load": 26626,
+     "guards": 0
+    },
+    "AutoPan": {
+     "image": 8872,
+     "fast": 2208,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6000,
+     "mean": 448.2,
+     "p999": 453.78,
+     "peak": 497.61,
+     "load": 108586,
+     "guards": 0
+    },
+    "ChannelAftertouch": {
+     "image": 688,
+     "fast": 2144,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 4875,
+     "mean": 375.34,
+     "p999": 386.21,
+     "peak": 430.77,
+     "load": 22470,
+     "guards": 0
+    },
+    "CurvedEnvelope": {
+     "image": 600,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 3750,
+     "mean": 342.63,
+     "p999": 437.68,
+     "peak": 438.37,
+     "load": 20711,
+     "guards": 0
+    },
+    "LegatoPortamento": {
+     "image": 568,
+     "fast": 1552,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4875,
+     "mean": 130.65,
+     "p999": 138.4,
+     "peak": 160.9,
+     "load": 18193,
+     "guards": 0
+    },
+    "LoopingEnvelope": {
+     "image": 5440,
+     "fast": 2032,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4800,
+     "mean": 272.22,
+     "p999": 349.21,
+     "peak": 371.4,
+     "load": 71332,
+     "guards": 0
+    },
+    "MacroKnob": {
+     "image": 864,
+     "fast": 2304,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4575,
+     "mean": 209.57,
+     "p999": 215.93,
+     "peak": 233.56,
+     "load": 26594,
+     "guards": 0
+    },
+    "MonoLead": {
+     "image": 648,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4275,
+     "mean": 170.86,
+     "p999": 185.43,
+     "peak": 187.55,
+     "load": 20468,
+     "guards": 0
+    },
+    "PerVoiceLfo": {
+     "image": 568,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6149,
+     "mean": 287.28,
+     "p999": 318.96,
+     "peak": 333.81,
+     "load": 19624,
+     "guards": 0
+    },
+    "PitchBend": {
+     "image": 568,
+     "fast": 1728,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5250,
+     "mean": 136.89,
+     "p999": 140.9,
+     "peak": 160.28,
+     "load": 18771,
+     "guards": 0
+    },
+    "SampleAndHold": {
+     "image": 1120,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 6000,
+     "mean": 190.53,
+     "p999": 195.71,
+     "peak": 209.24,
+     "load": 24905,
+     "guards": 0
+    },
+    "SawLfoFilter": {
+     "image": 592,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 237.19,
+     "p999": 278.21,
+     "peak": 288.12,
+     "load": 19919,
+     "guards": 0
+    },
+    "SharedLfo": {
+     "image": 552,
+     "fast": 1920,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 5400,
+     "mean": 277.67,
+     "p999": 312.12,
+     "peak": 326.09,
+     "load": 19423,
+     "guards": 0
+    },
+    "SquareLfoFilter": {
+     "image": 592,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 236.86,
+     "p999": 284.87,
+     "peak": 298.74,
+     "load": 19968,
+     "guards": 0
+    },
+    "StepSequencer": {
+     "image": 640,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6000,
+     "mean": 210.29,
+     "p999": 238.52,
+     "peak": 239.03,
+     "load": 20216,
+     "guards": 0
+    },
+    "TempoSyncedLfo": {
+     "image": 608,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 210.71,
+     "p999": 273.59,
+     "peak": 284.4,
+     "load": 20508,
+     "guards": 0
+    },
+    "TranceGate": {
+     "image": 640,
+     "fast": 2048,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6375,
+     "mean": 229.71,
+     "p999": 350.5,
+     "peak": 374.77,
+     "load": 21401,
+     "guards": 0
+    },
+    "Tremolo": {
+     "image": 8832,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6000,
+     "mean": 252.53,
+     "p999": 284.24,
+     "peak": 297.49,
+     "load": 106849,
+     "guards": 0
+    },
+    "TriangleLfoFilter": {
+     "image": 592,
+     "fast": 2000,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 233.45,
+     "p999": 273.71,
+     "peak": 283.62,
+     "load": 19919,
+     "guards": 0
+    },
+    "VibratoModWheel": {
+     "image": 568,
+     "fast": 1664,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5700,
+     "mean": 144.65,
+     "p999": 147.87,
+     "peak": 167.24,
+     "load": 18734,
+     "guards": 0
+    },
+    "VoiceStealing": {
+     "image": 560,
+     "fast": 1664,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5325,
+     "mean": 207.81,
+     "p999": 232.34,
+     "peak": 233.03,
+     "load": 18717,
+     "guards": 0
+    },
+    "DetunedSupersaw": {
+     "image": 1056,
+     "fast": 4080,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 6375,
+     "mean": 967.87,
+     "p999": 1088.8,
+     "peak": 1176.67,
+     "load": 33152,
+     "guards": 0
+    },
+    "LoopedSample": {
+     "image": 29904,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 6,
+     "frames": 4500,
+     "mean": 541.4,
+     "p999": 642.4,
+     "peak": 680.9,
+     "load": 330383,
+     "guards": 0
+    },
+    "OneShotSample": {
+     "image": 134968,
+     "fast": 1792,
+     "bulk": 0,
+     "voices": 6,
+     "frames": 4500,
+     "mean": 220.09,
+     "p999": 531.62,
+     "peak": 544.68,
+     "load": 1437780,
+     "guards": 0
+    },
+    "PluckedString": {
+     "image": 688,
+     "fast": 2576,
+     "bulk": 58464,
+     "voices": 6,
+     "frames": 5700,
+     "mean": 551.05,
+     "p999": 696.49,
+     "peak": 714.93,
+     "load": 23660,
+     "guards": 0
+    },
+    "PwmPad": {
+     "image": 520,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7125,
+     "mean": 312.23,
+     "p999": 343.25,
+     "peak": 377.99,
+     "load": 19023,
+     "guards": 0
+    },
+    "StereoUnison": {
+     "image": 1104,
+     "fast": 3232,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 556.32,
+     "p999": 600.99,
+     "peak": 621.87,
+     "load": 33592,
+     "guards": 0
+    },
+    "SubOscillator": {
+     "image": 648,
+     "fast": 1856,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 3750,
+     "mean": 258.79,
+     "p999": 301.49,
+     "peak": 302.18,
+     "load": 21193,
+     "guards": 0
+    },
+    "VelocityLayers": {
+     "image": 269664,
+     "fast": 2304,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 294.08,
+     "p999": 357.21,
+     "peak": 366.15,
+     "load": 2861423,
+     "guards": 0
+    },
+    "WavetableMorph": {
+     "image": 25528,
+     "fast": 2592,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7125,
+     "mean": 487.23,
+     "p999": 602.28,
+     "peak": 610.68,
+     "load": 287020,
+     "guards": 0
+    },
+    "FourVoices": {
+     "image": 392,
+     "fast": 1424,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 206.26,
+     "p999": 206.68,
+     "peak": 247.62,
+     "load": 15929,
+     "guards": 0
+    },
+    "OneVoice": {
+     "image": 368,
+     "fast": 1232,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 92.43,
+     "p999": 92.87,
+     "peak": 105.02,
+     "load": 14126,
+     "guards": 0
+    },
+    "Silent": {
+     "image": 152,
+     "fast": 480,
+     "bulk": 0,
+     "voices": 0,
+     "frames": 1500,
+     "mean": 28.64,
+     "p999": 29.09,
+     "peak": 29.09,
+     "load": 5467,
+     "guards": 0
+    },
+    "Idle": {
+     "image": 368,
+     "fast": 1232,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 55.59,
+     "p999": 93.09,
+     "peak": 106.52,
+     "load": 14126,
+     "guards": 0
+    },
+    "IdleVoices": {
+     "image": 368,
+     "fast": 5504,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 91.03,
+     "p999": 128.53,
+     "peak": 141.96,
+     "load": 42161,
+     "guards": 0
+    },
+    "Tracks": {
+     "image": 1296,
+     "fast": 8192,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 418.83,
+     "p999": 1018.4,
+     "peak": 1223.08,
+     "load": 81055,
+     "guards": 0
+    },
+    "Slots": {
+     "image": 504,
+     "fast": 1344,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 58.7,
+     "p999": 96.15,
+     "peak": 180.87,
+     "load": 27425,
+     "guards": 0
+    },
+    "Held1": {
+     "image": 368,
+     "fast": 1232,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 92.94,
+     "p999": 98.0,
+     "peak": 106.53,
+     "load": 14127,
+     "guards": 0
+    },
+    "Held2": {
+     "image": 376,
+     "fast": 1296,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 130.89,
+     "p999": 138.5,
+     "peak": 153.56,
+     "load": 14727,
+     "guards": 0
+    },
+    "Held4": {
+     "image": 392,
+     "fast": 1424,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 206.78,
+     "p999": 219.5,
+     "peak": 249.11,
+     "load": 15929,
+     "guards": 0
+    },
+    "Held8": {
+     "image": 424,
+     "fast": 1696,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 358.57,
+     "p999": 381.49,
+     "peak": 446.24,
+     "load": 18333,
+     "guards": 0
+    },
+    "Held16": {
+     "image": 488,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 662.16,
+     "p999": 705.49,
+     "peak": 864.49,
+     "load": 23142,
+     "guards": 0
+    },
+    "Segments1": {
+     "image": 96352,
+     "fast": 1232,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 143.16,
+     "p999": 152.21,
+     "peak": 156.74,
+     "load": 1883352,
+     "guards": 0
+    },
+    "Segments16": {
+     "image": 96472,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 748.99,
+     "p999": 873.14,
+     "peak": 951.27,
+     "load": 1892368,
+     "guards": 0
+    },
+    "Params": {
+     "image": 2424,
+     "fast": 2896,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 91.92,
+     "p999": 299.28,
+     "peak": 1687.8,
+     "load": 54275,
+     "guards": 0
+    },
+    "Inserts": {
+     "image": 600,
+     "fast": 2080,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 440.57,
+     "p999": 445.62,
+     "peak": 454.15,
+     "load": 36471,
+     "guards": 0
+    },
+    "Buses1": {
+     "image": 1584,
+     "fast": 8576,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 673.8,
+     "p999": 1273.36,
+     "peak": 1478.05,
+     "load": 84808,
+     "guards": 0
+    },
+    "Buses2": {
+     "image": 1608,
+     "fast": 8848,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 694.77,
+     "p999": 1294.33,
+     "peak": 1499.02,
+     "load": 85233,
+     "guards": 0
+    },
+    "Notes2": {
+     "image": 368,
+     "fast": 1296,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 212.31,
+     "p999": 212.31,
+     "peak": 212.31,
+     "load": 14572,
+     "guards": 0
+    },
+    "Notes4": {
+     "image": 368,
+     "fast": 1424,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 295.36,
+     "p999": 295.37,
+     "peak": 295.37,
+     "load": 15461,
+     "guards": 0
+    },
+    "Notes8": {
+     "image": 368,
+     "fast": 1696,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 455.0,
+     "p999": 455.12,
+     "peak": 455.12,
+     "load": 17241,
+     "guards": 0
+    },
+    "Notes64": {
+     "image": 368,
+     "fast": 5504,
+     "bulk": 0,
+     "voices": 64,
+     "frames": 1500,
+     "mean": 2678.92,
+     "p999": 2691.61,
+     "peak": 2691.61,
+     "load": 42161,
+     "guards": 0
+    },
+    "NotesParams": {
+     "image": 1648,
+     "fast": 4256,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1916.23,
+     "p999": 1916.8,
+     "peak": 1916.8,
+     "load": 43804,
+     "guards": 0
+    },
+    "HeldParams": {
+     "image": 1704,
+     "fast": 4256,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1734.86,
+     "p999": 1757.68,
+     "peak": 1993.42,
+     "load": 44896,
+     "guards": 0
+    },
+    "SetParams": {
+     "image": 96400,
+     "fast": 1280,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 103.47,
+     "p999": 146.3,
+     "peak": 158.21,
+     "load": 1872362,
+     "guards": 0
+    },
+    "IdleKnob": {
+     "image": 408,
+     "fast": 1280,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 56.03,
+     "p999": 98.87,
+     "peak": 112.87,
+     "load": 14981,
+     "guards": 0
+    },
+    "Mono": {
+     "image": 376,
+     "fast": 1536,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 669.68,
+     "p999": 670.56,
+     "peak": 670.56,
+     "load": 14823,
+     "guards": 0
+    },
+    "Poly": {
+     "image": 368,
+     "fast": 1296,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 212.31,
+     "p999": 212.31,
+     "peak": 212.31,
+     "load": 14571,
+     "guards": 0
+    },
+    "MixRamps": {
+     "image": 1472,
+     "fast": 4672,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 533.02,
+     "p999": 571.8,
+     "peak": 810.49,
+     "load": 56816,
+     "guards": 0
+    },
+    "MixStill": {
+     "image": 800,
+     "fast": 4480,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 523.74,
+     "p999": 564.15,
+     "peak": 627.58,
+     "load": 44960,
+     "guards": 0
+    },
+    "Zones1": {
+     "image": 10120,
+     "fast": 1904,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 909.61,
+     "p999": 909.9,
+     "peak": 909.9,
+     "load": 96764,
+     "guards": 0
+    },
+    "Zones256": {
+     "image": 18280,
+     "fast": 1904,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1292.11,
+     "p999": 1292.4,
+     "peak": 1292.4,
+     "load": 234004,
+     "guards": 0
+    },
+    "Fades": {
+     "image": 376,
+     "fast": 1520,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 1500,
+     "mean": 345.74,
+     "p999": 345.77,
+     "peak": 345.77,
+     "load": 16149,
+     "guards": 0
+    },
+    "OpNoise": {
+     "image": 712,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 732.78,
+     "p999": 745.49,
+     "peak": 783.61,
+     "load": 24041,
+     "guards": 0
+    },
+    "OpOsc": {
+     "image": 8968,
+     "fast": 2352,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 963.78,
+     "p999": 976.49,
+     "peak": 1008.61,
+     "load": 112072,
+     "guards": 0
+    },
+    "OpSaw": {
+     "image": 712,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1168.11,
+     "p999": 1184.49,
+     "peak": 1205.61,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpPulse": {
+     "image": 720,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1688.1,
+     "p999": 1696.48,
+     "peak": 1717.61,
+     "load": 24757,
+     "guards": 0
+    },
+    "OpTriangle": {
+     "image": 712,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 758.78,
+     "p999": 771.49,
+     "peak": 803.62,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpTone": {
+     "image": 712,
+     "fast": 2576,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 750.78,
+     "p999": 763.49,
+     "peak": 801.12,
+     "load": 24444,
+     "guards": 0
+    },
+    "OpBiquad": {
+     "image": 888,
+     "fast": 3600,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 845.16,
+     "p999": 858.24,
+     "peak": 900.37,
+     "load": 29708,
+     "guards": 0
+    },
+    "OpEnv": {
+     "image": 1048,
+     "fast": 3728,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1001.17,
+     "p999": 1014.24,
+     "peak": 1070.87,
+     "load": 34430,
+     "guards": 0
+    },
+    "OpMul": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 626.78,
+     "p999": 639.49,
+     "peak": 669.11,
+     "load": 24761,
+     "guards": 0
+    },
+    "OpMulS": {
+     "image": 712,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 548.78,
+     "p999": 561.5,
+     "peak": 591.11,
+     "load": 24691,
+     "guards": 0
+    },
+    "OpAdd": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 626.78,
+     "p999": 639.49,
+     "peak": 669.12,
+     "load": 24761,
+     "guards": 0
+    },
+    "OpAddS": {
+     "image": 712,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 548.78,
+     "p999": 561.49,
+     "peak": 591.11,
+     "load": 24691,
+     "guards": 0
+    },
+    "OpPan": {
+     "image": 712,
+     "fast": 2192,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 751.78,
+     "p999": 764.49,
+     "peak": 794.12,
+     "load": 25227,
+     "guards": 0
+    },
+    "OpDelay": {
+     "image": 744,
+     "fast": 2480,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1036.02,
+     "p999": 1036.74,
+     "peak": 1049.49,
+     "load": 24522,
+     "guards": 0
+    },
+    "OpComb": {
+     "image": 592,
+     "fast": 2480,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1174.54,
+     "p999": 1186.74,
+     "peak": 1246.37,
+     "load": 21590,
+     "guards": 0
+    },
+    "OpAllpass": {
+     "image": 592,
+     "fast": 2224,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1081.86,
+     "p999": 1091.74,
+     "peak": 1148.87,
+     "load": 21325,
+     "guards": 0
+    },
+    "OpFollow": {
+     "image": 880,
+     "fast": 2832,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 712.16,
+     "p999": 725.24,
+     "peak": 759.86,
+     "load": 29394,
+     "guards": 0
+    },
+    "OpKMtoF": {
+     "image": 1360,
+     "fast": 3344,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 659.28,
+     "p999": 672.74,
+     "peak": 704.37,
+     "load": 42256,
+     "guards": 0
+    },
+    "OpOscMod": {
+     "image": 504,
+     "fast": 1776,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 911.0,
+     "p999": 917.99,
+     "peak": 920.24,
+     "load": 18261,
+     "guards": 0
+    },
+    "OpMath": {
+     "image": 712,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1436.77,
+     "p999": 1449.48,
+     "peak": 1479.11,
+     "load": 25236,
+     "guards": 0
+    },
+    "OpMathDivide": {
+     "image": 1040,
+     "fast": 2704,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1470.77,
+     "p999": 1483.49,
+     "peak": 1513.11,
+     "load": 34181,
+     "guards": 0
+    },
+    "OpShape": {
+     "image": 792,
+     "fast": 1968,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 2068.77,
+     "p999": 2081.48,
+     "peak": 2111.11,
+     "load": 25925,
+     "guards": 0
+    },
+    "OpSample": {
+     "image": 10224,
+     "fast": 2224,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1164.79,
+     "p999": 1177.49,
+     "peak": 1212.61,
+     "load": 98749,
+     "guards": 0
+    },
+    "OpSample2": {
+     "image": 20096,
+     "fast": 2688,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1781.43,
+     "p999": 1808.98,
+     "peak": 1915.61,
+     "load": 182428,
+     "guards": 0
+    },
+    "OpSample3": {
+     "image": 20192,
+     "fast": 3456,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 3531.54,
+     "p999": 3586.47,
+     "peak": 3776.1,
+     "load": 183851,
+     "guards": 0
+    }
+   },
+   "engine_bytes": 1456,
+   "cases": {
+    "Dispatch only": {
+     "op": 0,
+     "mode": 0,
+     "still": true,
+     "first": 57
+    },
+    "Fill": {
+     "op": 1,
+     "mode": 0,
+     "still": true,
+     "first": 136
+    },
+    "Noise": {
+     "op": 2,
+     "mode": 0,
+     "still": true,
+     "first": 364
+    },
+    "Osc": {
+     "op": 3,
+     "mode": 0,
+     "still": true,
+     "first": 589
+    },
+    "Saw, naive": {
+     "op": 23,
+     "mode": 1,
+     "still": true,
+     "first": 322
+    },
+    "Saw, 110 Hz": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 457
+    },
+    "Saw, 4186 Hz": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 522
+    },
+    "Pulse, naive": {
+     "op": 24,
+     "mode": 1,
+     "still": true,
+     "first": 409
+    },
+    "Pulse, 110 Hz": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 620
+    },
+    "Pulse, 4186 Hz": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 734
+    },
+    "Saw, Nyquist": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 797
+    },
+    "Pulse, Nyquist": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 1321
+    },
+    "Triangle": {
+     "op": 25,
+     "mode": 0,
+     "still": true,
+     "first": 384
+    },
+    "Tone": {
+     "op": 26,
+     "mode": 0,
+     "still": true,
+     "first": 377
+    },
+    "Tone, at 0 Hz": {
+     "op": 26,
+     "mode": 0,
+     "still": true,
+     "first": 377
+    },
+    "Biquad, still": {
+     "op": 4,
+     "mode": 0,
+     "still": true,
+     "first": 640
+    },
+    "Biquad, moving": {
+     "op": 4,
+     "mode": 0,
+     "still": false,
+     "first": 646
+    },
+    "Biquad, high pass, moving": {
+     "op": 4,
+     "mode": 1,
+     "still": false,
+     "first": 649
+    },
+    "Biquad, band pass, moving": {
+     "op": 4,
+     "mode": 2,
+     "still": false,
+     "first": 645
+    },
+    "Env, attack": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 598
+    },
+    "Env, decay": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 692
+    },
+    "Env, sustain": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 402
+    },
+    "Env, release": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 598
+    },
+    "Env, decay, moving": {
+     "op": 5,
+     "mode": 0,
+     "still": false,
+     "first": 707
+    },
+    "Sample, mono i16": {
+     "op": 6,
+     "mode": 128,
+     "still": true,
+     "first": 1749
+    },
+    "Sample, mono f32": {
+     "op": 6,
+     "mode": 128,
+     "still": true,
+     "first": 1557
+    },
+    "Sample, stereo i16": {
+     "op": 6,
+     "mode": 0,
+     "still": true,
+     "first": 2197
+    },
+    "Sample, stereo f32": {
+     "op": 6,
+     "mode": 0,
+     "still": true,
+     "first": 1780
+    },
+    "Sample, mono f32, moving": {
+     "op": 6,
+     "mode": 128,
+     "still": false,
+     "first": 1544
+    },
+    "Sample2, mono i16": {
+     "op": 27,
+     "mode": 128,
+     "still": true,
+     "first": 2723
+    },
+    "Sample2, stereo i16": {
+     "op": 27,
+     "mode": 0,
+     "still": true,
+     "first": 3171
+    },
+    "Sample2, stereo i16, moving": {
+     "op": 27,
+     "mode": 0,
+     "still": false,
+     "first": 3114
+    },
+    "Sample2, stereo i16, reverse, moving": {
+     "op": 27,
+     "mode": 1,
+     "still": false,
+     "first": 3133
+    },
+    "Sample2, stereo i16, tail, moving": {
+     "op": 27,
+     "mode": 2,
+     "still": false,
+     "first": 3121
+    },
+    "Sample2, mono f32, moving": {
+     "op": 27,
+     "mode": 128,
+     "still": false,
+     "first": 2474
+    },
+    "Sample3, mono i16": {
+     "op": 33,
+     "mode": 192,
+     "still": true,
+     "first": 3200
+    },
+    "Sample3, stereo i16, moving": {
+     "op": 33,
+     "mode": 64,
+     "still": false,
+     "first": 3592
+    },
+    "Sample3, stereo i16, reverse, moving": {
+     "op": 33,
+     "mode": 65,
+     "still": false,
+     "first": 3607
+    },
+    "Sample3, mono f32, moving": {
+     "op": 33,
+     "mode": 192,
+     "still": false,
+     "first": 2952
+    },
+    "Sample3, crossfade, mono i16": {
+     "op": 33,
+     "mode": 128,
+     "still": true,
+     "first": 6040
+    },
+    "Sample3, crossfade, stereo i16, moving": {
+     "op": 33,
+     "mode": 0,
+     "still": false,
+     "first": 6817
+    },
+    "Sample3, crossfade, stereo i16, reverse, moving": {
+     "op": 33,
+     "mode": 1,
+     "still": false,
+     "first": 6847
+    },
+    "Sample3, crossfade, mono f32, moving": {
+     "op": 33,
+     "mode": 128,
+     "still": false,
+     "first": 5537
+    },
+    "Mul": {
+     "op": 7,
+     "mode": 0,
+     "still": true,
+     "first": 252
+    },
+    "MulS": {
+     "op": 8,
+     "mode": 0,
+     "still": true,
+     "first": 214
+    },
+    "Add": {
+     "op": 9,
+     "mode": 0,
+     "still": true,
+     "first": 252
+    },
+    "AddS": {
+     "op": 10,
+     "mode": 0,
+     "still": true,
+     "first": 214
+    },
+    "Pan": {
+     "op": 11,
+     "mode": 0,
+     "still": true,
+     "first": 377
+    },
+    "DelayWrite": {
+     "op": 12,
+     "mode": 0,
+     "still": true,
+     "first": 367
+    },
+    "DelayRead": {
+     "op": 13,
+     "mode": 0,
+     "still": true,
+     "first": 548
+    },
+    "DelayRead, feedback": {
+     "op": 13,
+     "mode": 1,
+     "still": true,
+     "first": 551
+    },
+    "Comb": {
+     "op": 14,
+     "mode": 0,
+     "still": true,
+     "first": 1023
+    },
+    "Allpass": {
+     "op": 15,
+     "mode": 0,
+     "still": true,
+     "first": 927
+    },
+    "Follow": {
+     "op": 16,
+     "mode": 0,
+     "still": true,
+     "first": 508
+    },
+    "Follow, moving": {
+     "op": 16,
+     "mode": 0,
+     "still": false,
+     "first": 512
+    },
+    "KMul": {
+     "op": 17,
+     "mode": 0,
+     "still": true,
+     "first": 79
+    },
+    "KAdd": {
+     "op": 18,
+     "mode": 0,
+     "still": true,
+     "first": 79
+    },
+    "KMtoF, still": {
+     "op": 19,
+     "mode": 0,
+     "still": true,
+     "first": 144
+    },
+    "KMtoF, moving": {
+     "op": 19,
+     "mode": 0,
+     "still": false,
+     "first": 151
+    },
+    "KRatio, still": {
+     "op": 20,
+     "mode": 60,
+     "still": true,
+     "first": 143
+    },
+    "KRatio, moving": {
+     "op": 20,
+     "mode": 60,
+     "still": false,
+     "first": 149
+    },
+    "KSnap": {
+     "op": 21,
+     "mode": 0,
+     "still": true,
+     "first": 72
+    },
+    "KLfo": {
+     "op": 22,
+     "mode": 0,
+     "still": true,
+     "first": 154
+    },
+    "KLfo2": {
+     "op": 28,
+     "mode": 0,
+     "still": true,
+     "first": 157
+    },
+    "OscMod, sine": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4214
+    },
+    "OscMod, sine, phase audio": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4181
+    },
+    "OscMod, sine, feedback": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4114
+    },
+    "OscMod, triangle": {
+     "op": 29,
+     "mode": 1,
+     "still": true,
+     "first": 2106
+    },
+    "OscMod, saw, 110 Hz": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2142
+    },
+    "OscMod, saw, 4186 Hz": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2202
+    },
+    "OscMod, saw, sync audio": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2259
+    },
+    "OscMod, sine, sync every other sample": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 5732
+    },
+    "OscMod, pulse, 4186 Hz": {
+     "op": 29,
+     "mode": 3,
+     "still": true,
+     "first": 3074
+    },
+    "OscMod, saw, naive": {
+     "op": 29,
+     "mode": 4,
+     "still": true,
+     "first": 1784
+    },
+    "OscMod, pulse, naive": {
+     "op": 29,
+     "mode": 5,
+     "still": true,
+     "first": 2317
+    },
+    "Math, min, audio and scalar": {
+     "op": 30,
+     "mode": 0,
+     "still": true,
+     "first": 439
+    },
+    "Math, clip, audio": {
+     "op": 30,
+     "mode": 3,
+     "still": true,
+     "first": 642
+    },
+    "Math, floor, audio": {
+     "op": 30,
+     "mode": 4,
+     "still": true,
+     "first": 657
+    },
+    "Math, divide, audio": {
+     "op": 30,
+     "mode": 5,
+     "still": true,
+     "first": 503
+    },
+    "Math, select, audio": {
+     "op": 30,
+     "mode": 7,
+     "still": true,
+     "first": 479
+    },
+    "KMath, divide": {
+     "op": 31,
+     "mode": 5,
+     "still": true,
+     "first": 93
+    },
+    "Shape": {
+     "op": 32,
+     "mode": 0,
+     "still": true,
+     "first": 973
+    }
+   },
+   "clear": 20.58
+  },
+  "MonoCmsis": {
+   "kernels": {
+    "Dispatch only": 57.03,
+    "Fill": 135.03,
+    "Noise": 358.02,
+    "Osc": 589.02,
+    "Saw, naive": 322.02,
+    "Saw, 110 Hz": 457.57,
+    "Saw, 4186 Hz": 517.47,
+    "Pulse, naive": 408.02,
+    "Pulse, 110 Hz": 611.35,
+    "Pulse, 4186 Hz": 736.4,
+    "Saw, Nyquist": 808.02,
+    "Pulse, Nyquist": 1344.02,
+    "Triangle": 384.02,
+    "Tone": 270.03,
+    "Tone, at 0 Hz": 376.02,
+    "Biquad, still": 532.02,
+    "Biquad, moving": 646.02,
+    "Biquad, high pass, moving": 648.02,
+    "Biquad, band pass, moving": 645.02,
+    "Env, attack": 489.02,
+    "Env, decay": 583.02,
+    "Env, sustain": 293.02,
+    "Env, release": 489.02,
+    "Env, decay, moving": 701.52,
+    "Sample, mono i16": 1813.04,
+    "Sample, mono f32": 1621.04,
+    "Sample, stereo i16": 2261.04,
+    "Sample, stereo f32": 1845.04,
+    "Sample, mono f32, moving": 1615.55,
+    "Sample2, mono i16": 2556.07,
+    "Sample2, stereo i16": 3004.06,
+    "Sample2, stereo i16, moving": 3023.76,
+    "Sample2, stereo i16, reverse, moving": 2997.79,
+    "Sample2, stereo i16, tail, moving": 3029.76,
+    "Sample2, mono f32, moving": 2383.76,
+    "Sample3, mono i16": 3004.06,
+    "Sample3, stereo i16, moving": 3468.75,
+    "Sample3, stereo i16, reverse, moving": 3440.79,
+    "Sample3, mono f32, moving": 2828.76,
+    "Sample3, crossfade, mono i16": 5680.1,
+    "Sample3, crossfade, stereo i16, moving": 6605.98,
+    "Sample3, crossfade, stereo i16, reverse, moving": 6550.05,
+    "Sample3, crossfade, mono f32, moving": 5325.99,
+    "Mul": 252.02,
+    "MulS": 213.03,
+    "Add": 252.02,
+    "AddS": 213.02,
+    "Pan": 297.02,
+    "DelayWrite": 366.02,
+    "DelayRead": 548.02,
+    "DelayRead, feedback": 551.02,
+    "Comb": 1005.08,
+    "Allpass": 913.77,
+    "Follow": 455.02,
+    "Follow, moving": 510.52,
+    "KMul": 79.03,
+    "KAdd": 79.03,
+    "KMtoF, still": 93.03,
+    "KMtoF, moving": 150.03,
+    "KRatio, still": 93.03,
+    "KRatio, moving": 149.02,
+    "KSnap": 72.03,
+    "KLfo": 152.24,
+    "KLfo2": 154.24,
+    "OscMod, sine": 4151.85,
+    "OscMod, sine, phase audio": 4148.95,
+    "OscMod, sine, feedback": 4130.28,
+    "OscMod, triangle": 2062.01,
+    "OscMod, saw, 110 Hz": 2095.5,
+    "OscMod, saw, 4186 Hz": 2152.66,
+    "OscMod, saw, sync audio": 2243.01,
+    "OscMod, sine, sync every other sample": 5692.0,
+    "OscMod, pulse, 4186 Hz": 3006.82,
+    "OscMod, saw, naive": 1772.02,
+    "OscMod, pulse, naive": 2307.01,
+    "Math, min, audio and scalar": 439.02,
+    "Math, clip, audio": 642.02,
+    "Math, floor, audio": 657.02,
+    "Math, divide, audio": 503.02,
+    "Math, select, audio": 478.02,
+    "KMath, divide": 93.03,
+    "Shape": 973.02
+   },
+   "recipes": {
+    "AdditiveBell": {
+     "image": 9680,
+     "fast": 4304,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7500,
+     "mean": 1422.44,
+     "p999": 1720.7,
+     "peak": 1748.46,
+     "load": 130495,
+     "guards": 0
+    },
+    "AudioRateAmplitudeModulation": {
+     "image": 8920,
+     "fast": 1616,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5550,
+     "mean": 238.54,
+     "p999": 266.59,
+     "peak": 275.4,
+     "load": 108856,
+     "guards": 0
+    },
+    "DrawbarOrgan": {
+     "image": 9736,
+     "fast": 3232,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 4800,
+     "mean": 1229.68,
+     "p999": 1288.74,
+     "peak": 1385.05,
+     "load": 129097,
+     "guards": 0
+    },
+    "FrenchHorn": {
+     "image": 1184,
+     "fast": 3264,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 9750,
+     "mean": 350.73,
+     "p999": 522.93,
+     "peak": 595.37,
+     "load": 34887,
+     "guards": 0
+    },
+    "PhaseModElectricPiano": {
+     "image": 9464,
+     "fast": 3776,
+     "bulk": 23904,
+     "voices": 6,
+     "frames": 5775,
+     "mean": 1341.48,
+     "p999": 1486.27,
+     "peak": 1529.43,
+     "load": 124669,
+     "guards": 0
+    },
+    "RingModulation": {
+     "image": 8792,
+     "fast": 1440,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 180.1,
+     "p999": 197.49,
+     "peak": 206.84,
+     "load": 105883,
+     "guards": 0
+    },
+    "Trumpet": {
+     "image": 1320,
+     "fast": 3648,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 423.95,
+     "p999": 605.52,
+     "peak": 645.55,
+     "load": 38465,
+     "guards": 0
+    },
+    "Clap": {
+     "image": 792,
+     "fast": 2208,
+     "bulk": 30432,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 209.15,
+     "p999": 424.15,
+     "peak": 424.62,
+     "load": 24716,
+     "guards": 0
+    },
+    "DrumLoop": {
+     "image": 10600,
+     "fast": 6528,
+     "bulk": 60864,
+     "voices": 9,
+     "frames": 6450,
+     "mean": 635.12,
+     "p999": 1052.27,
+     "peak": 1085.55,
+     "load": 164989,
+     "guards": 0
+    },
+    "HiHat": {
+     "image": 728,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6300,
+     "mean": 117.83,
+     "p999": 194.94,
+     "peak": 201.43,
+     "load": 23193,
+     "guards": 0
+    },
+    "Kick808": {
+     "image": 8864,
+     "fast": 1488,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7125,
+     "mean": 190.63,
+     "p999": 220.12,
+     "peak": 235.02,
+     "load": 107503,
+     "guards": 0
+    },
+    "Snare": {
+     "image": 776,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6000,
+     "mean": 268.85,
+     "p999": 472.49,
+     "peak": 491.99,
+     "load": 24750,
+     "guards": 0
+    },
+    "ChebyshevWavefold": {
+     "image": 8944,
+     "fast": 1856,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4275,
+     "mean": 250.76,
+     "p999": 303.55,
+     "peak": 329.65,
+     "load": 109992,
+     "guards": 0
+    },
+    "Chorus": {
+     "image": 1104,
+     "fast": 2880,
+     "bulk": 11808,
+     "voices": 4,
+     "frames": 4050,
+     "mean": 592.8,
+     "p999": 642.61,
+     "peak": 666.15,
+     "load": 36323,
+     "guards": 0
+    },
+    "Compressor": {
+     "image": 1096,
+     "fast": 2704,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5250,
+     "mean": 404.08,
+     "p999": 468.96,
+     "peak": 469.65,
+     "load": 35706,
+     "guards": 0
+    },
+    "CubicSaturation": {
+     "image": 640,
+     "fast": 1536,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 187.57,
+     "p999": 225.62,
+     "peak": 230.24,
+     "load": 21127,
+     "guards": 0
+    },
+    "Flanger": {
+     "image": 800,
+     "fast": 1792,
+     "bulk": 2064,
+     "voices": 1,
+     "frames": 7500,
+     "mean": 214.99,
+     "p999": 218.06,
+     "peak": 231.15,
+     "load": 27810,
+     "guards": 0
+    },
+    "HaasWidener": {
+     "image": 704,
+     "fast": 1936,
+     "bulk": 3984,
+     "voices": 4,
+     "frames": 3750,
+     "mean": 342.08,
+     "p999": 403.46,
+     "peak": 404.84,
+     "load": 25957,
+     "guards": 0
+    },
+    "InsertFilterSweep": {
+     "image": 1344,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 222.44,
+     "p999": 240.09,
+     "peak": 274.4,
+     "load": 37858,
+     "guards": 0
+    },
+    "ParametricEq": {
+     "image": 1840,
+     "fast": 2176,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4125,
+     "mean": 290.43,
+     "p999": 308.56,
+     "peak": 345.84,
+     "load": 48533,
+     "guards": 0
+    },
+    "Phaser": {
+     "image": 976,
+     "fast": 2736,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7125,
+     "mean": 469.03,
+     "p999": 509.33,
+     "peak": 544.33,
+     "load": 33867,
+     "guards": 0
+    },
+    "PingPongDelay": {
+     "image": 752,
+     "fast": 2400,
+     "bulk": 230688,
+     "voices": 1,
+     "frames": 8325,
+     "mean": 170.37,
+     "p999": 219.53,
+     "peak": 229.96,
+     "load": 27908,
+     "guards": 0
+    },
+    "PrecutGrainCloud": {
+     "image": 158664,
+     "fast": 5296,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 112.38,
+     "p999": 209.5,
+     "peak": 211.43,
+     "load": 1824084,
+     "guards": 0
+    },
+    "Reverb": {
+     "image": 1696,
+     "fast": 4016,
+     "bulk": 187776,
+     "voices": 3,
+     "frames": 5250,
+     "mean": 975.71,
+     "p999": 1078.58,
+     "peak": 1078.9,
+     "load": 52064,
+     "guards": 0
+    },
+    "SidechainDucking": {
+     "image": 9504,
+     "fast": 3344,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 7425,
+     "mean": 578.83,
+     "p999": 616.77,
+     "peak": 626.24,
+     "load": 130982,
+     "guards": 0
+    },
+    "Vocoder": {
+     "image": 2000,
+     "fast": 5264,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5100,
+     "mean": 839.12,
+     "p999": 878.02,
+     "peak": 1009.96,
+     "load": 63106,
+     "guards": 0
+    },
+    "FormantVowels": {
+     "image": 872,
+     "fast": 1728,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5250,
+     "mean": 157.06,
+     "p999": 168.59,
+     "peak": 228.71,
+     "load": 24393,
+     "guards": 0
+    },
+    "KeyboardTrackedFilter": {
+     "image": 616,
+     "fast": 1456,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 174.41,
+     "p999": 198.99,
+     "peak": 199.84,
+     "load": 19923,
+     "guards": 0
+    },
+    "ResonantSawBass": {
+     "image": 704,
+     "fast": 1856,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4500,
+     "mean": 253.63,
+     "p999": 299.62,
+     "peak": 300.37,
+     "load": 22115,
+     "guards": 0
+    },
+    "VelocityFilterAmp": {
+     "image": 624,
+     "fast": 1520,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 3750,
+     "mean": 185.86,
+     "p999": 211.31,
+     "peak": 211.31,
+     "load": 20425,
+     "guards": 0
+    },
+    "Wind": {
+     "image": 592,
+     "fast": 1504,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 9000,
+     "mean": 117.67,
+     "p999": 122.62,
+     "peak": 137.59,
+     "load": 19692,
+     "guards": 0
+    },
+    "Arpeggio": {
+     "image": 944,
+     "fast": 1552,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6375,
+     "mean": 236.95,
+     "p999": 267.96,
+     "peak": 268.65,
+     "load": 26626,
+     "guards": 0
+    },
+    "AutoPan": {
+     "image": 8872,
+     "fast": 1952,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6000,
+     "mean": 432.2,
+     "p999": 437.78,
+     "peak": 481.61,
+     "load": 108586,
+     "guards": 0
+    },
+    "ChannelAftertouch": {
+     "image": 688,
+     "fast": 1888,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 4875,
+     "mean": 335.34,
+     "p999": 346.21,
+     "peak": 390.77,
+     "load": 22470,
+     "guards": 0
+    },
+    "CurvedEnvelope": {
+     "image": 600,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 3750,
+     "mean": 302.23,
+     "p999": 391.77,
+     "peak": 392.46,
+     "load": 20711,
+     "guards": 0
+    },
+    "LegatoPortamento": {
+     "image": 568,
+     "fast": 1296,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4875,
+     "mean": 104.27,
+     "p999": 112.03,
+     "peak": 134.53,
+     "load": 18194,
+     "guards": 0
+    },
+    "LoopingEnvelope": {
+     "image": 5440,
+     "fast": 1776,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 4800,
+     "mean": 245.25,
+     "p999": 319.93,
+     "peak": 342.12,
+     "load": 71332,
+     "guards": 0
+    },
+    "MacroKnob": {
+     "image": 864,
+     "fast": 2048,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4575,
+     "mean": 182.13,
+     "p999": 188.49,
+     "peak": 206.12,
+     "load": 26594,
+     "guards": 0
+    },
+    "MonoLead": {
+     "image": 648,
+     "fast": 1568,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 4275,
+     "mean": 144.24,
+     "p999": 158.81,
+     "peak": 160.93,
+     "load": 20467,
+     "guards": 0
+    },
+    "PerVoiceLfo": {
+     "image": 568,
+     "fast": 1728,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6149,
+     "mean": 248.98,
+     "p999": 279.33,
+     "peak": 294.18,
+     "load": 19624,
+     "guards": 0
+    },
+    "PitchBend": {
+     "image": 568,
+     "fast": 1472,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5250,
+     "mean": 110.45,
+     "p999": 114.47,
+     "peak": 133.84,
+     "load": 18771,
+     "guards": 0
+    },
+    "SampleAndHold": {
+     "image": 1120,
+     "fast": 1568,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 6000,
+     "mean": 165.94,
+     "p999": 171.12,
+     "peak": 184.65,
+     "load": 24905,
+     "guards": 0
+    },
+    "SawLfoFilter": {
+     "image": 592,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 206.12,
+     "p999": 244.87,
+     "peak": 254.77,
+     "load": 19920,
+     "guards": 0
+    },
+    "SharedLfo": {
+     "image": 552,
+     "fast": 1664,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 5400,
+     "mean": 239.78,
+     "p999": 272.74,
+     "peak": 286.71,
+     "load": 19422,
+     "guards": 0
+    },
+    "SquareLfoFilter": {
+     "image": 592,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 205.79,
+     "p999": 251.52,
+     "peak": 265.4,
+     "load": 19968,
+     "guards": 0
+    },
+    "StepSequencer": {
+     "image": 640,
+     "fast": 1424,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6000,
+     "mean": 177.76,
+     "p999": 205.8,
+     "peak": 206.31,
+     "load": 20216,
+     "guards": 0
+    },
+    "TempoSyncedLfo": {
+     "image": 608,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6750,
+     "mean": 181.35,
+     "p999": 240.31,
+     "peak": 251.12,
+     "load": 20507,
+     "guards": 0
+    },
+    "TranceGate": {
+     "image": 640,
+     "fast": 1792,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6375,
+     "mean": 201.38,
+     "p999": 316.78,
+     "peak": 341.05,
+     "load": 21401,
+     "guards": 0
+    },
+    "Tremolo": {
+     "image": 8832,
+     "fast": 1568,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 6000,
+     "mean": 220.96,
+     "p999": 251.02,
+     "peak": 264.28,
+     "load": 106849,
+     "guards": 0
+    },
+    "TriangleLfoFilter": {
+     "image": 592,
+     "fast": 1744,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 202.39,
+     "p999": 240.37,
+     "peak": 250.28,
+     "load": 19920,
+     "guards": 0
+    },
+    "VibratoModWheel": {
+     "image": 568,
+     "fast": 1408,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 5700,
+     "mean": 118.09,
+     "p999": 121.31,
+     "peak": 140.68,
+     "load": 18734,
+     "guards": 0
+    },
+    "VoiceStealing": {
+     "image": 560,
+     "fast": 1408,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5325,
+     "mean": 175.54,
+     "p999": 199.62,
+     "peak": 200.31,
+     "load": 18717,
+     "guards": 0
+    },
+    "DetunedSupersaw": {
+     "image": 1056,
+     "fast": 3824,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 6375,
+     "mean": 912.54,
+     "p999": 1029.24,
+     "peak": 1117.11,
+     "load": 33152,
+     "guards": 0
+    },
+    "LoopedSample": {
+     "image": 29904,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 6,
+     "frames": 4500,
+     "mean": 500.12,
+     "p999": 596.87,
+     "peak": 635.36,
+     "load": 330384,
+     "guards": 0
+    },
+    "OneShotSample": {
+     "image": 134968,
+     "fast": 1536,
+     "bulk": 0,
+     "voices": 6,
+     "frames": 4500,
+     "mean": 191.37,
+     "p999": 486.46,
+     "peak": 499.52,
+     "load": 1437780,
+     "guards": 0
+    },
+    "PluckedString": {
+     "image": 688,
+     "fast": 2320,
+     "bulk": 58464,
+     "voices": 6,
+     "frames": 5700,
+     "mean": 499.6,
+     "p999": 636.52,
+     "peak": 654.96,
+     "load": 23659,
+     "guards": 0
+    },
+    "PwmPad": {
+     "image": 520,
+     "fast": 1568,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7125,
+     "mean": 269.15,
+     "p999": 297.96,
+     "peak": 332.71,
+     "load": 19023,
+     "guards": 0
+    },
+    "StereoUnison": {
+     "image": 1104,
+     "fast": 2976,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 513.13,
+     "p999": 556.02,
+     "peak": 576.9,
+     "load": 33592,
+     "guards": 0
+    },
+    "SubOscillator": {
+     "image": 648,
+     "fast": 1600,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 3750,
+     "mean": 226.92,
+     "p999": 268.15,
+     "peak": 268.84,
+     "load": 21192,
+     "guards": 0
+    },
+    "VelocityLayers": {
+     "image": 269664,
+     "fast": 2048,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 5250,
+     "mean": 269.59,
+     "p999": 331.62,
+     "peak": 340.55,
+     "load": 2861423,
+     "guards": 0
+    },
+    "WavetableMorph": {
+     "image": 25528,
+     "fast": 2336,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7125,
+     "mean": 465.49,
+     "p999": 580.12,
+     "peak": 588.52,
+     "load": 287020,
+     "guards": 0
+    },
+    "FourVoices": {
+     "image": 392,
+     "fast": 1168,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 161.61,
+     "p999": 162.03,
+     "peak": 202.96,
+     "load": 15930,
+     "guards": 0
+    },
+    "OneVoice": {
+     "image": 368,
+     "fast": 976,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 66.25,
+     "p999": 66.68,
+     "peak": 78.84,
+     "load": 14127,
+     "guards": 0
+    },
+    "Silent": {
+     "image": 152,
+     "fast": 352,
+     "bulk": 0,
+     "voices": 0,
+     "frames": 1500,
+     "mean": 18.02,
+     "p999": 18.47,
+     "peak": 18.47,
+     "load": 5467,
+     "guards": 0
+    },
+    "Idle": {
+     "image": 368,
+     "fast": 976,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 35.55,
+     "p999": 66.9,
+     "peak": 80.34,
+     "load": 14126,
+     "guards": 0
+    },
+    "IdleVoices": {
+     "image": 368,
+     "fast": 5248,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 70.98,
+     "p999": 102.34,
+     "peak": 115.78,
+     "load": 42161,
+     "guards": 0
+    },
+    "Tracks": {
+     "image": 1296,
+     "fast": 6016,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 257.57,
+     "p999": 758.77,
+     "peak": 963.46,
+     "load": 81055,
+     "guards": 0
+    },
+    "Slots": {
+     "image": 504,
+     "fast": 1088,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 38.66,
+     "p999": 69.97,
+     "peak": 154.68,
+     "load": 27425,
+     "guards": 0
+    },
+    "Held1": {
+     "image": 368,
+     "fast": 976,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 66.76,
+     "p999": 71.81,
+     "peak": 80.34,
+     "load": 14126,
+     "guards": 0
+    },
+    "Held2": {
+     "image": 376,
+     "fast": 1040,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 98.55,
+     "p999": 106.15,
+     "peak": 121.22,
+     "load": 14727,
+     "guards": 0
+    },
+    "Held4": {
+     "image": 392,
+     "fast": 1168,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 162.12,
+     "p999": 174.84,
+     "peak": 204.46,
+     "load": 15929,
+     "guards": 0
+    },
+    "Held8": {
+     "image": 424,
+     "fast": 1440,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 289.29,
+     "p999": 312.21,
+     "peak": 376.97,
+     "load": 18333,
+     "guards": 0
+    },
+    "Held16": {
+     "image": 488,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 543.62,
+     "p999": 586.96,
+     "peak": 745.96,
+     "load": 23142,
+     "guards": 0
+    },
+    "Segments1": {
+     "image": 96352,
+     "fast": 976,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 116.98,
+     "p999": 126.02,
+     "peak": 130.56,
+     "load": 1883352,
+     "guards": 0
+    },
+    "Segments16": {
+     "image": 96472,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 630.46,
+     "p999": 754.61,
+     "peak": 832.74,
+     "load": 1892366,
+     "guards": 0
+    },
+    "Params": {
+     "image": 2424,
+     "fast": 2640,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 71.87,
+     "p999": 271.09,
+     "peak": 1659.61,
+     "load": 54275,
+     "guards": 0
+    },
+    "Inserts": {
+     "image": 600,
+     "fast": 1824,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 346.13,
+     "p999": 351.18,
+     "peak": 359.71,
+     "load": 36471,
+     "guards": 0
+    },
+    "Buses1": {
+     "image": 1584,
+     "fast": 6272,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 390.17,
+     "p999": 891.37,
+     "peak": 1096.05,
+     "load": 84808,
+     "guards": 0
+    },
+    "Buses2": {
+     "image": 1608,
+     "fast": 6416,
+     "bulk": 0,
+     "voices": 16,
+     "frames": 1500,
+     "mean": 401.76,
+     "p999": 902.96,
+     "peak": 1107.65,
+     "load": 85233,
+     "guards": 0
+    },
+    "Notes2": {
+     "image": 368,
+     "fast": 1040,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 179.96,
+     "p999": 179.96,
+     "peak": 179.96,
+     "load": 14571,
+     "guards": 0
+    },
+    "Notes4": {
+     "image": 368,
+     "fast": 1168,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 250.71,
+     "p999": 250.72,
+     "peak": 250.72,
+     "load": 15461,
+     "guards": 0
+    },
+    "Notes8": {
+     "image": 368,
+     "fast": 1440,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 385.74,
+     "p999": 385.84,
+     "peak": 385.84,
+     "load": 17242,
+     "guards": 0
+    },
+    "Notes64": {
+     "image": 368,
+     "fast": 5248,
+     "bulk": 0,
+     "voices": 64,
+     "frames": 1500,
+     "mean": 2266.86,
+     "p999": 2277.58,
+     "peak": 2277.58,
+     "load": 42161,
+     "guards": 0
+    },
+    "NotesParams": {
+     "image": 1648,
+     "fast": 4000,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1830.97,
+     "p999": 1831.52,
+     "peak": 1831.52,
+     "load": 43804,
+     "guards": 0
+    },
+    "HeldParams": {
+     "image": 1704,
+     "fast": 4000,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1649.58,
+     "p999": 1672.39,
+     "peak": 1908.14,
+     "load": 44896,
+     "guards": 0
+    },
+    "SetParams": {
+     "image": 96400,
+     "fast": 1024,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 83.43,
+     "p999": 120.06,
+     "peak": 131.96,
+     "load": 1872362,
+     "guards": 0
+    },
+    "IdleKnob": {
+     "image": 408,
+     "fast": 1024,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 35.99,
+     "p999": 72.62,
+     "peak": 86.62,
+     "load": 14981,
+     "guards": 0
+    },
+    "Mono": {
+     "image": 376,
+     "fast": 1280,
+     "bulk": 0,
+     "voices": 1,
+     "frames": 1500,
+     "mean": 637.33,
+     "p999": 638.21,
+     "peak": 638.21,
+     "load": 14823,
+     "guards": 0
+    },
+    "Poly": {
+     "image": 368,
+     "fast": 1040,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 179.96,
+     "p999": 179.96,
+     "peak": 179.96,
+     "load": 14571,
+     "guards": 0
+    },
+    "MixRamps": {
+     "image": 1472,
+     "fast": 3520,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 397.89,
+     "p999": 436.68,
+     "peak": 675.37,
+     "load": 56816,
+     "guards": 0
+    },
+    "MixStill": {
+     "image": 800,
+     "fast": 3328,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 388.62,
+     "p999": 429.03,
+     "peak": 492.46,
+     "load": 44959,
+     "guards": 0
+    },
+    "Zones1": {
+     "image": 10120,
+     "fast": 1648,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 854.09,
+     "p999": 854.37,
+     "peak": 854.37,
+     "load": 96764,
+     "guards": 0
+    },
+    "Zones256": {
+     "image": 18280,
+     "fast": 1648,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 1500,
+     "mean": 1236.59,
+     "p999": 1236.86,
+     "peak": 1236.86,
+     "load": 234004,
+     "guards": 0
+    },
+    "Fades": {
+     "image": 376,
+     "fast": 1264,
+     "bulk": 0,
+     "voices": 5,
+     "frames": 1500,
+     "mean": 295.02,
+     "p999": 295.06,
+     "peak": 295.06,
+     "load": 16149,
+     "guards": 0
+    },
+    "OpNoise": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 684.13,
+     "p999": 696.83,
+     "peak": 734.96,
+     "load": 24041,
+     "guards": 0
+    },
+    "OpOsc": {
+     "image": 8968,
+     "fast": 2096,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 915.12,
+     "p999": 927.83,
+     "peak": 959.96,
+     "load": 112072,
+     "guards": 0
+    },
+    "OpSaw": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1119.45,
+     "p999": 1135.83,
+     "peak": 1156.96,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpPulse": {
+     "image": 720,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1639.44,
+     "p999": 1647.83,
+     "peak": 1668.96,
+     "load": 24758,
+     "guards": 0
+    },
+    "OpTriangle": {
+     "image": 712,
+     "fast": 2064,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 710.12,
+     "p999": 722.84,
+     "peak": 754.96,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpTone": {
+     "image": 712,
+     "fast": 2320,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 702.13,
+     "p999": 714.83,
+     "peak": 752.46,
+     "load": 24443,
+     "guards": 0
+    },
+    "OpBiquad": {
+     "image": 888,
+     "fast": 3344,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 797.51,
+     "p999": 810.58,
+     "peak": 852.71,
+     "load": 29708,
+     "guards": 0
+    },
+    "OpEnv": {
+     "image": 1048,
+     "fast": 3472,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 951.51,
+     "p999": 964.58,
+     "peak": 1021.21,
+     "load": 34430,
+     "guards": 0
+    },
+    "OpMul": {
+     "image": 712,
+     "fast": 1808,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 578.12,
+     "p999": 590.84,
+     "peak": 620.46,
+     "load": 24761,
+     "guards": 0
+    },
+    "OpMulS": {
+     "image": 712,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 500.12,
+     "p999": 512.83,
+     "peak": 542.46,
+     "load": 24691,
+     "guards": 0
+    },
+    "OpAdd": {
+     "image": 712,
+     "fast": 1808,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 578.12,
+     "p999": 590.84,
+     "peak": 620.46,
+     "load": 24761,
+     "guards": 0
+    },
+    "OpAddS": {
+     "image": 712,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 500.12,
+     "p999": 512.84,
+     "peak": 542.46,
+     "load": 24691,
+     "guards": 0
+    },
+    "OpPan": {
+     "image": 712,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 623.12,
+     "p999": 635.84,
+     "peak": 665.46,
+     "load": 25227,
+     "guards": 0
+    },
+    "OpDelay": {
+     "image": 744,
+     "fast": 2224,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 987.36,
+     "p999": 988.09,
+     "peak": 1000.83,
+     "load": 24522,
+     "guards": 0
+    },
+    "OpComb": {
+     "image": 592,
+     "fast": 2224,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1127.88,
+     "p999": 1140.09,
+     "peak": 1199.71,
+     "load": 21591,
+     "guards": 0
+    },
+    "OpAllpass": {
+     "image": 592,
+     "fast": 1968,
+     "bulk": 35328,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1035.2,
+     "p999": 1045.09,
+     "peak": 1102.21,
+     "load": 21324,
+     "guards": 0
+    },
+    "OpFollow": {
+     "image": 880,
+     "fast": 2576,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 664.5,
+     "p999": 677.58,
+     "peak": 712.21,
+     "load": 29394,
+     "guards": 0
+    },
+    "OpKMtoF": {
+     "image": 1360,
+     "fast": 3088,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 608.62,
+     "p999": 622.09,
+     "peak": 653.71,
+     "load": 42256,
+     "guards": 0
+    },
+    "OpOscMod": {
+     "image": 504,
+     "fast": 1520,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 1500,
+     "mean": 877.91,
+     "p999": 884.9,
+     "peak": 887.14,
+     "load": 18261,
+     "guards": 0
+    },
+    "OpMath": {
+     "image": 712,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1388.12,
+     "p999": 1400.83,
+     "peak": 1430.46,
+     "load": 25235,
+     "guards": 0
+    },
+    "OpMathDivide": {
+     "image": 1040,
+     "fast": 2448,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1418.12,
+     "p999": 1430.83,
+     "peak": 1460.46,
+     "load": 34181,
+     "guards": 0
+    },
+    "OpShape": {
+     "image": 792,
+     "fast": 1712,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 2020.11,
+     "p999": 2032.83,
+     "peak": 2062.45,
+     "load": 25924,
+     "guards": 0
+    },
+    "OpSample": {
+     "image": 10224,
+     "fast": 1968,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1150.64,
+     "p999": 1163.33,
+     "peak": 1198.46,
+     "load": 98749,
+     "guards": 0
+    },
+    "OpSample2": {
+     "image": 20096,
+     "fast": 2432,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 1766.78,
+     "p999": 1794.33,
+     "peak": 1900.96,
+     "load": 182429,
+     "guards": 0
+    },
+    "OpSample3": {
+     "image": 20192,
+     "fast": 3200,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 1500,
+     "mean": 3549.38,
+     "p999": 3604.32,
+     "peak": 3793.94,
+     "load": 183850,
+     "guards": 0
+    }
+   },
+   "engine_bytes": 1456,
+   "cases": {
+    "Dispatch only": {
+     "op": 0,
+     "mode": 0,
+     "still": true,
+     "first": 55
+    },
+    "Fill": {
+     "op": 1,
+     "mode": 0,
+     "still": true,
+     "first": 134
+    },
+    "Noise": {
+     "op": 2,
+     "mode": 0,
+     "still": true,
+     "first": 362
+    },
+    "Osc": {
+     "op": 3,
+     "mode": 0,
+     "still": true,
+     "first": 588
+    },
+    "Saw, naive": {
+     "op": 23,
+     "mode": 1,
+     "still": true,
+     "first": 321
+    },
+    "Saw, 110 Hz": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 454
+    },
+    "Saw, 4186 Hz": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 521
+    },
+    "Pulse, naive": {
+     "op": 24,
+     "mode": 1,
+     "still": true,
+     "first": 407
+    },
+    "Pulse, 110 Hz": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 619
+    },
+    "Pulse, 4186 Hz": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 732
+    },
+    "Saw, Nyquist": {
+     "op": 23,
+     "mode": 0,
+     "still": true,
+     "first": 795
+    },
+    "Pulse, Nyquist": {
+     "op": 24,
+     "mode": 0,
+     "still": true,
+     "first": 1319
+    },
+    "Triangle": {
+     "op": 25,
+     "mode": 0,
+     "still": true,
+     "first": 382
+    },
+    "Tone": {
+     "op": 26,
+     "mode": 0,
+     "still": true,
+     "first": 374
+    },
+    "Tone, at 0 Hz": {
+     "op": 26,
+     "mode": 0,
+     "still": true,
+     "first": 374
+    },
+    "Biquad, still": {
+     "op": 4,
+     "mode": 0,
+     "still": true,
+     "first": 638
+    },
+    "Biquad, moving": {
+     "op": 4,
+     "mode": 0,
+     "still": false,
+     "first": 644
+    },
+    "Biquad, high pass, moving": {
+     "op": 4,
+     "mode": 1,
+     "still": false,
+     "first": 647
+    },
+    "Biquad, band pass, moving": {
+     "op": 4,
+     "mode": 2,
+     "still": false,
+     "first": 643
+    },
+    "Env, attack": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 596
+    },
+    "Env, decay": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 689
+    },
+    "Env, sustain": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 399
+    },
+    "Env, release": {
+     "op": 5,
+     "mode": 0,
+     "still": true,
+     "first": 596
+    },
+    "Env, decay, moving": {
+     "op": 5,
+     "mode": 0,
+     "still": false,
+     "first": 704
+    },
+    "Sample, mono i16": {
+     "op": 6,
+     "mode": 128,
+     "still": true,
+     "first": 1812
+    },
+    "Sample, mono f32": {
+     "op": 6,
+     "mode": 128,
+     "still": true,
+     "first": 1619
+    },
+    "Sample, stereo i16": {
+     "op": 6,
+     "mode": 0,
+     "still": true,
+     "first": 2259
+    },
+    "Sample, stereo f32": {
+     "op": 6,
+     "mode": 0,
+     "still": true,
+     "first": 1844
+    },
+    "Sample, mono f32, moving": {
+     "op": 6,
+     "mode": 128,
+     "still": false,
+     "first": 1607
+    },
+    "Sample2, mono i16": {
+     "op": 27,
+     "mode": 128,
+     "still": true,
+     "first": 2787
+    },
+    "Sample2, stereo i16": {
+     "op": 27,
+     "mode": 0,
+     "still": true,
+     "first": 3234
+    },
+    "Sample2, stereo i16, moving": {
+     "op": 27,
+     "mode": 0,
+     "still": false,
+     "first": 3177
+    },
+    "Sample2, stereo i16, reverse, moving": {
+     "op": 27,
+     "mode": 1,
+     "still": false,
+     "first": 3197
+    },
+    "Sample2, stereo i16, tail, moving": {
+     "op": 27,
+     "mode": 2,
+     "still": false,
+     "first": 3184
+    },
+    "Sample2, mono f32, moving": {
+     "op": 27,
+     "mode": 128,
+     "still": false,
+     "first": 2537
+    },
+    "Sample3, mono i16": {
+     "op": 33,
+     "mode": 192,
+     "still": true,
+     "first": 3264
+    },
+    "Sample3, stereo i16, moving": {
+     "op": 33,
+     "mode": 64,
+     "still": false,
+     "first": 3654
+    },
+    "Sample3, stereo i16, reverse, moving": {
+     "op": 33,
+     "mode": 65,
+     "still": false,
+     "first": 3669
+    },
+    "Sample3, mono f32, moving": {
+     "op": 33,
+     "mode": 192,
+     "still": false,
+     "first": 3014
+    },
+    "Sample3, crossfade, mono i16": {
+     "op": 33,
+     "mode": 128,
+     "still": true,
+     "first": 6169
+    },
+    "Sample3, crossfade, stereo i16, moving": {
+     "op": 33,
+     "mode": 0,
+     "still": false,
+     "first": 6946
+    },
+    "Sample3, crossfade, stereo i16, reverse, moving": {
+     "op": 33,
+     "mode": 1,
+     "still": false,
+     "first": 6976
+    },
+    "Sample3, crossfade, mono f32, moving": {
+     "op": 33,
+     "mode": 128,
+     "still": false,
+     "first": 5666
+    },
+    "Mul": {
+     "op": 7,
+     "mode": 0,
+     "still": true,
+     "first": 250
+    },
+    "MulS": {
+     "op": 8,
+     "mode": 0,
+     "still": true,
+     "first": 212
+    },
+    "Add": {
+     "op": 9,
+     "mode": 0,
+     "still": true,
+     "first": 250
+    },
+    "AddS": {
+     "op": 10,
+     "mode": 0,
+     "still": true,
+     "first": 212
+    },
+    "Pan": {
+     "op": 11,
+     "mode": 0,
+     "still": true,
+     "first": 295
+    },
+    "DelayWrite": {
+     "op": 12,
+     "mode": 0,
+     "still": true,
+     "first": 364
+    },
+    "DelayRead": {
+     "op": 13,
+     "mode": 0,
+     "still": true,
+     "first": 547
+    },
+    "DelayRead, feedback": {
+     "op": 13,
+     "mode": 1,
+     "still": true,
+     "first": 549
+    },
+    "Comb": {
+     "op": 14,
+     "mode": 0,
+     "still": true,
+     "first": 1021
+    },
+    "Allpass": {
+     "op": 15,
+     "mode": 0,
+     "still": true,
+     "first": 926
+    },
+    "Follow": {
+     "op": 16,
+     "mode": 0,
+     "still": true,
+     "first": 505
+    },
+    "Follow, moving": {
+     "op": 16,
+     "mode": 0,
+     "still": false,
+     "first": 511
+    },
+    "KMul": {
+     "op": 17,
+     "mode": 0,
+     "still": true,
+     "first": 77
+    },
+    "KAdd": {
+     "op": 18,
+     "mode": 0,
+     "still": true,
+     "first": 77
+    },
+    "KMtoF, still": {
+     "op": 19,
+     "mode": 0,
+     "still": true,
+     "first": 142
+    },
+    "KMtoF, moving": {
+     "op": 19,
+     "mode": 0,
+     "still": false,
+     "first": 148
+    },
+    "KRatio, still": {
+     "op": 20,
+     "mode": 60,
+     "still": true,
+     "first": 141
+    },
+    "KRatio, moving": {
+     "op": 20,
+     "mode": 60,
+     "still": false,
+     "first": 147
+    },
+    "KSnap": {
+     "op": 21,
+     "mode": 0,
+     "still": true,
+     "first": 71
+    },
+    "KLfo": {
+     "op": 22,
+     "mode": 0,
+     "still": true,
+     "first": 152
+    },
+    "KLfo2": {
+     "op": 28,
+     "mode": 0,
+     "still": true,
+     "first": 154
+    },
+    "OscMod, sine": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4213
+    },
+    "OscMod, sine, phase audio": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4179
+    },
+    "OscMod, sine, feedback": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 4112
+    },
+    "OscMod, triangle": {
+     "op": 29,
+     "mode": 1,
+     "still": true,
+     "first": 2104
+    },
+    "OscMod, saw, 110 Hz": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2139
+    },
+    "OscMod, saw, 4186 Hz": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2199
+    },
+    "OscMod, saw, sync audio": {
+     "op": 29,
+     "mode": 2,
+     "still": true,
+     "first": 2257
+    },
+    "OscMod, sine, sync every other sample": {
+     "op": 29,
+     "mode": 0,
+     "still": true,
+     "first": 5730
+    },
+    "OscMod, pulse, 4186 Hz": {
+     "op": 29,
+     "mode": 3,
+     "still": true,
+     "first": 3073
+    },
+    "OscMod, saw, naive": {
+     "op": 29,
+     "mode": 4,
+     "still": true,
+     "first": 1782
+    },
+    "OscMod, pulse, naive": {
+     "op": 29,
+     "mode": 5,
+     "still": true,
+     "first": 2315
+    },
+    "Math, min, audio and scalar": {
+     "op": 30,
+     "mode": 0,
+     "still": true,
+     "first": 437
+    },
+    "Math, clip, audio": {
+     "op": 30,
+     "mode": 3,
+     "still": true,
+     "first": 640
+    },
+    "Math, floor, audio": {
+     "op": 30,
+     "mode": 4,
+     "still": true,
+     "first": 655
+    },
+    "Math, divide, audio": {
+     "op": 30,
+     "mode": 5,
+     "still": true,
+     "first": 502
+    },
+    "Math, select, audio": {
+     "op": 30,
+     "mode": 7,
+     "still": true,
+     "first": 477
+    },
+    "KMath, divide": {
+     "op": 31,
+     "mode": 5,
+     "still": true,
+     "first": 92
+    },
+    "Shape": {
+     "op": 32,
+     "mode": 0,
+     "still": true,
+     "first": 972
+    }
+   },
+   "clear": 20.58
+  }
+ }
+}

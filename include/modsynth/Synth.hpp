@@ -16,6 +16,7 @@
 
 #include <modsynth/Backend.hpp>
 #include <modsynth/Config.hpp>
+#include <modsynth/Cost.hpp>
 #include <modsynth/Executor.hpp>
 #include <modsynth/Format.hpp>
 #include <modsynth/Kernels.hpp>
@@ -85,6 +86,34 @@ template <class T>
     return {static_cast<u32>(sizeof(T)), static_cast<u32>(alignof(T))};
 }
 
+// What one frame did, which only an engine built with SynthConfig::count_work counts. tools/Bench.py fits what each
+// of these costs on a device, for its Costs table.
+struct Work {
+    u32 segments = 0;        // pieces of the frame dispatched
+    u32 track_segments = 0;  // tracks dispatched, in all of them
+    u32 voice_slots = 0;     // voices looked at, likewise
+    u32 held = 0;            // of those, held voices whose end was looked for
+    u32 idle = 0;            // voices passed over in the audio phase
+    u32 run = 0;             // voices and fades run
+    u32 fades = 0;           // of those, fades
+    u32 slots = 0;           // slots and inserts updated
+    u32 params = 0;          // their parameters looked at
+    u32 moving = 0;          // of those, ones moving
+    u32 inserts = 0;
+    u32 gathers = 0;
+    u32 gather_inputs = 0;
+    u32 mix_registers = 0;                                  // looked at for a ramp
+    u32 glides = 0;                                         // voices looked at for a glide
+    u32 held_notes = 0;                                     // notes a mono or legato track looked at
+    u32 instructions = 0;                                   // instructions the streams ran
+    u32 notes = 0;                                          // notes started
+    u32 note_voices = 0;                                    // voices and fades their tracks have
+    u32 note_params = 0;                                    // parameters their slots have
+    u32 note_bytes = 0;                                     // bytes cleared for them
+    u32 zone_rows = 0;                                      // zone rows their samplers may read
+    std::array<u32, static_cast<u32>(Op::kCount)> steps{};  // steps run, by opcode
+};
+
 struct TapBlock {
     const float* data = nullptr;
     u32 length = 0;
@@ -99,6 +128,8 @@ class Synth {
     static_assert(C.generations == 1 || C.generations == 2, "SynthConfig::generations must be 1 or 2");
     static_assert(std::has_single_bit(C.frame_size) && C.frame_size >= kMinFrameSize && C.frame_size <= kMaxFrameSize,
                   "SynthConfig::frame_size must be a power of two from 8 to 1024, or no image could name it");
+    static_assert(!C.count_work || E::max_workers == 1,
+                  "Work is counted by one thread, so only a serial engine counts it");
 
    public:
     static constexpr u32 frame_size = C.frame_size;
@@ -154,6 +185,120 @@ class Synth {
         const u64 align = layout.region_align;
         const auto rounded = [align](u64 n) { return (n + align - 1) / align * align; };  // As the constructor splits
         return {rounded(layout.generation + fast.used()), rounded(bulk.used())};
+    }
+
+    // The most one frame of this Program can cost a target with these costs and this layout, in its cycles: every voice
+    // and fade slot sounding, each step on its dearest path, and each stream's busiest frame. A device refuses a
+    // Program over its budget, so whatever it plays fits every frame. If `voice` is given, it gets what one more
+    // sounding voice costs on each track, for saying how many fit, and `parts` gets where the cycles go.
+    [[nodiscard]] static u64 frame_cost(const ChunkTable& chunks, u64 program, float rate, const Costs& k,
+                                        const Layout& layout = Synth::layout(), u64* voice = nullptr,
+                                        CostParts* parts = nullptr) {
+        const ChunkRef* c = chunks.find(program, ChunkKind::Program);
+        ProgramView p;
+        if (!c || !parse_program({c->data, c->size}, p)) return ~u64{0};
+        const ProgramHeader& h = p.h;
+        const u64 window = detail::frame_ticks(p, rate, layout.frame_size);
+        const detail::Run conductor = detail::densest(p, h.conductor_begin, h.conductor_length, window);
+        const u64 segments = 1 + conductor.instructions;
+        const bool plays = (h.features & kFeaturePlayModes) != 0, steals = (h.features & kFeatureStealFades) != 0;
+
+        // What a patch's steps cost each frame, and what more they cost in the frame a note starts, when nothing they
+        // worked out from their inputs is kept yet. A sampler reads its zones then too, or at the release in release
+        // mode, which every voice can reach in the same frame.
+        struct Steps {
+            u64 each = 0, starting = 0;
+        };
+        const auto steps = [&](const PatchView& v, u32 first, u32 count) {
+            Steps s;
+            for (u32 i = first; i < first + count; ++i) {
+                const WireStep w = v.step(i);
+                const OpSignature sig = op_signature(static_cast<Op>(w.op));
+                bool constant = true;
+                for (u32 a = 0; a < sig.ins; ++a) {
+                    const Bank bank = operand_bank(w.in[a]);
+                    constant = constant && (bank == Bank::Buffer || bank == Bank::Const);
+                }
+                u8 mode = w.mode;
+                if (w.op == static_cast<u8>(Op::Sample) || w.op == static_cast<u8>(Op::Sample2) ||
+                    w.op == static_cast<u8>(Op::Sample3)) {
+                    // Priced as mono if every recording the patch has is, as any of them can be a zone's
+                    bool mono = true;
+                    for (u32 r = 0; r < v.h.refs; ++r) {
+                        const ChunkRef* a = chunks.find(v.ref(r), ChunkKind::Asset);
+                        mono = mono && (!a || modsynth::load<AssetHeader>(a->data).channels == 1);
+                    }
+                    if (mono) mode |= kMonoAssets;
+                    if (w.op == static_cast<u8>(Op::Sample3) && w.resource < v.h.refs) {
+                        const ChunkRef* zones = chunks.find(v.ref(w.resource), ChunkKind::Table);
+                        if (zones && !detail::zones_meet(zones->data)) mode |= kOneZone;
+                    }
+                }
+                const u64 price = k.of(w.op, mode, constant);
+                const u64 first = w.op < k.first.size() ? k.first[w.op] : 0;
+                s.each += price;
+                s.starting += std::max<u64>(first, k.of(w.op, mode, false)) - price;
+                const bool zones = w.op == static_cast<u8>(Op::Sample2) || w.op == static_cast<u8>(Op::Sample3);
+                if (zones && w.resource < v.h.refs) {
+                    const ChunkRef* t = chunks.find(v.ref(w.resource), ChunkKind::Table);
+                    const u32 fields = w.op == static_cast<u8>(Op::Sample3) ? kZone3Fields : kZoneFields;
+                    const u64 rows = t ? modsynth::load<TableHeader>(t->data).length / fields * u64{k.zone_row} : 0;
+                    const bool on_release = w.op == static_cast<u8>(Op::Sample3) && (w.mode & kSampleRelease) != 0;
+                    (on_release ? s.each : s.starting) += rows;
+                }
+            }
+            return s;
+        };
+        const auto slot = [&](const PatchView& v) {
+            return k.slot + static_cast<u64>(v.h.params) * k.param + steps(v, 0, v.h.control_steps).each;
+        };
+
+        CostParts out;
+        out.fixed = k.frame + (segments - 1) * k.segment;
+        out.events = conductor.instructions * k.instruction;
+        // An instruction that sets an insert's parameter looks through that insert's, and one that sets a global
+        // through the Program's globals.
+        u64 insert_params = 0;
+        for (u32 i = 0; i < h.inserts; ++i) {
+            insert_params = std::max<u64>(insert_params, patch_view(chunks, p.patch(p.insert(i).patch)).h.params);
+        }
+        for (u32 t = 0; t < h.tracks; ++t) {
+            const TrackDesc d = p.track(t);
+            const u64 voices = d.voices, fades = steals ? fade_slots(d.voices) : 0, held = plays ? kMaxHeldNotes : 0;
+            u64 voice_steps = 0, starting = 0, params = 0, bytes = 0;
+            for (u32 s = 0; s < d.slot_count; ++s) {
+                const PatchView v = patch_view(chunks, p.patch(p.slot(d.slot_begin + s)));
+                out.fixed += slot(v);
+                const Steps each = steps(v, v.h.control_steps, v.h.voice_steps);
+                voice_steps = std::max(voice_steps, each.each);
+                starting = std::max(starting, each.starting);
+                params += v.h.params;
+                bytes = std::max<u64>(bytes, measure_patch(v, rate, layout).voice_state + 4ull * v.h.voice_scalars);
+            }
+            const u64 sounding = k.run + voice_steps;
+            out.fixed += segments * (k.track + held * k.held);
+            out.voices += segments * voices * k.voice + (voices + fades) * sounding + fades * k.fade +
+                          (plays ? voices * k.glide : 0);
+            const detail::Run run = detail::densest(p, d.stream_begin, d.stream_length, window);
+            out.events += run.instructions * (k.instruction + held * k.held);
+            out.events += run.notes * (k.note + (voices + fades) * k.note_voice + params * k.note_param +
+                                       (bytes + 63) / 64 * k.note_block + starting);
+            out.events += run.params * ((params + insert_params + h.globals) * k.note_param + voices * k.note_voice);
+            if (voice) voice[t] = sounding + segments * k.voice + (plays ? k.glide : 0);
+        }
+        for (u32 i = 0; i < h.inserts; ++i) {
+            const PatchView v = patch_view(chunks, p.patch(p.insert(i).patch));
+            const Steps each = steps(v, v.h.control_steps, v.h.voice_steps);
+            out.inserts += k.insert + slot(v) + each.each + each.starting;  // An insert starts with the Program
+        }
+        for (u32 i = 0; i < h.mix_steps; ++i) {
+            const MixStep m = p.mix_step(i);
+            if (m.op == static_cast<u8>(MixOp::Gather))
+                out.mixer += k.gather + static_cast<u64>(m.src) * k.gather_input;
+        }
+        if ((h.features & kFeatureMixRamps) != 0) out.mixer += static_cast<u64>(h.mix_regs) * k.mix_register;
+        if (parts) *parts = out;
+        return out.total();
     }
 
     // This engine's own sizes.
@@ -268,6 +413,7 @@ class Synth {
     }
 
     void render(const std::array<float*, C.channels>& out) {
+        count([](Work& w) { w = {}; });
         if (load_phase_ == LoadPhase::Ready) commit();
 
         Generation* g = live_;
@@ -318,6 +464,13 @@ class Synth {
         for (u32 t = 0; t < live_->program.h.tracks; ++t) n += live_->tracks[t].guard_trips;
         for (u32 i = 0; i < live_->program.h.inserts; ++i) n += live_->inserts[i].guard_trips;
         return n;
+    }
+
+    // What the last frame did. Only an engine built to count it has this.
+    [[nodiscard]] const Work& work() const
+        requires(C.count_work)
+    {
+        return work_;
     }
 
     // A completed block for this tap, if one is waiting. It stays valid until the next render().
@@ -1246,10 +1399,16 @@ class Synth {
 
     void run_control(Generation& g) {
         transport(g);
-        if (g.mix_ramps) update_mix_ramps(g);
+        if (g.mix_ramps) {
+            update_mix_ramps(g);
+            count([&](Work& w) { w.mix_registers += g.program.h.mix_regs; });
+        }
         for (u32 t = 0; t < g.program.h.tracks; ++t) {
             Track& track = g.tracks[t];
-            if (track.glides) update_glides(track);
+            if (track.glides) {
+                update_glides(track);
+                count([&](Work& w) { w.glides += track.desc.voices; });
+            }
             for (u32 s = 0; s < track.desc.slot_count; ++s) update_slot(g, track.slots[s]);
         }
         for (u32 i = 0; i < g.program.h.inserts; ++i) update_slot(g, g.inserts[i].slot);
@@ -1279,9 +1438,14 @@ class Synth {
 
     void update_slot(Generation& g, Slot& slot) {
         const PatchView& v = slot.binding->view;
+        count([&](Work& w) {
+            ++w.slots;
+            w.params += v.h.params;
+        });
         for (u32 i = 0; i < v.h.params; ++i) {
             ParamState& p = slot.params[i];
             if (p.frames == 0) continue;
+            count([](Work& w) { ++w.moving; });
             p.value = --p.frames == 0 ? p.target : p.value + p.step;
             const ParamDesc d = v.param(i);
             if (d.scope == static_cast<u8>(ParamScope::Track)) slot.track[d.reg] = p.value;
@@ -1291,6 +1455,7 @@ class Synth {
         c.state = slot.state;
         c.stopped = !g.clock.playing;
         K::run(slot.binding->control, v.h.control_steps, c);
+        count_steps(slot.binding->control, v.h.control_steps);
     }
 
     void drain_events(Generation* g) {
@@ -1381,13 +1546,21 @@ class Synth {
     [[nodiscard]] u64 ticks_denominator(const Clock& k) const { return static_cast<u64>(int_rate_) * k.uspq; }
     [[nodiscard]] static u64 samples_unit(const Generation& g) { return 1000000ull * g.program.h.ppq; }
 
+    // How many ticks past the clock a target can be and still come within `limit` samples. A loop over many targets
+    // works this out once, which saves a 64-bit division for each.
+    [[nodiscard]] u64 horizon(const Generation& g, u32 limit) const {
+        return (samples_unit(g) * limit) / ticks_denominator(g.clock) + 2;
+    }
+
     // Samples until tick T, rounded up. Returns at least `limit` when T is that far away or further.
     [[nodiscard]] u32 samples_to(const Generation& g, u32 target, u32 limit) const {
+        return samples_to(g, target, limit, horizon(g, limit));
+    }
+    [[nodiscard]] u32 samples_to(const Generation& g, u32 target, u32 limit, u64 reach) const {
         const Clock& k = g.clock;
         if (target <= k.tick) return 0;
+        if (target - k.tick > reach) return limit;
         const u64 d = ticks_denominator(k), unit = samples_unit(g);
-        const u64 horizon = (unit * limit) / d + 2;
-        if (target - k.tick > horizon) return limit;
         const u64 units = static_cast<u64>(target - k.tick) * d - k.remainder;
         const u64 samples = (units + unit - 1) / unit;
         return samples >= limit ? limit : static_cast<u32>(samples);
@@ -1413,7 +1586,10 @@ class Synth {
             dispatch(g, position, segment);
             advance_clock(g, segment);
             position += segment;
-            while (g.conductor.tick <= k.tick && g.conductor.tick != kNoTick) step_conductor(g);
+            while (g.conductor.tick <= k.tick && g.conductor.tick != kNoTick) {
+                step_conductor(g);
+                count([](Work& w) { ++w.instructions; });
+            }
             if (k.loop_end != 0 && !wrapped && k.tick >= k.loop_end) {
                 wrapped = true;
                 release_all(g, position < N ? position : N - 1);
@@ -1424,31 +1600,48 @@ class Synth {
 
     void dispatch(Generation& g, u32 base, u32 segment) {
         if (segment == 0) return;
+        // Worked out once, the first time a target needs it. Nothing here moves the clock.
+        u64 reach = 0;
+        bool reached = false;
+        const auto ticks_within = [&] {
+            if (!reached) reach = horizon(g, segment);
+            reached = true;
+            return reach;
+        };
+        count([&](Work& w) {
+            ++w.segments;
+            w.track_segments += g.program.h.tracks;
+        });
         for (u32 t = 0; t < g.program.h.tracks; ++t) {
             Track& track = g.tracks[t];
+            count([&](Work& w) { w.voice_slots += track.desc.voices; });
             for (u32 v = 0; v < track.desc.voices; ++v) {
                 Voice& voice = track.voices[v];
                 if (v == track.line || !voice.active || !voice.held || voice.off_tick == kNoTick) continue;
-                const u32 s = samples_to(g, voice.off_tick, segment);
+                count([](Work& w) { ++w.held; });
+                const u32 s = samples_to(g, voice.off_tick, segment, ticks_within());
                 if (s < segment) release(voice, base + s);
             }
             // In time order, because on a line what a note does depends on what is held when it starts. At the same
             // sample the end goes first, so a note that only touches the next one is not an overlap.
             for (;;) {
                 u32 first_off = 0, off = segment;
+                count([&](Work& w) { w.held_notes += track.held_count; });
                 for (u32 i = 0; i < track.held_count; ++i) {
                     if (track.held[i].off_tick == kNoTick) continue;
-                    const u32 s = samples_to(g, track.held[i].off_tick, segment);
+                    const u32 s = samples_to(g, track.held[i].off_tick, segment, ticks_within());
                     if (s < off) {
                         off = s;
                         first_off = i;
                     }
                 }
-                const u32 next = track.cursor.tick == kNoTick ? segment : samples_to(g, track.cursor.tick, segment);
+                const u32 next =
+                    track.cursor.tick == kNoTick ? segment : samples_to(g, track.cursor.tick, segment, ticks_within());
                 if (off < segment && off <= next) {
                     held_note_off(g, track, first_off, base + off);
                 } else if (next < segment) {
                     step_track(g, track, base + next, false, 0);
+                    count([](Work& w) { ++w.instructions; });
                 } else {
                     break;
                 }
@@ -1813,6 +2006,20 @@ class Synth {
         v.ordinal = ordinal;
         const u32 slot = t.slot < t.desc.slot_count ? t.slot : 0;
         init_instance(*t.slots[slot].binding, t.slots[slot], v, 0);
+        count([&](Work& w) {
+            const Binding& b = *t.slots[slot].binding;
+            ++w.notes;
+            w.note_voices += t.desc.voices + t.fade_count;
+            w.note_params += b.view.h.params;
+            w.note_bytes += 4 * b.view.h.voice_scalars + b.voice_state;
+            for (u32 i = 0; i < b.view.h.voice_steps; ++i) {
+                const DecodedStep& s = b.voice[i];
+                if (s.op == static_cast<u8>(Op::Sample2))
+                    w.zone_rows += b.resources[s.resource].table.length / kZoneFields;
+                if (s.op == static_cast<u8>(Op::Sample3))
+                    w.zone_rows += b.resources[s.resource].table.length / kZone3Fields;
+            }
+        });
         v.scalars[kScalarNote] = static_cast<float>(note);
         v.scalars[kScalarVelocity] = static_cast<float>(velocity) / 127.0f;
         v.scalars[kScalarGate] = 1.0f;
@@ -1957,7 +2164,10 @@ class Synth {
         }
         for (u32 n = 0; n < t.desc.voices; ++n) {
             Voice& v = t.voices[n];
-            if (!v.active) continue;
+            if (!v.active) {
+                count([](Work& w) { ++w.idle; });
+                continue;
+            }
             const Slot& slot = t.slots[v.slot];
             const Binding& b = *slot.binding;
             RunContext c = context(g, b, slot, &v, scratch);
@@ -1977,6 +2187,8 @@ class Synth {
             } else {
                 K::run(b.voice, b.view.h.voice_steps, c);
             }
+            count([](Work& w) { ++w.run; });
+            count_steps(b.voice, b.view.h.voice_steps);
 
             const float* left = scratch + operand_index(b.view.h.out_left) * N;
             const float* right = scratch + operand_index(b.view.h.out_right) * N;
@@ -2012,6 +2224,11 @@ class Synth {
         c.ordinal = v.ordinal;
         c.seed = (static_cast<u32>(t.desc.id) << 16) ^ (f.index << 8) ^ v.age;
         K::run(b.voice, b.view.h.voice_steps, c);
+        count([](Work& w) {
+            ++w.run;
+            ++w.fades;
+        });
+        count_steps(b.voice, b.view.h.voice_steps);
         v.gate = {};
         float* left = scratch + operand_index(b.view.h.out_left) * N;
         float* right = scratch + operand_index(b.view.h.out_right) * N;
@@ -2068,6 +2285,8 @@ class Synth {
         c.state = i.instance.state;
         c.lines = reinterpret_cast<DelayLine*>(i.instance.state);
         K::run(b.voice, v.h.voice_steps, c);
+        count([](Work& w) { ++w.inserts; });
+        count_steps(b.voice, v.h.voice_steps);
 
         const float* left = scratch + operand_index(v.h.out_left) * N;
         const float* right = scratch + operand_index(v.h.out_right) * N;
@@ -2083,6 +2302,10 @@ class Synth {
     }
 
     void gather(Generation& g, const MixStep& m) {
+        count([&](Work& w) {
+            ++w.gathers;
+            w.gather_inputs += m.src;
+        });
         for (u32 ch = 0; ch < Ch; ++ch) B::fill(0.0f, bus(g, m.dst, ch), N);
         for (u32 k = 0; k < m.src; ++k) {
             const GatherInput in = g.program.gather_input(m.a + k);
@@ -2226,6 +2449,19 @@ class Synth {
 
     struct NoTaps {};
     [[no_unique_address]] std::conditional_t<(C.tap_slots > 0), std::array<Tap, C.tap_slots>, NoTaps> taps_{};
+    struct NoWork {};
+    [[no_unique_address]] std::conditional_t<C.count_work, Work, NoWork> work_{};
+
+    // Runs `f` on the counts, in an engine that keeps them, and compiles to nothing in any other.
+    template <class F>
+    void count(F&& f) {
+        if constexpr (C.count_work) f(work_);
+    }
+    void count_steps(const DecodedStep* steps, u32 n) {
+        if constexpr (C.count_work) {
+            for (u32 i = 0; i < n; ++i) ++work_.steps[steps[i].op];
+        }
+    }
 };
 
 }  // namespace modsynth

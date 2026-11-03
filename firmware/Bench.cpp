@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include <modsynth/Modsynth.hpp>
 #ifdef MODSYNTH_CMSIS
@@ -128,14 +129,40 @@ namespace {
 void measure_kernels() {
     float keep = 0.0f;
     for (const KernelCase& k : kKernelCases) {
+        g_rig.begin(k, false);
+        const std::uint32_t cold = ticks();
+        g_rig.frame();
+        const u64 first = instructions(since(cold));  // the frame a note starts in
+        keep += g_rig.result();
         g_rig.begin(k);
         const std::uint32_t from = ticks();
         for (u32 f = 0; f < kKernelFrames; ++f) g_rig.frame();
         const std::uint32_t elapsed = since(from);
         keep += g_rig.result();
-        print_row("kernel", k.name, {instructions(u64{elapsed} * 100) / kKernelFrames});  // Hundredths, per frame
+        // Its op and mode, whether nothing it reads once a frame moves, its first frame, and hundredths of instructions
+        // a frame after that A sampler's mode gets kMonoAssets when it plays only mono recordings, and a Sample3's
+        // kOneZone when it plays one, as frame_cost() looks them up.
+        const bool still = k.moving < 0 && k.wobble == 0;
+        const bool mono = k.recording == Recording::MonoI16 || k.recording == Recording::MonoF32;
+        const bool one_zone = k.op == Op::Sample3 && k.rows == 1;
+        print_row("kernel", k.name,
+                  {static_cast<u64>(k.op), k.mode | (mono ? kMonoAssets : 0u) | (one_zone ? kOneZone : 0u), still,
+                   first, instructions(u64{elapsed} * 100) / kKernelFrames});
     }
     if (keep != keep) print("a kernel made a NaN\n");  // Reading the results is what keeps GCC from deleting the work
+}
+
+// What clearing memory costs, which a note pays for its voice's state as it starts.
+void measure_clear() {
+    alignas(8) static std::byte block[4096];
+    constexpr u32 kTimes = 16;
+    const std::uint32_t from = ticks();
+    for (u32 i = 0; i < kTimes; ++i) {
+        std::memset(block, 0, sizeof block);
+        __asm volatile("" : : "r"(block) : "memory");  // so the stores happen every time
+    }
+    const std::uint32_t elapsed = since(from);
+    print_row("clear", "64 bytes", {instructions(u64{elapsed} * 100) / (kTimes * sizeof block / 64)});
 }
 
 bool measure(const Recipe& r) {
@@ -198,6 +225,7 @@ int main() {
     calibrate();
     print_row("engine", "bytes", {sizeof(Engine)});
     measure_kernels();
+    measure_clear();
     bool ok = true;
     for (const Recipe& r : kRecipes) ok = measure(r) && ok;
     finish(ok);

@@ -27,6 +27,7 @@
 #include <modsynth/Config.hpp>
 #include <modsynth/Format.hpp>
 #include <modsynth/Loader.hpp>
+#include <modsynth/Profile.hpp>
 #include <modsynth/Synth.hpp>
 
 namespace modsynth::compiler {
@@ -3088,6 +3089,7 @@ struct Target {
     u64 fast = 0, bulk = 0, image_bytes = 0;
     std::set<u8> opcodes;
     Layout layout;
+    std::optional<Costs> cost;  // only a device that refuses what it can't keep up with has one
 };
 
 inline bool is_natural(const json& v) {
@@ -3184,7 +3186,62 @@ inline Target read_target(const json& profile) {
             throw CompileError("target", "\"state_size\" has no size for an opcode the target runs");
         }
     }
+    if (profile.contains("cost")) {
+        const json& c = profile.at("cost");
+        Costs k;
+        each_cost(k, [&](const char* key, u32& v) { v = small(c, key); });
+        const auto price = [](const json& v) {
+            if (!is_natural(v) || v.get<u64>() > 0xFFFFFFFFu) {
+                throw CompileError("target", "a step's cost must be a whole number");
+            }
+            return v.get<u32>();
+        };
+        for (const auto& [key, prices] :
+             {std::pair{"step", &k.step}, std::pair{"still", &k.still}, std::pair{"first", &k.first}}) {
+            const json& list = field(c, key);
+            if (!list.is_array()) throw CompileError("target", std::string("\"") + key + "\" must be a list");
+            for (std::size_t i = 0; i < list.size() && i < prices->size(); ++i) (*prices)[i] = price(list[i]);
+            for (const u8 op : t.opcodes) {
+                if (op >= list.size() && op < prices->size()) {
+                    throw CompileError("target",
+                                       std::string("\"") + key + "\" has no cost for an opcode the target runs");
+                }
+            }
+        }
+        const json& modes = field(c, "modes");
+        if (!modes.is_array() || modes.size() > k.modes.size()) {
+            throw CompileError("target", "\"modes\" must be a list of at most " + std::to_string(k.modes.size()));
+        }
+        for (std::size_t i = 0; i < modes.size(); ++i) {
+            const json& m = modes[i];
+            if (!m.is_array() || m.size() != 4 || price(m[0]) > 255 || price(m[1]) > 255) {
+                throw CompileError("target", "a mode's cost is [op, mode, moving, still]");
+            }
+            k.modes[i] = {static_cast<u8>(price(m[0])), static_cast<u8>(price(m[1])), price(m[2]), price(m[3])};
+        }
+        t.cost = k;
+    }
     return t;
+}
+
+// Why a Program is over a target's budget, with how many voices of each track would fit if the others stayed.
+inline std::string over_budget(const ChunkTable& table, u64 program, u64 cycles, const Costs& k,
+                               const std::vector<u64>& voice) {
+    const ChunkRef* c = table.find(program, ChunkKind::Program);
+    ProgramView p;
+    (void)parse_program({c->data, c->size}, p);  // the loader checked it
+    std::string text = "could need " + std::to_string(cycles) + " cycles in a frame, and this target has " +
+                       std::to_string(k.budget) + ". Every voice sounding at once is counted.";
+    const u64 over = cycles - k.budget;
+    for (u32 t = 0; t < p.h.tracks; ++t) {
+        const u32 voices = p.track(t).voices;
+        if (voice[t] == 0) continue;
+        const u64 cut = (over + voice[t] - 1) / voice[t];
+        text += " Track " + std::to_string(p.track(t).id) + " has " + std::to_string(voices) + " voices at " +
+                std::to_string(voice[t]) + " cycles each";
+        text += cut < voices ? ", and fits with " + std::to_string(voices - cut) + "." : ".";
+    }
+    return text;
 }
 
 // Fails what a device would refuse, checked as it would load the image, and otherwise says how much of it the image
@@ -3230,6 +3287,7 @@ inline json check_target(const Target& t, const std::vector<std::byte>& bytes, c
     }
 
     MemorySizes most;
+    u64 most_cycles = 0;
     json programs = json::array();
     for (u32 i = 0; i < loader.programs(); ++i) {
         const MemorySizes need = Synth<>::bytes_required(table, loader.program_hash(i), t.rate, t.layout);
@@ -3240,16 +3298,33 @@ inline json check_target(const Target& t, const std::vector<std::byte>& bytes, c
             fail(name + " needs " + bytes_text(fast ? need.fast : need.bulk) + " of " + (fast ? "fast" : "bulk") +
                  " memory, and this target has " + bytes_text(fast ? t.fast : t.bulk));
         }
-        programs.push_back({{"fast", need.fast}, {"bulk", need.bulk}});
+        json entry = {{"fast", need.fast}, {"bulk", need.bulk}};
+        if (t.cost) {
+            const u64 program = loader.program_hash(i);
+            std::vector<u64> voice(kMaxTracks);
+            CostParts parts;
+            const u64 cycles = Synth<>::frame_cost(table, program, t.rate, *t.cost, t.layout, voice.data(), &parts);
+            if (cycles > t.cost->budget) fail(name + " " + over_budget(table, program, cycles, *t.cost, voice));
+            entry["cycles"] = cycles;
+            entry["cycles_by"] = {{"fixed", parts.fixed},
+                                  {"voices", parts.voices},
+                                  {"events", parts.events},
+                                  {"inserts", parts.inserts},
+                                  {"mixer", parts.mixer}};
+            most_cycles = std::max(most_cycles, cycles);
+        }
+        programs.push_back(std::move(entry));
         most.fast = std::max(most.fast, need.fast);
         most.bulk = std::max(most.bulk, need.bulk);
     }
-    return {{"name", t.name},
-            {"image_bytes", {bytes.size(), t.image_bytes}},
-            {"chunks", {table.size(), t.chunks}},
-            {"fast", {most.fast, t.fast}},
-            {"bulk", {most.bulk, t.bulk}},
-            {"programs", std::move(programs)}};
+    json report = {{"name", t.name},
+                   {"image_bytes", {bytes.size(), t.image_bytes}},
+                   {"chunks", {table.size(), t.chunks}},
+                   {"fast", {most.fast, t.fast}},
+                   {"bulk", {most.bulk, t.bulk}},
+                   {"programs", std::move(programs)}};
+    if (t.cost) report["cycles"] = {most_cycles, t.cost->budget};
+    return report;
 }
 
 }  // namespace detail

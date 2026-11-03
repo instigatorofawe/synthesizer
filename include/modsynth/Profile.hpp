@@ -17,9 +17,36 @@ struct ProfileInfo {
     u64 rate_millihertz;  // integers only, since this is written in a constant expression
     u64 fast;             // what one generation has
     u64 bulk;
-    u64 image_bytes;  // the largest image it stores
-    u32 chunks;       // how many chunks its table holds
+    u64 image_bytes;              // the largest image it stores
+    u32 chunks;                   // how many chunks its table holds
+    const Costs* cost = nullptr;  // what its frames cost, for a device that refuses a Program it can't keep up with
 };
+
+// Each term of a profile's "cost" but its steps, by name, in Costs' own order. `K` is Costs, or const Costs.
+template <class K, class F>
+constexpr void each_cost(K& k, F&& f) {
+    f("budget", k.budget);
+    f("frame", k.frame);
+    f("segment", k.segment);
+    f("track", k.track);
+    f("voice", k.voice);
+    f("run", k.run);
+    f("fade", k.fade);
+    f("slot", k.slot);
+    f("param", k.param);
+    f("insert", k.insert);
+    f("gather", k.gather);
+    f("gather_input", k.gather_input);
+    f("mix_register", k.mix_register);
+    f("glide", k.glide);
+    f("held", k.held);
+    f("instruction", k.instruction);
+    f("note", k.note);
+    f("note_voice", k.note_voice);
+    f("note_param", k.note_param);
+    f("note_block", k.note_block);
+    f("zone_row", k.zone_row);
+}
 
 // JSON written in a constant expression, so a firmware carries it in a section that its build extracts.
 struct ProfileText {
@@ -77,7 +104,31 @@ constexpr ProfileText write_profile(const ProfileInfo& info) {
     t.size_pair("mix_ramp", l.mix_ramp).size_pair("task", l.task);
     t.raw(",\"state_size\":[");
     for (u32 i = 0; i < l.state_size.size(); ++i) t.raw(i ? "," : "").number(l.state_size[i]);
-    t.raw("]}}\n");
+    t.raw("]}");
+    if (info.cost) {
+        t.raw(",\"cost\":{");
+        bool first = true;
+        each_cost(*info.cost, [&](const char* key, const u32& v) {
+            t.raw(first ? "\"" : ",\"").raw(key).raw("\":").number(v);
+            first = false;
+        });
+        t.raw(",\"step\":[");
+        for (u32 i = 0; i < info.cost->step.size(); ++i) t.raw(i ? "," : "").number(info.cost->step[i]);
+        t.raw("],\"still\":[");
+        for (u32 i = 0; i < info.cost->still.size(); ++i) t.raw(i ? "," : "").number(info.cost->still[i]);
+        t.raw("],\"first\":[");
+        for (u32 i = 0; i < info.cost->first.size(); ++i) t.raw(i ? "," : "").number(info.cost->first[i]);
+        t.raw("],\"modes\":[");
+        bool first_mode = true;
+        for (const ModeCost& m : info.cost->modes) {
+            if (m.op == 0) continue;
+            t.raw(first_mode ? "[" : ",[").number(m.op).raw(",").number(m.mode).raw(",").number(m.moving);
+            t.raw(",").number(m.still).raw("]");
+            first_mode = false;
+        }
+        t.raw("]}");
+    }
+    t.raw("}\n");
     return t;
 }
 

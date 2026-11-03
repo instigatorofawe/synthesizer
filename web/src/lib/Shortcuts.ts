@@ -8,7 +8,7 @@
 // Where a key works. Song holds the arrangement, the roll and step entry, and Patch holds the graph, so a key bound in one
 // works in what it holds as well. Step entry is a mode of the roll that takes over some of its keys, so the two can share,
 // and while it is on its keys come before the roll's and the arrangement's.
-export type Scope = 'everywhere' | 'song' | 'patch' | 'roll' | 'arrangement' | 'graph' | 'step';
+export type Scope = 'everywhere' | 'song' | 'patch' | 'roll' | 'arrangement' | 'graph' | 'step' | 'tempo' | 'head';
 
 export const SCOPES: Record<Scope, { name: string; within: Scope | null }> = {
 	everywhere: { name: 'Everywhere', within: null },
@@ -17,6 +17,8 @@ export const SCOPES: Record<Scope, { name: string; within: Scope | null }> = {
 	roll: { name: 'Piano roll', within: 'song' },
 	arrangement: { name: 'Arrangement', within: 'song' },
 	step: { name: 'Step entry', within: 'song' },
+	tempo: { name: 'Tempo lane', within: 'song' },
+	head: { name: 'Track heads', within: 'song' },
 	graph: { name: 'Graph', within: 'patch' }
 };
 
@@ -93,6 +95,32 @@ export const SHORTCUTS = [
 		scope: 'arrangement',
 		description: 'Take the chosen clip off its track'
 	},
+
+	// A change chosen in the Tempo lane. Each is one step to undo.
+	{ id: 'tempo.delete', code: 'Delete', scope: 'tempo', description: 'Delete the chosen tempo change' },
+	{ id: 'tempo.backspace', code: 'Backspace', scope: 'tempo', description: 'Delete the chosen tempo change' },
+	{ id: 'tempo.up', code: 'ArrowUp', scope: 'tempo', description: 'The chosen tempo change 1 BPM faster' },
+	{ id: 'tempo.down', code: 'ArrowDown', scope: 'tempo', description: 'The chosen tempo change 1 BPM slower' },
+	{
+		id: 'tempo.up-ten',
+		code: 'ArrowUp',
+		shift: true,
+		scope: 'tempo',
+		description: 'The chosen tempo change 10 BPM faster'
+	},
+	{
+		id: 'tempo.down-ten',
+		code: 'ArrowDown',
+		shift: true,
+		scope: 'tempo',
+		description: 'The chosen tempo change 10 BPM slower'
+	},
+
+	// A track head's fader or pan, with focus, as a slider takes them.
+	{ id: 'head.up', code: 'ArrowUp', scope: 'head', description: 'The fader up a step, or the pan a step right' },
+	{ id: 'head.right', code: 'ArrowRight', scope: 'head', description: 'The fader up a step, or the pan a step right' },
+	{ id: 'head.down', code: 'ArrowDown', scope: 'head', description: 'The fader down a step, or the pan a step left' },
+	{ id: 'head.left', code: 'ArrowLeft', scope: 'head', description: 'The fader down a step, or the pan a step left' },
 
 	{ id: 'graph.delete', code: 'Delete', scope: 'graph', description: 'Delete the chosen nodes, or the chosen wire' },
 	{

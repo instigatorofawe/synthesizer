@@ -62,8 +62,10 @@ import {
 	resizeNotes,
 	routeGains,
 	curveAt,
+	decibels,
 	faderGain,
 	faderPosition,
+	panText,
 	humanize,
 	placementSpan,
 	quantize,
@@ -980,6 +982,17 @@ describe('the gaps the pieces found', () => {
 		expect(faderPosition(1)).toBeCloseTo(0.794, 3);
 		expect(20 * Math.log10(faderGain(0.368))).toBeCloseTo(-20, 0);
 		for (const gain of [0, 0.01, 0.5, 1, 2, 3]) expect(faderGain(faderPosition(gain))).toBeCloseTo(gain, 12);
+	});
+
+	it('read a fader in decibels and a pan from the centre, as the Mixer and the track heads show them', () => {
+		expect(decibels(1)).toBe('0.0 dB');
+		expect(decibels(0.8)).toBe('-1.9 dB');
+		expect(decibels(2)).toBe('6.0 dB');
+		expect(decibels(0)).toBe('silent');
+		expect(panText(0)).toBe('C');
+		expect(panText(0.004)).toBe('C');
+		expect(panText(-0.2)).toBe('L20');
+		expect(panText(1)).toBe('R100');
 	});
 
 	it("fade a new track's stolen voices, and bring a slur's velocity only in legato", () => {

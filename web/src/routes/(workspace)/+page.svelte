@@ -1252,9 +1252,12 @@
 	let typedPosition = $state<string | null>(null);
 	let typedTempo = $state<string | null>(null);
 	const positionText = $derived(typedPosition ?? position(tick, ppq));
-	const tempoText = $derived(typedTempo ?? (songDoc ? String(shownTempo(songDoc.tempo, tick, false)) : ''));
-	const tempoTitle = $derived(songDoc ? tempoWords(songDoc.tempo, tick, ppq) : 'The tempo, once a song is open');
-	const glide = $derived(songDoc ? gliding(songDoc.tempo, tick) : null);
+	// While the Tempo lane is dragged, the field follows the drag, and the song compiles once it is let go.
+	let draggedTempo = $state.raw<Timeline['tempo'] | null>(null);
+	const heardTempo = $derived(draggedTempo ?? songDoc?.tempo);
+	const tempoText = $derived(typedTempo ?? (heardTempo ? String(shownTempo(heardTempo, tick, false)) : ''));
+	const tempoTitle = $derived(heardTempo ? tempoWords(heardTempo, tick, ppq) : 'The tempo, once a song is open');
+	const glide = $derived(heardTempo ? gliding(heardTempo, tick) : null);
 
 	// Enter or leaving the field sends what was typed, and Esc puts back what was there.
 	function fieldKeys(event: KeyboardEvent & { currentTarget: HTMLInputElement }, cancel: () => void) {
@@ -1686,6 +1689,7 @@
 							onnewpatch={newPatchForTrack}
 							onwriting={(writing) => (stepWriting = writing)}
 							onsolo={toggleSolo}
+							ontempo={(tempo) => (draggedTempo = tempo)}
 							onkey={(note, on) => started && soundNote(note, on)}
 							onsay={say}
 							bind:velocity

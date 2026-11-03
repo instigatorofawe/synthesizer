@@ -85,6 +85,7 @@
 		onnewpatch,
 		onwriting = () => {},
 		onsolo = () => {},
+		ontempo = () => {},
 		onkey
 	}: {
 		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
@@ -113,6 +114,7 @@
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
+		ontempo?: (tempo: Timeline['tempo'] | null) => void; // The tempo while the Tempo lane is dragged, then null
 		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, once audio has started
 	} = $props();
 
@@ -397,6 +399,16 @@
 		commit(next);
 	}
 
+	// A track head's fader or pan, as the Mixer's: the mix registers follow a drag, and the song takes the value let go of,
+	// which is one step of its undo.
+	function mixed(id: number, change: { gain?: number; pan?: number }, done: boolean) {
+		if (readonly) return;
+		const next = setTrack(doc, id, change);
+		const writes = program ? mixWrites(soloed(next, solo), program, trackKey(id)) : [];
+		for (const { register, value } of writes) engine.setMix(register, value);
+		if (done) commit(next);
+	}
+
 	function deleteTrack() {
 		if (selection.track === null) return;
 		commit(removeTrack(doc, selection.track));
@@ -604,6 +616,7 @@
 	<!-- The arrangement and the inspector take their places in the editor's grid: see `.top` below. -->
 	<div class="top">
 		<Arrangement
+			{id}
 			{doc}
 			{selection}
 			{barWidth}
@@ -631,6 +644,8 @@
 			onlocate={locate}
 			{onloop}
 			onexpand={expandClip}
+			{ontempo}
+			onmix={mixed}
 		/>
 
 		<aside class="inspector" id="inspector">
@@ -648,6 +663,7 @@
 			<fieldset disabled={readonly}>
 				<details>
 					<summary>Tempo, {doc.tempo[0]?.bpm} BPM</summary>
+					<p class="muted lanenote">The Tempo lane, above the tracks, draws these and is dragged.</p>
 					{#each doc.tempo as change, index (index)}
 						<div class="line">
 							<span class="muted">bar {barOf(change.tick, doc.ppq)}</span>
@@ -1291,6 +1307,10 @@
 		padding: 0.1rem 0.3rem;
 		font-size: 0.78rem;
 		box-sizing: border-box;
+	}
+	.lanenote {
+		margin: 0.2rem 0 0.35rem;
+		font-size: 0.72rem;
 	}
 	.ramp {
 		display: flex;

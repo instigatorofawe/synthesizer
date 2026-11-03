@@ -258,6 +258,13 @@ const TOP = Math.cbrt(2);
 export const faderGain = (position: number) => (position * TOP) ** 3;
 export const faderPosition = (gain: number) => Math.cbrt(Math.max(0, gain)) / TOP;
 
+// A gain as a fader reads it, as the Mixer's and a track head's both do.
+export const decibels = (gain: number) => (gain > 0 ? `${(20 * Math.log10(gain)).toFixed(1)} dB` : 'silent');
+
+// A pan as a knob reads it: C in the middle, and L or R with how far, in percent.
+export const panText = (pan: number) =>
+	Math.round(pan * 100) === 0 ? 'C' : `${pan < 0 ? 'L' : 'R'}${Math.abs(Math.round(pan * 100))}`;
+
 // The song as it sounds while some tracks are soloed: every other track muted, and the buses and the master as they are, so a
 // soloed track's sends still reach their reverb, as solo works in most DAWs. Solo belongs to the editor and not the document,
 // so this is what is compiled and heard, and never what is saved. A muted track stays muted when it is soloed, and a solo whose

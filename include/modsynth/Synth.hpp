@@ -189,11 +189,11 @@ class Synth {
 
     // The most one frame of this Program can cost a target with these costs and this layout, in its cycles: every voice
     // and fade slot sounding, each step on its dearest path, and each stream's busiest frame. A device refuses a
-    // Program over its budget, so whatever it plays fits every frame. If `voice` is given, it gets what one more
-    // sounding voice costs on each track, for saying how many fit, and `parts` gets where the cycles go.
+    // Program over its budget, so whatever it plays fits every frame. `parts` gets where the cycles go, and `voices`,
+    // if given, is how many voices each track has in place of the Program's own, for finding how many would fit.
     [[nodiscard]] static u64 frame_cost(const ChunkTable& chunks, u64 program, float rate, const Costs& k,
-                                        const Layout& layout = Synth::layout(), u64* voice = nullptr,
-                                        CostParts* parts = nullptr) {
+                                        const Layout& layout = Synth::layout(), CostParts* parts = nullptr,
+                                        std::span<const u32> voices_instead = {}) {
         const ChunkRef* c = chunks.find(program, ChunkKind::Program);
         ProgramView p;
         if (!c || !parse_program({c->data, c->size}, p)) return ~u64{0};
@@ -264,7 +264,8 @@ class Synth {
         }
         for (u32 t = 0; t < h.tracks; ++t) {
             const TrackDesc d = p.track(t);
-            const u64 voices = d.voices, fades = steals ? fade_slots(d.voices) : 0, held = plays ? kMaxHeldNotes : 0;
+            const u32 count = t < voices_instead.size() ? voices_instead[t] : d.voices;
+            const u64 voices = count, fades = steals ? fade_slots(count) : 0, held = plays ? kMaxHeldNotes : 0;
             u64 voice_steps = 0, starting = 0, params = 0, bytes = 0;
             for (u32 s = 0; s < d.slot_count; ++s) {
                 const PatchView v = patch_view(chunks, p.patch(p.slot(d.slot_begin + s)));
@@ -284,11 +285,6 @@ class Synth {
             out.events += run.notes * (k.note + (voices + fades) * k.note_voice + params * k.note_param +
                                        (bytes + 63) / 64 * k.note_block + starting);
             out.events += run.params * ((params + insert_params + h.globals) * k.note_param + voices * k.note_voice);
-            // One voice fewer saves its sound, and every note and parameter in the frame looking at it.
-            if (voice) {
-                voice[t] =
-                    sounding + segments * k.voice + (plays ? k.glide : 0) + (run.notes + run.params) * k.note_voice;
-            }
         }
         for (u32 i = 0; i < h.inserts; ++i) {
             const PatchView v = patch_view(chunks, p.patch(p.insert(i).patch));

@@ -1,7 +1,6 @@
-# modsynth design, revision 18
+# modsynth design, revision 19
 
-Status: Milestones 1 to 6 are implemented, along with the harnesses of Milestone 7. Of Milestone 5, BLE and showing a target's fit in the
-editor are not built.
+Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 7. `docs/Format.md` is its specification, and where this document and that one differ, that
 one is right. This document replaces all earlier revisions, and everything needed from them is included here. Sections about later milestones are
 still proposals. Section 24 lists what is agreed but not built, and what is still undecided.
@@ -209,7 +208,9 @@ An Asset is a new chunk kind, separate from power-of-two wavetables.
   hash checks out, so a bad upload is still harmless. Hashing costs about 12 cycles per byte, or roughly 160 ms per MB at
   80 MHz [model]. It runs on receipt, not at every boot.
 - On wasm the fixed heap must hold assets, because memory growth stays off. An image slot is 16 MiB, about 2.9 minutes of mono i16 at 48 kHz, and an image over it is refused on load with the reason
-  shown on the page. Its size becomes a start-up setting. What a large heap costs in the browser is measured in Milestone 7.
+  shown on the page. Its size becomes a start-up setting. The whole heap is 128 MiB, three image slots among it, and it costs little until used:
+  starting the engine took 5.5 ms, and the process grew by 2.5 MB, as the pages are reserved and not touched [measured: Node 26, which has a
+  browser's V8, `tools/MeasureWorklet.mjs`].
 - `Sample2`, from revision 4, is the op asset import writes. A Table of zones maps key and velocity ranges to recordings, each with its own root
   key, and the note picks one at its start. It takes `note` rather than a ratio, because the root is only known then, and that is what lets a
   glide or a legato change slide one recording. It adds a start offset, reverse, and a tail, where a loop runs while the note is held and plays
@@ -300,7 +301,16 @@ frame size comes from the profile unless the request gives one. Otherwise the re
 `firmware/Profiles` holds the board's profiles, which `firmware/Check.sh` holds to what the build writes, and `tools/Board.py` compiles every
 request against the profile of the board it is talking to.
 
-Not built yet: a cost table, which needs Milestone 7, and showing fit in the editor.
+**What a frame costs.** A device's profile also carries a cost table, and a request for it fails to compile, with `where` set to `target`,
+if a Program's dearest frame could take longer than the device has for one. The board's loader refuses the same images, so whatever a device
+plays fits every frame [board]. The dearest frame counts every voice of every track sounding, each step on its dearest path, and the
+busiest frame of each stream. Section 15 has how the table is measured. The report's `target` gives each Program's bound and where it goes,
+and how many voices each track could have with the others as they are, which a refusal says too:
+
+    Program "p" could need 58367 cycles in a frame, and this target has 51944. Every voice sounding at once is counted.
+    Track 1 has 2 voices, and fits with 1.
+
+Not built yet: showing fit in the editor.
 
 **Delivery.** A device receives the whole image over BLE or a serial link, and a small host tool sends an exported image file. Serial is
 built: `tools/Board.py` sends over the ST-LINK's USB serial port, and `docs/Board.md` has the protocol. The format needs no change for this. It uses byte offsets and no pointers, its manifest comes first, so a wrong revision or frame size can be refused from the first
@@ -337,8 +347,9 @@ the page reloads, even across a locate, and a value changed in the document is i
 
 The wasm build deliberately has no SharedArrayBuffer and no memory growth. The compiler runs in a separate wasm instance
 on a worker and transfers image bytes to the worklet, which loads them in slices across render quanta. The loader is
-resumable on every target, and device delivery uses the same mechanism. The worst quantum during a load is measured in
-Milestone 7.
+resumable on every target, and device delivery uses the same mechanism. Loading takes little of a quantum: the dearest quantum while
+a recipe, a piece or the demo loaded took under 0.1 ms of the 2.67 ms one has, from 520 bytes to 264 KB of image [measured: Node 26,
+`tools/MeasureWorklet.mjs`].
 
 ## 13. Oscilloscope
 
@@ -366,7 +377,11 @@ A build with no tap slots has none of this code.
 - Each block carries tap slot, generation, starting sample index and a dropped-block count. The sample index lines traces
   up with each other and with the playhead.
 - If no buffer is free, the block is dropped and counted. The display can never hold up audio.
-- Heap views are created once, which is safe because memory growth is off, so the audio thread allocates no views.
+- Heap views are created once, which is safe because memory growth is off, so the audio thread allocates no views of the heap.
+- The worklet sends the same message objects every time, as postMessage copies a message when it sends it. What the audio thread
+  still allocates is a view on each buffer the page returns, since every one comes back a new object: with all 8 tap slots on, 157
+  bytes a quantum, against about 280 when each message was new, and 25 a quantum with none on, for the state the page shows [measured:
+  Node 26, the young generation fixed so that nothing was collected during a run].
 - After a generation swap, the GUI re-sends tap targets from the new sidecar. The generation field marks the break.
 
 A Web Audio `AnalyserNode` on the master would be less work, but it cannot reach tracks or graph nodes and has no sample
@@ -391,8 +406,9 @@ index. One path serves every case.
 - Table contents are checked for non-finite values, sliced.
 - Each voice has an output guard, because about 14% of accepted fuzz images produced NaN or infinity [measured]. A guard trips only on values that
   aren't finite, so a finite blow-up still reaches the output. Open 9 covers that.
-- Delay lines clear lazily, because a hostile image took 5.8 ms of a 2.67 ms frame [measured]. A per-op cost table sets a
-  compile-time and load-time limit alongside the memory limit.
+- Delay lines clear lazily, because a hostile image took 5.8 ms of a 2.67 ms frame [measured]. A device's cost table sets a
+  compile-time and load-time limit alongside the memory limit, section 10, so on a device no image can overrun a frame. A desktop or a
+  browser has no such limit, and an image there can still take longer than a frame.
 - Denormals: no target sets a flush-to-zero mode, because wasm has none. Kernels flush their own state every frame, the same way on every target, as
   `docs/Format.md` says under Arithmetic.
 
@@ -401,27 +417,58 @@ its replacement.
 
 ## 15. Embedded performance
 
-These figures are early estimates. Tuning waits for Milestone 7.
+**On the board.** Measured on a NUCLEO-L476RG at 80 MHz, with images in flash behind 4 wait states and the ART caches [board]. `docs/Board.md`
+has the detail.
+- **What a frame may cost:** 51,944 cycles at frame 32. That is the core's 53,344 less 1,400 for playing the frame out to the DAC.
+- **Recipes:** 48 of the 61 compile for the board, and its loader refuses the same 13. On both builds every one of the 48 played every frame
+  within budget, the dearest at 70% (Chorus), and the median recipe takes 22% of the core on average. Of the 13:
+  - 6 ran over budget on the board in Milestone 5: AdditiveBell, DetunedSupersaw, DrawbarOrgan, DrumLoop, PhaseModElectricPiano and Vocoder.
+  - 2 need more memory than it has: Reverb and PingPongDelay.
+  - 5 ran within budget then, at 25% to 75%, but could need more with every voice sounding: FrenchHorn, LoopedSample, PrecutGrainCloud,
+    SidechainDucking and Trumpet. `docs/Benchmarks.md` says how many voices each track of every recipe could have.
+- **The demo and the pieces:** refused. The demo could need 173% of a frame, and the pieces, without their reverb, 4 to 20 frames' worth.
+- **Voices:** one voice of the cheapest patch, a naive saw, could be one of 27. A recipe's track that fits could have 2 to 10 voices of its own
+  patch, 6 at the median.
 
-**On the board.** Milestone 5 measured cycles on a NUCLEO-L476RG at 80 MHz, with images in flash behind 4 wait states and the ART caches
-[board]. `docs/Board.md` has the detail.
-- **Recipes:** 59 of the 61 load. The other two need more bulk memory than its 64 KB. Of the 59:
-  - 56 fit a 32-sample frame on average and 53 in their worst frame.
-  - The median takes 26% of the core.
-- **One voice:** a patch playing one voice costs 203 to 400 cycles a sample, mixer included. The model's 160 to 200 is for the voice alone.
-- **The demo:** it runs at 106% of the core on average, so it doesn't play in real time.
-- **The pieces:** none of them fits.
-  - Their stereo reverb needs 188 KB of bulk memory.
-  - Without it, their first 30 s run at 164% to 469% of the core on average, with 8 to 20 voices at once.
+**The cost table.** `firmware/NucleoCosts.hpp` prices each kind of work in cycles, and section 10 has how the compiler and the board use it.
+It is built from two measurements of the same calibration Programs, each pair differing in one kind of work, which `bench/MakeCalibration.py`
+writes:
+- In instructions, on QEMU's Cortex-M4, which is exact and which CI repeats.
+- In cycles, on the board itself, by `tools/Board.py time --bench` on a build with `MODSYNTH_COST_LIMIT` off.
 
-Calibrating the model against these is still Milestone 7's.
+Their ratio is what that work takes a cycle on the board, kept in `firmware/Profiles/Calibration.json`, so a change in the code reprices itself
+from QEMU and the board is needed only to measure the ratios again. Steps took 1.36 to 2.11 cycles an instruction, the frame itself 2.54, and
+a note start 4.64, with its memory clearing and 64-bit divisions [board]. Every price is 10% above what was measured. A step is priced at its
+dearest case in `bench/KernelCases.hpp`, for its mode where that is much cheaper, for mono recordings, for one zone of a Sample3, and for its
+inputs when none of them can move. Its first frame of a note is priced once for each note that can start in a frame.
+
+Checked three ways:
+- **On the board:** over the 73 Programs within budget with a board measurement, the bound was 1.20 to 2.39 times the worst frame, 1.39 at the
+  median, and never below it [board].
+- **On QEMU, in CI:** no recipe's or calibration Program's dearest frame takes more instructions than its bound priced at one cycle each, with no
+  margin. `tools/Bench.py check` fails otherwise.
+- **On a host, in CI:** an engine built with `SynthConfig::count_work` counts what each frame did, and in no frame of any recipe, piece,
+  golden or the demo is that more than the bound assumes, as `CostTest` checks.
+
+**Tuning.** Every change below gives the same bits as before on every golden, on a host and on QEMU's Cortex-M4 [measured]:
+- Delay lines run in stretches that never wrap, and a line still filling as a silent stretch and then a data one. Comb takes 49% fewer
+  instructions, Allpass 55%, DelayRead 68% and DelayWrite 61%.
+- Samplers compile a loop for each encoding and channel count, with the position in locals: 20 to 30% fewer.
+- Env runs a loop for each stage on a level in a local: about 15% fewer.
+- A voice whose outputs are one buffer checks it once, and mixing at a gain of 1 adds: 18% less on every voice besides its steps.
+- `dispatch()` works out a segment's horizon once, not a 64-bit division for every held voice. Halving the search instead, to drop the
+  division for an event's own sample, cost more instructions than the division and was left out.
+
+The median recipe takes 5% fewer instructions on QEMU and Reverb 36%, and on the board 5.8% fewer cycles at the median and up to 13% [board].
+
+These figures from before the board are kept for what they decided.
 
 Target floor: the STM32L476 class, a Cortex-M4F at 80 MHz with 128 KB SRAM and 1 MB flash. It has no double-precision FPU
 and no float SIMD, so `double` is banned from the run path.
 
 All figures below are [model]: exact instruction counts priced with a simple M4 timing table, assuming zero wait states.
-They leave out flash wait states, cache misses, DMA contention, FP stalls and load pipelining, and have not been
-checked against a board. Treat them as within about 30%.
+They leave out flash wait states, cache misses, DMA contention, FP stalls and load pipelining. The board took 1.36 to 2.11 cycles an
+instruction where this table assumed about 1.5, and the cost table above replaces it.
 
 Cycles per sample, frame 64:
 
@@ -481,20 +528,17 @@ Whole voice (2 oscillators, noise, 2 filters, envelope), per voice with 4 held:
 | CMSIS-DSP, as its CMake builds it, loop unrolling on | 165 |
 | CMSIS-DSP, unrolling on, FMA contraction off | 157 |
 
-Findings to apply in Milestone 7:
+What became of the findings this model gave Milestone 7:
 
-- Build CMSIS-DSP with `ARM_MATH_LOOPUNROLL`, or the modelled gain mostly disappears. With it the table above models 10.8% for one voice, but over whole
-  recipes the median saving at peak is 0.95% of instructions and the most is 2.3% [measured: `docs/Benchmarks.md`]. Those aren't like for like, since one
-  is modelled cycles at frame 64 and the other instructions at frame 32. Open 25 needs cycles on a board.
-- `-ffp-contract=off` is now set on every target, for a different reason: section 16. On M4 it also saves time, since `vfma` costs 3
-  cycles where `vmul` plus `vadd` cost 2. That part rests on the timing table, not on a board.
-- Hold coefficients in locals in scalar kernels. The prototype's reload per sample cost 56% on the biquad.
-- Kernels no longer call libm, which also drops it from the firmware. Section 16 says why. Its replacements run at control rate, and have not
-  been measured.
-- Per-frame filter modulation is affordable: a coefficient update costs 245 to 285 cycles, about 2% of a voice per filter
-  at frame 64.
-- Frame 32 costs about 10% more than frame 128, and is the default for its control rate. Section 9 has why the size is part of the image.
-- Wavetables in flash add about 9 to 12% to a voice at 80 MHz if every read misses.
+- CMSIS-DSP is built with `ARM_MATH_LOOPUNROLL`. The table above models 10.8% for one voice, and on the board the median change in mean cycles was
+  0.0% [board], open 25.
+- `-ffp-contract=off` is set on every target, for section 16's reason.
+- Scalar kernels hold coefficients in locals, and the tuning above did the same for envelopes and samplers.
+- Kernels no longer call libm. What replaced it runs at control rate, and the cost table prices it with the steps that use it.
+- A filter's coefficients worked out every frame cost a moving Biquad 625 instructions a frame against 517 still [measured], which the cost table
+  prices apart.
+- Frame 32 stays the default for its control rate.
+- Wavetables and recordings are read from flash on the board, and their steps' cycles per instruction include that.
 
 Voices, at 48 kHz with 30% of the core held back for I/O and error in this estimate, at 160 to 200 cycles per voice:
 
@@ -504,7 +548,8 @@ Voices, at 48 kHz with 30% of the core held back for I/O and error in this estim
 | 120 MHz | STM32L4R5 | 8 to 10 | 7 to 9 |
 | 170 MHz | STM32G474 | 12 to 15 | 11 to 13 |
 
-Cortex-M7 parts are not modelled, because the M4 table does not apply to a dual-issue core.
+On the board, the recipes that fit could have 2 to 10 voices of their own patch, and a naive saw 27, above. Other parts would need their own
+calibration. Cortex-M7 parts are not modelled, because the M4 table does not apply to a dual-issue core.
 
 RAM limits reverb before CPU does. Voice state is about 270 bytes per voice, but Freeverb-sized lines take 55 KB mono at
 48 kHz in f32. Stereo f32 will not fit an L476 alongside anything else. Mono i16 takes 27 KB, or mono f32 at 32 kHz takes
@@ -530,8 +575,8 @@ Use it for:
 
 - Unit tests and golden audio on the real target ABI and word size.
 - 32-bit bugs: section 14's overflow is invisible on 64-bit and faults here.
-- From Milestone 7, an instruction-count gate. Counts are exact, so CI can fail on a small regression with no timing noise.
-- From Milestone 7, generating the op cost table for the target profile.
+- The instruction-count gate. Counts are exact, so CI fails on a small regression with no timing noise: section 17.
+- Measuring the instruction side of the board's cost table, section 15.
 
 It cannot tell you about real time: wait states, caches, DMA, I2S output, or bus contention. The board can, and section 15 and
 `docs/Board.md` have what it measured.
@@ -566,9 +611,17 @@ from 3.5 to 10 ns between frames 8 and 512 for unknown reasons, so native ratios
 instruction counts above instead.
 
 `tools/Bench.py` runs both sides and writes `docs/Benchmarks.md`: Google Benchmark on a host, and `firmware/Bench.cpp` for exact instruction
-counts on QEMU, over one list of kernel cases and every recipe. wasm on x86 is not measured yet. CI runs both harnesses once, so they keep
-working, and does not compare their figures: the instruction-count gate is still Milestone 7's. Cycles on a board need a harness that reads
-`DWT_CYCCNT` instead of SysTick, and Google Benchmark can't run there, which is why the case list has no dependency on it.
+counts on QEMU, over one list of kernel cases, every recipe and the calibration Programs. wasm on x86 is not measured yet. Cycles on the board
+come from its own firmware, which reads `DWT_CYCCNT` for every frame it renders, and the case list has no dependency on Google Benchmark, which
+can't run there.
+
+**The instruction-count gate.** `bench/M4.json` holds the counts, and CI's firmware job fails if any kernel case, recipe or calibration Program
+moved more than 1% from them, if `firmware/NucleoCosts.hpp` isn't what they and the board's calibration give, or if a Program's dearest frame
+takes more instructions than its bound. A count depends on the compiler too, so that job runs in Debian trixie, whose arm-none-eabi-gcc
+14.2.1 wrote the baseline, and a change meant to move counts runs `tools/Bench.py m4` there and then `tools/Bench.py baseline`.
+
+**The size gate.** `firmware/Check.sh` fails a board firmware over 112 KB of flash, with 16 KB left before its 128 KB runs into slot A. The
+scalar build takes 94.8 KB and the CMSIS one 96.7 KB.
 
 Desktop figure so far [measured]: about 8.4 ns per voice-sample, flat from 1 to 2,048 voices on one M4 Pro core, scalar,
 one patch, no effects.
@@ -663,7 +716,20 @@ First figures from the real engine [measured], on an M4 Pro with 8 performance c
 
 The pool costs about 1.3 µs a frame with 8 workers and 15 tasks that do nothing, and 0.3 µs with 2, so it pays only where tasks are long. The
 12-track case shows that limit. Serially its frame at 32 takes 8.0 µs, of which the reverbs take 0.55 µs, so each track is about 0.6 µs, and
-at that size more workers add more cost than they save. Worst frames and real-time use still wait for Milestone 7.
+at that size more workers add more cost than they save.
+
+The pieces and the demo on the same machine [measured: `bench/ParallelBench.cpp`, the first 20 s of each, median of three]:
+
+| Program | Tracks | Frame 32, 2 / 4 / 8 workers | Frame 128, 2 / 4 / 8 workers |
+|---|---|---|---|
+| BachPreludeInC, FurElise | 1 | 1.00x at each | 1.00x at each |
+| The demo | 12 | 0.98x / 0.97x / 0.99x | 1.00x / 1.00x / 0.99x |
+| HallOfTheMountainKing | 9 | 1.08x / 0.96x / 0.69x | 1.28x / 1.17x / 1.00x |
+| PassionChorale | 4 | 1.27x / 1.26x / 0.99x | 1.43x / 1.73x / 1.53x |
+
+A one-track piece runs inline, as it is one chain. The rest share their reverb bus, which every track waits for, and their frames take 4 to
+20 µs, so a few workers help at frame 128 and more cost more. Worst frames grow on a pool: the Mountain King's went from 22 µs serially to 178 µs
+on 8 workers, from threads waking late. That is why real-time use stays out of scope below.
 
 **Checks in CI.**
 
@@ -871,11 +937,14 @@ requests run CI, so checks run locally before a push. One that changes only Mark
    and its tail. `PythonTest.py` holds it to the golden renders and to the same bits on any number of workers, and `Listen.py` now uses it.
 7. **Measurement and optimization.** Board calibration of the cost model, voice counts, op cost table and limits,
    instruction-count CI gate, size budget, kernel tuning from section 15, browser load and heap costs, audio-thread
-   allocation from the scope, and parallel speedup. Accelerate and Highway follow only if a measured budget fails.
+   allocation from the scope, and parallel speedup. Accelerate and Highway follow only if a measured budget fails. Built: section 15 has the
+   cost table, its calibration and the tuning, section 10 the limit, section 17 the gates, sections 7, 12 and 13 the browser's figures, and
+   section 18 the pool's. No measured budget failed on a desktop or in a browser, so Accelerate and Highway stay out.
 
-Until Milestone 7 sets real limits, there is no op cost limit, so a hostile image can still overrun a frame, and a load can still take
-longer than a frame: the format's limits bound that cost but do not make it small, and Patch and Program validation run whole rather than
-in slices. Lazy delay clearing is not deferred.
+A device has an op cost limit, so no image it plays can overrun a frame. A desktop or a browser has none, as section 14 says, and there a
+hostile image can still take longer than a frame. A load can still take longer than a frame on any target: the format's limits bound that
+cost but do not make it small, and Patch and Program validation run whole rather than in slices, which section 21 defers. A device loads with
+audio stopped, so there it costs only time. Lazy delay clearing is not deferred.
 
 ## 23. Fuzzing
 
@@ -941,6 +1010,17 @@ Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in se
 - Events off the frame boundary, section 6.
 - Delivery over BLE, and showing a target's fit in the editor, section 10.
 
+**Built for Milestone 7** (revision 19), as sections 10 and 15 describe. The user decided that a device refuses, at compile and at load, a
+Program whose dearest frame, with every voice sounding, could overrun its budget. Choices made there that the user hasn't weighed in on:
+- **What the bound counts:** each step on its dearest path for its mode, its recordings' channels and whether its inputs can move, its first
+  frame once for each note that can start in a frame, and the busiest frame of each stream at its fastest tempo.
+- **Margin:** every price is 10% above what the board measured, which is what the dearest case needed.
+- **The budget:** a frame's cycles less 1,400 for playing it out, the most `stats` measured while playing with a heavy load.
+- **Calibration:** a ratio of cycles to instructions for each kind of work, so CI reprices a code change from QEMU, and the board is needed
+  only to measure the ratios again.
+- **The gates:** counts may move 1% from the baseline before CI fails, and a board firmware 112 KB of flash.
+- **The scope:** the worklet sends the same message objects every time, rather than new ones.
+
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.
 - **Serial protocol:**
@@ -975,12 +1055,13 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 | 20 | Are mono builds an exception to the target rule? | Recommended yes, as section 10 has it, with channel count as an output format. Folding was chosen before the rule existed and hasn't been confirmed since. |
 | 21 | Does sample rate need the same treatment as frame size? | Recommended no: leave it at run time and document it. Frequencies stay correct, and only frame-timed behaviour shifts, such as control rate and the shortest feedback loop. |
 | 23 | What authenticates an image over BLE? | A hash doesn't, and anyone in range can connect. Validation protects memory, but a valid image can still be very loud or overload the CPU. Recommended: BLE bonding, or signed images. |
-| 24 | Is a set of embedded-friendly recipes wanted? | Floated, not decided. On the board, 2 of the 61 recipes don't load and 6 more run over a frame's budget somewhere, and none of the four pieces fits [board]. `Tone` alone doesn't rescue them, so a set would also need fewer voices or partials, and open 32's reverb. |
+| 24 | Is a set of embedded-friendly recipes wanted? | Floated, not decided. The board refuses 13 of the 61 recipes: 2 for memory, 6 that ran over budget, and 5 that ran within it but could exceed it with every voice sounding, and none of the four pieces [board]. `docs/Benchmarks.md` says how many voices each track of every recipe could have, which is most of what such a set would change, and open 32's reverb the rest. |
 | 25 | Does CMSIS-DSP save enough on this chip? | No [board]. Over 60 programs the median change in mean cycles is 0.0%, with Vocoder 9.9% slower and PhaseModElectricPiano 8.4% faster. Section 15's model had 10.8% for one voice. Recommended: keep it as a supported backend, since it passes the same checks, and don't make it any target's default. |
 | 26 | Time signatures and pickups? | The editor draws every timeline in 4/4 from tick 0. Für Elise, in 3/8 after an eighth's pickup, is in its third bar where the ruler shows bar 2, and the chorale's pickup puts every bar line a beat early. Recommended: a meter map and a pickup in the timeline document, which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change. |
 | 27 | A sustain pedal? | A timeline has none, so `MakePieces.py` writes Für Elise's pedalling into how long its notes are. The piano roll then shows the pedal's notes rather than the player's, and moving a pedal change means rewriting durations. Recommended: a pedal lane per track that the compiler applies to note lengths, as it writes a tempo ramp as steps, so the format and engine stay as they are. A key played live under the pedal would still need the engine to hold its voice. |
 | 28 | Importing MIDI files? | Every piece began as a MIDI file or LilyPond source, and the app imports only WAV. A Standard MIDI File reader is 45 lines of `MakePieces.py`. Recommended: import a file as a new timeline, a track for each of its tracks, with its tempo map, and its pedal once open 27 gives it somewhere to go. |
 | 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks open 21's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
 | 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
-| 31 | Should the benchmarks cover the pieces? | They don't fit an L476, for memory alone, open 32 [board], so their cycles there are unknown. On a host they render 41 to 168 times faster than real time, from images of 10.6 to 93.3 KB [measured: Apple M4 Pro, Python binding]. Recommended: measure a window of each, such as its loudest 20 seconds, rather than all of it. |
+| 31 | Should the benchmarks cover the pieces? | Partly done: `bench/ParallelBench.cpp` times the first 20 seconds of each on a host, serially and on a pool, section 18. On the board their bound, without their reverb, is 4 to 20 times a frame's budget [board]. Recommended: leave them out of the QEMU bench, whose full renders would take 9 minutes, as the bound already says they don't fit. |
 | 32 | Should there be a reverb an L476 can hold? | Every piece sends to a stereo reverb that needs 188 KB of bulk memory, and the board has 64 KB, so none of them plays there [board]. The demo's reverb fits, at 47 KB. Section 15 has the arithmetic: mono i16 lines take 27 KB. A reverb that fits wouldn't make the pieces play on an L476: without theirs, they run at 164% to 469% of the core [board]. Recommended: a mono reverb mode, or i16 lines as a new op, chosen by an author like any other cheaper feature, and the pieces left as they are. |
+| 33 | Should the bound count a track's notes rather than its voices? | The compiler knows how many notes a track holds at once, but not how long each sounds after its release, which an envelope's time decides and a lane can move, so only the voice count bounds what sounds. Counting voices refuses some Programs that never use them all: PrecutGrainCloud has 12 voices for grains of which 2 sound at once, and would fit with 10. Recommended: keep counting voices, so a refusal is never wrong, and let the error and the report say how many fit, as they do. |

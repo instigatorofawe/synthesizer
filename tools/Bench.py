@@ -209,9 +209,9 @@ def m4(_: argparse.Namespace) -> None:
     (BUILD / "M4.json").write_text(json.dumps(report, indent=1) + "\n")
 
 
-def board_fit(names: list[str]) -> dict[str, tuple[str, float]]:
-    """Each recipe compiled for the board's scalar build: whether it fits, and its dearest frame as a share of the
-    budget, as the compiler works them out."""
+def board_fit(names: list[str]) -> dict[str, tuple[str, float, str]]:
+    """Each recipe compiled for the board's scalar build: whether it fits, its dearest frame as a share of the budget,
+    and how many voices each track could have, as the compiler works them out."""
     profile = json.loads((ROOT / "firmware" / "Profiles" / "Nucleo.json").read_text())
     unlimited = profile | {"cost": profile["cost"] | {"budget": 2**32 - 1}}
     request_path, image, report_path = (
@@ -219,10 +219,10 @@ def board_fit(names: list[str]) -> dict[str, tuple[str, float]]:
         BUILD / "Fit.image",
         BUILD / "Fit.report.json",
     )
-    fit = {}
-    for name in names:
+
+    def compile(name: str, target: dict) -> dict:
         request = json.loads((RECIPES / f"{name}.json").read_text())
-        request["target"] = unlimited
+        request["target"] = target
         request_path.write_text(json.dumps(request))
         run(
             BUILD / "modsynth_compile",
@@ -232,12 +232,31 @@ def board_fit(names: list[str]) -> dict[str, tuple[str, float]]:
             check=False,
             capture_output=True,
         )
-        report = json.loads(report_path.read_text())
+        return json.loads(report_path.read_text())
+
+    fit = {}
+    for name in names:
+        report = compile(name, unlimited)
         if not report.get("ok"):
-            fit[name] = ("RAM", math.nan)
+            fit[name] = ("RAM", math.nan, "")
             continue
         share = report["target"]["cycles"][0] / profile["cost"]["budget"]
-        fit[name] = ("yes" if share <= 1 else "CPU", share)
+        report = compile(name, profile)
+        if report.get("ok"):
+            voices = [t["fit"] for t in report["target"]["programs"][0]["voices"]]
+        else:  # Over budget, which the error says track by track
+            message = report["errors"][0]["message"]
+            voices = [
+                int(n) if n else 0
+                for n in re.findall(
+                    r"(?:fits with (\d+)|no number fits alone)", message
+                )
+            ]
+        fit[name] = (
+            "yes" if share <= 1 else "CPU",
+            share,
+            ", ".join(str(v) if v else "none" for v in voices),
+        )
     return fit
 
 
@@ -264,12 +283,12 @@ def recipe_rows(
     rows = []
     for name, r in sorted(stereo["recipes"].items(), key=lambda item: -item[1]["peak"]):
         h = hosted[f"Recipe/{name}/manual_time"]
-        verdict, share = fit[name]
+        verdict, share, voices = fit[name]
         bound = "" if math.isnan(share) else f"{share:.0%}"
         rows.append(
             f"| {name} | {groups[name]} | {r['image'] / 1024:.1f} | {(r['fast'] + r['bulk']) / 1024:.1f} | {r['voices']} "
             f"| {r['mean']:.0f} | {r['p999']:.0f} | {r['peak']:.0f} | {mono['recipes'][name]['peak']:.0f} "
-            f"| {cmsis['recipes'][name]['peak']:.0f} | {bound} | {verdict} "
+            f"| {cmsis['recipes'][name]['peak']:.0f} | {bound} | {verdict} | {voices} "
             f"| {h['real_time'] / (r['frames'] * FRAME):.1f} | {h['p999_frame_ns'] / 1000:.1f} / {h['worst_frame_ns'] / 1000:.1f} |"
         )
     return rows
@@ -378,7 +397,7 @@ def table(_: argparse.Namespace) -> None:
     groups = {r["name"]: r["group"] for r in index}
     recipes = list(stereo["recipes"].values())
     fit = board_fit(list(stereo["recipes"]))
-    fits = sum(verdict == "yes" for verdict, _ in fit.values())
+    fits = sum(verdict == "yes" for verdict, _, _ in fit.values())
     work = json.loads((BUILD / "Work.json").read_text())
     commit = run(
         "git", "rev-parse", "--short", "HEAD", capture_output=True, text=True, cwd=ROOT
@@ -401,8 +420,10 @@ def table(_: argparse.Namespace) -> None:
     )
     columns = (
         "Instructions are per sample, stereo and scalar unless named. Peak is the worst frame of the whole recipe, played from "
-        "start to end. Board is the compiler's bound on a frame for the board, with every voice sounding, as a share of its "
-        "budget. Host ns is per sample of the mean frame. A host's worst frame is mostly the operating system."
+        "start to end. Voices is the most that sounded at once on QEMU. Board is the compiler's bound on a frame for the "
+        "board, with every voice sounding, as a share of its budget, and Voices that fit is how many each track could have "
+        "with the others as they are. Host ns is per sample of the mean frame. A host's worst frame is mostly the "
+        "operating system."
     )
     kernels = (
         f"One step at a time, per sample, on inputs a recipe gives it. A control step runs once a frame, so its figure is its "
@@ -424,8 +445,8 @@ def table(_: argparse.Namespace) -> None:
         "",
         columns,
         "",
-        "| Recipe | Group | Image KB | RAM KB | Voices | Mean | p99.9 | Peak | Peak, mono | Peak, CMSIS | Board | Fits | Host ns | Host p99.9 / worst frame µs |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|",
+        "| Recipe | Group | Image KB | RAM KB | Voices | Mean | p99.9 | Peak | Peak, mono | Peak, CMSIS | Board | Fits | Voices that fit | Host ns | Host p99.9 / worst frame µs |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|",
         *recipe_rows(stereo, mono, cmsis, hosted, groups, fit),
         "",
         "## Engine",

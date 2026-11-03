@@ -87,8 +87,21 @@ With the board plugged in, flash it and talk to it with `tools/Board.py`:
     uv run --with dist/modsynth-*.whl tools/Board.py send examples/Recipes/Arpeggio.json --play
     uv run tools/Board.py check      # every golden image, rendered on the board
 
-A request is compiled against the board's profile, so one that won't fit fails before it is sent. [docs/Board.md](docs/Board.md) has
-the protocol, the audio pin, and what was measured, including which recipes fit.
+A request is compiled against the board's profile, so one that won't fit, in memory or in a frame's cycles, fails before it is sent, and
+the board refuses it too. [docs/Board.md](docs/Board.md) has the protocol, the audio pin, the cost limit, and what was measured, including
+which recipes fit.
+
+## Instruction counts
+
+Kernels and recipes have exact instruction counts on QEMU, and CI fails if one moves more than 1% from `bench/M4.json`. In the same
+Debian container as above:
+
+    tools/Bench.py m4         # every kernel case, recipe and calibration Program, into build/bench
+    tools/Bench.py check      # what CI runs: the counts, the board's cost table, and every Program within its bound
+    tools/Bench.py baseline   # if a change is meant to move counts, make them the new baseline, and rewrite the cost table
+
+`tools/Bench.py host` times the same cases, the recipes and the pieces on this machine, and `tools/Bench.py table` writes
+[docs/Benchmarks.md](docs/Benchmarks.md) from both.
 
 ## Fuzzing
 

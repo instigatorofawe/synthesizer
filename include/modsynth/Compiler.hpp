@@ -3224,22 +3224,45 @@ inline Target read_target(const json& profile) {
     return t;
 }
 
-// Why a Program is over a target's budget, with how many voices of each track would fit if the others stayed.
+// The most voices each track could have, the others staying as they are, for a frame within a target's budget. A
+// frame costs more with each voice, so a search finds it.
+inline std::vector<u32> voices_that_fit(const ChunkTable& table, u64 program, float rate, const Costs& k,
+                                        const Layout& layout) {
+    const ChunkRef* c = table.find(program, ChunkKind::Program);
+    ProgramView p;
+    (void)parse_program({c->data, c->size}, p);  // the loader checked it
+    std::vector<u32> voices(p.h.tracks), fit(p.h.tracks);
+    for (u32 t = 0; t < p.h.tracks; ++t) voices[t] = p.track(t).voices;
+    for (u32 t = 0; t < p.h.tracks; ++t) {
+        std::vector<u32> trial = voices;
+        u32 low = 1, high = kMaxVoices;  // a track has at least one voice
+        while (low < high) {
+            trial[t] = (low + high + 1) / 2;
+            if (Synth<>::frame_cost(table, program, rate, k, layout, nullptr, trial) <= k.budget) {
+                low = trial[t];
+            } else {
+                high = trial[t] - 1;
+            }
+        }
+        trial[t] = low;
+        fit[t] = Synth<>::frame_cost(table, program, rate, k, layout, nullptr, trial) <= k.budget ? low : 0;
+    }
+    return fit;
+}
+
+// Why a Program is over a target's budget, and how many voices of each track would fit with the others as they are.
 inline std::string over_budget(const ChunkTable& table, u64 program, u64 cycles, const Costs& k,
-                               const std::vector<u64>& voice) {
+                               const std::vector<u32>& fit) {
     const ChunkRef* c = table.find(program, ChunkKind::Program);
     ProgramView p;
     (void)parse_program({c->data, c->size}, p);  // the loader checked it
     std::string text = "could need " + std::to_string(cycles) + " cycles in a frame, and this target has " +
                        std::to_string(k.budget) + ". Every voice sounding at once is counted.";
-    const u64 over = cycles - k.budget;
     for (u32 t = 0; t < p.h.tracks; ++t) {
         const u32 voices = p.track(t).voices;
-        if (voice[t] == 0) continue;
-        const u64 cut = (over + voice[t] - 1) / voice[t];
         text += " Track " + std::to_string(p.track(t).id) + " has " + std::to_string(voices) +
-                (voices == 1 ? " voice at " : " voices at ") + std::to_string(voice[t]) + " cycles each";
-        text += cut < voices ? ", and fits with " + std::to_string(voices - cut) + "." : ".";
+                (voices == 1 ? " voice" : " voices");
+        text += fit[t] > 0 ? ", and fits with " + std::to_string(fit[t]) + "." : ", and no number fits alone.";
     }
     return text;
 }
@@ -3301,16 +3324,24 @@ inline json check_target(const Target& t, const std::vector<std::byte>& bytes, c
         json entry = {{"fast", need.fast}, {"bulk", need.bulk}};
         if (t.cost) {
             const u64 program = loader.program_hash(i);
-            std::vector<u64> voice(kMaxTracks);
             CostParts parts;
-            const u64 cycles = Synth<>::frame_cost(table, program, t.rate, *t.cost, t.layout, voice.data(), &parts);
-            if (cycles > t.cost->budget) fail(name + " " + over_budget(table, program, cycles, *t.cost, voice));
+            const u64 cycles = Synth<>::frame_cost(table, program, t.rate, *t.cost, t.layout, &parts);
+            const std::vector<u32> fit = voices_that_fit(table, program, t.rate, *t.cost, t.layout);
+            if (cycles > t.cost->budget) fail(name + " " + over_budget(table, program, cycles, *t.cost, fit));
             entry["cycles"] = cycles;
             entry["cycles_by"] = {{"fixed", parts.fixed},
                                   {"voices", parts.voices},
                                   {"events", parts.events},
                                   {"inserts", parts.inserts},
                                   {"mixer", parts.mixer}};
+            const ChunkRef* chunk = table.find(program, ChunkKind::Program);
+            ProgramView view;
+            (void)parse_program({chunk->data, chunk->size}, view);
+            json tracks = json::array();
+            for (u32 n = 0; n < fit.size(); ++n) {
+                tracks.push_back({{"id", view.track(n).id}, {"voices", view.track(n).voices}, {"fit", fit[n]}});
+            }
+            entry["voices"] = std::move(tracks);
             most_cycles = std::max(most_cycles, cycles);
         }
         programs.push_back(std::move(entry));

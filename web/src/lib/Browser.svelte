@@ -45,7 +45,9 @@
 		shownPatch,
 		usersOf,
 		reveal = null,
-		onshortcuts
+		onshortcuts,
+		onmade = () => {},
+		onescape = () => {}
 	}: {
 		search: string; // The page's address now, which every link here changes a part of
 		examples: { name: string; recipes: { name: string; listen_for: string }[] }[];
@@ -70,6 +72,8 @@
 		usersOf?: (id: string) => { name: string }[];
 		reveal?: Section | null; // A list to open and scroll to as the browser opens, when its rail asked for one
 		onshortcuts: () => void; // Opens the sheet of keyboard shortcuts
+		onmade?: (what: 'timeline' | 'patch' | 'bundle') => void; // Once a new one is open, to give it focus
+		onescape?: () => void; // Esc in an empty filter: the browser is done with, and focus goes back
 	} = $props();
 
 	let filter = $state('');
@@ -107,8 +111,11 @@
 	const made: SubmitFunction =
 		() =>
 		async ({ result, update }) => {
+			const what = adding;
 			await update();
-			if (result.type !== 'failure' && result.type !== 'error') adding = null;
+			if (result.type === 'failure' || result.type === 'error') return;
+			adding = null;
+			if (what) onmade(what);
 		};
 
 	// What each list is for, which its ? shows, and which an empty list shows of itself.
@@ -249,7 +256,19 @@
 {/snippet}
 
 <nav class="browser" aria-label="Browser">
-	<input class="filter" type="search" placeholder="Filter" aria-label="Filter the browser" bind:value={filter} />
+	<input
+		class="filter"
+		type="search"
+		placeholder="Filter"
+		aria-label="Filter the browser"
+		bind:value={filter}
+		onkeydown={(event) => {
+			// Esc empties the filter, as a search field does, and in an empty one it leaves the browser.
+			if (!pressed(event, 'escape') || filter) return;
+			event.preventDefault();
+			onescape();
+		}}
+	/>
 
 	<div class="scroll" bind:this={scroller}>
 		<h2>Library</h2>

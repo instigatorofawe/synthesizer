@@ -67,17 +67,18 @@ export function tempoWords(tempo: Tempo[], tick: number, ppq: number): string {
 	if (!change) return 'The tempo';
 	const to = rampTo(tempo, index);
 	const bar = barOf(change.tick, ppq);
+	// Each says where the rest is: the Tempo lane, above the tracks, which ▸ Tempo unfolds.
+	const lane = 'The Tempo lane above the tracks, which ▸ Tempo unfolds,';
 	if (to) {
 		return (
 			`Gliding from ${change.bpm} BPM at bar ${bar} to ${to.bpm} at bar ${barOf(to.tick, ppq)}. ` +
-			'Typing sets where the glide starts.'
+			`Typing sets where the glide starts. ${lane} draws the glide.`
 		);
 	}
-	if (tempo.length === 1) return "The song's tempo. Type another to change it.";
-	return (
-		`The tempo from bar ${bar}, one of the song's ${tempo.length} tempos. Typing changes this one, and the inspector ` +
-		'lists them all.'
-	);
+	if (tempo.length === 1) {
+		return `The song's tempo. Type another to change it. ${lane} takes more tempos and glides between them.`;
+	}
+	return `The tempo from bar ${bar}, one of the song's ${tempo.length} tempos. Typing changes this one. ${lane} draws them all.`;
 }
 
 // Whether the tempo is gliding at a tick, and which way.

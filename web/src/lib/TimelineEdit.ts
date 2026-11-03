@@ -34,13 +34,20 @@ export function byOwner<T extends PatchLike>(patches: T[]): { own: T[]; builtin:
 export const BEATS_PER_BAR = 4;
 export const ticksPerBar = (doc: Pick<Timeline, 'ppq'>) => doc.ppq * BEATS_PER_BAR;
 
+// Snap's choices. A triplet, T, puts three in the time of two, so 1/8T is a third of a beat. Those this ppq can't hold in whole
+// ticks are left out.
 export function grids(ppq: number) {
 	const each = (beats: number) => Math.max(1, Math.round(ppq * beats));
+	const triplet = (label: string, beats: number) =>
+		Number.isInteger(ppq * beats) && ppq * beats >= 1 ? [{ label, ticks: ppq * beats }] : [];
 	return [
 		{ label: 'Bar', ticks: each(BEATS_PER_BAR) },
 		{ label: '1/4', ticks: each(1) },
+		...triplet('1/4T', 2 / 3),
 		{ label: '1/8', ticks: each(1 / 2) },
+		...triplet('1/8T', 1 / 3),
 		{ label: '1/16', ticks: each(1 / 4) },
+		...triplet('1/16T', 1 / 6),
 		{ label: '1/32', ticks: each(1 / 8) },
 		{ label: 'Off', ticks: 1 }
 	];
@@ -92,22 +99,30 @@ export function noteValue(ticks: number, ppq: number): string {
 	const whole = ppq * BEATS_PER_BAR;
 	const common = gcd(ticks, whole);
 	const [over, under] = [ticks / common, whole / common];
+	const twos = (n: number) => n <= 128 && (n & (n - 1)) === 0;
 	if (under === 1) return over === 1 ? '1 bar' : `${over} bars`;
-	if (under <= 128 && (under & (under - 1)) === 0) return `${over}/${under}`;
+	if (twos(under)) return `${over}/${under}`;
+	// A triplet's third is in its denominator: a 1/8T, a third of a beat, is 1/12 of a bar. One or two of them read as a
+	// triplet, down to a 1/32T, and more read as ticks, which says more than 25/32T would.
+	if (under % 3 === 0 && twos(under / 3) && under <= 48 && over <= 2) return `${over}/${(under / 3) * 2}T`;
 	return ticks === 1 ? '1 tick' : `${ticks} ticks`;
 }
 
-// What the Draw length offers, a 1/32 note to a bar: those this ppq can hold in whole ticks.
-export function drawLengths(ppq: number): { label: string; ticks: number }[] {
-	return [32, 16, 8, 4, 2, 1]
-		.map((under) => (ppq * BEATS_PER_BAR) / under)
+// What the Draw length offers, a 1/32 note to a bar, and the 1/16, 1/8 and 1/4 triplets: those this ppq can hold in whole
+// ticks, shortest first.
+export function drawLengths(ppq: number, triplets = true): { label: string; ticks: number }[] {
+	const straight = [32, 16, 8, 4, 2, 1].map((under) => (ppq * BEATS_PER_BAR) / under);
+	const thirds = triplets ? [24, 12, 6].map((under) => (ppq * BEATS_PER_BAR) / under) : [];
+	return [...straight, ...thirds]
 		.filter((ticks) => Number.isInteger(ticks))
+		.sort((a, b) => a - b)
 		.map((ticks) => ({ label: noteValue(ticks, ppq), ticks }));
 }
 
-// The Draw length one step shorter or longer than this one, which needn't be one of them. It stops at either end.
+// The Draw length one step shorter or longer than this one, which needn't be one of them. It stops at either end. [ and ] step
+// through the straight lengths, so a triplet steps to the straight one beside it.
 export function stepLength(ticks: number, ppq: number, by: -1 | 1): number {
-	const lengths = drawLengths(ppq).map((length) => length.ticks);
+	const lengths = drawLengths(ppq, false).map((length) => length.ticks);
 	const next = by > 0 ? lengths.find((length) => length > ticks) : lengths.findLast((length) => length < ticks);
 	return next ?? ticks;
 }

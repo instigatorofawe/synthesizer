@@ -24,6 +24,7 @@ export function parsePitch(text: string): number | null {
 }
 
 // A length typed as a note value, as bars or as ticks, or as several of those added together: 1/8, 3/16, 1/8. (a dotted 1/8),
+// 1/8T (an eighth-note triplet),
 // 2 bars, 1.5 bars, 1 bar + 1/4, 240 ticks. A bare number is ticks, so a length no note value names can still be had. A bar is a
 // whole note, as 4/4 has it. What isn't a whole number of ticks, or is less than `least`, is no length.
 export function parseLength(text: string, ppq: number, least = 1): number | null {
@@ -37,12 +38,13 @@ export function parseLength(text: string, ppq: number, least = 1): number | null
 	let ticks = 0;
 	for (const term of terms) {
 		const bars = /^(\d+(?:\.\d+)?|\.\d+)\s*bars?$/.exec(term);
-		const fraction = /^(\d+)\s*\/\s*(\d+)\s*(\.*)$/.exec(term);
+		const fraction = /^(\d+)\s*\/\s*(\d+)\s*(t?)\s*(\.*)$/.exec(term);
 		const plain = /^(\d+)(?:\s*ticks?)?$/.exec(term);
 		if (bars) ticks += Number(bars[1]) * whole;
 		else if (fraction && Number(fraction[2]) > 0) {
-			const dots = fraction[3].length; // Each dot adds half of what came before it
-			ticks += ((Number(fraction[1]) * whole) / Number(fraction[2])) * (2 - 2 ** -dots);
+			const third = fraction[3] ? 2 / 3 : 1; // A triplet, 1/8T, is three in the time of two
+			const dots = fraction[4].length; // Each dot adds half of what came before it
+			ticks += ((Number(fraction[1]) * whole) / Number(fraction[2])) * third * (2 - 2 ** -dots);
 		} else if (plain) ticks += Number(plain[1]);
 		else return null;
 	}
@@ -59,9 +61,10 @@ export function barLength(ticks: number, ppq: number): string {
 	return bars && left ? `${noteValue(bars * bar, ppq)} + ${noteValue(left, ppq)}` : noteValue(ticks, ppq);
 }
 
-// The note values a note's length or a ramp is chosen from: a 1/32 to two bars, dotted ones too, as far as this ppq holds them.
+// The note values a note's length or a ramp is chosen from: a 1/32 to two bars, dotted ones and triplets too, as far as this ppq
+// holds them.
 export function noteLengths(ppq: number): string[] {
-	const values = [1 / 32, 1 / 16, 1 / 8, 3 / 16, 1 / 4, 3 / 8, 1 / 2, 3 / 4, 1, 2];
+	const values = [1 / 32, 1 / 24, 1 / 16, 1 / 12, 1 / 8, 1 / 6, 3 / 16, 1 / 4, 3 / 8, 1 / 2, 3 / 4, 1, 2];
 	return lengthsOf(values, ppq);
 }
 

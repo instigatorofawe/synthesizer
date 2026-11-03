@@ -17,6 +17,7 @@
 	import Browser, { type Section } from '#lib/Browser.svelte';
 	import BrowserRail from '#lib/BrowserRail.svelte';
 	import BundleDialog from '#lib/BundleDialog.svelte';
+	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import ShortcutsSheet from '#lib/ShortcutsSheet.svelte';
 	import CompileLight from '#lib/CompileLight.svelte';
 	import { Compiler, type Compiled } from '#lib/Compiler.ts';
@@ -38,8 +39,10 @@
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
 	import { stepVelocity } from '#lib/StepEntry.ts';
+	import { bpmText } from '#lib/TempoLane.ts';
 	import {
 		BEATS_PER_BAR,
+		barOf,
 		mixWrites,
 		patchUses,
 		position,
@@ -1266,6 +1269,14 @@
 	const tempoTitle = $derived(heardTempo ? tempoWords(heardTempo, tick, ppq) : 'The tempo, once a song is open');
 	const glide = $derived(heardTempo ? gliding(heardTempo, tick) : null);
 
+	// The ▾ beside BPM lists the song's tempo changes, each going to where it is, as a DAW's tempo list does.
+	let tempoMenu = $state<{ x: number; y: number } | null>(null);
+	const tempoItems = (doc: Timeline): MenuItem[] =>
+		doc.tempo.map((change, index) => ({
+			label: `${bpmText(change.bpm)} BPM at bar ${barOf(change.tick, doc.ppq)}${change.ramp && index < doc.tempo.length - 1 ? ', gliding on' : ''}`,
+			action: () => moveTo(change.tick)
+		}));
+
 	// Enter or leaving the field sends what was typed, and Esc puts back what was there.
 	function fieldKeys(event: KeyboardEvent & { currentTarget: HTMLInputElement }, cancel: () => void) {
 		if (event.key === 'Enter') {
@@ -1387,6 +1398,25 @@
 		localStorage.setItem('modsynth.browser', browserOpen ? 'open' : 'closed');
 	}
 
+	// B gives the browser's filter focus as it opens, so a list can be found by typing, and Esc in it gives focus back to what had
+	// it, closing the browser if it is over the views.
+	let beforeBrowser: Element | null = null;
+	async function focusFilter() {
+		if (!browserShown) return;
+		beforeBrowser = document.activeElement;
+		await rendered();
+		document.querySelector<HTMLInputElement>('.browser .filter')?.focus();
+	}
+
+	function leaveBrowser() {
+		if (!wide) browserOver = false;
+		const back = beforeBrowser;
+		beforeBrowser = null;
+		const focusable = back instanceof HTMLElement || back instanceof SVGElement;
+		if (focusable && back.isConnected && back !== document.body) back.focus({ preventScroll: true });
+		else (document.activeElement as HTMLElement | null)?.blur();
+	}
+
 	// Over the views, the browser goes once it has done its job, or when the page is used instead.
 	$effect(() => {
 		void address.href;
@@ -1396,6 +1426,14 @@
 	function outsideBrowser(event: PointerEvent) {
 		const target = event.target as Element;
 		if (browserOver && !target.closest('.side, .rail, .menu')) browserOver = false;
+	}
+
+	// What was just made takes focus where it opens, rather than the page, which is where the field that named it leaves focus:
+	// a new song's roll, so the keys and step entry work at once, or a new patch's graph.
+	async function focusMade(what: 'timeline' | 'patch' | 'bundle') {
+		await rendered();
+		const target = what === 'timeline' ? 'roll' : what === 'patch' ? 'graph' : null;
+		if (target) document.querySelector<SVGElement>(`[data-testid="${target}"]`)?.focus({ preventScroll: true });
 	}
 
 	// Undo and Redo, the top bar's and the keys, act on what the view on screen edits.
@@ -1414,6 +1452,7 @@
 		} else if (matches(event, 'browser')) {
 			event.preventDefault();
 			toggleBrowser();
+			void focusFilter();
 		} else if (matches(event, 'escape') && browserOver) {
 			event.preventDefault(); // Esc closes one thing at a time, and the browser over the views is the nearest
 			browserOver = false;
@@ -1614,6 +1653,20 @@
 			<span class="muted">BPM</span>
 			{#if glide}<span class="glide" aria-hidden="true">{glide === 'up' ? '↗' : '↘'}</span>{/if}
 		</label>
+		{#if songDoc && songDoc.tempo.length > 1}
+			<button
+				type="button"
+				class="tempos"
+				aria-label="Tempo changes"
+				aria-haspopup="menu"
+				aria-expanded={tempoMenu !== null}
+				title="The song's tempo changes. Choose one to go to it."
+				onclick={(event) => {
+					const box = event.currentTarget.getBoundingClientRect();
+					tempoMenu = { x: box.left, y: box.bottom + 2 };
+				}}>▾</button
+			>
+		{/if}
 		<div class="undo" role="group" aria-label="Undo and redo">
 			<button
 				type="button"
@@ -1793,6 +1846,15 @@
 		/>
 	{/key}
 {/if}
+{#if tempoMenu && songDoc}
+	<ContextMenu
+		x={tempoMenu.x}
+		y={tempoMenu.y}
+		label="Tempo changes"
+		items={tempoItems(songDoc)}
+		onclose={() => (tempoMenu = null)}
+	/>
+{/if}
 {#if shortcutsShown}
 	<ShortcutsSheet onclose={() => (shortcutsShown = false)} />
 {/if}
@@ -1812,6 +1874,8 @@
 		usersOf={(id) => usedBy(id, library, data.library.timelines, nowPlaying)}
 		{reveal}
 		onshortcuts={() => (shortcutsShown = true)}
+		onmade={focusMade}
+		onescape={leaveBrowser}
 	/>
 {/snippet}
 
@@ -1994,6 +2058,12 @@
 	}
 	.bpm {
 		width: 3.4rem;
+	}
+	.tempos {
+		padding: 0 0.3rem;
+		min-width: 24px;
+		min-height: 24px;
+		font-size: 0.75rem;
 	}
 	.glide {
 		color: var(--accent);

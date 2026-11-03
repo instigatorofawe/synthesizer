@@ -8,8 +8,8 @@
 	import { clampVelocity } from '#lib/StepEntry.ts';
 	import { isBlackKey, noteName } from '#lib/TimelineEdit.ts';
 
-	// Two octaves of keys in the top bar, for whichever view is on screen to play. Each key is a button named by its note
-	// number, and the computer keyboard plays them too: A to ' from the lowest C shown, with Z and X moving the keys an octave.
+	// Two octaves of keys in the top bar, for whichever view is on screen to play. Each key is a button named by its note,
+	// and the computer keyboard plays them too: A to ' from the lowest C shown, with Z and X moving the keys an octave.
 	// There is one set of keys on the page, so the page decides where a key is heard, and it listens on the window whichever
 	// view is showing. Hold and the velocity they play at sit either side of them, and are the page's too: Hold changes only
 	// what is heard, and the velocity is the one new notes are written at.
@@ -85,9 +85,43 @@
 		release(note, event.timeStamp);
 	}
 
+	// The keys are one stop for Tab, as a toolbar's buttons are: the key last moved to takes focus, and the arrows, Home and End
+	// move between them. Enter plays the key with focus for as long as it is held.
+	let stop = $state<number | null>(null);
+	const tabbable = $derived(stop !== null && notes.includes(stop) ? stop : base);
+	let keyboard: HTMLDivElement;
+	const entered = new Set<number>(); // Keys Enter holds down
+
+	function keyKeys(event: KeyboardEvent, note: number) {
+		const at = notes.indexOf(note);
+		let to: number | null = null;
+		if (event.key === 'ArrowRight' || event.key === 'ArrowUp') to = Math.min(notes.length - 1, at + 1);
+		else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') to = Math.max(0, at - 1);
+		else if (event.key === 'Home') to = 0;
+		else if (event.key === 'End') to = notes.length - 1;
+		else if (event.key === 'Enter') {
+			event.preventDefault();
+			if (!event.repeat && !entered.has(note)) {
+				entered.add(note);
+				press(note, event.timeStamp);
+			}
+			return;
+		} else return;
+		event.preventDefault();
+		event.stopPropagation(); // The arrows are the keys' here, not the roll's or the arrangement's
+		stop = notes[to];
+		keyboard.querySelectorAll<HTMLButtonElement>('.key')[to]?.focus();
+	}
+
+	function keyUp(event: KeyboardEvent, note: number) {
+		if (event.key !== 'Enter' || !entered.delete(note)) return;
+		release(note, event.timeStamp);
+	}
+
 	// A key let go while the page wasn't looking would otherwise hold its note for ever.
 	function releaseAll() {
 		typed.clear();
+		entered.clear();
 		for (const note of [...held]) release(note);
 	}
 
@@ -122,13 +156,14 @@
 >
 
 <div
+	bind:this={keyboard}
 	class="keyboard"
 	class:writing
 	class:recording
 	style:width="{whites.length * WHITE}px"
 	role="group"
 	aria-label="Keys"
-	title={`${writing ? 'Step entry: keys write notes at the cursor in the roll. ' : ''}${recording ? 'Recording: the take writes what the keys play. ' : ''}${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up.`}
+	title={`${writing ? 'Step entry: keys write notes at the cursor in the roll. ' : ''}${recording ? 'Recording: the take writes what the keys play. ' : ''}${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up. Tab reaches these keys, the arrows move along them, and Enter plays one.`}
 >
 	{#each notes as note (note)}
 		<button
@@ -140,11 +175,18 @@
 			style:left="{isBlackKey(note) ? left(note) : whites.indexOf(note) * WHITE}px"
 			aria-label={noteName(note)}
 			aria-keyshortcuts={keyFor(note, base) || undefined}
+			tabindex={note === tabbable ? 0 : -1}
 			title={keyFor(note, base) ? `${noteName(note)} (${keyFor(note, base)})` : noteName(note)}
 			{disabled}
 			onpointerdown={(event) => press(note, event.timeStamp)}
 			onpointerup={(event) => release(note, event.timeStamp)}
 			onpointerleave={(event) => release(note, event.timeStamp)}
+			onkeydown={(event) => keyKeys(event, note)}
+			onkeyup={(event) => keyUp(event, note)}
+			onfocus={() => (stop = note)}
+			onblur={(event) => {
+				if (entered.delete(note)) release(note, event.timeStamp);
+			}}
 		>
 			{#if note % 12 === 0}<span>{noteName(note)}</span>{/if}
 		</button>

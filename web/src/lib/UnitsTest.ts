@@ -54,6 +54,13 @@ describe('a length', () => {
 		expect(parseLength('5/4', PPQ)).toBe(2400);
 	});
 
+	it('reads a triplet as three in the time of two', () => {
+		expect(parseLength('1/8T', PPQ)).toBe(PPQ / 3);
+		expect(parseLength('1/4t', PPQ)).toBe((PPQ * 2) / 3);
+		expect(parseLength('1/16T', PPQ)).toBe(PPQ / 6);
+		expect(parseLength('1 bar + 1/8T', PPQ)).toBe(PPQ * 4 + PPQ / 3);
+	});
+
 	it('is ticks when it is a bare number, so an odd one can still be had', () => {
 		expect(parseLength('240', PPQ)).toBe(240);
 		expect(parseLength('1900', PPQ)).toBe(1900);
@@ -62,14 +69,33 @@ describe('a length', () => {
 	});
 
 	it('reads back as it was written, as a note value or in bars', () => {
-		for (const ticks of [1, 7, 30, 160, 240, 360, 480, 1440, 1900, 1920, 2400, 3840, 4800, 1920 + 100]) {
+		for (const ticks of [
+			1,
+			7,
+			30,
+			80,
+			160,
+			240,
+			320,
+			360,
+			400,
+			480,
+			640,
+			1440,
+			1900,
+			1920,
+			2400,
+			3840,
+			4800,
+			1920 + 100
+		]) {
 			expect(parseLength(noteValue(ticks, PPQ), PPQ), noteValue(ticks, PPQ)).toBe(ticks);
 			expect(parseLength(barLength(ticks, PPQ), PPQ), barLength(ticks, PPQ)).toBe(ticks);
 		}
 	});
 
 	it('is nothing that is no whole number of ticks, or less than the least it can be', () => {
-		for (const text of ['', 'x', '1/0', '1/7', '1/8 +', 'bar', '-240', '1/8t', '0']) {
+		for (const text of ['', 'x', '1/0', '1/7', '1/8 +', 'bar', '-240', '1/8x', '1/8tt', '0']) {
 			expect(parseLength(text, PPQ), text).toBeNull();
 		}
 		expect(parseLength('0', PPQ, 0)).toBe(0); // A ramp of nothing is a step
@@ -88,7 +114,21 @@ describe('a length', () => {
 	});
 
 	it('is chosen from note values and bars that the ppq holds', () => {
-		expect(noteLengths(PPQ)).toEqual(['1/32', '1/16', '1/8', '3/16', '1/4', '3/8', '1/2', '3/4', '1 bar', '2 bars']);
+		expect(noteLengths(PPQ)).toEqual([
+			'1/32',
+			'1/16T',
+			'1/16',
+			'1/8T',
+			'1/8',
+			'1/4T',
+			'3/16',
+			'1/4',
+			'3/8',
+			'1/2',
+			'3/4',
+			'1 bar',
+			'2 bars'
+		]);
 		expect(noteLengths(2)).toEqual(['1/8', '1/4', '3/8', '1/2', '3/4', '1 bar', '2 bars']);
 		expect(barLengths(PPQ)).toEqual(['1/4', '1/2', '1 bar', '2 bars', '3 bars', '4 bars', '8 bars', '16 bars']);
 		for (const text of [...noteLengths(PPQ), ...barLengths(PPQ)]) expect(parseLength(text, PPQ), text).not.toBeNull();

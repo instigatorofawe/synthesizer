@@ -1011,7 +1011,7 @@
 		border-radius: 3px;
 		background: transparent;
 		color: var(--muted);
-		font-size: 0.68rem;
+		font-size: 0.75rem;
 		line-height: 17px;
 		text-align: left;
 		white-space: nowrap;

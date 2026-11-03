@@ -166,6 +166,19 @@ describe('the grid', () => {
 			}
 		}
 		expect(grids(480).find((g) => g.label === '1/16')?.ticks).toBe(120);
+		expect(grids(480).map((g) => g.label)).toEqual([
+			'Bar',
+			'1/4',
+			'1/4T',
+			'1/8',
+			'1/8T',
+			'1/16',
+			'1/16T',
+			'1/32',
+			'Off'
+		]);
+		expect(grids(480).find((g) => g.label === '1/8T')?.ticks).toBe(160);
+		expect(grids(7).map((g) => g.label)).not.toContain('1/8T'); // A ppq that can't hold a third of a beat has none
 	});
 
 	it('snaps to the nearest line and never before the start', () => {
@@ -382,7 +395,12 @@ describe('note entry', () => {
 		expect(noteValue(1920, 480)).toBe('1 bar');
 		expect(noteValue(3840, 480)).toBe('2 bars');
 		expect(noteValue(2400, 480)).toBe('5/4');
-		expect(noteValue(160, 480)).toBe('160 ticks'); // A triplet
+		expect(noteValue(160, 480)).toBe('1/8T'); // Three in the time of two 1/8s
+		expect(noteValue(320, 480)).toBe('1/4T');
+		expect(noteValue(80, 480)).toBe('1/16T');
+		expect(noteValue(640, 480)).toBe('1/2T');
+		expect(noteValue(400, 480)).toBe('400 ticks'); // Five 1/16Ts read better as ticks
+		expect(noteValue(100, 480)).toBe('100 ticks');
 		expect(noteValue(1, 480)).toBe('1 tick');
 		expect(noteValue(12, 96)).toBe('1/32');
 	});
@@ -390,12 +408,16 @@ describe('note entry', () => {
 	it('offers Draw lengths from a 1/32 to a bar, where the ppq holds them in whole ticks', () => {
 		expect(drawLengths(480)).toEqual([
 			{ label: '1/32', ticks: 60 },
+			{ label: '1/16T', ticks: 80 },
 			{ label: '1/16', ticks: 120 },
+			{ label: '1/8T', ticks: 160 },
 			{ label: '1/8', ticks: 240 },
+			{ label: '1/4T', ticks: 320 },
 			{ label: '1/4', ticks: 480 },
 			{ label: '1/2', ticks: 960 },
 			{ label: '1 bar', ticks: 1920 }
 		]);
+		expect(drawLengths(480, false).map((d) => d.label)).toEqual(['1/32', '1/16', '1/8', '1/4', '1/2', '1 bar']);
 		expect(drawLengths(7).map((d) => d.label)).toEqual(['1/4', '1/2', '1 bar']);
 		expect(drawLengths(1).map((d) => d.ticks)).toEqual([1, 2, 4]);
 	});
@@ -408,6 +430,8 @@ describe('note entry', () => {
 		expect(stepLength(1920, 480, 1)).toBe(1920);
 		expect(stepLength(60, 480, -1)).toBe(60);
 		expect(stepLength(5000, 480, -1)).toBe(1920);
+		expect(stepLength(160, 480, 1)).toBe(240); // A 1/8T steps to the straight lengths either side of it
+		expect(stepLength(160, 480, -1)).toBe(120);
 	});
 });
 

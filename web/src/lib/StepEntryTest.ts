@@ -7,6 +7,7 @@ import {
 	moveTo,
 	press,
 	release,
+	repitch,
 	rest,
 	stepBack,
 	stepVelocity,
@@ -159,6 +160,28 @@ describe('stepping back', () => {
 		const back = stepBack(undone, written.cursor, EIGHTH);
 		expect(back.clip).toBe(undone);
 		expect(back.cursor).toEqual(START);
+	});
+});
+
+describe('fixing the last step’s pitch', () => {
+	it('moves the notes it wrote, and Backspace still takes them back', () => {
+		const first = chord(clipOf([note(0, 40)]), moveTo(EIGHTH), [60, 64]);
+		const up = repitch(first.clip, first.cursor, 1);
+		expect(up.clip.notes.map((n) => n.note).sort()).toEqual([40, 61, 65]);
+		expect(up.cursor.tick).toBe(first.cursor.tick);
+		const octave = repitch(up.clip, up.cursor, -12);
+		expect(octave.clip.notes.map((n) => n.note).sort()).toEqual([40, 49, 53]);
+		const back = stepBack(octave.clip, octave.cursor, EIGHTH);
+		expect(back.clip.notes).toEqual([note(0, 40)]);
+	});
+
+	it('moves nothing after a rest, past 0 to 127, or once its notes have been changed', () => {
+		const written = chord(clipOf(), START, [120]);
+		expect(repitch(written.clip, written.cursor, 12).clip).toBe(written.clip);
+		const rested = rest(written.cursor, EIGHTH);
+		expect(repitch(written.clip, rested, 1).clip).toBe(written.clip);
+		const changed = { ...written.clip, notes: [note(0, 120, SIXTEENTH)] };
+		expect(repitch(changed, written.cursor, 1).clip).toBe(changed);
 	});
 });
 

@@ -90,6 +90,22 @@ export const SHORTCUTS = [
 		description: 'A rest as long as the Draw length, or with piano keys held, their notes a Snap step longer'
 	},
 	{ id: 'step.back', code: 'Backspace', scope: 'step', description: 'Take back the last step' },
+	{ id: 'step.up', code: 'ArrowUp', scope: 'step', description: 'The last step’s notes up a semitone' },
+	{ id: 'step.down', code: 'ArrowDown', scope: 'step', description: 'The last step’s notes down a semitone' },
+	{
+		id: 'step.octave-up',
+		code: 'ArrowUp',
+		shift: true,
+		scope: 'step',
+		description: 'The last step’s notes up an octave'
+	},
+	{
+		id: 'step.octave-down',
+		code: 'ArrowDown',
+		shift: true,
+		scope: 'step',
+		description: 'The last step’s notes down an octave'
+	},
 
 	{ id: 'arrangement.delete', code: 'Delete', scope: 'arrangement', description: 'Take the chosen clip off its track' },
 	{

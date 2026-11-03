@@ -16,6 +16,7 @@
 		press,
 		release,
 		rest,
+		repitch,
 		stepBack,
 		write,
 		type Chord,
@@ -663,6 +664,29 @@
 			// With keys still down, it drops what they would have written.
 			if (chord) chord = null;
 			else stepBackOnce();
+		} else if (
+			matches(event, 'step.up') ||
+			matches(event, 'step.down') ||
+			matches(event, 'step.octave-up') ||
+			matches(event, 'step.octave-down')
+		) {
+			if (chord) return; // Keys still down are still being chosen
+			const by = matches(event, 'step.up')
+				? 1
+				: matches(event, 'step.down')
+					? -1
+					: matches(event, 'step.octave-up')
+						? 12
+						: -12;
+			const fixed = repitch(clip, cursor, by);
+			if (fixed.clip !== clip) {
+				chosen = new Set();
+				moveCursor(fixed.cursor);
+				onchange(fixed.clip);
+				const top = Math.max(...fixed.cursor.steps.at(-1)!.notes.map((note) => note.note));
+				audition(top); // Heard, as a note clicked in is
+				reveal(fixed.cursor.tick, top);
+			}
 		} else if (matches(event, 'escape')) {
 			escape();
 		} else {

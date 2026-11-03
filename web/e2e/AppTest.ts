@@ -1006,7 +1006,9 @@ async function addNoteAt(page: Page, tick: number, note: number) {
 	await settled(page);
 }
 
+// Starts audio once every edit has compiled, so the image it starts with is the newest.
 async function startAudio(page: Page) {
+	await settled(page);
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 }

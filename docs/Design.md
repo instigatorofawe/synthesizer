@@ -1030,7 +1030,9 @@ limiter in the host, sections 14 and 19. Neither changes the engine, and the NaN
 hasn't weighed in on:
 - **Full scale is 1**, with no margin, for the device check and the limiter both.
 - **Every compiler can play every engine.** It holds one for each frame size from 8 to 1024 and both channel counts, so every host refuses
-  the same images, which makes the browser's compiler module 1.40 MB rather than 671 KB.
+  the same images, which makes the browser's compiler module 1.40 MB rather than 671 KB. The sixteen engines are built once, in
+  `Peak.cpp`, the compiler library's one source file: built in every file that includes the compiler, they made each four times as slow
+  for GCC to compile, and with the memory to match.
 - **The limiter** looks at no sample ahead, so it adds no latency. Its gain drops at once to keep a sample at full scale and comes back over
   0.1 s, both channels together, and below full scale it changes no bit. It is in the wasm engine's render, so playback and Export WAV both
   have it, and the Python binding's `limit`, which `Listen.py` plays through. The binding's `render` stays the engine's own output, which

@@ -67,9 +67,14 @@ if(MODSYNTH_BUILD_COMPILER OR SKBUILD OR MODSYNTH_BUILD_PYTHON)
     )
     FetchContent_MakeAvailable(nlohmann_json)
 
-    add_library(modsynth_compiler INTERFACE)
+    # Headers but for the peak check's engines, one per frame size and channel count, which compile once here rather than
+    # in every file that includes the compiler. The Python module links it into a shared library, so it's PIC. Every
+    # wasm build of the compiler catches its exceptions, so this file is built to pass them on.
+    add_library(modsynth_compiler STATIC include/modsynth/Peak.cpp)
     add_library(modsynth::compiler ALIAS modsynth_compiler)
-    target_link_libraries(modsynth_compiler INTERFACE modsynth nlohmann_json::nlohmann_json)
+    target_link_libraries(modsynth_compiler PUBLIC modsynth nlohmann_json::nlohmann_json)
+    set_target_properties(modsynth_compiler PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_options(modsynth_compiler PRIVATE $<$<PLATFORM_ID:Emscripten>:-fwasm-exceptions>)
 endif()
 
 if(SKBUILD OR MODSYNTH_BUILD_PYTHON)

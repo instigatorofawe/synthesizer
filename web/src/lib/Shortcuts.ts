@@ -6,7 +6,8 @@
 // An editor still handles its own keys where it is, and asks `matches` whether an event is one of them.
 
 // Where a key works. Song holds the arrangement, the roll and step entry, and Patch holds the graph, so a key bound in one
-// works in what it holds as well. Step entry is a mode of the roll that takes over some of its keys, so the two can share.
+// works in what it holds as well. Step entry is a mode of the roll that takes over some of its keys, so the two can share,
+// and while it is on its keys come before the roll's and the arrangement's.
 export type Scope = 'everywhere' | 'song' | 'patch' | 'roll' | 'arrangement' | 'graph' | 'step';
 
 export const SCOPES: Record<Scope, { name: string; within: Scope | null }> = {
@@ -75,6 +76,15 @@ export const SHORTCUTS = [
 	{ id: 'roll.octave-down', code: 'ArrowDown', shift: true, scope: 'roll', description: 'Chosen notes down an octave' },
 	{ id: 'roll.earlier', code: 'ArrowLeft', scope: 'roll', description: 'Chosen notes a Snap step earlier' },
 	{ id: 'roll.later', code: 'ArrowRight', scope: 'roll', description: 'Chosen notes a Snap step later' },
+
+	// While step entry is on, it takes these from the roll and the arrangement. Esc, everywhere, leaves it.
+	{
+		id: 'step.rest',
+		code: 'ArrowRight',
+		scope: 'step',
+		description: 'A rest as long as the Draw length, or with piano keys held, their notes a Snap step longer'
+	},
+	{ id: 'step.back', code: 'Backspace', scope: 'step', description: 'Take back the last step' },
 
 	{ id: 'arrangement.delete', code: 'Delete', scope: 'arrangement', description: 'Take the chosen clip off its track' },
 	{

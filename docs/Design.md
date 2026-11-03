@@ -922,6 +922,17 @@ end grows the clip to the bar that holds it, which says so with an Undo. Here th
 would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
 four bars past the end, so there is room to do it.
 
+Step entry writes notes from the keyboard with the song stopped, and is the way to write them without a mouse. R, or the Step toggle at the
+right of the roll's tabs, turns it on, and a line in the roll marks where the next step goes: where it was last in that clip, or else the
+clip's start, and a click moves it to the nearest line of the grid. The piano keys write notes there as long as the Draw length, so every start
+and length lands on the grid, and they sound as they always do. Keys held together make a chord, which is one edit, written once the last
+of them is let go, and the cursor then moves past it. → with keys held makes their notes a Snap step longer, → alone rests, and Backspace
+takes the last step back, or with none behind the cursor moves it back and deletes nothing. While step entry is on, → and Backspace are its
+own rather than the roll's or the arrangement's, and Esc leaves it once nothing nearer is left to close. A step past the clip's end grows the
+clip as a clicked note does. The rules are pure functions over a clip and a cursor, in `StepEntry.ts`. The keys reach them through the page,
+which lets them write into a track the image leaves out for having no notes yet. C and V step the velocity of new notes, clicked or
+stepped, by 10, and Vel beside Draw shows it.
+
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
 a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
 gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. What the page plays and Export WAV writes pass through a limiter after the

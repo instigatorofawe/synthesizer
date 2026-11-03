@@ -76,6 +76,42 @@ export const isBlackKey = (note: number) => NOTE_NAMES[note % 12].length > 1;
 
 export const barOf = (tick: number, ppq: number) => Math.floor(tick / (ppq * BEATS_PER_BAR)) + 1;
 
+// Where a tick falls as bar.beat.tick, with bars and beats counted from 1 and the tick from 0, as most DAWs show it: 1.4.000 is
+// the last beat of the first bar.
+export function position(tick: number, ppq: number): string {
+	const beat = Math.floor(tick / ppq);
+	const bar = Math.floor(beat / BEATS_PER_BAR) + 1;
+	return `${bar}.${(beat % BEATS_PER_BAR) + 1}.${String(tick % ppq).padStart(3, '0')}`;
+}
+
+const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+
+// A length as a note value: 1/8, 3/16, 1 bar. A bar is a whole note, as 4/4 has it. A length that no note value down to a
+// 1/128 can name, a triplet's or one typed in, stays in ticks.
+export function noteValue(ticks: number, ppq: number): string {
+	const whole = ppq * BEATS_PER_BAR;
+	const common = gcd(ticks, whole);
+	const [over, under] = [ticks / common, whole / common];
+	if (under === 1) return over === 1 ? '1 bar' : `${over} bars`;
+	if (under <= 128 && (under & (under - 1)) === 0) return `${over}/${under}`;
+	return ticks === 1 ? '1 tick' : `${ticks} ticks`;
+}
+
+// What the Draw length offers, a 1/32 note to a bar: those this ppq can hold in whole ticks.
+export function drawLengths(ppq: number): { label: string; ticks: number }[] {
+	return [32, 16, 8, 4, 2, 1]
+		.map((under) => (ppq * BEATS_PER_BAR) / under)
+		.filter((ticks) => Number.isInteger(ticks))
+		.map((ticks) => ({ label: noteValue(ticks, ppq), ticks }));
+}
+
+// The Draw length one step shorter or longer than this one, which needn't be one of them. It stops at either end.
+export function stepLength(ticks: number, ppq: number, by: -1 | 1): number {
+	const lengths = drawLengths(ppq).map((length) => length.ticks);
+	const next = by > 0 ? lengths.find((length) => length > ticks) : lengths.findLast((length) => length < ticks);
+	return next ?? ticks;
+}
+
 // ---------------------------------------------------------------------------------------------------------------- chains
 
 // The compiler's own names for these, which an insert's `key` and a route's `output` already use.
@@ -532,6 +568,61 @@ export function makeUnique(doc: Timeline, track: number, index: number): { doc: 
 	if (!placed) return { doc, id: '' };
 	const copy = duplicateClip(doc, placed.clip);
 	return { doc: setPlacement(copy.doc, track, index, { clip: copy.id }), id: copy.id };
+}
+
+// The same placement again where this one ends, repeats, window and all, so a pattern grows by one more of it. It plays the same
+// clip, as a copy dragged off it does, and the index it lands at comes back with it.
+export function duplicatePlacement(doc: Timeline, track: number, index: number): { doc: Timeline; index: number } {
+	const placed = doc.tracks.find((t) => t.id === track)?.placements[index];
+	if (!placed) return { doc, index };
+	const copy = { ...placed, tick: placed.tick + placementSpan(doc, placed) };
+	const next = mapChain(doc, trackKey(track), (chain) => ({
+		...chain,
+		placements: inOrder([...(chain as Track).placements, copy])
+	}));
+	return { doc: next, index: (next.tracks.find((t) => t.id === track)?.placements ?? []).lastIndexOf(copy) };
+}
+
+// The clip a drag across an empty row draws, from the tick it was pressed at to the one it reached, either way: whole bars, from
+// the start of the first to the end of the last. It stays in the gap it was pressed in, between the placements either side, so
+// drawing one never makes an overlap. Null if there is no room.
+export function drawnClip(
+	doc: Timeline,
+	track: number,
+	from: number,
+	to: number
+): { tick: number; length: number } | null {
+	const bar = ticksPerBar(doc);
+	let tick = Math.floor(Math.min(from, to) / bar) * bar;
+	let end = (Math.floor(Math.max(from, to) / bar) + 1) * bar;
+	for (const placed of doc.tracks.find((t) => t.id === track)?.placements ?? []) {
+		if (placed.tick <= from) tick = Math.max(tick, placed.tick + placementSpan(doc, placed));
+		else end = Math.min(end, placed.tick);
+	}
+	return end > tick ? { tick, length: end - tick } : null;
+}
+
+// A clip long enough to hold a note that starts at `tick`:to the end of the bar it falls in, or as it was if it holds it already.
+export function growToHold(clip: Clip, tick: number, ppq: number): Clip {
+	if (tick < clip.length) return clip;
+	return { ...clip, length: barOf(tick, ppq) * ppq * BEATS_PER_BAR };
+}
+
+// Whether a clip can be `length` long without any of its placements running into the one after it on its track. A placement
+// that plays a window of its own length doesn't grow, and one that plays to the end of the clip grows each of its repeats. The
+// compiler refuses a placement that starts before the last one has ended, so this is what keeps growing a clip from breaking
+// a song that uses it somewhere out of sight.
+export function canGrow(doc: Timeline, id: string, length: number): boolean {
+	const clip = clipOf(doc, id);
+	if (!clip) return false;
+	const grown = setClip(doc, id, { ...clip, length });
+	return grown.tracks.every((track) => {
+		const placements = inOrder(track.placements);
+		return placements.every((placed, at) => {
+			const after = placements[at + 1];
+			return placed.clip !== id || !after || placed.tick + placementSpan(grown, placed) <= after.tick;
+		});
+	});
 }
 
 // --------------------------------------------------------------------------------------------------------------- notes

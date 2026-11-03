@@ -13,10 +13,15 @@ import {
 	barOf,
 	busKey,
 	byOwner,
+	canGrow,
 	describeLane,
+	drawnClip,
+	drawLengths,
 	duplicateClip,
 	duplicateNotes,
+	duplicatePlacement,
 	grids,
+	growToHold,
 	laneChoices,
 	laneCurve,
 	laneKey,
@@ -28,9 +33,11 @@ import {
 	moveNotes,
 	movePlacement,
 	noteName,
+	noteValue,
 	patchUses,
 	place,
 	placeOfError,
+	position,
 	removeBus,
 	removeClip,
 	removeInsert,
@@ -66,6 +73,7 @@ import {
 	tempoAt,
 	snapTick,
 	songLength,
+	stepLength,
 	trackKey,
 	type Clip,
 	type LaneTarget,
@@ -194,6 +202,30 @@ describe('placements', () => {
 		expect(removePlacement(song(), 1, 0).tracks[0].placements.map((p) => p.clip)).toEqual(['b']);
 	});
 
+	it('duplicate where they end, with their repeats and window, and say where the copy landed', () => {
+		const trimmed = setPlacement(song(), 2, 0, { start: 480, transpose: 12, repeat: 3 });
+		const { doc, index } = duplicatePlacement(trimmed, 2, 0);
+		expect(index).toBe(1);
+		expect(doc.tracks[1].placements[1]).toEqual({ clip: 'a', tick: 4320, repeat: 3, start: 480, transpose: 12 });
+		const onto = duplicatePlacement(song(), 1, 0); // It lands on b, which the compiler will call an overlap
+		expect(onto.doc.tracks[0].placements.map((p) => [p.clip, p.tick])).toEqual([
+			['a', 0],
+			['b', 3840],
+			['a', 3840]
+		]);
+		expect(onto.index).toBe(2);
+	});
+
+	it('are drawn in whole bars across a row, either way, and stay in the gap they were drawn in', () => {
+		const doc = song(); // Track 2 plays a from 0 to 1920. Track 1 plays a twice and then b, to 4800.
+		expect(drawnClip(doc, 2, 2000, 5000)).toEqual({ tick: 1920, length: 3840 });
+		expect(drawnClip(doc, 2, 5000, 2000)).toEqual({ tick: 1920, length: 3840 });
+		expect(drawnClip(doc, 2, 2000, 2100)).toEqual({ tick: 1920, length: 1920 });
+		expect(drawnClip(doc, 1, 5000, 100)).toEqual({ tick: 4800, length: 960 }); // From where b ends
+		expect(drawnClip(place(doc, 2, 'b', 5000), 2, 2000, 9000)).toEqual({ tick: 1920, length: 3080 }); // To where b starts
+		expect(drawnClip(doc, 2, 100, 200)).toBeNull(); // Pressed inside a, which fills that bar
+	});
+
 	it('leave the other uses of a clip alone when made unique', () => {
 		const { doc, id } = makeUnique(song(), 1, 0);
 		expect(id).toBe('a-2');
@@ -265,6 +297,89 @@ describe('notes', () => {
 
 	it('come out by index', () => {
 		expect(removeNotes(clip, new Set([0, 2])).notes.map((n) => n.note)).toEqual([64]);
+	});
+});
+
+describe('note entry', () => {
+	it('reads a position as bar.beat.tick, counting bars and beats from one', () => {
+		expect(position(0, 480)).toBe('1.1.000');
+		expect(position(1440, 480)).toBe('1.4.000');
+		expect(position(1920 + 480 + 60, 480)).toBe('2.2.060');
+		expect(position(7, 96)).toBe('1.1.007');
+		expect(position(1000, 960)).toBe('1.2.040');
+	});
+
+	it('names a length as a note value, or in ticks when none fits', () => {
+		expect(noteValue(240, 480)).toBe('1/8');
+		expect(noteValue(360, 480)).toBe('3/16');
+		expect(noteValue(1920, 480)).toBe('1 bar');
+		expect(noteValue(3840, 480)).toBe('2 bars');
+		expect(noteValue(2400, 480)).toBe('5/4');
+		expect(noteValue(160, 480)).toBe('160 ticks'); // A triplet
+		expect(noteValue(1, 480)).toBe('1 tick');
+		expect(noteValue(12, 96)).toBe('1/32');
+	});
+
+	it('offers Draw lengths from a 1/32 to a bar, where the ppq holds them in whole ticks', () => {
+		expect(drawLengths(480)).toEqual([
+			{ label: '1/32', ticks: 60 },
+			{ label: '1/16', ticks: 120 },
+			{ label: '1/8', ticks: 240 },
+			{ label: '1/4', ticks: 480 },
+			{ label: '1/2', ticks: 960 },
+			{ label: '1 bar', ticks: 1920 }
+		]);
+		expect(drawLengths(7).map((d) => d.label)).toEqual(['1/4', '1/2', '1 bar']);
+		expect(drawLengths(1).map((d) => d.ticks)).toEqual([1, 2, 4]);
+	});
+
+	it('steps the Draw length to the next value either way, from any length, and stops at the ends', () => {
+		expect(stepLength(240, 480, 1)).toBe(480);
+		expect(stepLength(240, 480, -1)).toBe(120);
+		expect(stepLength(360, 480, 1)).toBe(480); // A dotted 1/8 steps to the values either side of it
+		expect(stepLength(360, 480, -1)).toBe(240);
+		expect(stepLength(1920, 480, 1)).toBe(1920);
+		expect(stepLength(60, 480, -1)).toBe(60);
+		expect(stepLength(5000, 480, -1)).toBe(1920);
+	});
+});
+
+describe('growing a clip', () => {
+	it('grows to the end of the bar that holds a note, and not for a note it holds already', () => {
+		const clip = clipNamed('c', 1920);
+		expect(growToHold(clip, 1919, 480)).toBe(clip);
+		expect(growToHold(clip, 1920, 480).length).toBe(3840);
+		expect(growToHold(clip, 5000, 480).length).toBe(5760);
+		expect(growToHold(clipNamed('c', 5280), 5300, 480).length).toBe(5760); // From 2.75 bars to 3
+		expect(growToHold(clip, 2000, 480).notes).toBe(clip.notes);
+	});
+
+	it('is safe while no repeat of any placement of the clip runs into the next placement on its track', () => {
+		// Clip a repeats twice from 0 on track 1, so it ends where b starts at 3840. On track 2 nothing follows it.
+		const doc = song();
+		expect(canGrow(doc, 'a', 1920)).toBe(true);
+		expect(canGrow(doc, 'a', 1921)).toBe(false);
+		expect(canGrow(doc, 'b', 96000)).toBe(true);
+		const spaced = setPlacement(doc, 1, 1, { tick: 7680 });
+		expect(canGrow(spaced, 'a', 3840)).toBe(true); // Two repeats of 3840 end at 7680, where b starts
+		expect(canGrow(spaced, 'a', 3841)).toBe(false);
+		expect(canGrow(doc, 'nothing', 3840)).toBe(false);
+	});
+
+	it('checks every track the clip is placed on, and a placement of it that follows another', () => {
+		const doc = place(song(), 2, 'b', 2880); // Track 2 plays a from 0 to 1920, then b
+		expect(canGrow(doc, 'a', 2880)).toBe(false);
+		const twice = place(timelineSchema.parse({ clips: [clipNamed('a')], tracks: [{ id: 1 }] }), 1, 'a', 0);
+		const again = place(twice, 1, 'a', 1920);
+		expect(canGrow(again, 'a', 1920)).toBe(true);
+		expect(canGrow(again, 'a', 2400)).toBe(false);
+		expect(canGrow(twice, 'a', 2400)).toBe(true); // The last placement on its track grows freely
+	});
+
+	it("leaves out a placement that plays a window of its own length, which doesn't grow", () => {
+		const doc = setPlacement(song(), 1, 0, { length: 960 }); // Two repeats of 960 end at 1920, well before b
+		expect(canGrow(doc, 'a', 9600)).toBe(true);
+		expect(canGrow(setPlacement(doc, 1, 0, { start: 480, length: 1440 }), 'a', 9600)).toBe(false); // To the end again
 	});
 });
 

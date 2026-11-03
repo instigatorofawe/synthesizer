@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ContextMenu from '#lib/ContextMenu.svelte';
+	import { matches, modKey } from '#lib/Shortcuts.ts';
 	import { addPoint, laneCurve, removePoint, setPoint, snapTick, type Clip, type Lane } from '#lib/TimelineEdit.ts';
 
 	let {
@@ -34,19 +36,28 @@
 
 	let svg: SVGSVGElement;
 	let chosen = $state<number | null>(null); // An index into `clip.automation`
-	let held = $state.raw<{ index: number; clip: Clip } | null>(null);
+	// A point being dragged, in `clip`, which `base` is as it was pressed: a new point is in `base` but not yet in `clip`.
+	let held = $state.raw<{ index: number; base: Clip; clip: Clip } | null>(null);
+	let menu = $state.raw<{ x: number; y: number; index: number } | null>(null);
 
 	const shown = $derived(held?.clip ?? clip);
 	const current = $derived(chosen === null ? undefined : shown.automation[chosen]);
-	const drawn = $derived(lane.points.map(({ index }) => ({ index, point: shown.automation[index] })));
+	// The lane's points as they are while one is dragged, the new one too, which isn't in the lane until it is let go.
+	const drawn = $derived.by(() => {
+		const points = lane.points.map(({ index }) => ({ index, point: shown.automation[index] }));
+		if (held && held.index >= clip.automation.length)
+			points.push({ index: held.index, point: held.clip.automation[held.index] });
+		return points;
+	});
 	const yOf = (value: number) => PAD + (1 - (value - min) / (max - min)) * (HEIGHT - 2 * PAD);
 
 	function pointer(event: { clientX: number; clientY: number }) {
 		const box = svg.getBoundingClientRect();
 		const y = Math.min(HEIGHT - PAD, Math.max(PAD, event.clientY - box.top));
 		const fraction = 1 - (y - PAD) / (HEIGHT - 2 * PAD);
-		const tick = Math.min(clip.length - 1, snapTick((event.clientX - box.left) / perTick, grid));
-		return { tick, value: Number((min + fraction * (max - min)).toPrecision(4)) };
+		const at = snapTick((event.clientX - box.left) / perTick, grid);
+		const tick = Math.min(clip.length - 1, at);
+		return { tick, value: Number((min + fraction * (max - min)).toPrecision(4)), past: at >= clip.length };
 	}
 
 	const polyline = $derived(
@@ -55,14 +66,20 @@
 			.join(' ')
 	);
 
+	// A right-click chooses the point for its menu, and Ctrl-click is a right-click on a Mac, so neither drags.
+	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && modKey() === 'Meta');
+
 	function startPoint(event: PointerEvent, index: number) {
 		event.stopPropagation();
+		svg.focus({ preventScroll: true });
 		chosen = index;
-		if (!readonly) held = { index, clip };
+		if (!readonly && !secondary(event)) held = { index, base: clip, clip };
 	}
 
 	function pointerMove(event: PointerEvent) {
-		if (held) held = { ...held, clip: setPoint(clip, held.index, pointer(event)) };
+		if (!held) return;
+		const { tick, value } = pointer(event);
+		held = { ...held, clip: setPoint(held.base, held.index, { tick, value }) };
 	}
 
 	function pointerUp() {
@@ -71,16 +88,61 @@
 		if (finished && finished.clip !== clip) onchange(finished.clip);
 	}
 
-	function added(event: MouseEvent) {
-		if (readonly) return;
-		const { tick, value } = pointer(event);
+	// A click on the lane adds a point there, and dragging before letting go moves it. A point already at that tick is
+	// chosen instead, which is also what the second click of a double-click finds.
+	function pressGround(event: PointerEvent) {
+		svg.focus({ preventScroll: true });
+		chosen = null;
+		if (readonly || secondary(event)) return;
+		const { tick, value, past } = pointer(event);
+		if (past) return;
+		const there = lane.points.find(({ point }) => point.tick === tick);
+		if (there) {
+			chosen = there.index;
+			held = { index: there.index, base: clip, clip };
+			return;
+		}
+		const base = addPoint(clip, lane, tick, value);
 		chosen = clip.automation.length; // Taken first, because the parent's change reaches `clip` at once
+		held = { index: chosen, base, clip: base };
+	}
+
+	// A double-click adds a point too, if its first click didn't.
+	function doubled(event: MouseEvent) {
+		if (readonly) return;
+		const { tick, value, past } = pointer(event);
+		if (past || lane.points.some(({ point }) => point.tick === tick)) return;
+		chosen = clip.automation.length;
 		onchange(addPoint(clip, lane, tick, value));
 	}
 
 	function removed(index: number) {
 		chosen = null;
 		onchange(removePoint(clip, index));
+	}
+
+	// Delete in a lane is about its points, so it never reaches the arrangement, where it would take the clip away.
+	function keydown(event: KeyboardEvent) {
+		if (matches(event, 'roll.delete') || matches(event, 'roll.backspace')) {
+			event.preventDefault();
+			event.stopPropagation();
+			if (!readonly && chosen !== null) removed(chosen);
+		} else if (matches(event, 'escape')) {
+			event.stopPropagation();
+			if (held) held = null;
+			else chosen = null;
+		}
+	}
+
+	// The menu closes before an item acts, so the item holds the point it is for rather than reading the menu.
+	const pointItems = (index: number) => [{ label: 'Delete', action: () => removed(index) }];
+
+	function pointMenu(event: MouseEvent, index: number) {
+		event.preventDefault();
+		event.stopPropagation();
+		held = null;
+		chosen = index;
+		if (!readonly) menu = { x: event.clientX, y: event.clientY, index };
 	}
 
 	function field(name: 'tick' | 'value' | 'ramp', text: string) {
@@ -143,15 +205,19 @@
 	<span class="grow"></span>
 	{#if !readonly}<button type="button" onclick={onremove} aria-label={`Remove lane ${label}`}>Remove</button>{/if}
 </div>
-<svg bind:this={svg} {width} height={HEIGHT} role="application" aria-label={`Lane ${label}`} data-testid={testid}>
-	<rect
-		class="ground"
-		{width}
-		height={HEIGHT}
-		role="presentation"
-		ondblclick={added}
-		onpointerdown={() => (chosen = null)}
-	/>
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<svg
+	bind:this={svg}
+	{width}
+	height={HEIGHT}
+	role="application"
+	aria-label={`Lane ${label}`}
+	tabindex="-1"
+	data-testid={testid}
+	onkeydown={keydown}
+	oncontextmenu={(event) => event.preventDefault()}
+>
+	<rect class="ground" {width} height={HEIGHT} role="presentation" ondblclick={doubled} onpointerdown={pressGround} />
 	<polyline class="curve" points={polyline} />
 	{#each drawn as { index, point } (index)}
 		<circle
@@ -165,10 +231,20 @@
 			aria-label={`Point at ${point.tick}`}
 			data-testid={`${testid}-point-${index}`}
 			onpointerdown={(event) => startPoint(event, index)}
-			ondblclick={() => !readonly && removed(index)}
+			oncontextmenu={(event) => pointMenu(event, index)}
 		/>
 	{/each}
 </svg>
+
+{#if menu}
+	<ContextMenu
+		x={menu.x}
+		y={menu.y}
+		label={`${label} point`}
+		items={pointItems(menu.index)}
+		onclose={() => (menu = null)}
+	/>
+{/if}
 
 <style>
 	.head {
@@ -201,6 +277,7 @@
 	}
 	svg {
 		display: block;
+		outline: none;
 		background: #0d1117;
 		border-top: 1px solid var(--line);
 		border-bottom: 1px solid var(--line);

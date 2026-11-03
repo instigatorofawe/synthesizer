@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick as settle, untrack, type Snippet } from 'svelte';
-	import Arrangement, { type Selection } from '#lib/Arrangement.svelte';
+	import { on } from 'svelte/events';
+	import Arrangement, { type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
@@ -11,7 +12,7 @@
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
-	import { matches } from '#lib/Shortcuts.ts';
+	import { matches, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -19,9 +20,13 @@
 		addTempo,
 		addTrack,
 		barOf,
+		canGrow,
+		drawLengths,
+		duplicatePlacement,
 		grids,
 		laneChoices,
 		makeUnique,
+		noteValue,
 		place,
 		placementIndex,
 		placeOfError,
@@ -42,6 +47,7 @@
 		setTrack,
 		snapTick,
 		songLength,
+		stepLength,
 		windowOf,
 		ticksPerBar,
 		type Clip,
@@ -103,6 +109,13 @@
 		untrack(() => doc.tracks.find((t) => t.id === selection.track)?.placements[selection.placement ?? -1]?.clip ?? null)
 	);
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
+	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
+	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
+	const drawChoices = $derived.by(() => {
+		const lengths = drawLengths(doc.ppq);
+		if (lengths.some((length) => length.ticks === draw)) return lengths;
+		return [...lengths, { label: noteValue(draw, doc.ppq), ticks: draw }].sort((a, b) => a.ticks - b.ticks);
+	});
 	let barWidth = $state(96);
 	let loop = $state<{ start: number; end: number } | null>(null);
 	let looping = $state(false);
@@ -228,8 +241,8 @@
 		if (putPatch(home.track, home.index, id)) await openPatch(home.track, id); // Unless the track went meanwhile
 	}
 
-	function newClip(id: number, at: number) {
-		const added = addClip(doc, ticksPerBar(doc));
+	function newClip(id: number, at: number, length = ticksPerBar(doc)) {
+		const added = addClip(doc, length);
 		const next = place(added.doc, id, added.id, at);
 		commit(next);
 		selection = { track: id, placement: placementIndex(next, id, added.id, at) };
@@ -294,6 +307,44 @@
 
 	const clipChanged = (next: Clip) => commit(setClip(doc, next.id, next));
 
+	// What a clip's menu in the arrangement does, each to the placement it was opened on.
+	const placementActions: PlacementActions = {
+		open: (at) => select(at),
+		duplicate: (at) => {
+			const copied = duplicatePlacement(doc, at.track, at.placement);
+			select(at);
+			commit(copied.doc);
+			selection = { track: at.track, placement: copied.index };
+		},
+		unique: (at) => {
+			select(at);
+			unique();
+		},
+		remove: (at) => {
+			select(at);
+			deletePlacement();
+		},
+		delete: (at) => {
+			select(at);
+			deleteClip();
+		}
+	};
+
+	// [ and ] step the Draw length. They go by where the keys are, as the piano keys do, and a field keeps them. They have
+	// their own listener, so the editor's `keydown` stays as it is.
+	function stepDraw(event: KeyboardEvent) {
+		if (readonly || !active || typingIn(event.target)) return;
+		const by = matches(event, 'draw-shorter') ? -1 : matches(event, 'draw-longer') ? 1 : 0;
+		if (!by) return;
+		event.preventDefault();
+		draw = stepLength(draw, doc.ppq, by);
+	}
+
+	onMount(() => {
+		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
+		return on(window, 'keydown', stepDraw);
+	});
+
 	function audition(note: number, on: boolean) {
 		if (reported?.index === undefined) return;
 		if (on) engine.noteOn(reported.index, note);
@@ -356,6 +407,16 @@
 			<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
 			<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
 		{/if}
+		{#if !readonly}
+			<label
+				title="How long a clicked note is. [ and ] step it, and it follows the last note added, resized or chosen."
+			>
+				Draw
+				<select aria-label="Draw length" bind:value={draw}>
+					{#each drawChoices as choice (choice.ticks)}<option value={choice.ticks}>{choice.label}</option>{/each}
+				</select>
+			</label>
+		{/if}
 		<label>
 			Snap
 			<select aria-label="Snap" bind:value={grid}>
@@ -367,7 +428,9 @@
 		<button type="button" onclick={toggleLoop} aria-pressed={looping}>Loop {looping ? 'on' : 'off'}</button>
 		<span class="muted hint">
 			Click the numbers to move the playhead, and drag under them for a loop.
-			{#if !readonly}Double-click a row for a new clip. Drag a clip's right edge to repeat it, and hold alt to copy it.{/if}
+			{#if !readonly}Drag across a row for a new clip, or double-click it for a bar. Drag a clip's right edge to repeat
+				it, hold
+				{mod} to copy it, and right-click it for more.{/if}
 		</span>
 	</div>
 
@@ -391,6 +454,7 @@
 			onselect={select}
 			onchange={arranged}
 			onnew={newClip}
+			actions={placementActions}
 			onlocate={locate}
 			onloop={setLoop}
 		/>
@@ -733,8 +797,11 @@
 							{playing}
 							canAudition={reported !== undefined}
 							{readonly}
+							bind:draw
+							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
 							onchange={clipChanged}
 							onaudition={audition}
+							onundo={undo}
 						/>
 					{/key}
 					{#if !readonly && home && !reported}
@@ -747,7 +814,7 @@
 					<p class="muted empty">
 						{readonly
 							? 'Choose a clip in the arrangement to see its notes.'
-							: 'Choose a clip in the arrangement to edit its notes, or double-click a row for a new one.'}
+							: 'Choose a clip in the arrangement to edit its notes, or drag across a row for a new one.'}
 					</p>
 				{/if}
 			{:else if tab === 'mixer'}

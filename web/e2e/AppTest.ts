@@ -1088,7 +1088,7 @@ test('notes are moved, stretched, chosen and removed by hand', async ({ page }) 
 	expect(doc.tracks[0].placements).toHaveLength(1); // Delete in the roll is about notes
 });
 
-test('velocity is dragged, and a double-click takes a note away', async ({ page }) => {
+test('velocity is dragged, and a double-click on a note leaves it there', async ({ page }) => {
 	await trackWithClip(page, 'Velocity');
 	await addNoteAt(page, 480, 60);
 	const bar = (await page.getByTestId('velocity-0').boundingBox())!;
@@ -1097,6 +1097,8 @@ test('velocity is dragged, and a double-click takes a note away', async ({ page 
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-vel', /^6[34]$/);
 	const { x, y } = await centre(page, 'note-0');
 	await page.mouse.dblclick(x - 20, y);
+	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(1);
+	await page.keyboard.press('Delete');
 	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(0);
 });
 
@@ -1116,11 +1118,11 @@ test('a clip is moved, repeated and copied in the arrangement, and an overlap la
 	await press(page, edge, { x: edge.x + barPixels, y: edge.y });
 	await expect(block).toHaveAttribute('data-repeat', '2');
 
-	// Alt copies a placement, on another track, of the same clip.
+	// Mod copies a placement, on another track, of the same clip.
 	const moved = await centre(page, 'placement-1-0');
-	await page.keyboard.down('Alt');
+	await page.keyboard.down('ControlOrMeta');
 	await press(page, { x: moved.x - 20, y: moved.y }, { x: moved.x - 20 + barPixels, y: moved.y + 60 });
-	await page.keyboard.up('Alt');
+	await page.keyboard.up('ControlOrMeta');
 	await expect(page.getByTestId('placement-2-0')).toHaveAttribute('data-repeat', '2');
 	await expect(page.getByTestId('clip-uses')).toContainText('Placed 2 times');
 

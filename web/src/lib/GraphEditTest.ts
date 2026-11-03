@@ -5,6 +5,8 @@ import {
 	detailOf,
 	disconnect,
 	edgeInto,
+	freeSpot,
+	insertSnap,
 	inputsOf,
 	layout,
 	moveNode,
@@ -12,15 +14,20 @@ import {
 	outputsOf,
 	parseCurve,
 	placed,
+	rateErrorInput,
 	removeNode,
 	setLiteral,
 	setOption,
+	tidy,
+	whyCompiledAway,
 	type CatalogEntry,
+	type GraphNode,
 	type LibraryPatch
 } from '#lib/GraphEdit.ts';
 import { probeTargets } from '#lib/AudioEngine.ts';
-import { reachable, type AssetEntry } from '#lib/Request.ts';
-import { referencedSubpatches, type Graph } from '#lib/Schema.ts';
+import { buildRequest, reachable, type AssetEntry } from '#lib/Request.ts';
+import { EMPTY_GRAPH, referencedSubpatches, timelineSchema, type Graph } from '#lib/Schema.ts';
+import { compileRequest } from '#lib/server/Compile.ts';
 
 const catalog: CatalogEntry[] = [
 	{ type: 'note', inputs: [], outputs: ['pitch', 'velocity', 'gate'], options: [] },
@@ -218,6 +225,181 @@ describe('laying a graph out', () => {
 			])
 		);
 		expect(places.get(1)!.y).not.toBe(places.get(2)!.y);
+	});
+
+	it('puts an envelope beside what it shapes, not at the far left', () => {
+		const places = layout(EMPTY_GRAPH);
+		const at = (type: string) => places.get(EMPTY_GRAPH.nodes.find((node) => node.type === type)!.id)!;
+		expect(at('env').x).toBe(at('osc').x);
+		expect(at('env').x).toBeLessThan(at('mul').x);
+		expect(at('note').x).toBeLessThan(at('mtof').x);
+	});
+
+	it('levels a node with what feeds it, so a chain reads along one line', () => {
+		const places = layout(EMPTY_GRAPH);
+		expect(
+			new Set(['note', 'mtof', 'osc', 'mul', 'out'].map((type) => places.get(idOf(EMPTY_GRAPH, type))!.y))
+		).toEqual(new Set([0]));
+	});
+
+	it('keeps nodes in a column apart by how tall each is drawn', () => {
+		const tall = graph([1, 2, 3].map((id) => ({ id, type: 'noise' as const })));
+		const places = layout(tall, (node) => node.id * 100);
+		expect(places.get(2)!.y).toBeGreaterThanOrEqual(places.get(1)!.y + 100);
+		expect(places.get(3)!.y).toBeGreaterThanOrEqual(places.get(2)!.y + 200);
+	});
+});
+
+const idOf = (g: Graph, type: string) => g.nodes.find((node) => node.type === type)!.id;
+
+describe('tidying a graph', () => {
+	const heap = graph(
+		EMPTY_GRAPH.nodes.map((node) => ({ ...node, x: 0, y: 0 })),
+		EMPTY_GRAPH.edges
+	);
+	const height = (node: GraphNode) => nodeHeightFor(node);
+
+	it('moves every node where the layout puts it, in one edit, and changes nothing else', () => {
+		const tidied = tidy(heap, height);
+		const places = layout(heap, height);
+		for (const node of tidied.nodes) expect({ x: node.x, y: node.y }).toEqual(places.get(node.id));
+		expect(tidied.edges).toBe(heap.edges);
+		expect(tidied.nodes.map(({ x: _x, y: _y, ...rest }) => rest)).toEqual(EMPTY_GRAPH.nodes);
+		expect(heap.nodes.every((node) => node.x === 0 && node.y === 0)).toBe(true);
+	});
+
+	it('leaves no node on top of another', () => {
+		const wide = graph(
+			Array.from({ length: 12 }, (_, i) => ({
+				id: i + 1,
+				type: i % 3 ? ('osc' as const) : ('env' as const),
+				x: 0,
+				y: 0
+			})),
+			Array.from({ length: 11 }, (_, i) => ({ from: i + 1, to: 12 - (i % 2), input: 'freq' }))
+		);
+		const tidied = tidy(wide, height);
+		expect(overlapping(tidied)).toEqual([]);
+	});
+});
+
+// A stand-in for the editor's heights: an env is drawn with four inputs and anything else with one.
+const nodeHeightFor = (node: GraphNode) => (node.type === 'env' ? 118 : 64);
+const sizeFor = (node: GraphNode) => ({ width: 150, height: nodeHeightFor(node) });
+
+function overlapping(g: Graph) {
+	const found: [number, number][] = [];
+	for (const a of g.nodes)
+		for (const b of g.nodes) {
+			if (a.id >= b.id) continue;
+			const [ax, ay, bx, by] = [a.x as number, a.y as number, b.x as number, b.y as number];
+			const apart = ax >= bx + 150 || bx >= ax + 150 || ay >= by + nodeHeightFor(b) || by >= ay + nodeHeightFor(a);
+			if (!apart) found.push([a.id, b.id]);
+		}
+	return found;
+}
+
+describe('placing a new node', () => {
+	const one = graph([{ id: 1, type: 'osc', x: 100, y: 100 }]);
+
+	it('lands where it was asked to when nothing is there', () => {
+		expect(freeSpot(one, { x: 400, y: 100 }, { width: 150, height: 64 }, sizeFor)).toEqual({ x: 400, y: 100 });
+	});
+
+	it('moves off a node it would cover, as little as it can', () => {
+		const at = freeSpot(one, { x: 110, y: 110 }, { width: 150, height: 64 }, sizeFor);
+		const added = addNode(one, 'noise', at.x, at.y).graph;
+		expect(overlapping(added)).toEqual([]);
+		expect(Math.hypot(at.x - 110, at.y - 110)).toBeLessThan(150);
+	});
+
+	it('finds room in a crowded graph', () => {
+		let crowded = graph([]);
+		for (let i = 0; i < 30; ++i) {
+			const at = freeSpot(crowded, { x: (i * 37) % 200, y: (i * 53) % 200 }, sizeFor({ id: 0, type: 'env' }), sizeFor);
+			crowded = addNode(crowded, 'env', at.x, at.y).graph;
+		}
+		expect(overlapping(crowded)).toEqual([]);
+	});
+});
+
+describe('the snap a rate error offers', () => {
+	const message =
+		"input 'cutoff' is read once a frame and cannot take audio. To read it once a frame on purpose, put a snap node on the wire";
+	const filtered = graph(
+		[...EMPTY_GRAPH.nodes, { id: 7, type: 'biquad', x: 0, y: 0 }],
+		[
+			...EMPTY_GRAPH.edges.filter((edge) => edge.to !== 6),
+			{ from: 5, to: 7, input: 'in' },
+			{ from: 7, to: 6, input: 'l' },
+			{ from: 4, to: 7, input: 'cutoff' }
+		]
+	);
+
+	it('reads which input the error is about, and nothing from any other error', () => {
+		expect(rateErrorInput(message)).toBe('cutoff');
+		expect(rateErrorInput("no input 'cutoff'")).toBeNull();
+		expect(rateErrorInput('a patch has one out node')).toBeNull();
+	});
+
+	it('puts a snap between the wire and the input, as one edit', () => {
+		const fixed = insertSnap(filtered, 7, 'cutoff', 20, 30)!;
+		expect(fixed.id).toBe(8);
+		expect(fixed.graph.nodes.at(-1)).toEqual({ id: 8, type: 'snap', x: 20, y: 30 });
+		expect(edgeInto(fixed.graph, 8, 'in')).toEqual({ from: 4, port: 'out', to: 8, input: 'in' });
+		expect(edgeInto(fixed.graph, 7, 'cutoff')).toEqual({ from: 8, port: 'out', to: 7, input: 'cutoff' });
+		expect(fixed.graph.edges).toHaveLength(filtered.edges.length + 1);
+		expect(filtered.nodes).toHaveLength(7);
+	});
+
+	it('offers nothing for an input with no wire', () => {
+		expect(insertSnap(filtered, 7, 'q', 0, 0)).toBeNull();
+	});
+
+	it('is what the compiler asked for', async () => {
+		const compile = async (g: Graph) => {
+			const timeline = timelineSchema.parse({
+				clips: [{ id: 'c', length: 960, notes: [{ tick: 0, note: 60, dur: 480 }] }],
+				tracks: [{ id: 1, slots: ['p'], placements: [{ clip: 'c', tick: 0 }] }]
+			});
+			const request = buildRequest([{ id: 'p', name: 'P', graph: g }], [], [{ id: 't', name: 'T', timeline }]);
+			return (await compileRequest(request)).report;
+		};
+		const before = await compile(filtered);
+		expect(before.errors?.map((error) => [nodeOfError(error.where, 'p'), rateErrorInput(error.message)])).toEqual([
+			[7, 'cutoff']
+		]);
+		const after = await compile(insertSnap(filtered, 7, 'cutoff', 0, 0)!.graph);
+		expect(after.errors).toBeUndefined();
+		expect(after.ok).toBe(true);
+	});
+});
+
+describe('why a node compiled away', () => {
+	it('says so for a node whose wires never reach the out node', () => {
+		const loose = graph(
+			[...EMPTY_GRAPH.nodes, { id: 7, type: 'noise' }, { id: 8, type: 'biquad' }],
+			[...EMPTY_GRAPH.edges, { from: 7, to: 8, input: 'in' }]
+		);
+		expect(whyCompiledAway(loose, 7)).toContain('reaches the out node');
+		expect(whyCompiledAway(loose, 8)).toContain('reaches the out node');
+	});
+
+	it("says nothing where the reason isn't in this graph", () => {
+		expect(whyCompiledAway(EMPTY_GRAPH, 4)).toBeNull();
+		const looped = graph(
+			[
+				{ id: 1, type: 'delay' },
+				{ id: 2, type: 'add' },
+				{ id: 3, type: 'out' }
+			],
+			[
+				{ from: 1, to: 2, input: 'a' },
+				{ from: 2, to: 1, input: 'in' },
+				{ from: 2, to: 3, input: 'l' }
+			]
+		);
+		expect(whyCompiledAway(looped, 1)).toBeNull();
 	});
 });
 

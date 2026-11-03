@@ -31,11 +31,14 @@ export interface LibraryPatch {
 	graph: Graph;
 }
 
+export type Point = { x: number; y: number };
+
 export const COLUMN = 190;
 export const ROW = 38;
 export const NODE_WIDTH = 150;
-export const NODE_HEADER = 26;
+export const NODE_HEADER = 40; // Two lines: the name a person reads, and the compiler's with what the node is set to
 export const PORT_SPACING = 18;
+const GAP = 24; // Between two nodes in a column
 
 const entryOf = (catalog: CatalogEntry[], type: string) => catalog.find((entry) => entry.type === type);
 
@@ -128,39 +131,121 @@ export function detailOf(node: GraphNode, graph: Graph, library: LibraryPatch[])
 
 const placedAt = (node: GraphNode) => typeof node.x === 'number' && typeof node.y === 'number';
 
-// Left to right by how far each node is from a source, which reads like signal flow. A delay can close a loop, so this gives
-// up on a loop rather than following it round: depths stop at the node count.
-export function layout(graph: Graph): Map<number, { x: number; y: number }> {
+// How tall a node is drawn, which only the editor knows, since it depends on the catalog and the library.
+export type HeightOf = (node: GraphNode) => number;
+const spacedRows: HeightOf = () => 3 * ROW - GAP;
+
+// Left to right by how far each node is from a source, which reads like signal flow. Then each moves as far right as the first
+// node it feeds allows, so an envelope sits beside what it shapes rather than at the far left. A delay can close a loop, so
+// this gives up on a loop rather than following it round: depths stop at the node count. In a column, a node goes level with
+// the highest node that feeds it where there is room, so a chain reads along one line with what shapes it below, and nodes fed
+// by nothing to their left go below them all.
+export function layout(graph: Graph, heightOf: HeightOf = spacedRows): Map<number, Point> {
+	const count = graph.nodes.length;
 	const depth = new Map<number, number>(graph.nodes.map((node) => [node.id, 0]));
-	for (let pass = 0; pass < graph.nodes.length; ++pass) {
+	const edges = graph.edges.filter((edge) => edge.from !== edge.to && depth.has(edge.from) && depth.has(edge.to));
+	for (let pass = 0; pass < count; ++pass) {
 		let moved = false;
-		for (const edge of graph.edges) {
-			const from = depth.get(edge.from);
-			const to = depth.get(edge.to);
-			if (from === undefined || to === undefined || edge.from === edge.to) continue;
-			if (to < from + 1 && from + 1 < graph.nodes.length) {
+		for (const edge of edges) {
+			const from = depth.get(edge.from)!;
+			if (depth.get(edge.to)! < from + 1 && from + 1 < count) {
 				depth.set(edge.to, from + 1);
 				moved = true;
 			}
 		}
 		if (!moved) break;
 	}
-	const rows = new Map<number, number>();
-	const places = new Map<number, { x: number; y: number }>();
-	for (const node of [...graph.nodes].sort((a, b) => a.id - b.id)) {
-		const column = depth.get(node.id) ?? 0;
-		const row = rows.get(column) ?? 0;
-		rows.set(column, row + 3);
-		places.set(node.id, { x: column * COLUMN, y: row * ROW });
+	for (let pass = 0; pass < count; ++pass) {
+		let moved = false;
+		for (const node of graph.nodes) {
+			const fed = edges.filter((edge) => edge.from === node.id).map((edge) => depth.get(edge.to)!);
+			const furthest = Math.min(...fed) - 1;
+			if (fed.length && furthest > depth.get(node.id)!) {
+				depth.set(node.id, furthest);
+				moved = true;
+			}
+		}
+		if (!moved) break;
+	}
+
+	const places = new Map<number, Point>();
+	const columns = [...new Set(depth.values())].sort((a, b) => a - b);
+	for (const column of columns) {
+		const level = new Map<number, number>();
+		for (const node of graph.nodes) {
+			if (depth.get(node.id) !== column) continue;
+			const tops = edges
+				.filter((edge) => edge.to === node.id && places.has(edge.from))
+				.map((edge) => places.get(edge.from)!.y);
+			if (tops.length) level.set(node.id, Math.min(...tops));
+		}
+		const nodes = graph.nodes
+			.filter((node) => depth.get(node.id) === column)
+			.sort((a, b) => (level.get(a.id) ?? Infinity) - (level.get(b.id) ?? Infinity) || a.id - b.id);
+		let free = 0;
+		for (const node of nodes) {
+			const y = Math.max(free, level.get(node.id) ?? free);
+			places.set(node.id, { x: column * COLUMN, y });
+			free = y + heightOf(node) + GAP;
+		}
 	}
 	return places;
 }
 
 // Every node with a position, so that one drag can't move the ones that were only laid out.
-export function placed(graph: Graph): Graph {
+export function placed(graph: Graph, heightOf?: HeightOf): Graph {
 	if (graph.nodes.every(placedAt)) return graph;
-	const places = layout(graph);
+	const places = layout(graph, heightOf);
 	return { ...graph, nodes: graph.nodes.map((node) => (placedAt(node) ? node : { ...node, ...places.get(node.id) })) };
+}
+
+// Every node where the layout puts it, as one edit, for a graph whose nodes were moved about or added in a heap.
+export function tidy(graph: Graph, heightOf?: HeightOf): Graph {
+	const places = layout(graph, heightOf);
+	return { ...graph, nodes: graph.nodes.map((node) => ({ ...node, ...places.get(node.id) })) };
+}
+
+export interface Size {
+	width: number;
+	height: number;
+}
+
+const MARGIN = 16; // Kept clear around a node placed by the editor, so that its ports and title aren't hidden
+const SEARCH_STEP = 10;
+const SEARCH_RINGS = 300;
+
+// The nearest place to `want` where a node of this size covers no other, searched outwards one ring at a time. A new node
+// never lands on top of another, where it would hide one and look like a single node.
+export function freeSpot(graph: Graph, want: Point, size: Size, sizeOf: (node: GraphNode) => Size): Point {
+	const boxes = graph.nodes
+		.filter(placedAt)
+		.map((node) => ({ x: node.x as number, y: node.y as number, ...sizeOf(node) }));
+	const free = (x: number, y: number) =>
+		boxes.every(
+			(box) =>
+				x >= box.x + box.width + MARGIN ||
+				box.x >= x + size.width + MARGIN ||
+				y >= box.y + box.height + MARGIN ||
+				box.y >= y + size.height + MARGIN
+		);
+	const start = { x: Math.round(want.x), y: Math.round(want.y) };
+	for (let ring = 0; ring <= SEARCH_RINGS; ++ring) {
+		const cells: Point[] = [];
+		for (let i = -ring; i <= ring; ++i) cells.push({ x: i, y: -ring }, { x: i, y: ring });
+		for (let j = -ring + 1; j < ring; ++j) cells.push({ x: -ring, y: j }, { x: ring, y: j });
+		let best: Point | null = null;
+		let distance = Infinity;
+		for (const cell of cells) {
+			const at = { x: start.x + cell.x * SEARCH_STEP, y: start.y + cell.y * SEARCH_STEP };
+			const d = Math.hypot(cell.x, cell.y);
+			if (d < distance && free(at.x, at.y)) {
+				best = at;
+				distance = d;
+			}
+		}
+		if (best) return best;
+	}
+	return { x: start.x, y: Math.max(start.y, ...boxes.map((box) => box.y + box.height + MARGIN)) };
 }
 
 export function addNode(graph: Graph, type: GraphNode['type'], x: number, y: number): { graph: Graph; id: number } {
@@ -285,6 +370,51 @@ export function removeZone(graph: Graph, id: number, index: number): Graph {
 				zonesOf(node).filter((_, i) => i !== index)
 			)
 		: graph;
+}
+
+// A snap on the wire into an input, which is what the compiler asks for when audio reaches an input it reads once a frame. The
+// snap takes the wire's source, and the input takes the snap. Only the patch's author knows whether reading once a frame is
+// right, section 5 of Design.md, so the editor offers this and never does it on its own.
+export function insertSnap(
+	graph: Graph,
+	to: number,
+	input: string,
+	x: number,
+	y: number
+): { graph: Graph; id: number } | null {
+	const wire = edgeInto(graph, to, input);
+	if (!wire) return null;
+	const { graph: added, id } = addNode(graph, 'snap', x, y);
+	const edges = added.edges.flatMap((edge) =>
+		edge === wire
+			? [
+					{ from: edge.from, port: portName(edge), to: id, input: 'in' },
+					{ from: id, port: 'out', to, input }
+				]
+			: [edge]
+	);
+	return { graph: { ...added, edges }, id };
+}
+
+const RATE_ERROR = /^input '([^']+)' is read once a frame and cannot take audio/;
+
+// The input a compile error says can't take audio, which a snap on its wire would fix, or null for any other error.
+export const rateErrorInput = (message: string): string | null => RATE_ERROR.exec(message)?.[1] ?? null;
+
+// Why the compiler left a node out, where the graph alone shows it. The compiler keeps what the out node depends on, so a node
+// none of whose wires lead there makes nothing that is heard. A node that does lead there and was still left out, such as a
+// subpatch whose own outlets go nowhere, has its reason inside another graph, and this says nothing.
+export function whyCompiledAway(graph: Graph, id: number): string | null {
+	const seen = new Set<number>();
+	const stack = [id];
+	while (stack.length) {
+		const current = stack.pop()!;
+		if (seen.has(current)) continue;
+		seen.add(current);
+		if (graph.nodes.find((node) => node.id === current)?.type === 'out') return null;
+		for (const edge of graph.edges) if (edge.from === current) stack.push(edge.to);
+	}
+	return 'Nothing it makes reaches the out node, so it compiled away.';
 }
 
 // Which of this patch's nodes an error belongs to. Inside a subpatch that is the subpatch's node, since that is what is on

@@ -30,6 +30,8 @@ const BAR = 96; // Pixels, at the arrangement's zoom until it is changed
 const lane = (page: Page) => page.getByTestId('tempo-lane');
 const laneButton = (page: Page) => page.getByRole('button', { name: 'Tempo lane' });
 const point = (page: Page, index: number) => page.getByTestId(`tempo-point-${index}`);
+// A folded change's label, which its tooltip says more than.
+const flag = (page: Page, index: number) => page.getByTestId(`tempo-flag-${index}`).locator('text');
 const field = (page: Page) => page.getByTestId('tempo');
 const box = async (page: Page, id: string) => (await page.getByTestId(id).boundingBox())!;
 
@@ -75,7 +77,7 @@ test('the folded Tempo lane reads the song’s tempo, and stays unfolded for tha
 	await page.goto('/?timeline=song');
 	await expect(lane(page)).toHaveAttribute('data-open', 'false');
 	await expect(laneButton(page)).toHaveAttribute('aria-expanded', 'false');
-	await expect(page.getByTestId('tempo-flag-0')).toHaveText('140');
+	await expect(flag(page, 0)).toHaveText('140');
 	const folded = (await lane(page).boundingBox())!;
 	expect(folded.height).toBeLessThan(24);
 
@@ -105,15 +107,15 @@ test('the folded Tempo lane reads the song’s tempo, and stays unfolded for tha
 		{ tick: 7680, bpm: 120 }
 	]);
 	// Reading it takes no clicks: a flag at each change, and a slope where one glides to the next
-	await expect(page.getByTestId('tempo-flag-0')).toHaveText('140');
-	await expect(page.getByTestId('tempo-flag-1')).toHaveText('90');
-	await expect(page.getByTestId('tempo-flag-2')).toHaveText('120');
+	await expect(flag(page, 0)).toHaveText('140');
+	await expect(flag(page, 1)).toHaveText('90');
+	await expect(flag(page, 2)).toHaveText('120');
 	await expect(page.getByTestId('tempo-glide-1')).toBeAttached();
 	await expect(page.getByTestId('tempo-glide-0')).toHaveCount(0);
 	await expect(lane(page)).toHaveAttribute('aria-label', 'Tempo lane: 140 BPM, 90 from bar 3, gliding to 120 by bar 5');
-	const flag = (await box(page, 'tempo-flag-1')).x - (await lane(page).boundingBox())!.x;
-	expect(flag).toBeGreaterThanOrEqual(2 * BAR - 1);
-	expect(flag).toBeLessThan(2 * BAR + 2);
+	const third = (await box(page, 'tempo-flag-1')).x - (await lane(page).boundingBox())!.x;
+	expect(third).toBeGreaterThanOrEqual(2 * BAR - 1);
+	expect(third).toBeLessThan(2 * BAR + 2);
 	// The inspector's list is the same tempo
 	await expect(page.getByText('Tempo, 140 BPM')).toBeAttached();
 
@@ -374,9 +376,10 @@ test('an example’s tempo and mix can be looked at but not changed', async ({ p
 	await expect(page.locator('[data-testid^="tempo-point-"]')).toHaveCount(before);
 
 	const fader = page.locator('[data-testid^="head-fader-"]').first();
+	await expect(fader).toHaveAttribute('aria-disabled', 'true');
 	const level = (await fader.getAttribute('aria-valuetext'))!;
-	await fader.dblclick();
 	const box = (await fader.boundingBox())!;
+	await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
 	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(box.x + 4, box.y + box.height / 2, { steps: 4 });

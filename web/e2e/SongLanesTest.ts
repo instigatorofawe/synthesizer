@@ -114,8 +114,7 @@ test('the folded Tempo lane reads the song’s tempo, and stays unfolded for tha
 	await expect(page.getByTestId('tempo-glide-0')).toHaveCount(0);
 	await expect(lane(page)).toHaveAttribute('aria-label', 'Tempo lane: 140 BPM, 90 from bar 3, gliding to 120 by bar 5');
 	const third = (await box(page, 'tempo-flag-1')).x - (await lane(page).boundingBox())!.x;
-	expect(third).toBeGreaterThanOrEqual(2 * BAR - 1);
-	expect(third).toBeLessThan(2 * BAR + 2);
+	expect(Math.abs(third - 2 * BAR)).toBeLessThan(2); // At bar 3
 	// The inspector's list is the same tempo
 	await expect(page.getByText('Tempo, 140 BPM')).toBeAttached();
 

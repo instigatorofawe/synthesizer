@@ -10,6 +10,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = ["numpy>=2"]
 authors = [{ name = "Ran Liu" }]
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE.md"]
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"

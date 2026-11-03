@@ -9,10 +9,10 @@ import {
 	edgeInto,
 	freeSpot,
 	insertSnap,
+	makeRoom,
 	inputsOf,
 	isPort,
 	layout,
-	moveNode,
 	moveNodes,
 	nodeOfError,
 	nodesTouching,
@@ -21,7 +21,6 @@ import {
 	pasteNodes,
 	placed,
 	rateErrorInput,
-	removeNode,
 	removeNodes,
 	setLiteral,
 	setOption,
@@ -134,7 +133,7 @@ describe('editing a graph', () => {
 	});
 
 	it('takes a node and its wires away together', () => {
-		const next = removeNode(start, 2);
+		const next = removeNodes(start, [2]);
 		expect(next.nodes.map((node) => node.id)).toEqual([1, 3]);
 		expect(next.edges).toEqual([]);
 	});
@@ -174,7 +173,7 @@ describe('editing a graph', () => {
 
 	it('keeps every other node where it was when one moves', () => {
 		const laid = placed(start);
-		const moved = moveNode(laid, 2, 500, 500);
+		const moved = moveNodes(laid, [2], 500 - (laid.nodes[1].x as number), 500 - (laid.nodes[1].y as number));
 		expect(moved.nodes[1]).toMatchObject({ x: 500, y: 500 });
 		expect(moved.nodes[0]).toEqual(laid.nodes[0]);
 		expect(placed(moved)).toBe(moved);
@@ -183,7 +182,7 @@ describe('editing a graph', () => {
 	it('does not change a graph it can only read', () => {
 		const frozen = structuredClone(start);
 		connect(start, 1, 'gate', 3, 'r');
-		removeNode(start, 1);
+		removeNodes(start, [1]);
 		setLiteral(start, 1, 'x', 1);
 		expect(start).toEqual(frozen);
 	});
@@ -361,6 +360,18 @@ describe('the snap a rate error offers', () => {
 
 	it('offers nothing for an input with no wire', () => {
 		expect(insertSnap(filtered, 7, 'q', 0, 0)).toBeNull();
+	});
+
+	it('has room made for it where the wire is too short, by moving what is from there rightwards', () => {
+		const placed: Graph = {
+			...filtered,
+			nodes: filtered.nodes.map((node, i) => ({ ...node, x: i * 100, y: 0 }))
+		};
+		const roomy = makeRoom(placed, 300, 200);
+		expect(roomy.nodes.map((node) => node.x)).toEqual([0, 100, 200, 500, 600, 700, 800]);
+		expect(roomy.nodes.map((node) => node.y)).toEqual(placed.nodes.map((node) => node.y));
+		const unplaced: Graph = { ...filtered, nodes: [{ id: 1, type: 'note' }] };
+		expect(makeRoom(unplaced, 0, 50).nodes).toEqual(unplaced.nodes); // A node the layout places is left to it
 	});
 
 	it('is what the compiler asked for', async () => {

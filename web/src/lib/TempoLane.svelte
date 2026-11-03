@@ -20,9 +20,11 @@
 		tempoThere,
 		toggleGlide,
 		yToBpm,
-		type TempoSegment
-	} from '#lib/TempoLane.ts';
-	import { barOf, position, removeTempo, snapTick, type Tempo } from '#lib/TimelineEdit.ts';
+		type TempoSegment,
+		removeTempo
+	} from '#lib/Tempo.ts';
+	import type { Tempo } from '#lib/TimelineEdit.ts';
+	import { barOf, position, snapTick } from '#lib/Units.ts';
 
 	// The song's tempo as a lane of the song layer, over the arrangement's bars, so the playhead and the bar lines pass through
 	// it. Folded it is a thin row of flags, each change's BPM where it starts, with a slope where one glides to the next, so the
@@ -86,6 +88,16 @@
 	const perBpm = $derived((height - 2 * PAD) / (range.high - range.low));
 	const end = $derived(width / perTick);
 	const segments = $derived(tempoSegments(tempo, end));
+	// What the unfolded lane says it does until it has been used for it: how to add a change, and then how to glide to one.
+	const coach = $derived(
+		readonly
+			? null
+			: tempo.length < 2
+				? 'A click adds a tempo change, and a drag sets its BPM.'
+				: tempo.some((change) => change.ramp)
+					? null
+					: 'A click on the line after a change makes it glide to the next.'
+	);
 	const summary = $derived(tempoSummary(doc.tempo, doc.ppq));
 
 	const xOf = (tick: number) => tick * perTick;
@@ -277,7 +289,8 @@
 				disabled: !canGlide(doc.tempo, index)
 			}
 		];
-		if (!isFirstTempo(doc.tempo, index)) items.push({ label: 'Delete', action: () => remove(index) });
+		if (!isFirstTempo(doc.tempo, index))
+			items.push({ label: 'Delete', keys: 'tempo.delete', action: () => remove(index) });
 		return items;
 	}
 
@@ -416,6 +429,8 @@
 		{/each}
 		{#if readout}
 			<text class="readout" x={readout.x} y={readout.y} data-testid="tempo-readout">{readout.text}</text>
+		{:else if coach}
+			<text class="coach" x={xOf(0) + 60} y={height - 6} data-testid="tempo-coach">{coach}</text>
 		{/if}
 	{:else}
 		{#each segments as segment (segment.index ?? 'before')}
@@ -509,6 +524,11 @@
 	}
 	.point.chosen .label {
 		fill: var(--text);
+	}
+	.coach {
+		fill: var(--muted);
+		font-size: 11px;
+		pointer-events: none;
 	}
 	.readout {
 		fill: var(--text);

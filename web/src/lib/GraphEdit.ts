@@ -253,10 +253,6 @@ export function addNode(graph: Graph, type: GraphNode['type'], x: number, y: num
 	return { graph: { ...graph, nodes: [...graph.nodes, { id, type, x, y }] }, id };
 }
 
-export function removeNode(graph: Graph, id: number): Graph {
-	return removeNodes(graph, [id]);
-}
-
 // The nodes and every wire to or from them, as one edit.
 export function removeNodes(graph: Graph, ids: Iterable<number>): Graph {
 	const gone = new Set(ids);
@@ -273,10 +269,6 @@ export function removeNodes(graph: Graph, ids: Iterable<number>): Graph {
 // note node and a subpatch its out node.
 const PORT_TYPES: ReadonlySet<string> = new Set(['note', 'in', 'out', 'inlet', 'outlet']);
 export const isPort = (node: GraphNode) => PORT_TYPES.has(node.type);
-
-export function moveNode(graph: Graph, id: number, x: number, y: number): Graph {
-	return { ...graph, nodes: graph.nodes.map((node) => (node.id === id ? { ...node, x, y } : node)) };
-}
 
 const coordinate = (value: unknown) => (typeof value === 'number' ? value : 0);
 
@@ -500,6 +492,17 @@ export function removeZone(graph: Graph, id: number, index: number): Graph {
 				zonesOf(node).filter((_, i) => i !== index)
 			)
 		: graph;
+}
+
+// Room for a node between two that sit too close for one: every node from `x` rightwards moves `by` to the right, as a node
+// editor makes room for a node dropped onto a wire, so what is added sits between them in the signal's direction.
+export function makeRoom(graph: Graph, x: number, by: number): Graph {
+	return {
+		...graph,
+		nodes: graph.nodes.map((node) =>
+			placedAt(node) && (node.x as number) >= x ? { ...node, x: (node.x as number) + by } : node
+		)
+	};
 }
 
 // A snap on the wire into an input, which is what the compiler asks for when audio reaches an input it reads once a frame. The

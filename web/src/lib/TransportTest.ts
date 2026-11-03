@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { timelineSchema } from '#lib/Schema.ts';
-import { position } from '#lib/TimelineEdit.ts';
-import { gliding, parseBpm, parsePosition, shownTempo, tempoIndexAt, tempoTyped, tempoWords } from '#lib/Transport.ts';
+import { gliding, parseBpm, shownTempo, tempoIndexAt, tempoTyped, tempoWords } from '#lib/Tempo.ts';
+import { position, parsePosition } from '#lib/Units.ts';
 
 const PPQ = 480;
 

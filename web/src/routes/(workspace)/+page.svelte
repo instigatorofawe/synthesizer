@@ -17,6 +17,11 @@
 	import Browser, { type Section } from '#lib/Browser.svelte';
 	import BrowserRail from '#lib/BrowserRail.svelte';
 	import BundleDialog from '#lib/BundleDialog.svelte';
+	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import QuickOpen from '#lib/QuickOpen.svelte';
+	import type { Openable } from '#lib/QuickOpen.ts';
+	import ShortcutsSheet from '#lib/ShortcutsSheet.svelte';
+	import type { SideTab } from '#lib/GraphEditor.svelte';
 	import CompileLight from '#lib/CompileLight.svelte';
 	import { Compiler, type Compiled } from '#lib/Compiler.ts';
 	import DocumentMenu from '#lib/DocumentMenu.svelte';
@@ -35,22 +40,24 @@
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
-	import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
+	import type { Stamp } from '#lib/Recording.ts';
+	import { TakeRun, type TakeHost } from '#lib/Take.svelte.ts';
 	import { stepVelocity } from '#lib/StepEntry.ts';
+	import { bpmText, tempoAt, gliding, parseBpm, shownTempo, tempoTyped, tempoWords } from '#lib/Tempo.ts';
 	import {
-		BEATS_PER_BAR,
 		mixWrites,
 		patchUses,
-		position,
+		addSlot,
 		replacePatch,
+		setSlot,
 		settlingWrites,
 		soloed,
-		tempoAt,
 		trackKey,
 		type PatchUse
 	} from '#lib/TimelineEdit.ts';
+	import { wholeSong } from '#lib/Transport.ts';
+	import { BEATS_PER_BAR, barOf, position, parsePosition } from '#lib/Units.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
-	import { gliding, parseBpm, parsePosition, shownTempo, tempoTyped, tempoWords, wholeSong } from '#lib/Transport.ts';
 	import { playedBy, playedOn, usedBy } from '#lib/UsedBy.ts';
 	import ViewTabs from '#lib/ViewTabs.svelte';
 	import {
@@ -62,8 +69,11 @@
 		isInsert,
 		landing,
 		parseGraph,
+		patchHref,
 		placeParams,
+		recipeHref,
 		songPlaceOf,
+		timelineHref,
 		trackAlone,
 		viewOf,
 		withDrafts,
@@ -311,6 +321,25 @@
 			void open({ patch: made.to, part: null }, false, 'patch');
 		};
 	};
+
+	// Use on track: the patch the Patch view shows, put on the track the Song view chose, in place of what it plays, as one
+	// edit. Only a library timeline can be changed, and an insert has no notes to play, so neither is offered.
+	const useOn = $derived.by(() => {
+		if (!saved || !timelineDoc || selectedTrack === null || !shown || shown.example) return null;
+		const track = timelineDoc.tracks.find((t) => t.id === selectedTrack);
+		if (!track || track.slots[0] === shown.patch.id) return null;
+		if (isInsert(shown.patch.graph)) return null;
+		return { id: track.id, name: track.name || `Track ${track.id}` };
+	});
+
+	function useOnTrack() {
+		if (!useOn || !timelineDoc || !shown) return;
+		const track = timelineDoc.tracks.find((t) => t.id === useOn.id);
+		const next = track?.slots.length
+			? setSlot(timelineDoc, useOn.id, 0, shown.patch.id)
+			: addSlot(timelineDoc, useOn.id, shown.patch.id);
+		timelineEdited({ text: JSON.stringify(next, null, 1) });
+	}
 
 	// Puts a copy in place of the original in the open timeline, as one edit. Says whether it played the original at all.
 	function swapIn(from: string, to: string): boolean {
@@ -583,7 +612,7 @@
 			if (built.doc) compiledFrom.set(result.report, built.doc);
 			song = result;
 			if (result.report.ok) goodSong = result;
-			else if (take && takePhase === 'arming') {
+			else if (take?.phase === 'arming') {
 				take = null;
 				say("The song doesn't compile, so it can't be recorded into. The light says what's wrong.");
 			}
@@ -819,7 +848,7 @@
 		if (on && latched.has(note)) {
 			letGo([note], at);
 			// While a take records, a key played again sounds and is written as any other key is.
-			if (!take || takePhase !== 'started') {
+			if (take?.phase !== 'started') {
 				freeing.add(note);
 				return;
 			}
@@ -877,7 +906,7 @@
 						: null;
 		if (!to) return;
 		// A take records the keys that play its track, from the count-in on, and stamps them with when they were pressed.
-		const stamped = at !== undefined && takePhase === 'started' && to.source === 'song' && to.track === takeIndex;
+		const stamped = at !== undefined && take?.phase === 'started' && to.source === 'song' && to.track === takeIndex;
 		sounding.set(note, { ...to, stamped });
 		use(to.source, () => engine.noteOn(to.track, note, vel, stamped ? at : undefined));
 	}
@@ -889,10 +918,15 @@
 	// to the roll's Snap, at the Vel velocity. Pressed again it stops recording and the song plays on, and Stop or Space stops
 	// both. A take is one undo step. The rules are Recording.ts's, and the timing the worklet's, which stamps each key with where
 	// the song was when what was playing then was heard, so latency moves nothing.
-	type Taking = { track: number; key: string; grid: number; velocity: number; write: Take; held: Map<number, Stamp> };
-	let take = $state.raw<Taking | null>(null);
-	let takePhase = $state<'arming' | 'started' | 'ending'>('arming');
-	let shownClip: string | null = null; // The clip the take last wrote into, which the roll shows
+	let take = $state.raw<TakeRun | null>(null);
+	// What a take asks of the page: the timeline it records into while that is still the one open, the loop it goes round, an
+	// edit of its run, and a clip for the roll to show.
+	const takeHost: TakeHost = {
+		doc: (key) => (saved && timelineDoc && draftKey('timeline', saved.id) === key ? timelineDoc : null),
+		loop: () => (looping && timelineDoc ? (loop ?? wholeSong(timelineDoc)) : null),
+		write: (doc) => timelineEdited({ text: JSON.stringify(doc, null, 1) }, 'typing'),
+		shown: (track, clip) => void rendered().then(() => songEditor?.reveal({ track, clip }))
+	};
 	let liveSong = $state.raw<CompileReport | null>(null); // The song's image that is playing, once one is
 	const keepTracks = $derived(take !== null);
 	const takeIndex = $derived(
@@ -910,7 +944,7 @@
 	});
 	const recordState = $derived.by(() => {
 		if (!take) return 'off';
-		if (takePhase === 'arming') return 'arming';
+		if (take.phase === 'arming') return 'arming';
 		const now = engineState?.recording ?? 0;
 		return now === 1 ? 'counting' : now === 2 ? 'recording' : 'arming';
 	});
@@ -932,9 +966,7 @@
 		const settings = songEditor?.takeSettings() ?? { grid: ppq / 4, velocity: 100 };
 		const key = draftKey('timeline', saved.id);
 		history.end(key); // A take is a step of its own
-		shownClip = null;
-		takePhase = 'arming';
-		take = { track: selectedTrack, key, ...settings, write: newTake(selectedTrack), held: new Map() };
+		take = new TakeRun(takeHost, selectedTrack, key, settings);
 		use('song');
 	}
 
@@ -943,7 +975,7 @@
 	$effect(() => {
 		const ready =
 			take !== null &&
-			takePhase === 'arming' &&
+			take.phase === 'arming' &&
 			live === 'song' &&
 			!!liveSong?.programs[0]?.tracks.some((t) => t.id === take!.track);
 		if (ready) untrack(beginTake);
@@ -952,7 +984,7 @@
 	function beginTake() {
 		if (!take || !songDoc) return;
 		const doc = songDoc;
-		takePhase = 'started';
+		take.start();
 		songEditor?.stopStepping();
 		if (engineState?.playing) {
 			engine.record(doc.ppq, BEATS_PER_BAR, 0, engineState.tick);
@@ -967,52 +999,20 @@
 
 	// Recording stops. The worklet says where the song was when it did, for the notes still held, and then the take is done.
 	function endTake() {
-		if (!take) return;
-		if (takePhase === 'arming') {
-			take = null;
-			return;
-		}
-		if (takePhase === 'started') engine.stopRecording();
-		takePhase = 'ending';
+		const how = take?.stop();
+		if (how === 'dropped') take = null;
+		else if (how === 'stopping') engine.stopRecording();
 	}
 
 	function takeEnded(at: Stamp) {
 		const ending = take;
 		if (!ending) return;
-		for (const [note, on] of ending.held) writeTaken(ending, note, on, at);
+		ending.ended(at);
 		history.end(ending.key);
 		take = null;
 	}
 
-	function keyStamped(key: PlayedKey) {
-		const t = take;
-		if (!t || takePhase === 'arming') return;
-		if (key.on) {
-			t.held.set(key.note, { tick: key.tick, elapsed: key.elapsed });
-			return;
-		}
-		const on = t.held.get(key.note);
-		if (!on) return;
-		t.held.delete(key.note);
-		writeTaken(t, key.note, on, key);
-	}
-
-	// A note played, snapped and written where the take is: one edit of a run, which undoes in one step with the take's others.
-	function writeTaken(t: Taking, note: number, on: Stamp, off: Stamp) {
-		if (!saved || !timelineDoc || draftKey('timeline', saved.id) !== t.key) return;
-		const round = looping ? (loop ?? wholeSong(timelineDoc)) : null;
-		const snapped = snapPlayed({ note, vel: t.velocity, on, off }, t.grid, round);
-		if (!snapped) return;
-		const done = recordNote(timelineDoc, t.write, snapped);
-		if (!done) return;
-		t.write = done.take;
-		timelineEdited({ text: JSON.stringify(done.doc, null, 1) }, 'typing');
-		if (done.clip !== shownClip) {
-			shownClip = done.clip;
-			const clip = done.clip;
-			void rendered().then(() => songEditor?.reveal({ track: t.track, clip }));
-		}
-	}
+	const keyStamped = (key: PlayedKey) => take?.played(key);
 
 	// A Control moves the sound where the Patch view's patch is heard, as it is dragged. Let go on a track of a song that can
 	// change, the value is the track's, saved with the song as a mixer knob's is: one step of the song's undo, and one compile,
@@ -1121,7 +1121,27 @@
 
 	// What the light lists. Each problem says where it is in words, and its link goes there: a node's opens the Patch view with the
 	// node chosen, and a track's, a clip's or the mix's opens the Song view with it chosen.
-	let nodeAsked = $state.raw<{ node: number } | null>(null);
+	// A node the address names, as a reload or a link left it, is asked for as the patch opens.
+	let nodeAsked = $state.raw<{ node: number; quiet?: true } | null>(
+		untrack(() => {
+			const node = Number(address.searchParams.get('node'));
+			return Number.isInteger(node) && address.searchParams.has('node') ? { node, quiet: true } : null;
+		})
+	);
+
+	// What the Patch view shows in its side column, and which node is chosen, go in the address as the Song view's place does:
+	// the JSON tab as `side=json`, and one node chosen as `node`, so a reload lands back on it.
+	let sideTab = $state<SideTab>(untrack(() => (address.searchParams.get('side') === 'json' ? 'json' : 'patch')));
+	$effect(() => {
+		const json = sideTab === 'json';
+		untrack(() => {
+			if (json !== (address.searchParams.get('side') === 'json')) void open({ side: json ? 'json' : null }, true);
+		});
+	});
+	function nodeChosen(node: number | null) {
+		const now = address.searchParams.get('node');
+		if (now !== (node === null ? null : String(node))) void open({ node: node === null ? null : String(node) }, true);
+	}
 
 	const names: Names = {
 		patch: (id) => (songPatches.find((p) => p.id === id) ?? library.find((p) => p.id === id))?.name,
@@ -1265,6 +1285,14 @@
 	const tempoTitle = $derived(heardTempo ? tempoWords(heardTempo, tick, ppq) : 'The tempo, once a song is open');
 	const glide = $derived(heardTempo ? gliding(heardTempo, tick) : null);
 
+	// The ▾ beside BPM lists the song's tempo changes, each going to where it is, as a DAW's tempo list does.
+	let tempoMenu = $state<{ x: number; y: number } | null>(null);
+	const tempoItems = (doc: Timeline): MenuItem[] =>
+		doc.tempo.map((change, index) => ({
+			label: `${bpmText(change.bpm)} BPM at bar ${barOf(change.tick, doc.ppq)}${change.ramp && index < doc.tempo.length - 1 ? ', gliding on' : ''}`,
+			action: () => moveTo(change.tick)
+		}));
+
 	// Enter or leaving the field sends what was typed, and Esc puts back what was there.
 	function fieldKeys(event: KeyboardEvent & { currentTarget: HTMLInputElement }, cancel: () => void) {
 		if (event.key === 'Enter') {
@@ -1337,11 +1365,15 @@
 		selectedTrack = place.track;
 		if (!chosen) return;
 		const giveWay = place.track !== before && (askedPatch !== null || askedPart !== null);
-		void open({ ...placeParams(place), ...(giveWay ? { patch: null, part: null } : {}) }, true);
+		const another = place.track !== before;
+		void open(
+			{ ...placeParams(place), ...(giveWay ? { patch: null, part: null } : {}), ...(another ? { node: null } : {}) },
+			true
+		);
 	}
 
 	function patchOpened(id: string) {
-		void open(recipe ? { part: id, patch: null } : { patch: id, part: null }, false, 'patch');
+		void open(recipe ? { part: id, patch: null, node: null } : { patch: id, part: null, node: null }, false, 'patch');
 	}
 
 	// New patch for this track. The patch is saved at once, as the browser's New patch is, and the library loads again so it's
@@ -1371,6 +1403,32 @@
 	const wide = $derived(windowWidth === undefined || windowWidth >= WIDE);
 	let browserOpen = $state(true); // On a wide screen, as last left
 	let browserOver = $state(false); // On a narrow one
+	let shortcutsShown = $state(false); // The sheet ? opens
+	let quickOpen = $state(false); // Mod+K's search
+	let keyStrip = $state<HTMLElement | null>(null); // The Patch view's strip, where the keys are drawn while it is open
+
+	// What Mod+K finds: the library's timelines, the examples, and the patches, the library's own before the built-in ones.
+	const openables = $derived.by((): Openable[] => [
+		...data.library.timelines.map((t) => ({
+			kind: 'Timeline' as const,
+			name: t.name,
+			href: timelineHref(search, t.id, saved?.id ?? null)
+		})),
+		...data.examples.flatMap((group) =>
+			group.recipes.map((r) => ({
+				kind: 'Example' as const,
+				name: r.name,
+				href: recipeHref(search, r.name, recipe?.entry.name ?? null)
+			}))
+		),
+		...[...library]
+			.sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin))
+			.map((p) => ({
+				kind: p.builtin ? ('Built-in' as const) : ('Patch' as const),
+				name: p.name,
+				href: patchHref(search, p.id)
+			}))
+	]);
 	let reveal = $state<Section | null>(null);
 	const browserShown = $derived(wide ? browserOpen : browserOver);
 	let saveForm: HTMLFormElement;
@@ -1385,6 +1443,25 @@
 		localStorage.setItem('modsynth.browser', browserOpen ? 'open' : 'closed');
 	}
 
+	// B gives the browser's filter focus as it opens, so a list can be found by typing, and Esc in it gives focus back to what had
+	// it, closing the browser if it is over the views.
+	let beforeBrowser: Element | null = null;
+	async function focusFilter() {
+		if (!browserShown) return;
+		beforeBrowser = document.activeElement;
+		await rendered();
+		document.querySelector<HTMLInputElement>('.browser .filter')?.focus();
+	}
+
+	function leaveBrowser() {
+		if (!wide) browserOver = false;
+		const back = beforeBrowser;
+		beforeBrowser = null;
+		const focusable = back instanceof HTMLElement || back instanceof SVGElement;
+		if (focusable && back.isConnected && back !== document.body) back.focus({ preventScroll: true });
+		else (document.activeElement as HTMLElement | null)?.blur();
+	}
+
 	// Over the views, the browser goes once it has done its job, or when the page is used instead.
 	$effect(() => {
 		void address.href;
@@ -1394,6 +1471,14 @@
 	function outsideBrowser(event: PointerEvent) {
 		const target = event.target as Element;
 		if (browserOver && !target.closest('.side, .rail, .menu')) browserOver = false;
+	}
+
+	// What was just made takes focus where it opens, rather than the page, which is where the field that named it leaves focus:
+	// a new song's roll, so the keys and step entry work at once, or a new patch's graph.
+	async function focusMade(what: 'timeline' | 'patch' | 'bundle') {
+		await rendered();
+		const target = what === 'timeline' ? 'roll' : what === 'patch' ? 'graph' : null;
+		if (target) document.querySelector<SVGElement>(`[data-testid="${target}"]`)?.focus({ preventScroll: true });
 	}
 
 	// Undo and Redo, the top bar's and the keys, act on what the view on screen edits.
@@ -1412,9 +1497,13 @@
 		} else if (matches(event, 'browser')) {
 			event.preventDefault();
 			toggleBrowser();
+			void focusFilter();
 		} else if (matches(event, 'escape') && browserOver) {
 			event.preventDefault(); // Esc closes one thing at a time, and the browser over the views is the nearest
 			browserOver = false;
+		} else if (matches(event, 'shortcuts')) {
+			event.preventDefault();
+			shortcutsShown = true;
 		}
 	}
 
@@ -1422,6 +1511,11 @@
 		if (matches(event, 'save')) {
 			event.preventDefault();
 			if (dirty.size) saveForm.requestSubmit();
+			return;
+		}
+		if (matches(event, 'quick-open')) {
+			event.preventDefault(); // Some browsers take Ctrl+K for their own search
+			if (!(event.target as Element | null)?.closest?.('dialog')) quickOpen = true;
 			return;
 		}
 		if (event.defaultPrevented || keptBy(event.target)) return;
@@ -1609,6 +1703,20 @@
 			<span class="muted">BPM</span>
 			{#if glide}<span class="glide" aria-hidden="true">{glide === 'up' ? '↗' : '↘'}</span>{/if}
 		</label>
+		{#if songDoc && songDoc.tempo.length > 1}
+			<button
+				type="button"
+				class="tempos"
+				aria-label="Tempo changes"
+				aria-haspopup="menu"
+				aria-expanded={tempoMenu !== null}
+				title="The song's tempo changes. Choose one to go to it."
+				onclick={(event) => {
+					const box = event.currentTarget.getBoundingClientRect();
+					tempoMenu = { x: box.left, y: box.bottom + 2 };
+				}}>▾</button
+			>
+		{/if}
 		<div class="undo" role="group" aria-label="Undo and redo">
 			<button
 				type="button"
@@ -1638,6 +1746,7 @@
 			bind:velocity
 			onhold={holdKeys}
 			onletgo={() => letGo(latched)}
+			stripIn={view === 'patch' ? keyStrip : null}
 		/>
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
 		<span class="grow"></span>
@@ -1655,7 +1764,11 @@
 			<div class="side">{@render browser()}</div>
 		{/if}
 		{#if windowWidth === undefined || !(wide && browserOpen)}
-			<BrowserRail open={browserShown} onopen={(section) => toggleBrowser(section)} />
+			<BrowserRail
+				open={browserShown}
+				onopen={(section) => toggleBrowser(section)}
+				onshortcuts={() => (shortcutsShown = true)}
+			/>
 		{/if}
 		{#if !wide && browserOver}
 			<div class="side over">{@render browser()}</div>
@@ -1739,6 +1852,11 @@
 					active={view === 'patch'}
 					song={songName}
 					onsong={() => void show('song')}
+					{useOn}
+					onuse={useOnTrack}
+					onstrip={(strip) => (keyStrip = strip)}
+					bind:tab={sideTab}
+					onchosen={nodeChosen}
 					onname={(name) => patchEdited({ name })}
 					ongraph={(graph) => patchEdited({ graph })}
 					ontext={(text, typing) => patchEdited({ text }, typing ? 'typing' : 'edit')}
@@ -1784,6 +1902,21 @@
 		/>
 	{/key}
 {/if}
+{#if tempoMenu && songDoc}
+	<ContextMenu
+		x={tempoMenu.x}
+		y={tempoMenu.y}
+		label="Tempo changes"
+		items={tempoItems(songDoc)}
+		onclose={() => (tempoMenu = null)}
+	/>
+{/if}
+{#if quickOpen}
+	<QuickOpen items={openables} onclose={() => (quickOpen = false)} />
+{/if}
+{#if shortcutsShown}
+	<ShortcutsSheet onclose={() => (shortcutsShown = false)} />
+{/if}
 
 {#snippet browser()}
 	<Browser
@@ -1799,6 +1932,9 @@
 		shownPatch={view === 'patch' ? (shown?.patch.id ?? null) : null}
 		usersOf={(id) => usedBy(id, library, data.library.timelines, nowPlaying)}
 		{reveal}
+		onshortcuts={() => (shortcutsShown = true)}
+		onmade={focusMade}
+		onescape={leaveBrowser}
 	/>
 {/snippet}
 
@@ -1864,6 +2000,7 @@
 		{#if recipe}
 			<textarea
 				aria-label="Timeline JSON"
+				wrap="off"
 				spellcheck="false"
 				readonly
 				value={JSON.stringify(recipe.project.programs[0].timeline, null, 1)}></textarea>
@@ -1871,6 +2008,7 @@
 			<p class="muted">Edits compile as you type, and audio crossfades to them without stopping.</p>
 			<textarea
 				aria-label="Timeline JSON"
+				wrap="off"
 				spellcheck="false"
 				value={timelineText}
 				oninput={(e) => timelineEdited({ text: e.currentTarget.value }, 'typing')}
@@ -1981,6 +2119,12 @@
 	}
 	.bpm {
 		width: 3.4rem;
+	}
+	.tempos {
+		padding: 0 0.3rem;
+		min-width: 24px;
+		min-height: 24px;
+		font-size: 0.75rem;
 	}
 	.glide {
 		color: var(--accent);

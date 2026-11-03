@@ -1,25 +1,26 @@
 <script lang="ts">
 	import { onMount, tick as settle } from 'svelte';
+	import { bpmText, tempoRange } from '#lib/Tempo.ts';
 	import {
-		barOf,
 		copiedSpan,
 		drawnClip,
 		movePlacement,
-		noteValue,
 		pasteAt,
 		pastePlacement,
 		place,
 		placementIndex,
+		removeTrack,
 		setPlacement,
-		snapTick,
+		setTrack,
 		songLength,
-		ticksPerBar,
 		windowOf,
 		type Clip,
 		type PatchLike,
 		type Tempo,
 		type Track
 	} from '#lib/TimelineEdit.ts';
+	import { wholeSong } from '#lib/Transport.ts';
+	import { barOf, noteValue, snapTick, ticksPerBar } from '#lib/Units.ts';
 	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { escapeCancels } from '#lib/Drag.ts';
@@ -31,9 +32,8 @@
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import { LANES_KEY, SONG_LANES, keepOpen, keptOpen, laneHeight, layerHeight } from '#lib/SongLayer.ts';
+	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import TempoLane from '#lib/TempoLane.svelte';
-	import { bpmText, tempoRange } from '#lib/TempoLane.ts';
-	import { wholeSong } from '#lib/Transport.ts';
 
 	export interface Selection {
 		track: number | null;
@@ -423,6 +423,98 @@
 		gesture?.kind === 'draw' && gesture.drawn ? drawnClip(doc, gesture.track, gesture.from, gesture.to) : null
 	);
 
+	// A track head's menu, and an empty row's: what is done to the track, and a clip made or pasted where the row was pressed.
+	// They are the clip's menu's neighbours, so one is open at a time.
+	let other = $state.raw<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+	let renaming = $state<number | null>(null); // The track whose name is being typed in its head
+
+	function headItems(track: Track): MenuItem[] {
+		const bar = ticksPerBar(doc);
+		const soloItem = { label: solo.has(track.id) ? 'Unsolo' : 'Solo', action: () => onsolo(track.id) };
+		if (readonly) return [soloItem];
+		return [
+			{ label: 'Rename…', action: () => (renaming = track.id) },
+			{
+				label: 'New clip at the playhead',
+				action: () => onnew(track.id, Math.floor(tick / bar) * bar, TEMPLATE_BARS * bar)
+			},
+			{ label: track.mute ? 'Unmute' : 'Mute', action: () => onmute(track.id) },
+			soloItem,
+			{
+				label: 'Delete track',
+				action: () => {
+					onselect({ track: null, placement: null });
+					onchange(removeTrack(doc, track.id));
+				}
+			}
+		];
+	}
+
+	function openHeadMenu(track: Track, on: Element, at: { x: number; y: number } | null) {
+		gesture = null;
+		menu = null;
+		onselect({ track: track.id, placement: null });
+		const box = on.getBoundingClientRect();
+		other = {
+			x: at?.x ?? box.left,
+			y: at?.y ?? box.bottom,
+			label: `Track ${trackName(track)}`,
+			items: headItems(track)
+		};
+	}
+
+	function headMenu(event: MouseEvent, track: Track) {
+		if ((event.target as Element).closest('input, .mix')) return; // A field's own menu, and the fader's
+		event.preventDefault();
+		const keyed = event.clientX === 0 && event.clientY === 0;
+		openHeadMenu(track, event.currentTarget as Element, keyed ? null : { x: event.clientX, y: event.clientY });
+	}
+
+	function headKeys(event: KeyboardEvent, track: Track) {
+		if (!matches(event, 'menu')) return;
+		event.preventDefault();
+		event.stopPropagation();
+		openHeadMenu(track, event.currentTarget as Element, null);
+	}
+
+	function rowMenu(event: MouseEvent) {
+		event.preventDefault();
+		gesture = null;
+		menu = null;
+		const at = canvas(event);
+		const track = doc.tracks[rowAt(at.y)];
+		if (!track || readonly) return;
+		const tick = Math.floor(ticksAt(at.x) / grid) * grid;
+		const copied = clipboard.placement;
+		const items: MenuItem[] = [{ label: 'New clip here', action: () => onnew(track.id, tick) }];
+		if (copied) {
+			items.push({
+				label: 'Paste here',
+				keys: 'paste',
+				action: () => {
+					const pasted = pastePlacement(doc, track.id, tick, copied.what);
+					if (pasted.index < 0) return;
+					copied.pasted = { to: track.id, at: tick };
+					const chosen = { track: track.id, placement: pasted.index };
+					onchange(pasted.doc, chosen);
+					onselect(chosen);
+				}
+			});
+		}
+		other = { x: event.clientX, y: event.clientY, label: `Row of ${trackName(track)}`, items };
+	}
+
+	function renamed(track: Track, name: string) {
+		renaming = null;
+		if (name.trim() !== track.name) onchange(setTrack(doc, track.id, { name: name.trim() }));
+	}
+
+	// The field takes focus and its text is chosen, so typing replaces the name.
+	function chooseText(input: HTMLInputElement) {
+		input.focus();
+		input.select();
+	}
+
 	function blockMenu(event: MouseEvent, block: Block) {
 		event.preventDefault();
 		event.stopPropagation();
@@ -433,6 +525,7 @@
 	// The menu key and Shift+F10 open it at the clip rather than at a pointer.
 	function openBlockMenu(block: Block, on: Element, at: { x: number; y: number } | null) {
 		gesture = null;
+		other = null;
 		onselect({ track: block.track.id, placement: block.index });
 		if (readonly || !actions) return;
 		const box = on.getBoundingClientRect();
@@ -464,9 +557,9 @@
 		return [
 			{ label: 'Open notes', action: () => open(at) },
 			{ label: 'Loop this clip', action: () => loopThis(at) },
-			{ label: 'Duplicate after', action: () => duplicate(at) },
+			{ label: 'Duplicate after', keys: 'duplicate', action: () => duplicate(at) },
 			{ label: 'Make unique', action: () => unique(at), disabled: uses(opened.clip) < 2 },
-			{ label: 'Remove from track', action: () => remove(at) },
+			{ label: 'Remove from track', keys: 'arrangement.delete', action: () => remove(at) },
 			{ label: 'Delete clip', action: () => deleteClip(at) }
 		];
 	}
@@ -556,50 +649,80 @@
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} onkeydown={keydown} />
 
 <div class="arrangement" bind:this={view} data-testid="arrangement-view" onwheel={wheel}>
-	<div class="heads" bind:this={heads} style:padding-top="{TOP}px">
-		<!-- The song layer's heads. ▸ or a double-click on a folded lane unfolds it, and ▾ folds it again. -->
-		<div class="layer" role="group" aria-label="Song lanes" style:height="{layer}px">
-			{#each SONG_LANES as lane (lane.id)}
-				{@const open = unfolded.has(lane.id)}
-				<div class="lanehead" class:open style:height="{laneHeight(open)}px" data-testid={`lane-head-${lane.id}`}>
-					<button
-						type="button"
-						class="fold"
-						aria-expanded={open}
-						aria-label={`${lane.name} lane`}
-						title={open ? `Fold the ${lane.name} lane` : `Unfold the ${lane.name} lane`}
-						onclick={() => fold(lane.id)}><span aria-hidden="true">{open ? '▾' : '▸'}</span> {lane.name}</button
-					>
-					{#if open && lane.id === 'tempo'}
-						<!-- The lane's scale, the BPM at its top and at its foot. -->
-						<span class="scale" aria-hidden="true">
-							<span>{bpmText(tempoScale.high)}</span>
-							<span>{bpmText(tempoScale.low)}</span>
-						</span>
-					{/if}
-				</div>
-			{/each}
+	<div class="heads" bind:this={heads}>
+		<!-- The ruler's corner and the song layer's heads, which stay at the top as the tracks scroll under them. ▸ or a
+			 double-click on a folded lane unfolds it, and ▾ folds it again. -->
+		<div class="corner" style:padding-top="{TOP}px">
+			<div class="layer" role="group" aria-label="Song lanes" style:height="{layer}px">
+				{#each SONG_LANES as lane (lane.id)}
+					{@const open = unfolded.has(lane.id)}
+					<div class="lanehead" class:open style:height="{laneHeight(open)}px" data-testid={`lane-head-${lane.id}`}>
+						<button
+							type="button"
+							class="fold"
+							aria-expanded={open}
+							aria-label={`${lane.name} lane`}
+							title={open ? `Fold the ${lane.name} lane` : `Unfold the ${lane.name} lane`}
+							onclick={() => fold(lane.id)}><span aria-hidden="true">{open ? '▾' : '▸'}</span> {lane.name}</button
+						>
+						{#if open && lane.id === 'tempo'}
+							<!-- The lane's scale, the BPM at its top and at its foot. -->
+							<span class="scale" aria-hidden="true">
+								<span>{bpmText(tempoScale.high)}</span>
+								<span>{bpmText(tempoScale.low)}</span>
+							</span>
+						{/if}
+					</div>
+				{/each}
+			</div>
 		</div>
 		{#each doc.tracks as track (track.id)}
 			{@const names = track.slots.map(patchName)}
 			{@const soloed = solo.has(track.id)}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="head"
 				class:chosen={selection.track === track.id}
 				class:silent={track.mute || (soloing && !soloed)}
 				style:height="{ROW}px"
+				oncontextmenu={(event) => headMenu(event, track)}
 			>
 				<div class="namerow">
-					<button
-						type="button"
-						class="select"
-						class:problem={badTracks.has(track.id)}
-						data-testid={`track-${track.id}`}
-						aria-pressed={selection.track === track.id}
-						onclick={() => onselect({ track: track.id, placement: null })}
-					>
-						<span class="title">{trackName(track)}</span>
-					</button>
+					{#if renaming === track.id}
+						<input
+							class="rename"
+							aria-label="Rename the track"
+							value={track.name || trackName(track)}
+							use:chooseText
+							onkeydown={(event) => {
+								if (event.key === 'Enter') renamed(track, event.currentTarget.value);
+								else if (matches(event, 'escape')) {
+									event.preventDefault();
+									event.stopPropagation();
+									renaming = null;
+								}
+							}}
+							onblur={(event) => {
+								if (renaming === track.id) renamed(track, event.currentTarget.value);
+							}}
+						/>
+					{:else}
+						<button
+							type="button"
+							class="select"
+							class:problem={badTracks.has(track.id)}
+							data-testid={`track-${track.id}`}
+							aria-pressed={selection.track === track.id}
+							title="Right-click or Shift+F10 for its menu: rename, a new clip, delete"
+							onclick={() => onselect({ track: track.id, placement: null })}
+							onkeydown={(event) => headKeys(event, track)}
+							ondblclick={() => {
+								if (!readonly) renaming = track.id;
+							}}
+						>
+							<span class="title">{trackName(track)}</span>
+						</button>
+					{/if}
 					<!-- Mute is the track's own, saved with the song as the Mixer's is. Solo is the editor's, and isn't saved. -->
 					<div class="toggles" role="group" aria-label={`Mute and solo ${trackName(track)}`}>
 						<button
@@ -668,44 +791,77 @@
 	</div>
 
 	<div class="scroller">
-		<svg bind:this={svg} {width} {height} role="application" aria-label="Arrangement" data-testid="arrangement">
-			<!-- Under the song layer's lanes, which draw over the bars and take the pointer there. -->
-			<rect class="songlayer" y={TOP} {width} height={layer} />
-			<rect
-				class="ruler"
-				{width}
-				height={RULER}
-				role="presentation"
-				data-testid="ruler"
-				onpointerdown={(event) => onlocate(snapTick(ticksAt(canvas(event).x), grid))}
-			/>
-			<rect
-				class="loopstrip"
-				y={RULER}
-				{width}
-				height={LOOP}
-				role="presentation"
-				data-testid="loop-strip"
-				onpointerdown={startLoop}
-				><title
-					>Drag for a loop. A click turns it on or off, and a drag on it moves it, or by an end stretches it.</title
-				></rect
-			>
-			{#if shownLoop}
+		<!-- The ruler, the loop strip and the song layer stay at the top as the tracks scroll, as a DAW's do. The tracks' canvas
+			 starts under them, so a y on it is the same either way. -->
+		<div class="band" style:height="{tracksTop}px" data-testid="arrangement-band">
+			<svg {width} height={tracksTop}>
+				<!-- Under the song layer's lanes, which draw over the bars and take the pointer there. -->
+				<rect class="songlayer" y={TOP} {width} height={layer} />
 				<rect
-					class="brace"
-					class:off={!shownOn}
-					x={shownLoop.start * perTick}
-					y={RULER + 2}
-					width={(shownLoop.end - shownLoop.start) * perTick}
-					height={LOOP - 4}
-					data-testid="loop-brace"
-					data-on={shownOn}
-					data-start={shownLoop.start}
-					data-end={shownLoop.end}
+					class="ruler"
+					{width}
+					height={RULER}
+					role="presentation"
+					data-testid="ruler"
+					onpointerdown={(event) => onlocate(snapTick(ticksAt(canvas(event).x), grid))}
 				/>
-			{/if}
+				<rect
+					class="loopstrip"
+					y={RULER}
+					{width}
+					height={LOOP}
+					role="presentation"
+					data-testid="loop-strip"
+					onpointerdown={startLoop}
+					><title
+						>Drag for a loop. A click turns it on or off, and a drag on it moves it, or by an end stretches it.</title
+					></rect
+				>
+				{#if shownLoop}
+					<rect
+						class="brace"
+						class:off={!shownOn}
+						x={shownLoop.start * perTick}
+						y={RULER + 2}
+						width={(shownLoop.end - shownLoop.start) * perTick}
+						height={LOOP - 4}
+						data-testid="loop-brace"
+						data-on={shownOn}
+						data-start={shownLoop.start}
+						data-end={shownLoop.end}
+					/>
+				{/if}
 
+				{#each { length: bars + 1 }, bar}
+					<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={0} y2={tracksTop} />
+					{#if bar < bars}
+						<text class="number" x={bar * barWidth + 4} y={14}>{bar + 1}</text>
+					{/if}
+				{/each}
+				<line class="playhead" x1={tick * perTick} x2={tick * perTick} y1={0} y2={tracksTop} />
+			</svg>
+			<TempoLane
+				{doc}
+				y={TOP}
+				{width}
+				{perTick}
+				{grid}
+				open={unfolded.has('tempo')}
+				{readonly}
+				onchange={(next) => onchange(next)}
+				onpreview={ontempo}
+				onunfold={() => fold('tempo', true)}
+			/>
+		</div>
+		<svg
+			bind:this={svg}
+			{width}
+			{height}
+			style:margin-top="{-tracksTop}px"
+			role="application"
+			aria-label="Arrangement"
+			data-testid="arrangement"
+		>
 			{#each doc.tracks as track, row (track.id)}
 				<rect
 					class="row"
@@ -718,14 +874,12 @@
 					data-testid={`row-${track.id}`}
 					onpointerdown={rowPressed}
 					ondblclick={rowDoubled}
+					oncontextmenu={rowMenu}
 				/>
 			{/each}
 
 			{#each { length: bars + 1 }, bar}
-				<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={0} y2={height} />
-				{#if bar < bars}
-					<text class="number" x={bar * barWidth + 4} y={14}>{bar + 1}</text>
-				{/if}
+				<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={tracksTop} y2={height} />
 			{/each}
 
 			{#each blocks as block (block.key)}
@@ -781,21 +935,12 @@
 
 			<line class="playhead" x1={tick * perTick} x2={tick * perTick} y1={0} y2={height} data-testid="playhead" />
 		</svg>
-		<TempoLane
-			{doc}
-			y={TOP}
-			{width}
-			{perTick}
-			{grid}
-			open={unfolded.has('tempo')}
-			{readonly}
-			onchange={(next) => onchange(next)}
-			onpreview={ontempo}
-			onunfold={() => fold('tempo', true)}
-		/>
 	</div>
 </div>
 
+{#if other}
+	<ContextMenu x={other.x} y={other.y} label={other.label} items={other.items} onclose={() => (other = null)} />
+{/if}
 {#if menu}
 	<ContextMenu
 		x={menu.x}
@@ -825,7 +970,7 @@
 	.heads {
 		position: sticky;
 		left: 0;
-		z-index: 1;
+		z-index: 3; /* Over the band, which scrolls under it sideways */
 		background: var(--panel);
 		border-right: 1px solid var(--line);
 		box-sizing: border-box;
@@ -861,6 +1006,13 @@
 		flex-direction: column;
 		justify-content: flex-end;
 		padding: 0 0.3rem 0 0.6rem;
+		font-size: 0.8rem;
+	}
+	.rename {
+		flex: 1;
+		min-width: 0;
+		margin: 0 0.3rem 0.1rem 0.4rem;
+		padding: 0.05rem 0.25rem;
 		font-size: 0.8rem;
 	}
 	.toggles {
@@ -959,6 +1111,19 @@
 		position: relative;
 		min-width: 0;
 	}
+	.corner,
+	.band {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+	}
+	.corner {
+		background: var(--panel);
+		box-shadow: 0 1px 0 var(--line);
+	}
+	.band {
+		box-shadow: 0 1px 0 var(--line);
+	}
 	/* The song layer's heads, over the tracks' and set apart from them. */
 	.layer {
 		background: #11161d;
@@ -977,7 +1142,7 @@
 		border-radius: 3px;
 		background: transparent;
 		color: var(--muted);
-		font-size: 0.68rem;
+		font-size: 0.75rem;
 		line-height: 17px;
 		text-align: left;
 		white-space: nowrap;

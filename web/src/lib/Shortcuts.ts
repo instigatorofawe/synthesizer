@@ -51,6 +51,14 @@ export const SHORTCUTS = [
 	{ id: 'fit', code: 'Period', scope: 'everywhere', description: 'Fit the view to what is in it' },
 	// Browsers open a menu for Shift+F10 on some systems and not on others, a Mac's among them, so the editor opens its own.
 	{ id: 'menu', code: 'F10', shift: true, scope: 'everywhere', description: 'Open the menu of what has focus' },
+	{ id: 'shortcuts', code: 'Slash', shift: true, scope: 'everywhere', description: 'Show these shortcuts' },
+	{
+		id: 'quick-open',
+		code: 'KeyK',
+		mod: true,
+		scope: 'everywhere',
+		description: 'Open a song, an example or a patch by name'
+	},
 
 	// What is chosen, in whichever editor is in use.
 	{ id: 'select-all', code: 'KeyA', mod: true, scope: 'everywhere', description: 'Choose everything' },
@@ -89,6 +97,22 @@ export const SHORTCUTS = [
 		description: 'A rest as long as the Draw length, or with piano keys held, their notes a Snap step longer'
 	},
 	{ id: 'step.back', code: 'Backspace', scope: 'step', description: 'Take back the last step' },
+	{ id: 'step.up', code: 'ArrowUp', scope: 'step', description: 'The last step’s notes up a semitone' },
+	{ id: 'step.down', code: 'ArrowDown', scope: 'step', description: 'The last step’s notes down a semitone' },
+	{
+		id: 'step.octave-up',
+		code: 'ArrowUp',
+		shift: true,
+		scope: 'step',
+		description: 'The last step’s notes up an octave'
+	},
+	{
+		id: 'step.octave-down',
+		code: 'ArrowDown',
+		shift: true,
+		scope: 'step',
+		description: 'The last step’s notes down an octave'
+	},
 
 	{ id: 'arrangement.delete', code: 'Delete', scope: 'arrangement', description: 'Take the chosen clip off its track' },
 	{
@@ -184,12 +208,44 @@ const NAMES: Record<string, string> = {
 	ArrowRight: '→'
 };
 
+// Keys whose Shift is a character of its own, written as that character: ? rather than Shift+/.
+const SHIFTED: Record<string, string> = { Slash: '?' };
+
 // How a binding is written, as a Mac writes it (⇧⌘Z) or as everywhere else does (Ctrl+Shift+Z).
 export function label(id: ShortcutId, mod = modKey()): string {
 	const binding = shortcut(id);
-	const key = NAMES[binding.code] ?? binding.code.replace(/^(Key|Digit)/, '');
-	if (mod === 'Meta') return `${binding.shift ? '⇧' : ''}${binding.mod ? '⌘' : ''}${key}`;
-	return [binding.mod && 'Ctrl', binding.shift && 'Shift', key].filter(Boolean).join('+');
+	const shifted = binding.shift && !binding.mod ? SHIFTED[binding.code] : undefined;
+	const key = shifted ?? NAMES[binding.code] ?? binding.code.replace(/^(Key|Digit)/, '');
+	const shift = binding.shift && !shifted;
+	if (mod === 'Meta') return `${shift ? '⇧' : ''}${binding.mod ? '⌘' : ''}${key}`;
+	return [binding.mod && 'Ctrl', shift && 'Shift', key].filter(Boolean).join('+');
+}
+
+// A binding as `aria-keyshortcuts` writes it, so a screen reader can say the key a menu item shares: Control+Shift+Z.
+export function ariaKeys(id: ShortcutId, mod = modKey()): string {
+	const binding = shortcut(id);
+	const key = binding.code.replace(/^(Key|Digit)/, '');
+	return [binding.mod && mod, binding.shift && 'Shift', key].filter(Boolean).join('+');
+}
+
+// The sheet ? opens: each place keys work, in the order a session meets them, and in each what its keys do. Bindings that do
+// one thing, as Delete and Backspace do, share a row.
+const SHEET_ORDER: Scope[] = ['everywhere', 'song', 'roll', 'step', 'arrangement', 'tempo', 'head', 'patch', 'graph'];
+
+export type SheetRow = { keys: string[]; description: string };
+
+export function sheet(mod = modKey()): { scope: Scope; name: string; rows: SheetRow[] }[] {
+	return SHEET_ORDER.map((scope) => {
+		const rows: SheetRow[] = [];
+		for (const binding of SHORTCUTS as readonly Shortcut[]) {
+			if (binding.scope !== scope || binding.piano) continue;
+			const key = label(binding.id as ShortcutId, mod);
+			const same = rows.find((row) => row.description === binding.description);
+			if (same) same.keys.push(key);
+			else rows.push({ keys: [key], description: binding.description });
+		}
+		return { scope, name: SCOPES[scope].name, rows };
+	}).filter((group) => group.rows.length);
 }
 
 // Inputs that are pressed or dragged rather than typed into. Space and the table's keys go past them, as they go past a button.

@@ -11,6 +11,8 @@ import {
 	createBundle,
 	createPatch,
 	createTimeline,
+	freeName,
+	patchNames,
 	deleteAsset,
 	deleteBundle,
 	deletePatch,
@@ -42,9 +44,10 @@ export const load = async ({ url }) => {
 				entry,
 				project,
 				// The same documents with their defaults filled in, for the editors to draw. What plays is `project`, as it ships.
-				patches: Object.entries(project.patches).map(([id, patch]) => ({
+				// An example's one patch is called after the example, as its built-in copy is: most call it "p", which says nothing.
+				patches: Object.entries(project.patches).map(([id, patch], _, all) => ({
 					id,
-					name: patch.name || id,
+					name: all.length === 1 ? recipe : patch.name || id,
 					graph: graphSchema.parse(patch.graph)
 				})),
 				timeline: timelineSchema.parse(project.programs[0].timeline),
@@ -135,7 +138,7 @@ export const actions = {
 		const form = await request.formData();
 		const name = field(form, 'name');
 		if (!name) return fail(400, { message: 'a patch needs a name' });
-		const id = createPatch(db(), name, EMPTY_GRAPH);
+		const id = createPatch(db(), freeName(name, patchNames(db())), EMPTY_GRAPH); // "Lead 2" if there is a Lead
 		if (form.has('back')) redirect(303, back(form, { patch: id, part: null }));
 		return { created: id };
 	},

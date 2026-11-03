@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
 	import type { Ring } from '#lib/ScopeMath.ts';
+	import { decibels, toDecibels } from '#lib/TimelineEdit.ts';
 
 	// A level meter on a tap, as a DAW puts on every track. It reads only samples that arrived since the last frame, so a tap
 	// that stops sending falls to silence instead of holding its last level.
@@ -31,9 +32,8 @@
 	let held = $state(1); // The lowest gain while the light has been on, or 1 while it is off
 	let heldUntil = 0;
 
-	const decibels = (level: number) => (level > 0 ? 20 * Math.log10(level) : -Infinity);
-	const loud = (level: number) => (level > 0 ? `${decibels(level).toFixed(1)} dB` : 'silent');
-	const share = (level: number) => Math.max(0, Math.min(1, (decibels(level) - FLOOR) / (CEILING - FLOOR)));
+	const loud = decibels;
+	const share = (level: number) => Math.max(0, Math.min(1, (toDecibels(level) - FLOOR) / (CEILING - FLOOR)));
 
 	$effect(() => {
 		const gain = limiter?.limited ?? 1;
@@ -85,9 +85,9 @@
 			class="limit"
 			class:on={held < 1}
 			role="img"
-			aria-label={held < 1 ? `Limiting ${decibels(held).toFixed(1)} dB` : 'Not limiting'}
+			aria-label={held < 1 ? `Limiting ${toDecibels(held).toFixed(1)} dB` : 'Not limiting'}
 			title={held < 1
-				? `Limiting: the limiter turned the song down by as much as ${(-decibels(held)).toFixed(1)} dB to keep it at full scale`
+				? `Limiting: the limiter turned the song down by as much as ${(-toDecibels(held)).toFixed(1)} dB to keep it at full scale`
 				: 'Lights when the limiter turns the song down to keep it at full scale'}
 			data-testid={held < 1 ? 'limiting' : undefined}
 		></span>

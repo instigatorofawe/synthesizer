@@ -130,7 +130,7 @@ test('a wire is chosen with a click, says what it joins, and Delete takes it awa
 });
 
 test("a wire's menu offers a snap where its input can't take audio", async ({ page }) => {
-	await newPatch(page, 'Filtered');
+	await newPatch(page, 'Filtered by a snap'); // ControlsKeysTest makes a Filtered, and a second would be Filtered 2
 	await sideTab(page, 'JSON').click();
 	const json = page.getByLabel('Graph JSON');
 	type Doc = { nodes: { id: number; type: string }[]; edges: { from: number; to: number; input?: string }[] };

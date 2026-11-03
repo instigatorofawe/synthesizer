@@ -106,8 +106,14 @@
 </div>
 
 <style>
+	/* 24 px square, the least a target should be, inside the room the Song tab leaves at its end. */
 	.opener {
-		padding: 0 0.3rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		padding: 0;
 		border: 0;
 		border-radius: 3px;
 		background: transparent;

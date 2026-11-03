@@ -2,7 +2,8 @@
 // its own, so coming back to a clip finds it as it was left, and the wheel and Fit change it.
 
 import { modHeld } from '#lib/Shortcuts.ts';
-import { BEATS_PER_BAR, type Clip } from '#lib/TimelineEdit.ts';
+import type { Clip } from '#lib/TimelineEdit.ts';
+import { BEATS_PER_BAR } from '#lib/Units.ts';
 
 export interface RollZoom {
 	beat: number; // Pixels across a beat

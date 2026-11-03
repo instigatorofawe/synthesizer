@@ -3,6 +3,7 @@
 // the compiler says what is wrong and where. What these do take care of is taking references along, because deleting a bus
 // shouldn't leave a trail of errors about a name nobody can see any more.
 import type { Graph, Param, Timeline } from '#lib/Schema.ts';
+import { BEATS_PER_BAR, barOf, snapTick, ticksPerBar } from '#lib/Units.ts';
 
 export type Track = Timeline['tracks'][number];
 export type Bus = Timeline['buses'][number];
@@ -29,25 +30,6 @@ export function byOwner<T extends PatchLike>(patches: T[]): { own: T[]; builtin:
 	return { own: patches.filter((patch) => !patch.builtin), builtin: patches.filter((patch) => patch.builtin) };
 }
 
-// The grid is 4/4 and nothing stores that. A document holds ticks, so a time signature would change how it is drawn and
-// nothing about how it plays.
-export const BEATS_PER_BAR = 4;
-export const ticksPerBar = (doc: Pick<Timeline, 'ppq'>) => doc.ppq * BEATS_PER_BAR;
-
-export function grids(ppq: number) {
-	const each = (beats: number) => Math.max(1, Math.round(ppq * beats));
-	return [
-		{ label: 'Bar', ticks: each(BEATS_PER_BAR) },
-		{ label: '1/4', ticks: each(1) },
-		{ label: '1/8', ticks: each(1 / 2) },
-		{ label: '1/16', ticks: each(1 / 4) },
-		{ label: '1/32', ticks: each(1 / 8) },
-		{ label: 'Off', ticks: 1 }
-	];
-}
-
-export const snapTick = (tick: number, grid: number) => Math.max(0, Math.round(tick / grid) * grid);
-
 const clipOf = (doc: Timeline, id: string) => doc.clips.find((clip) => clip.id === id);
 
 // The window of its clip a placement plays, in the clip's ticks: all of it unless it says otherwise.
@@ -66,50 +48,6 @@ export function songLength(doc: Timeline): number {
 		for (const placed of track.placements) end = Math.max(end, placed.tick + placementSpan(doc, placed));
 	}
 	return end;
-}
-
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-// With 60 as C4, which is what most tools show and all that a name can do here: the engine only sees the number.
-export const noteName = (note: number) => `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
-export const isBlackKey = (note: number) => NOTE_NAMES[note % 12].length > 1;
-
-export const barOf = (tick: number, ppq: number) => Math.floor(tick / (ppq * BEATS_PER_BAR)) + 1;
-
-// Where a tick falls as bar.beat.tick, with bars and beats counted from 1 and the tick from 0, as most DAWs show it: 1.4.000 is
-// the last beat of the first bar.
-export function position(tick: number, ppq: number): string {
-	const beat = Math.floor(tick / ppq);
-	const bar = Math.floor(beat / BEATS_PER_BAR) + 1;
-	return `${bar}.${(beat % BEATS_PER_BAR) + 1}.${String(tick % ppq).padStart(3, '0')}`;
-}
-
-const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
-
-// A length as a note value: 1/8, 3/16, 1 bar. A bar is a whole note, as 4/4 has it. A length that no note value down to a
-// 1/128 can name, a triplet's or one typed in, stays in ticks.
-export function noteValue(ticks: number, ppq: number): string {
-	const whole = ppq * BEATS_PER_BAR;
-	const common = gcd(ticks, whole);
-	const [over, under] = [ticks / common, whole / common];
-	if (under === 1) return over === 1 ? '1 bar' : `${over} bars`;
-	if (under <= 128 && (under & (under - 1)) === 0) return `${over}/${under}`;
-	return ticks === 1 ? '1 tick' : `${ticks} ticks`;
-}
-
-// What the Draw length offers, a 1/32 note to a bar: those this ppq can hold in whole ticks.
-export function drawLengths(ppq: number): { label: string; ticks: number }[] {
-	return [32, 16, 8, 4, 2, 1]
-		.map((under) => (ppq * BEATS_PER_BAR) / under)
-		.filter((ticks) => Number.isInteger(ticks))
-		.map((ticks) => ({ label: noteValue(ticks, ppq), ticks }));
-}
-
-// The Draw length one step shorter or longer than this one, which needn't be one of them. It stops at either end.
-export function stepLength(ticks: number, ppq: number, by: -1 | 1): number {
-	const lengths = drawLengths(ppq).map((length) => length.ticks);
-	const next = by > 0 ? lengths.find((length) => length > ticks) : lengths.findLast((length) => length < ticks);
-	return next ?? ticks;
 }
 
 // ---------------------------------------------------------------------------------------------------------------- chains
@@ -259,7 +197,11 @@ export const faderGain = (position: number) => (position * TOP) ** 3;
 export const faderPosition = (gain: number) => Math.cbrt(Math.max(0, gain)) / TOP;
 
 // A gain as a fader reads it, as the Mixer's and a track head's both do.
-export const decibels = (gain: number) => (gain > 0 ? `${(20 * Math.log10(gain)).toFixed(1)} dB` : 'silent');
+// Decibels, as every fader, meter and scope on the page writes them: one place, so they read alike everywhere. Silence is
+// "silent" in words and "-∞" where only a figure fits, a track head's, until decision 18 settles one word for it.
+export const toDecibels = (gain: number) => (gain > 0 ? 20 * Math.log10(gain) : -Infinity);
+export const decibels = (gain: number) => (gain > 0 ? `${toDecibels(gain).toFixed(1)} dB` : 'silent');
+export const decibelFigure = (gain: number) => (gain > 0 ? toDecibels(gain).toFixed(1) : '-∞');
 
 // A pan as a knob reads it: C in the middle, and L or R with how far, in percent.
 export const panText = (pan: number) =>
@@ -836,7 +778,9 @@ export function lanesOf(clip: Clip): Lane[] {
 
 export interface LaneChoice {
 	key: string;
-	label: string;
+	label: string; // What the lane is called where it is drawn, on its own
+	group: string; // What it belongs to, which the list of choices groups them under: a patch, an insert, or the mix
+	name: string; // What it is called within its group
 	param?: number;
 	target?: LaneTarget;
 	min: number;
@@ -852,7 +796,17 @@ const paramsOf = (patch: PatchLike | undefined): Param[] => patch?.graph.params 
 function mixChoices(doc: Timeline, track: Track | undefined): LaneChoice[] {
 	const choices: LaneChoice[] = [];
 	const add = (label: string, target: LaneTarget, min: number, max: number, start: number) =>
-		choices.push({ key: laneKey(undefined, target), label, target, min, max, start, reaches: true });
+		choices.push({
+			key: laneKey(undefined, target),
+			label,
+			group: 'Mix',
+			name: label,
+			target,
+			min,
+			max,
+			start,
+			reaches: true
+		});
 	if (track) {
 		add('Fader', { mix: 'fader', track: track.id }, 0, 2, track.gain);
 		add('Pan', { mix: 'pan', track: track.id }, -1, 1, track.pan);
@@ -875,12 +829,16 @@ export function laneChoices(doc: Timeline, trackId: number | null, patches: Patc
 	const seen = new Set<number>();
 	const choices: LaneChoice[] = [];
 	for (const slot of track?.slots ?? []) {
-		for (const param of paramsOf(patches.find((p) => p.id === slot))) {
+		const patch = patches.find((p) => p.id === slot);
+		for (const param of paramsOf(patch)) {
 			if (seen.has(param.id)) continue;
 			seen.add(param.id);
+			const name = param.name || `Param ${param.id}`;
 			choices.push({
 				key: laneKey(param.id, undefined),
-				label: param.name || `Param ${param.id}`,
+				label: name,
+				group: patch?.name ?? slot,
+				name,
 				param: param.id,
 				min: param.min,
 				max: param.max,
@@ -890,14 +848,18 @@ export function laneChoices(doc: Timeline, trackId: number | null, patches: Patc
 		}
 	}
 	for (const chain of eachChain(doc)) {
+		const on = 'slots' in chain ? chain.name || `Track ${chain.id}` : 'id' in chain ? `bus ${chain.id}` : 'the master';
 		for (const insert of chain.inserts) {
 			if (insert.id === undefined) continue;
 			const patch = patches.find((p) => p.id === insert.patch);
 			for (const param of paramsOf(patch)) {
 				const target = { insert: insert.id };
+				const name = param.name || `Param ${param.id}`;
 				choices.push({
 					key: laneKey(param.id, target),
-					label: `${patch?.name ?? insert.patch} ${param.name || param.id}`,
+					label: `${patch?.name ?? insert.patch} ${name}`,
+					group: `${patch?.name ?? insert.patch} on ${on}`,
+					name,
 					param: param.id,
 					target,
 					min: param.min,
@@ -931,27 +893,10 @@ const fromChoice = (choice: Pick<LaneChoice, 'param' | 'target'>) => ({
 	...(choice.target === undefined ? {} : { target: choice.target })
 });
 
-// These three change the document's points as they are, each holding its value from its tick or ramping from there for its own
+// These change the document's points as they are, each holding its value from its tick or ramping from there for its own
 // ticks. What a lane's own gestures do, which keeps points joined by lines, is further down: `addLanePoint` and the rest.
 export function addPoint(clip: Clip, lane: Pick<LaneChoice, 'param' | 'target'>, tick: number, value: number): Clip {
 	return { ...clip, automation: [...clip.automation, { ...fromChoice(lane), tick, value }] };
-}
-
-export function setPoint(clip: Clip, index: number, change: Partial<Point>): Clip {
-	return {
-		...clip,
-		automation: clip.automation.map((point, i) => {
-			if (i !== index) return point;
-			const next: Point = { ...point, ...change };
-			if (next.ramp === 0 || next.ramp === undefined) delete next.ramp;
-			if (next.curve === 'linear' || next.curve === undefined || next.ramp === undefined) delete next.curve;
-			return next;
-		})
-	};
-}
-
-export function removePoint(clip: Clip, index: number): Clip {
-	return { ...clip, automation: clip.automation.filter((_, i) => i !== index) };
 }
 
 export function removeLane(clip: Clip, key: string): Clip {
@@ -1217,45 +1162,6 @@ export function removeLanePoint(clip: Clip, index: number, start?: number): Clip
 }
 
 // --------------------------------------------------------------------------------------------------------------- tempo
-
-const byTick = (tempo: Tempo[]) => [...tempo].sort((a, b) => a.tick - b.tick);
-
-// In order, and marked as a ramp only where a later change gives it somewhere to go, which the compiler insists on.
-function tidy(tempo: Tempo[]): Tempo[] {
-	const sorted = byTick(tempo);
-	const last = sorted.at(-1)?.tick;
-	return sorted.map(({ ramp, ...change }) => (ramp && change.tick !== last ? { ...change, ramp } : change));
-}
-
-// The tempo at a tick, as the compiler plays it: a change holds until the next, and a ramp glides to the next, linearly in
-// bpm over ticks. The engine takes the ramp in steps of a 1/32 note, which this doesn't show. Before the first change it is
-// the engine's own 120.
-export function tempoAt(tempo: Tempo[], tick: number): number {
-	const sorted = byTick(tempo);
-	const at = sorted.findLastIndex((t) => t.tick <= tick);
-	if (at < 0) return 120;
-	const from = sorted[at];
-	const to = sorted[at + 1];
-	if (!from.ramp || !to) return from.bpm;
-	return from.bpm + ((to.bpm - from.bpm) * (tick - from.tick)) / (to.tick - from.tick);
-}
-
-// A change added inside a ramp carries it on, so at the tempo the ramp had there, it leaves the curve as it was.
-export function addTempo(doc: Timeline, tick: number, bpm: number): Timeline {
-	if (doc.tempo.some((t) => t.tick === tick)) return doc;
-	const before = byTick(doc.tempo).findLast((t) => t.tick < tick);
-	const added: Tempo = before?.ramp ? { tick, bpm, ramp: true } : { tick, bpm };
-	return { ...doc, tempo: tidy([...doc.tempo, added]) };
-}
-
-export function setTempo(doc: Timeline, index: number, change: Partial<Tempo>): Timeline {
-	return { ...doc, tempo: tidy(doc.tempo.map((t, i) => (i === index ? { ...t, ...change } : t))) };
-}
-
-// The first one sets the tempo the song opens at, so it stays.
-export function removeTempo(doc: Timeline, index: number): Timeline {
-	return doc.tempo.length > 1 ? { ...doc, tempo: tidy(doc.tempo.filter((_, i) => i !== index)) } : doc;
-}
 
 export interface Settling {
 	mix: { register: number; value: number }[];

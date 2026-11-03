@@ -7,6 +7,11 @@ import { SvelteMap } from 'svelte/reactivity';
 // About as far back as anyone goes. Past it the oldest step is forgotten.
 export const HISTORY_LIMIT = 200;
 
+// And as much as one document's history holds, so a big song's 200 steps, each the whole song, don't hold 50 MB until the page
+// closes. Past it the oldest steps are forgotten too, but never the last one. A string's size is two bytes a character.
+export const HISTORY_BYTES = 20 * 1024 * 1024;
+const sizeOf = (snapshot: unknown) => (typeof snapshot === 'string' ? snapshot.length * 2 : 0);
+
 // What an Undo and a Redo button need, for one document.
 export interface Undoable {
 	readonly canUndo: boolean;
@@ -22,9 +27,11 @@ export class History<T> {
 	readonly #stacks = new SvelteMap<string, Stacks<T>>();
 	readonly #typing = new Set<string>(); // Documents whose last step is still being typed
 	readonly #limit: number;
+	readonly #bytes: number;
 
-	constructor(limit = HISTORY_LIMIT) {
+	constructor(limit = HISTORY_LIMIT, bytes = HISTORY_BYTES) {
 		this.#limit = limit;
+		this.#bytes = bytes;
 	}
 
 	// An edit to the document `key`, which was `before` until now. It drops what could have been redone. An edit that is
@@ -32,6 +39,8 @@ export class History<T> {
 	record(key: string, before: T, typing = false): void {
 		if (typing && this.#typing.has(key)) return;
 		const past = [...(this.#stacks.get(key)?.past ?? []), before].slice(-this.#limit);
+		let held = past.reduce((sum, step) => sum + sizeOf(step), 0);
+		while (past.length > 1 && held > this.#bytes) held -= sizeOf(past.shift());
 		this.#stacks.set(key, { past, future: [] });
 		if (typing) this.#typing.add(key);
 		else this.#typing.delete(key);

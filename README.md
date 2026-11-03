@@ -64,7 +64,7 @@ The editor is laid out like a DAW, as two views under one top bar: Song, the arr
 below it, and Patch, a patch's graph at full height. The top bar holds the transport and a loop button, the position and the tempo
 as fields, one Undo and Redo for the view on screen, the keys, the master meter with a limiting light, a compile light that lists
 any problems with links to them, and Save. A browser down the side, which folds to a rail, holds the library and the examples, and
-the address holds the view, track, clip and tab, so a reload or a link lands where you were. A new
+the address holds the view, track, clip, tab, Expand, the chosen node and the JSON tab, so a reload or a link lands where you were. A new
 timeline starts with a track playing an electric piano and an empty clip open in the roll. A click in the roll adds a note, and a
 clip grows to hold one placed past its end. Fields read in bars and beats, note names and note values, velocity stems are as wide as
 their notes and a drag across them paints, and a lane's points join in lines. R turns on step entry, where the keys write notes and chords at a cursor, → rests and
@@ -81,7 +81,10 @@ the song, and Make default writes it into the patch. A built-in or an example's 
 copy where the original played. The computer keyboard from A to ' with Z and X for the
 octave plays the chosen track, or in the Patch view the patch, on its own when no track plays it, at the Vel beside the keys,
 and Hold latches what they play. Space plays and stops, and Home,
-or Stop pressed twice, goes back to the start. Shortcuts use ⌘ on a Mac and Ctrl elsewhere, and none uses Alt. A song stops at its
+or Stop pressed twice, goes back to the start. ? shows every key, ⌘K or Ctrl+K opens a song, an example or a patch by name, and
+Shift+F10 or a right-click opens the menu of a clip, notes, a track head, an empty row or the roll. Snap and Draw have triplets, a
+node shows its values, which a drag across changes, and Keys in the Patch view puts the keys across its foot, bigger.
+Shortcuts use ⌘ on a Mac and Ctrl elsewhere, and none uses Alt. A song stops at its
 end unless a loop is on, and the timeline follows the playhead. Edits to any number of patches and timelines stay, each with its
 own undo, while other things are opened, and Save writes them all at once. An example plays as it is, and adding one copies it into
 the library.

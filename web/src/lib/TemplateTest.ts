@@ -4,7 +4,7 @@ import { referencedAssets, referencedPatches, referencedSubpatches, timelineSche
 import { readCatalogue } from '#lib/server/Builtins.ts';
 import { compileRequest } from '#lib/server/Compile.ts';
 import { NEW_TIMELINE, TEMPLATE_BARS, TEMPLATE_PATCH } from '#lib/Template.ts';
-import { ticksPerBar } from '#lib/TimelineEdit.ts';
+import { ticksPerBar } from '#lib/Units.ts';
 import { trackAlone } from '#lib/Workspace.ts';
 
 describe('the new song', () => {

@@ -9,6 +9,7 @@
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import {
 		addBus,
+		decibels,
 		addInsert,
 		addSend,
 		busKey,
@@ -64,7 +65,6 @@
 	let newBus = $state('');
 
 	const number = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
-	const decibels = (gain: number) => (gain > 0 ? `${(20 * Math.log10(gain)).toFixed(1)} dB` : 'silent');
 
 	const patchOf = (id: string) => patches.find((patch) => patch.id === id);
 	const insertPatches = $derived(

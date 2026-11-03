@@ -1,7 +1,8 @@
 // Step entry, as most DAWs have it: the piano keys write notes at a cursor in the roll, each as long as the Draw length, so
 // every start and length lands on the grid without the song playing or anyone keeping time. Keys held together make a chord,
 // which is written once the last of them is let go, and the cursor then moves on past it. → with keys held makes their notes
-// a Snap step longer, → on its own leaves a rest, and Backspace takes back the last step.
+// a Snap step longer, → on its own leaves a rest, Backspace takes back the last step, and ↑ and ↓ move its notes, to fix a
+// wrong key.
 //
 // These are pure functions over a clip and a cursor, so they can be tested without a page. The roll wires them to keys.
 import { growToHold, type Clip, type Note } from '#lib/TimelineEdit.ts';
@@ -117,6 +118,27 @@ export function stepBack(clip: Clip, cursor: Cursor, length: number): { clip: Cl
 		clip: { ...clip, notes: kept, length: shrinks ? last.grew!.from : clip.length },
 		cursor: back
 	};
+}
+
+// ↑ or ↓ after a step, to fix a wrong key: the notes it wrote, those still as it wrote them, `by` semitones up or down. The step
+// keeps them as moved, so Backspace still takes them back. A move that would take one past 0 to 127 moves nothing, and neither
+// does one after a rest.
+export function repitch(clip: Clip, cursor: Cursor, by: number): { clip: Clip; cursor: Cursor } {
+	const last = cursor.steps.at(-1);
+	if (!last?.notes.length || last.notes.some((note) => note.note + by < 0 || note.note + by > 127)) {
+		return { clip, cursor };
+	}
+	const notes = [...clip.notes];
+	const moved: Note[] = [];
+	for (const written of last.notes) {
+		const at = notes.findIndex((note) => same(note, written));
+		if (at < 0) continue; // Changed since, so no longer the step's to fix
+		notes[at] = { ...written, note: written.note + by };
+		moved.push(notes[at]);
+	}
+	if (!moved.length) return { clip, cursor };
+	const step = { ...last, notes: moved };
+	return { clip: { ...clip, notes }, cursor: { ...cursor, steps: [...cursor.steps.slice(0, -1), step] } };
 }
 
 // The velocity of new notes, which C and V step through 1, 10, 20 and so on to 120 and 127: a step is big enough to hear,

@@ -10,30 +10,18 @@
 	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
 	import UnitField from '#lib/UnitField.svelte';
-	import { barLength, barLengths, readLength, readPosition } from '#lib/Units.ts';
-	import type { ProgramReport } from '#lib/Request.ts';
-	import { ZOOM_KEY, dropGone, gone, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
-	import type { Timeline } from '#lib/Schema.ts';
-	import type { Ring } from '#lib/ScopeMath.ts';
-	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
-	import { clampVelocity, type Cursor } from '#lib/StepEntry.ts';
+	import { addTempo, removeTempo, setTempo, tempoAt } from '#lib/Tempo.ts';
 	import {
 		addClip,
 		addPlayChange,
 		addSlot,
-		addTempo,
 		addTrack,
-		barOf,
 		canGrow,
-		drawLengths,
 		duplicatePlacement,
-		grids,
 		laneChoices,
 		makeUnique,
 		mixWrites,
-		noteValue,
 		place,
-		position,
 		placementIndex,
 		placementSpan,
 		placeOfError,
@@ -41,7 +29,6 @@
 		removePlacement,
 		removePlayChange,
 		removeSlot,
-		removeTempo,
 		removeTrack,
 		renameClip,
 		setClip,
@@ -49,18 +36,33 @@
 		setPlay,
 		setPlayChange,
 		setSlot,
-		setTempo,
-		tempoAt,
 		setTrack,
-		snapTick,
 		soloed,
-		stepLength,
 		trackKey,
 		windowOf,
-		ticksPerBar,
 		type Clip,
 		type PatchLike
 	} from '#lib/TimelineEdit.ts';
+	import {
+		barLength,
+		barLengths,
+		readLength,
+		readPosition,
+		barOf,
+		drawLengths,
+		grids,
+		noteValue,
+		position,
+		snapTick,
+		stepLength,
+		ticksPerBar
+	} from '#lib/Units.ts';
+	import type { ProgramReport } from '#lib/Request.ts';
+	import { ZOOM_KEY, dropGone, gone, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
+	import type { Timeline } from '#lib/Schema.ts';
+	import type { Ring } from '#lib/ScopeMath.ts';
+	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { clampVelocity, type Cursor } from '#lib/StepEntry.ts';
 	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import { landing, type SongPlace } from '#lib/Workspace.ts';
 
@@ -147,6 +149,7 @@
 	let stepping = $state(false);
 	const cursors = new Map<string, Cursor>();
 	let roll = $state<ReturnType<typeof PianoRoll>>();
+	let rollBar = $state<HTMLElement | null>(null); // Where in the tab strip the roll draws its toolbar
 	const drawChoices = $derived.by(() => {
 		const lengths = drawLengths(doc.ppq);
 		if (lengths.some((length) => length.ticks === draw)) return lengths;
@@ -219,7 +222,7 @@
 	// as a choice. What it was taken to is kept until the next change, which is the next choice.
 	let landed: SongPlace | null = { track: opened.track, clip: opened.clip, tab: opened.tab };
 	$effect(() => {
-		const now: SongPlace = { track: selection.track, clip: clipId, tab };
+		const now: SongPlace = { track: selection.track, clip: clipId, tab, ...(expanded ? { expand: true } : {}) };
 		untrack(() => {
 			const chosen = !landed || now.track !== landed.track || now.clip !== landed.clip || now.tab !== landed.tab;
 			landed = null;
@@ -233,6 +236,7 @@
 		const wanted = asked;
 		untrack(() => {
 			const at = landing(doc, wanted, tabIds);
+			if (!!wanted?.expand !== expanded) expand(!!wanted?.expand);
 			if (at.track === selection.track && at.clip === clipId && at.tab === tab) return;
 			landed = { track: at.track, clip: at.clip, tab: at.tab };
 			if (at.track !== selection.track || at.clip !== clipId) {
@@ -357,7 +361,7 @@
 
 	// The arrangement is as tall as its tracks, and the notes have the rest. Expand gives the notes the whole view, the
 	// arrangement's height and the inspector's width too, until ⤢ or Esc brings them back.
-	let expanded = $state(false);
+	let expanded = $state(untrack(() => !!asked?.expand)); // As the address asks, so a reload comes back to it
 	let peek = $state(false); // The inspector, shown beside expanded notes all the same
 	function expand(on = !expanded) {
 		expanded = on;
@@ -1064,38 +1068,42 @@
 	</div>
 
 	<div class="detail">
-		<div class="tabs" role="tablist" aria-label="Timeline views">
-			<button type="button" role="tab" aria-selected={tab === 'notes'} onclick={() => (tab = 'notes')}>
-				Notes{clip ? `: ${clip.id}` : ''}
-			</button>
-			<button type="button" role="tab" aria-selected={tab === 'mixer'} onclick={() => (tab = 'mixer')}>Mixer</button>
-			{#each tabs as extra (extra.id)}
-				<button type="button" role="tab" aria-selected={tab === extra.id} onclick={() => (tab = extra.id)}
-					>{extra.label}</button
-				>
-			{/each}
-		</div>
-		<!-- Step is for the notes, and ⤢ for whichever tab is open. -->
-		<div class="rolltools" role="toolbar" aria-label="Notes">
-			{#if tab === 'notes' && clip && !readonly}
+		<div class="strip">
+			<div class="tabs" role="tablist" aria-label="Timeline views">
+				<button type="button" role="tab" aria-selected={tab === 'notes'} onclick={() => (tab = 'notes')}>
+					Notes{clip ? `: ${clip.id}` : ''}
+				</button>
+				<button type="button" role="tab" aria-selected={tab === 'mixer'} onclick={() => (tab = 'mixer')}>Mixer</button>
+				{#each tabs as extra (extra.id)}
+					<button type="button" role="tab" aria-selected={tab === extra.id} onclick={() => (tab = extra.id)}
+						>{extra.label}</button
+					>
+				{/each}
+			</div>
+			<!-- The roll's zoom, Fit, chosen notes and hint, which the roll draws here while the notes are open. -->
+			<div class="rollbar" bind:this={rollBar}></div>
+			<!-- Step is for the notes, and ⤢ for whichever tab is open. -->
+			<div class="rolltools" role="toolbar" aria-label="Notes">
+				{#if tab === 'notes' && clip && !readonly}
+					<button
+						type="button"
+						class="step"
+						aria-pressed={stepping}
+						title={`Step entry (${label('step-entry')}): the piano keys write notes at a cursor, each as long as Draw`}
+						onclick={() => (stepping = !stepping)}><span aria-hidden="true">●</span> Step</button
+					>
+				{/if}
 				<button
 					type="button"
-					class="step"
-					aria-pressed={stepping}
-					title={`Step entry (${label('step-entry')}): the piano keys write notes at a cursor, each as long as Draw`}
-					onclick={() => (stepping = !stepping)}><span aria-hidden="true">●</span> Step</button
+					class="expand"
+					aria-label="Expand"
+					aria-pressed={expanded}
+					title={expanded
+						? 'Bring the arrangement and the inspector back (Esc)'
+						: 'Give this the whole view. A double-click on a clip does too, and Esc comes back.'}
+					onclick={() => expand()}>⤢</button
 				>
-			{/if}
-			<button
-				type="button"
-				class="expand"
-				aria-label="Expand"
-				aria-pressed={expanded}
-				title={expanded
-					? 'Bring the arrangement and the inspector back (Esc)'
-					: 'Give this the whole view. A double-click on a clip does too, and Esc comes back.'}
-				onclick={() => expand()}>⤢</button
-			>
+			</div>
 		</div>
 		<div class="pane" class:notes={tab === 'notes'} role="tabpanel">
 			{#if tab === 'notes'}
@@ -1103,6 +1111,7 @@
 					{#key clip.id}
 						<PianoRoll
 							{clip}
+							toolbarIn={rollBar}
 							ppq={doc.ppq}
 							{grid}
 							slots={home?.slots ?? []}
@@ -1303,11 +1312,23 @@
 		flex-direction: column;
 		position: relative;
 	}
-	/* The roll's own controls, and ⤢, sit at the right end of the tab strip. */
+	/* The tabs, the roll's toolbar in what room they leave, and Step and ⤢ at the right end. */
+	.strip {
+		flex: none;
+		display: flex;
+		align-items: stretch;
+		height: 2rem;
+		border-bottom: 1px solid var(--line);
+	}
+	.rollbar {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden; /* What the toolbar can't fit scrolls inside it, and never runs over the inspector */
+		display: flex;
+		padding: 0.2rem 0 0 0.6rem;
+	}
 	.rolltools {
-		position: absolute;
-		top: 0;
-		right: 0;
+		flex: none;
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
@@ -1334,9 +1355,9 @@
 	.tabs {
 		flex: none;
 		display: flex;
+		align-items: flex-end;
 		gap: 0.15rem;
 		padding-top: 0.3rem;
-		border-bottom: 1px solid var(--line);
 	}
 	.tabs button {
 		border: 1px solid transparent;

@@ -17,7 +17,7 @@ import {
 	tempoTick,
 	toggleGlide,
 	yToBpm
-} from '#lib/TempoLane.ts';
+} from '#lib/Tempo.ts';
 import type { Tempo } from '#lib/TimelineEdit.ts';
 
 const BAR = 1920; // At 480 ticks a beat

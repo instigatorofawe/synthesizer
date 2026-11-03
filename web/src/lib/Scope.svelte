@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { columns, findTrigger, Ring } from '#lib/ScopeMath.ts';
+	import { decibels } from '#lib/TimelineEdit.ts';
 
 	let {
 		label,
@@ -72,9 +73,9 @@
 				data-testid="peak"
 				data-peak={peak}
 				data-loudest={loudest}
-				title="Loudest since Play: {loudest > 0 ? `${(20 * Math.log10(loudest)).toFixed(1)} dB` : 'silent'}"
+				title="Loudest since Play: {decibels(loudest)}"
 			>
-				{peak > 0 ? `${(20 * Math.log10(peak)).toFixed(1)} dB` : 'silent'}
+				{decibels(peak)}
 			</span>
 			{#if !compact}<span class:dim={!triggered}>{triggered ? 'trig' : 'auto'}</span>{/if}
 		</span>

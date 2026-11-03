@@ -6,10 +6,10 @@
 	import { baseAfter, belongsElsewhere, keyFor, noteForKey } from '#lib/KeyboardKeys.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { clampVelocity } from '#lib/StepEntry.ts';
-	import { isBlackKey, noteName } from '#lib/TimelineEdit.ts';
+	import { isBlackKey, noteName } from '#lib/Units.ts';
 
-	// Two octaves of keys in the top bar, for whichever view is on screen to play. Each key is a button named by its note
-	// number, and the computer keyboard plays them too: A to ' from the lowest C shown, with Z and X moving the keys an octave.
+	// Two octaves of keys in the top bar, for whichever view is on screen to play. Each key is a button named by its note,
+	// and the computer keyboard plays them too: A to ' from the lowest C shown, with Z and X moving the keys an octave.
 	// There is one set of keys on the page, so the page decides where a key is heard, and it listens on the window whichever
 	// view is showing. Hold and the velocity they play at sit either side of them, and are the page's too: Hold changes only
 	// what is heard, and the velocity is the one new notes are written at.
@@ -25,7 +25,8 @@
 		latched = new Set(),
 		velocity = $bindable(100),
 		onhold = () => {},
-		onletgo = () => {}
+		onletgo = () => {},
+		stripIn = null
 	}: {
 		low?: number;
 		octaves?: number;
@@ -39,18 +40,33 @@
 		velocity?: number;
 		onhold?: (on: boolean) => void;
 		onletgo?: () => void; // Esc: let go of every note Hold keeps
+		stripIn?: HTMLElement | null; // The Patch view's strip, which the keys are drawn into, wider and bigger, while it is open
 	} = $props();
 
-	const WHITE = 14; // px
+	// In the strip, the keys are bigger and as many octaves as fit, with those the computer keys play in the middle.
+	let stripWidth = $state(0);
+	$effect(() => {
+		if (!stripIn) return;
+		const watch = new ResizeObserver(() => (stripWidth = stripIn.clientWidth));
+		watch.observe(stripIn);
+		return () => watch.disconnect();
+	});
+	const WHITE = $derived(stripIn ? 24 : 14); // px
+	const shownOctaves = $derived(
+		stripIn ? Math.max(octaves, Math.min(7, Math.floor((stripWidth - 16) / (7 * WHITE)))) : octaves
+	);
 
 	let base = $state(untrack(() => low)); // `low` is where the keys start, and Z and X move them from there
-	const notes = $derived(Array.from({ length: octaves * 12 + 1 }, (_, i) => base + i));
+	const start = $derived(
+		Math.max(0, Math.min(127 - shownOctaves * 12, base - 12 * Math.floor((shownOctaves - octaves) / 2)))
+	);
+	const notes = $derived(Array.from({ length: shownOctaves * 12 + 1 }, (_, i) => start + i));
 	const whites = $derived(notes.filter((note) => !isBlackKey(note)));
 	const held = new SvelteSet<number>();
 	const typed = new Map<string, number>(); // The note each key held down started, so moving the octave can't strand it
 
 	// A black key sits over the line between the white keys either side of it.
-	const left = (note: number) => whites.indexOf(note - 1) * WHITE + WHITE - 4.5;
+	const left = (note: number) => whites.indexOf(note - 1) * WHITE + WHITE * (1 - 0.32);
 
 	function press(note: number, at = performance.now()) {
 		if (held.has(note)) return;
@@ -85,9 +101,51 @@
 		release(note, event.timeStamp);
 	}
 
+	// The keys are one stop for Tab, as a toolbar's buttons are: the key last moved to takes focus, and the arrows, Home and End
+	// move between them. Enter plays the key with focus for as long as it is held.
+	let stop = $state<number | null>(null);
+	const tabbable = $derived(stop !== null && notes.includes(stop) ? stop : base);
+
+	// Draws the keys into the strip while it is open, and back here once it closes.
+	function drawnIn(element: HTMLElement, target: HTMLElement | null) {
+		const home = element.parentElement!;
+		const place = (to: HTMLElement | null) => (to ?? home).appendChild(element);
+		place(target);
+		return { update: place, destroy: () => element.remove() };
+	}
+	let keyboard: HTMLDivElement;
+	const entered = new Set<number>(); // Keys Enter holds down
+
+	function keyKeys(event: KeyboardEvent, note: number) {
+		const at = notes.indexOf(note);
+		let to: number;
+		if (event.key === 'ArrowRight' || event.key === 'ArrowUp') to = Math.min(notes.length - 1, at + 1);
+		else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') to = Math.max(0, at - 1);
+		else if (event.key === 'Home') to = 0;
+		else if (event.key === 'End') to = notes.length - 1;
+		else if (event.key === 'Enter') {
+			event.preventDefault();
+			if (!event.repeat && !entered.has(note)) {
+				entered.add(note);
+				press(note, event.timeStamp);
+			}
+			return;
+		} else return;
+		event.preventDefault();
+		event.stopPropagation(); // The arrows are the keys' here, not the roll's or the arrangement's
+		stop = notes[to];
+		keyboard.querySelectorAll<HTMLButtonElement>('.key')[to]?.focus();
+	}
+
+	function keyUp(event: KeyboardEvent, note: number) {
+		if (event.key !== 'Enter' || !entered.delete(note)) return;
+		release(note, event.timeStamp);
+	}
+
 	// A key let go while the page wasn't looking would otherwise hold its note for ever.
 	function releaseAll() {
 		typed.clear();
+		entered.clear();
 		for (const note of [...held]) release(note);
 	}
 
@@ -121,34 +179,49 @@
 	onclick={() => onhold(!hold)}>Hold</button
 >
 
-<div
-	class="keyboard"
-	class:writing
-	class:recording
-	style:width="{whites.length * WHITE}px"
-	role="group"
-	aria-label="Keys"
-	title={`${writing ? 'Step entry: keys write notes at the cursor in the roll. ' : ''}${recording ? 'Recording: the take writes what the keys play. ' : ''}${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up.`}
->
-	{#each notes as note (note)}
-		<button
-			type="button"
-			class="key"
-			class:black={isBlackKey(note)}
-			class:down={held.has(note)}
-			class:latched={latched.has(note) && !held.has(note)}
-			style:left="{isBlackKey(note) ? left(note) : whites.indexOf(note) * WHITE}px"
-			aria-label={noteName(note)}
-			aria-keyshortcuts={keyFor(note, base) || undefined}
-			title={keyFor(note, base) ? `${noteName(note)} (${keyFor(note, base)})` : noteName(note)}
-			{disabled}
-			onpointerdown={(event) => press(note, event.timeStamp)}
-			onpointerup={(event) => release(note, event.timeStamp)}
-			onpointerleave={(event) => release(note, event.timeStamp)}
-		>
-			{#if note % 12 === 0}<span>{noteName(note)}</span>{/if}
-		</button>
-	{/each}
+<div class="keyshome">
+	<div
+		bind:this={keyboard}
+		use:drawnIn={stripIn}
+		class="keyboard"
+		class:wide={!!stripIn}
+		style:--white="{WHITE}px"
+		class:writing
+		class:recording
+		style:width="{whites.length * WHITE}px"
+		role="group"
+		aria-label="Keys"
+		title={`${writing ? 'Step entry: keys write notes at the cursor in the roll. ' : ''}${recording ? 'Recording: the take writes what the keys play. ' : ''}${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up. Tab reaches these keys, the arrows move along them, and Enter plays one.`}
+	>
+		{#each notes as note (note)}
+			<button
+				type="button"
+				class="key"
+				class:black={isBlackKey(note)}
+				class:down={held.has(note)}
+				class:latched={latched.has(note) && !held.has(note)}
+				style:left="{isBlackKey(note) ? left(note) : whites.indexOf(note) * WHITE}px"
+				aria-label={noteName(note)}
+				aria-keyshortcuts={keyFor(note, base) || undefined}
+				tabindex={note === tabbable ? 0 : -1}
+				title={keyFor(note, base) ? `${noteName(note)} (${keyFor(note, base)})` : noteName(note)}
+				{disabled}
+				onpointerdown={(event) => press(note, event.timeStamp)}
+				onpointerup={(event) => release(note, event.timeStamp)}
+				onpointerleave={(event) => release(note, event.timeStamp)}
+				onkeydown={(event) => keyKeys(event, note)}
+				onkeyup={(event) => keyUp(event, note)}
+				onfocus={() => (stop = note)}
+				onblur={(event) => {
+					if (entered.delete(note)) release(note, event.timeStamp);
+				}}
+			>
+				{#if note % 12 === 0}<span>{noteName(note)}</span>{:else if stripIn && keyFor(note, base)}<span class="letter"
+						>{keyFor(note, base)}</span
+					>{/if}
+			</button>
+		{/each}
+	</div>
 </div>
 <label
 	class="velocity"
@@ -188,10 +261,13 @@
 		outline-offset: 1px;
 		border-radius: 2px;
 	}
+	.keyshome {
+		display: contents;
+	}
 	.key {
 		position: absolute;
 		top: 0;
-		width: 14px;
+		width: var(--white);
 		height: 26px;
 		padding: 0;
 		border-radius: 0 0 3px 3px;
@@ -208,7 +284,7 @@
 		pointer-events: none;
 	}
 	.key.black {
-		width: 9px;
+		width: calc(var(--white) * 0.64);
 		height: 16px;
 		background: #21262d;
 		z-index: 1;
@@ -229,6 +305,26 @@
 	}
 	.key:disabled {
 		opacity: 0.5;
+	}
+	/* In the Patch view's strip: bigger keys, their notes' names and the computer keys that play them. */
+	.keyboard.wide {
+		height: 64px;
+	}
+	.wide .key {
+		height: 64px;
+		padding-bottom: 3px;
+	}
+	.wide .key.black {
+		height: 40px;
+	}
+	.wide .key span {
+		font-size: 10px;
+	}
+	.wide .key .letter {
+		color: #57606a;
+	}
+	.wide .key.black .letter {
+		color: #8b949e;
 	}
 	/* A note Hold keeps sounding after its key came up. */
 	.key.latched:not(:disabled) {

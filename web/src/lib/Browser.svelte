@@ -24,8 +24,19 @@
 <script lang="ts">
 	import { enhance, type SubmitFunction } from '$app/forms';
 	import { tick, untrack } from 'svelte';
+	import { patchGroups } from '#lib/PatchGroups.ts';
 	import { matches as pressed } from '#lib/Shortcuts.ts';
-	import { actionOn, draftKey, isInsert, withoutPlace, withParams, withView } from '#lib/Workspace.ts';
+	import {
+		actionOn,
+		draftKey,
+		isInsert,
+		patchHref as patchHrefIn,
+		recipeHref as recipeHrefIn,
+		timelineHref as timelineHrefIn,
+		withoutPlace,
+		withParams,
+		withView
+	} from '#lib/Workspace.ts';
 	import type { Graph } from '#lib/Schema.ts';
 
 	// The sidebar: the library on top and the examples that ship with the app below. Everything in it is a link that changes what
@@ -44,7 +55,10 @@
 		openRecipe,
 		shownPatch,
 		usersOf,
-		reveal = null
+		reveal = null,
+		onshortcuts,
+		onmade = () => {},
+		onescape = () => {}
 	}: {
 		search: string; // The page's address now, which every link here changes a part of
 		examples: { name: string; recipes: { name: string; listen_for: string }[] }[];
@@ -68,6 +82,9 @@
 		// patch under the pointer, since an edit changes it, and the rest say what is saved.
 		usersOf?: (id: string) => { name: string }[];
 		reveal?: Section | null; // A list to open and scroll to as the browser opens, when its rail asked for one
+		onshortcuts: () => void; // Opens the sheet of keyboard shortcuts
+		onmade?: (what: 'timeline' | 'patch' | 'bundle') => void; // Once a new one is open, to give it focus
+		onescape?: () => void; // Esc in an empty filter: the browser is done with, and focus goes back
 	} = $props();
 
 	let filter = $state('');
@@ -105,8 +122,11 @@
 	const made: SubmitFunction =
 		() =>
 		async ({ result, update }) => {
+			const what = adding;
 			await update();
-			if (result.type !== 'failure' && result.type !== 'error') adding = null;
+			if (result.type === 'failure' || result.type === 'error') return;
+			adding = null;
+			if (what) onmade(what);
 		};
 
 	// What each list is for, which its ? shows, and which an empty list shows of itself.
@@ -136,27 +156,9 @@
 
 	// Another song has its own tracks and clips, so the place in this one stays behind. The song open goes back to where it is.
 	const inSong = $derived(withView(withoutPlace(search), 'song'));
-	const timelineHref = (id: string) =>
-		withView(
-			withParams(id === openTimeline ? search : withoutPlace(search), {
-				timeline: id,
-				recipe: null,
-				patch: null,
-				part: null
-			}),
-			'song'
-		);
-	const recipeHref = (name: string) =>
-		withView(
-			withParams(name === openRecipe ? search : withoutPlace(search), {
-				recipe: name,
-				timeline: null,
-				patch: null,
-				part: null
-			}),
-			'song'
-		);
-	const patchHref = (id: string) => withView(withParams(search, { patch: id, part: null }), 'patch');
+	const timelineHref = (id: string) => timelineHrefIn(search, id, openTimeline);
+	const recipeHref = (name: string) => recipeHrefIn(search, name, openRecipe);
+	const patchHref = (id: string) => patchHrefIn(search, id);
 	const bundleHref = (id: string) => withParams(search, { bundle: id });
 
 	const shownTimelines = $derived(timelines.filter((t) => matches(t.name)));
@@ -167,6 +169,8 @@
 	const ownSamples = $derived(samples.filter((s) => !s.builtin));
 	const shownPatches = $derived(ownPatches.filter((p) => matches(p.name)));
 	const shownBuiltins = $derived(builtinPatches.filter((p) => matches(p.name)));
+	// Under the examples' own headings, as the patch picker has them, so 136 of them read as a dozen families.
+	const builtinGroups = $derived(patchGroups(shownBuiltins, [], examples).filter((group) => group.builtin));
 	const shownSamples = $derived(ownSamples.filter((s) => matches(s.name)));
 	const shownBundles = $derived(bundles.filter((b) => matches(b.name)));
 	const shownExamples = $derived(
@@ -247,7 +251,19 @@
 {/snippet}
 
 <nav class="browser" aria-label="Browser">
-	<input class="filter" type="search" placeholder="Filter" aria-label="Filter the browser" bind:value={filter} />
+	<input
+		class="filter"
+		type="search"
+		placeholder="Filter"
+		aria-label="Filter the browser"
+		bind:value={filter}
+		onkeydown={(event) => {
+			// Esc empties the filter, as a search field does, and in an empty one it leaves the browser.
+			if (!pressed(event, 'escape') || filter) return;
+			event.preventDefault();
+			onescape();
+		}}
+	/>
 
 	<div class="scroll" bind:this={scroller}>
 		<h2>Library</h2>
@@ -335,7 +351,10 @@
 			<div class="tools">{@render aboutButton('builtins', 'built-in patches', BUILTINS)}</div>
 			{@render aboutText('builtins', BUILTINS, false)}
 			<ul aria-label="Built-in patches">
-				{#each shownBuiltins as patch (patch.id)}{@render patchLink(patch)}{/each}
+				{#each builtinGroups as group (group.key)}
+					{#if group.label}<li class="family">{group.label}</li>{/if}
+					{#each group.patches as patch (patch.id)}{@render patchLink(patch)}{/each}
+				{/each}
 			</ul>
 		</details>
 
@@ -377,6 +396,9 @@
 			</details>
 		{/each}
 	</div>
+	<button type="button" class="shortcuts" title="Every key the editor binds (?)" onclick={onshortcuts}
+		>Keyboard shortcuts <kbd>?</kbd></button
+	>
 </nav>
 
 <style>
@@ -388,6 +410,33 @@
 		background: var(--panel);
 		border-right: 1px solid var(--line);
 		font-size: 0.82rem;
+	}
+	.shortcuts {
+		margin: 0;
+		border: 0;
+		border-top: 1px solid var(--line);
+		border-radius: 0;
+		background: transparent;
+		color: var(--muted);
+		text-align: left;
+		padding: 0.4rem 0.6rem;
+		font-size: 0.75rem;
+	}
+	.shortcuts:hover {
+		color: var(--text);
+	}
+	.shortcuts kbd {
+		margin-left: 0.3rem;
+		padding: 0 0.3em;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		font: inherit;
+	}
+	.family {
+		margin: 0.4rem 0 0.1rem;
+		font-size: 0.7rem;
+		color: var(--muted);
+		list-style: none;
 	}
 	.filter {
 		margin: 0.5rem;

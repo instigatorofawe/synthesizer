@@ -208,6 +208,8 @@ describe('where the Song view is', () => {
 		expect(songPlaceOf('?track=two&clip=&pane=')).toEqual(place(null, null, null));
 		expect(songPlaceOf('?track=1.5')).toEqual(place(null, null, null));
 		expect(songPlaceOf('?track=%202%20&clip=a%20b')).toEqual(place(2, 'a b', null));
+		expect(songPlaceOf('?track=1&expand=1')).toEqual({ ...place(1, null, null), expand: true });
+		expect(withParams('?track=1&expand=1', placeParams(place(1, null, null)))).toBe('?track=1');
 	});
 
 	it('writes them, leaving out Notes and what is not chosen, and reads back what it wrote', () => {

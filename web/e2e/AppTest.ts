@@ -772,7 +772,9 @@ test('a recipe plays from the examples without touching the library', async ({ p
 	const problems: string[] = [];
 	page.on('pageerror', (e) => problems.push(e.message));
 	await page.goto('/');
-	await browser(page).getByText('drums').click();
+	await browser(page)
+		.locator('summary', { hasText: /^drums/ })
+		.click(); // The examples' group, not the built-ins' heading
 	await browser(page).getByRole('link', { name: 'Kick808' }).click();
 	await expect(page).toHaveURL(/recipe=Kick808/);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
@@ -1225,7 +1227,7 @@ test('an insert lane compiles, and a fader and a pan lane on one track both move
 	await tab(page, 'Mixer');
 	await page.getByLabel('Add an insert to Track 1').selectOption('reverb');
 	await tab(page, 'Notes');
-	await page.getByLabel('Add a lane').selectOption({ label: 'Room room' });
+	await page.getByLabel('Add a lane').selectOption({ label: 'room' }); // The reverb insert's room, under its patch "on Track 1"
 	await expect(page.getByTestId('lane-0')).toBeVisible();
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[0].target).toEqual({ insert: 1 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);

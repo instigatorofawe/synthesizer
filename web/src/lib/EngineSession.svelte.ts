@@ -255,6 +255,15 @@ export class EngineSession<E extends Engine = AudioEngine> {
 		if (!this.started) void this.start();
 	}
 
+	// The song is wanted again, as when nothing is heard on its own any more, and `then` once it plays. Unlike `use`, this
+	// starts nothing, since there may be no click or key to start audio on, but audio on its way plays the song once it starts.
+	wantSong(then?: () => void) {
+		if (this.want === 'song') return;
+		if (this.started || this.#starting) return this.use('song', then);
+		this.want = 'song';
+		this.#waiting = [];
+	}
+
 	// Audio starts. A browser lets it only in answer to a click or a key, so this is called from one.
 	async start() {
 		if (this.#starting) return;

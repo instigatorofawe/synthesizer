@@ -18,6 +18,16 @@ export default defineConfig({
 		screenshot: 'only-on-failure',
 		trace: 'retain-on-failure'
 	},
+	// The layout's own tests run at a laptop's two sizes: in the first project at Playwright's 1280 by 720, as every file that
+	// sets no size does, and again at 1280 by 800.
+	projects: [
+		{ name: 'default' },
+		{
+			name: '1280x800',
+			testMatch: /(Views|Room|BrowserAddress)Test\.ts$/,
+			use: { viewport: { width: 1280, height: 800 } }
+		}
+	],
 	webServer: {
 		command: 'rm -rf .e2e && node build/index.js',
 		port,

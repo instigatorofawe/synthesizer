@@ -207,6 +207,21 @@ describe('what plays', () => {
 		expect(engine.calls.at(-1)).toBe('locate 1440');
 	});
 
+	it('takes the song back once nothing plays on its own, and starts nothing for it', async () => {
+		const quiet = session('alone');
+		quiet.it.wantSong();
+		expect(quiet.it.want).toBe('song');
+		expect(quiet.engine.calls).toEqual([]); // No click or key yet, so no audio
+
+		const { it: s, engine } = await songLive();
+		s.use('alone', () => engine.noteOn(0, 60)); // Waits for an image that never comes
+		s.wantSong(() => engine.noteOn(1, 60));
+		engine.goLive();
+		expect(engine.calls).toContain('on 1 60');
+		expect(engine.calls).not.toContain('on 0 60');
+		expect(s.want).toBe('song');
+	});
+
 	it('forgets the last song when another opens', async () => {
 		const { it: s, engine } = await songLive();
 		s.setLoop({ start: 0, end: 960 }, true);

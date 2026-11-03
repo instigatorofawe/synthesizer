@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { loopButton, pianoKey, undoButton } from './Chrome.ts';
+import { loopButton, pianoKey, startAudio, undoButton } from './Chrome.ts';
 import { engineRenders, loudest, settled } from './Engine.ts';
 import { openView } from './Views.ts';
 
@@ -168,7 +168,7 @@ async function toneSong(page: Page, name: string) {
 
 async function play(page: Page) {
 	await settled(page);
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true');
@@ -422,7 +422,7 @@ test('Latch keeps a note sounding after its key comes up, until it is played aga
 	await expect(page.locator('.key.latched')).toHaveCount(0);
 });
 
-test("the keys' velocity is the roll's Vel: set in either view, it is what step entry writes", async ({ page }) => {
+test("the keys' velocity is the page's one Vel: set in either view, it is what step entry writes", async ({ page }) => {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
 	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
@@ -431,13 +431,11 @@ test("the keys' velocity is the roll's Vel: set in either view, it is what step 
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
 	await expect(page.getByTestId('roll')).toBeVisible();
 	const keys = page.getByLabel('Velocity of the keys');
-	const roll = page.getByLabel('Velocity of new notes');
 	await expect(keys).toHaveValue('100');
-	await expect(roll).toHaveValue('100');
+	await expect(page.getByLabel('Velocity of new notes')).toHaveCount(0); // One field, beside the keys
 
 	await keys.fill('64');
 	await keys.press('Enter');
-	await expect(roll).toHaveValue('64');
 	await keys.blur();
 	await page.keyboard.press('r');
 	await expect(page.getByTestId('step-cursor')).toHaveAttribute('data-tick', '0');
@@ -451,13 +449,8 @@ test("the keys' velocity is the roll's Vel: set in either view, it is what step 
 	await page.keyboard.press('v');
 	await expect(keys).toHaveValue('70');
 	await openView(page, 'song');
-	await expect(roll).toHaveValue('70');
+	await expect(keys).toHaveValue('70');
 	await page.keyboard.press('s');
 	await expect(notes).toHaveCount(2);
 	await expect(page.getByTestId('note-1')).toHaveAttribute('data-vel', '70');
-
-	// The roll's field sets the keys' too.
-	await roll.fill('20');
-	await roll.press('Enter');
-	await expect(keys).toHaveValue('20');
 });

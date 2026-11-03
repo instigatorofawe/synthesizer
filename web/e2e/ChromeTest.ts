@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { fromSongMenu, loopButton, openLight, undoButton } from './Chrome.ts';
+import { fromSongMenu, loopButton, openLight, startAudio, undoButton } from './Chrome.ts';
 import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated, as in AppTest.
@@ -316,7 +316,7 @@ test('the master meter lights while the limiter turns the song down', async ({ p
 		for (const track of song.tracks) track.gain = 4;
 	});
 	await settled(page);
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	const limiting = page.getByTestId('limiting');

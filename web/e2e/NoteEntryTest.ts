@@ -36,11 +36,14 @@ async function newTrack(page: Page, name: string) {
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 }
 
-// A track with a one-bar clip, made by a double-click, open in the roll.
+// A track with a one-bar clip, open in the roll.
 async function trackWithClip(page: Page, name: string) {
 	await newTrack(page, name);
-	const row = (await page.getByTestId('row-1').boundingBox())!;
-	await page.mouse.dblclick(row.x + 10, row.y + 20);
+	// + Track comes with a four-bar clip, open in the roll. These tests count from a bar, so it is cut to one.
+	const length = page.getByLabel('Clip length');
+	await length.fill('1');
+	await length.press('Enter');
+	await expect(length).toHaveValue('1 bar');
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 }
@@ -206,16 +209,17 @@ test('a clip that would grow into the next placement offers to lengthen instead,
 test('dragging across an empty row draws a clip of whole bars, and a double-click still makes one bar', async ({
 	page
 }) => {
-	await newTrack(page, 'Drawn clips');
+	await newTrack(page, 'Drawn clips'); // Whose own clip takes bars 1 to 4
 	const row = (await page.getByTestId('row-1').boundingBox())!;
 	const barPixels = 96;
-	await press(page, { x: row.x + 10, y: row.y + 20 }, { x: row.x + barPixels * 2 + 40, y: row.y + 20 });
-	await expect(page.getByTestId('placement-1-0')).toHaveAttribute('data-tick', '0');
-	await expect(page.getByLabel('Clip length')).toHaveValue('3 bars');
+	const from = row.x + barPixels * 4;
+	await press(page, { x: from + 10, y: row.y + 20 }, { x: from + barPixels + 40, y: row.y + 20 });
+	await expect(page.getByTestId('placement-1-1')).toHaveAttribute('data-tick', String(4 * BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('2 bars');
 	await expect(page.getByTestId('roll')).toBeVisible();
 
-	await page.mouse.dblclick(row.x + barPixels * 5 + 10, row.y + 20);
-	await expect(page.getByTestId('placement-1-1')).toBeVisible();
+	await page.mouse.dblclick(from + barPixels * 3 + 10, row.y + 20);
+	await expect(page.getByTestId('placement-1-2')).toBeVisible();
 	await expect(page.getByLabel('Clip length')).toHaveValue('1 bar');
 });
 

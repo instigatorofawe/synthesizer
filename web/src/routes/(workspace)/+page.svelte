@@ -699,6 +699,24 @@
 		if (!on) letGo(latched);
 	}
 
+	// Once nothing is heard on its own any more, as when a new track's first note puts it in the song, the song takes over, and a
+	// key still held carries on there, so the click that wrote the note is heard, though it started audio and that image was
+	// still on its way.
+	$effect(() => {
+		if (aloneWanted) return;
+		untrack(() => {
+			if (session.want !== 'alone') return;
+			const held = [...sounding].filter(([note, at]) => at.source === 'alone' && !at.stamped && !latched.has(note));
+			const track = view === 'song' ? chosenIndex : hears.kind === 'song' ? hears.track : null;
+			session.wantSong();
+			if (track === null) return;
+			for (const [note] of held) {
+				sounding.set(note, { source: 'song', track, stamped: false });
+				session.use('song', () => engine.noteOn(track, note, velocity));
+			}
+		});
+	});
+
 	// A held note goes with the image it was playing in, once another takes over.
 	$effect(() => {
 		const now = session.want;

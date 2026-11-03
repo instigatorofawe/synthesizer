@@ -15,14 +15,16 @@ const test = base.extend({
 	}
 });
 
-// A 1280 by 800 laptop, the smallest screen the editor is laid out for, and the one with least room for notes.
-test.use({ viewport: { width: 1280, height: 800 } });
+// At a laptop's 1280 by 720 and 1280 by 800, the smallest screens the editor is laid out for: the two projects in
+// playwright.config.ts run this file at each.
 
 test.beforeEach(({ page }) => {
 	page.on('dialog', (dialog) => dialog.accept());
 });
 
 const arrangement = (page: Page) => page.getByTestId('arrangement-view');
+// How much shorter than 800 px the window is, which the notes give up: the arrangement and the chrome are as tall at either size.
+const shorter = (page: Page) => 800 - page.viewportSize()!.height;
 const expand = (page: Page) => page.getByRole('button', { name: 'Expand' });
 const inspector = (page: Page) => page.getByRole('button', { name: 'Inspector' });
 const notesTab = (page: Page) => page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: /^Notes/ });
@@ -65,12 +67,13 @@ async function wheel(page: Page, keys: string[], dx: number, dy: number) {
 
 test('the arrangement is as tall as its tracks, up to a limit, and the notes have the rest', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await expect(page.getByRole('separator', { name: 'Resize the arrangement' })).toHaveCount(0);
+	// The tab strip is a handle between the two, and until it is dragged the arrangement is as tall as its tracks.
+	await expect(page.getByRole('separator', { name: 'Resize the arrangement' })).toHaveCount(1);
 	const tracks = await box(page, 'arrangement');
 	const shown = (await arrangement(page).boundingBox())!;
 	expect(shown.height - tracks.height).toBeGreaterThanOrEqual(0); // Its border, and a scrollbar if the system draws one
 	expect(shown.height - tracks.height).toBeLessThan(20);
-	await expect.poll(async () => (await roll(page)).height).toBeGreaterThan(270); // Once the track is known to sound
+	await expect.poll(async () => (await roll(page)).height).toBeGreaterThan(270 - shorter(page)); // Once the track is known to sound
 
 	// Past four tracks or so it scrolls, and the notes keep their room.
 	for (let added = 0; added < 5; ++added) {
@@ -94,7 +97,7 @@ test('Expand gives the notes the whole view, by ⤢ and by a double-click on a c
 	page
 }) => {
 	await page.goto('/?timeline=song');
-	await expect.poll(async () => (await roll(page)).height).toBeGreaterThan(270); // Once the track is known to sound
+	await expect.poll(async () => (await roll(page)).height).toBeGreaterThan(270 - shorter(page)); // Once the track is known to sound
 	const before = (await roll(page)).height;
 	await expect(expand(page)).toHaveAttribute('aria-pressed', 'false');
 

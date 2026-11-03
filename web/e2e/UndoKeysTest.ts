@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { redoButton, undoButton } from './Chrome.ts';
+import { redoButton, startAudio, undoButton } from './Chrome.ts';
 import { engineRenders } from './Engine.ts';
 
 // The transport's keys, Stop pressed twice, and an undo history for each patch and timeline that outlasts opening others.
@@ -97,7 +97,7 @@ test('Space plays and stops from anywhere but a field, and a button with focus d
 
 test('Stop pressed again goes back to the start, and so does Home', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	const stop = page.getByRole('button', { name: 'Stop', exact: true });
 

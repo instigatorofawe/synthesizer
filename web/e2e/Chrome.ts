@@ -30,3 +30,10 @@ export async function openLight(page: Page) {
 	await expect(list).toBeVisible();
 	return list;
 }
+
+// Audio starts with the page's first click or key, which is when a browser lets it. A test that wants it before it does
+// anything else clicks the top bar's edge, where nothing else answers a click.
+export async function startAudio(page: Page) {
+	await page.locator('header.topbar').click({ position: { x: 2, y: 2 } });
+	await expect(page.getByTestId('state')).toBeAttached({ timeout: 10000 });
+}

@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { startAudio } from './Chrome.ts';
 import { loudest } from './Engine.ts';
 import { emptyNewSong } from './NewSong.ts';
 import { openView } from './Views.ts';
@@ -182,16 +183,14 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	).toBeVisible();
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved'); // The timeline. The patch is saved as it's made.
 
-	// A clip with a note, and the new patch plays it.
-	const row = (await page.getByTestId('row-1').boundingBox())!;
-	await page.mouse.dblclick(row.x + 10, row.y + 20);
+	// A note in the track's own clip, and the new patch plays it.
 	await expect(page.getByTestId('roll')).toBeVisible();
 	const roll = page.getByTestId('roll');
 	const box = (await roll.boundingBox())!;
 	const key = (await page.getByTestId('key-60').boundingBox())!;
 	await page.mouse.dblclick(box.x + 2, key.y + key.height / 2);
 	await expect(page.getByTestId('note-0')).toBeAttached();
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	// The image with the note is the one playing. An image that arrives after Play has passed tick 0 never starts the note.

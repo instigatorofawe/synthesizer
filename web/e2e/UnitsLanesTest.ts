@@ -27,7 +27,7 @@ test.beforeEach(({ page }) => {
 
 const notes = (page: Page) => page.locator('[data-testid^="note-"]');
 
-// A track playing the lead, with a one-bar clip made by a double-click, open in the roll.
+// A track playing the lead, with a one-bar clip, open in the roll.
 async function trackWithClip(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
@@ -39,8 +39,11 @@ async function trackWithClip(page: Page, name: string) {
 	await emptyNewSong(page);
 	await page.getByRole('button', { name: 'Add track' }).click();
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
-	const row = (await page.getByTestId('row-1').boundingBox())!;
-	await page.mouse.dblclick(row.x + 10, row.y + 20);
+	// + Track comes with a four-bar clip, open in the roll. These tests count from a bar, so it is cut to one.
+	const length = page.getByLabel('Clip length');
+	await length.fill('1');
+	await length.press('Enter');
+	await expect(length).toHaveValue('1 bar');
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 }

@@ -52,8 +52,11 @@ async function stepClip(page: Page, name: string) {
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 	const row = page.locator('[data-testid^="row-"]').last();
 	const track = (await row.getAttribute('data-testid'))!.slice('row-'.length);
-	const box = (await row.boundingBox())!;
-	await page.mouse.dblclick(box.x + 10, box.y + 20);
+	// + Track comes with a four-bar clip, open in the roll. These tests count from a bar, so it is cut to one.
+	const length = page.getByLabel('Clip length');
+	await length.fill('1');
+	await length.press('Enter');
+	await expect(length).toHaveValue('1 bar');
 	await expect(page.getByTestId(`placement-${track}-0`)).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 	return track;

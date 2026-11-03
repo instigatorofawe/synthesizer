@@ -16,8 +16,8 @@ const test = base.extend({
 	}
 });
 
-// A 1280 by 800 laptop, the smallest screen the editor is laid out for, where the browser opens over the page from its rail.
-test.use({ viewport: { width: 1280, height: 800 } });
+// At a laptop's 1280 by 720 and 1280 by 800, the smallest screens the editor is laid out for: the two projects in
+// playwright.config.ts run this file at each.
 
 test.beforeEach(({ page }) => {
 	page.on('dialog', (dialog) => dialog.accept());
@@ -65,7 +65,7 @@ test('the browser is narrow, and short enough for a laptop with the examples shu
 	await expect(browser(page).getByText('Short pieces that ship with the app')).toHaveCount(0);
 	await expect(browser(page).getByRole('textbox')).toHaveCount(0);
 	const size = await measure(page);
-	test.info().annotations.push({ type: 'browser at 1280×800', description: JSON.stringify(size) });
+	test.info().annotations.push({ type: `browser at ${test.info().project.name}`, description: JSON.stringify(size) });
 	expect(size.width).toBe(220);
 	// Before, the browser took 699 px of its own beside its lists, and 874 px of content in a 725 px box with the demo library.
 	expect(size.own).toBeLessThan(480);

@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { redoButton, undoButton } from './Chrome.ts';
+import { redoButton, startAudio, undoButton } from './Chrome.ts';
 import { settled } from './Engine.ts';
 import { openView } from './Views.ts';
 
@@ -69,7 +69,7 @@ async function slots(page: Page): Promise<Record<number, string[]>> {
 
 async function playUntilHeard(page: Page) {
 	await settled(page);
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect.poll(async () => Math.max(0, ...(await patchLoudest(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
@@ -98,7 +98,7 @@ test("Edit a copy on an example's patch puts the copy on the track that played i
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'song');
 	await expect(trail(page)).toContainText('Track 2');
-	await expect(page.getByTestId('used-by')).toContainText('1 timeline: ReverseSwell');
+	await expect(page.getByTestId('used-by')).toContainText('1 song: ReverseSwell');
 	await playUntilHeard(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 

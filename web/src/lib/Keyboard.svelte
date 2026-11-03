@@ -4,16 +4,25 @@
 	import { baseAfter, belongsElsewhere, keyFor, noteForKey } from '#lib/KeyboardKeys.ts';
 	import { isBlackKey, noteName } from '#lib/TimelineEdit.ts';
 
-	// Two octaves of keys for playing the patch on screen. Each key is a button named by its note number, and the
-	// computer keyboard plays them too: A to ' from the lowest C shown, with Z and X moving the keys an octave.
+	// Two octaves of keys in the top bar, for whichever view is on screen to play. Each key is a button named by its note
+	// number, and the computer keyboard plays them too: A to ' from the lowest C shown, with Z and X moving the keys an octave.
+	// There is one set of keys on the page, so the page decides where a key is heard, and it listens on the window whichever
+	// view is showing.
 	let {
 		low = 48,
 		octaves = 2,
 		disabled = false,
+		where = '',
 		onnote
-	}: { low?: number; octaves?: number; disabled?: boolean; onnote: (note: number, on: boolean) => void } = $props();
+	}: {
+		low?: number;
+		octaves?: number;
+		disabled?: boolean;
+		where?: string; // Where the keys are heard, or why they can't be
+		onnote: (note: number, on: boolean) => void;
+	} = $props();
 
-	const WHITE = 18; // px
+	const WHITE = 14; // px
 
 	let base = $state(untrack(() => low)); // `low` is where the keys start, and Z and X move them from there
 	const notes = $derived(Array.from({ length: octaves * 12 + 1 }, (_, i) => base + i));
@@ -22,7 +31,7 @@
 	const typed = new Map<string, number>(); // The note each key held down started, so moving the octave can't strand it
 
 	// A black key sits over the line between the white keys either side of it.
-	const left = (note: number) => whites.indexOf(note - 1) * WHITE + WHITE - 6;
+	const left = (note: number) => whites.indexOf(note - 1) * WHITE + WHITE - 4.5;
 
 	function press(note: number) {
 		if (held.has(note)) return;
@@ -75,7 +84,7 @@
 	style:width="{whites.length * WHITE}px"
 	role="group"
 	aria-label="Keys"
-	title="Play from the computer keyboard: A to ', with Z and X for an octave down or up"
+	title={`${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up.`}
 >
 	{#each notes as note (note)}
 		<button
@@ -100,15 +109,15 @@
 <style>
 	.keyboard {
 		position: relative;
-		height: 30px;
+		height: 26px;
 		flex: none;
 		user-select: none;
 	}
 	.key {
 		position: absolute;
 		top: 0;
-		width: 18px;
-		height: 30px;
+		width: 14px;
+		height: 26px;
 		padding: 0;
 		border-radius: 0 0 3px 3px;
 		border: 1px solid #30363d;
@@ -124,8 +133,8 @@
 		pointer-events: none;
 	}
 	.key.black {
-		width: 12px;
-		height: 18px;
+		width: 9px;
+		height: 16px;
 		background: #21262d;
 		z-index: 1;
 	}

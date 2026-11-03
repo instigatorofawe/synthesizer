@@ -3,14 +3,14 @@
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
 	import GraphEditor from '#lib/GraphEditor.svelte';
-	import Keyboard from '#lib/Keyboard.svelte';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
 	import type { Ring } from '#lib/ScopeMath.ts';
-	import { actionOn, stay, type Hearing } from '#lib/Workspace.ts';
+	import { actionOn, stay, withView, type Hearing, type Undoable } from '#lib/Workspace.ts';
 
-	// The upper panel: one patch, drawn as a graph or shown as JSON, with keys to play it and scopes on what it makes.
+	// The Patch view: one patch, drawn as a graph or shown as JSON, with scopes on what it makes. A trail back to the song
+	// heads it, through the track the patch is heard on.
 	let {
 		patch,
 		name,
@@ -36,11 +36,12 @@
 		hearing,
 		scopes,
 		active,
+		song,
+		onsong,
 		onname,
 		ongraph,
 		ontext,
 		onprobes,
-		onnote,
 		onparam,
 		onpart
 	}: {
@@ -67,17 +68,42 @@
 		maxProbes: number;
 		hearing: Hearing;
 		scopes: { slot: number; label: string; ring: Ring }[];
-		active: boolean;
+		active: boolean; // Whether this view is on screen, so keys are for it
+		song: string; // The open timeline's or example's name
+		onsong: () => void; // Back to the Song view
 		onname: (name: string) => void;
 		ongraph: (graph: Graph) => void;
 		ontext: (text: string) => void;
 		onprobes: (probes: Probe[]) => void;
-		onnote: (note: number, on: boolean) => void;
 		onparam: (param: Param, value: number) => void;
 		onpart: (id: string) => void;
 	} = $props();
 
 	let view = $state<'graph' | 'json'>('graph');
+	let panel: HTMLElement;
+
+	// The top bar's Undo and Redo. The graph editor keeps the patch's history and answers the usual keys for it, so they reach
+	// it as those keys. It can't say when there is nothing to undo, so they are offered whenever the graph can change.
+	function press(redo: boolean) {
+		panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: redo, bubbles: true }));
+	}
+	export const history: Undoable = {
+		get canUndo() {
+			return patch !== null && !readonly && view === 'graph';
+		},
+		get canRedo() {
+			return patch !== null && !readonly && view === 'graph';
+		},
+		undo: () => press(false),
+		redo: () => press(true)
+	};
+
+	// A link, so it can open in another tab, that otherwise switches views without leaving the page.
+	function backToSong(event: MouseEvent) {
+		if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+		event.preventDefault();
+		onsong();
+	}
 
 	const heard = $derived(
 		hearing.kind === 'song'
@@ -90,15 +116,28 @@
 	const params = $derived(graph?.params ?? []);
 </script>
 
-<section class="patch" aria-label="Patch editor">
+<section class="patch" aria-label="Patch editor" bind:this={panel}>
 	<header>
-		<span class="kind">Patch</span>
-		{#if patch}
-			{#if readonly}
-				<strong class="title">{name}</strong>
-			{:else}
-				<input class="name" aria-label="Patch name" value={name} oninput={(e) => onname(e.currentTarget.value)} />
+		<nav class="trail" aria-label="Where this patch is heard">
+			<a href={withView(search, 'song')} onclick={backToSong} title="Back to the song, as it was left">
+				<span aria-hidden="true">♫</span>
+				{song || 'Song'}
+			</a>
+			{#if patch}
+				<span class="sep" aria-hidden="true">›</span>
+				{#if hearing.kind === 'song'}
+					<span class="track" title="The track that plays it, which keys play it on">{hearing.name}</span>
+					<span class="sep" aria-hidden="true">›</span>
+				{/if}
+				<span aria-hidden="true" class="diamond">◆</span>
+				{#if readonly}
+					<strong class="title" aria-current="page">{name}</strong>
+				{:else}
+					<input class="name" aria-label="Patch name" value={name} oninput={(e) => onname(e.currentTarget.value)} />
+				{/if}
 			{/if}
+		</nav>
+		{#if patch}
 			{#if dirty}<span class="dot" title="Unsaved changes">•</span>{/if}
 			{#if parts.length > 1}
 				<div class="parts" role="group" aria-label="Patches in this recipe">
@@ -124,7 +163,6 @@
 				</span>
 			{/if}
 			<span class="grow"></span>
-			<Keyboard disabled={!playable} {onnote} />
 			<div class="views" role="tablist" aria-label="Patch views">
 				<button type="button" role="tab" aria-selected={view === 'graph'} onclick={() => (view = 'graph')}>Graph</button
 				>
@@ -141,12 +179,12 @@
 			{#if !readonly}
 				<form method="POST" action={actionOn(search, 'deletePatch')} use:enhance={stay}>
 					<input type="hidden" name="id" value={patch.id} />
-					<input type="hidden" name="back" value={search} />
+					<input type="hidden" name="back" value={withView(search, 'patch')} />
 					<button class="delete">Delete patch</button>
 				</form>
 			{/if}
 		{:else}
-			<span class="muted">Choose a patch in the browser, or a track below, to see how it is made.</span>
+			<span class="muted">Choose a patch in the browser, or a track in the song, to see how it is made.</span>
 		{/if}
 	</header>
 
@@ -234,14 +272,36 @@
 		min-width: 0;
 		font-size: 0.82rem;
 	}
-	.kind {
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-		color: var(--muted);
+	.trail {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		min-width: 0;
+		flex: 0 1 auto;
 	}
+	.trail a,
+	.track,
 	.title {
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		min-width: 0;
+	}
+	.trail a {
+		flex: 0 1 auto;
+		max-width: 12rem;
+		color: var(--accent);
+		text-decoration: none;
+	}
+	.trail a:hover {
+		text-decoration: underline;
+	}
+	.track {
+		max-width: 10rem;
+	}
+	.sep,
+	.diamond {
+		color: var(--muted);
 	}
 	.name {
 		width: 12rem;

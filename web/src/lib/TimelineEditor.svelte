@@ -8,6 +8,7 @@
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
+	import type { Undoable } from '#lib/Workspace.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -73,12 +74,12 @@
 		rings: Ring[];
 		engine: SongControls;
 		readonly?: boolean;
-		active?: boolean; // Whether keys are for this editor, when it shares a page with others
+		active?: boolean; // Whether keys are for this editor, which they are while its view is on screen
 		tabs?: { id: string; label: string; content: Snippet }[]; // More views of the document, after the notes and the mixer
 		heading?: Snippet; // At the start of the toolbar
 		onchange: (doc: Timeline) => void;
 		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
-		onopen?: (patch: string) => void; // Someone asked to edit a patch this timeline uses
+		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -158,6 +159,18 @@
 		canRedo = future.length > 0;
 		onchange(next);
 	}
+
+	// What the top bar's Undo and Redo act on while the Song view is on screen.
+	export const history: Undoable = {
+		get canUndo() {
+			return canUndo;
+		},
+		get canRedo() {
+			return canRedo;
+		},
+		undo,
+		redo
+	};
 
 	// The page shows the chosen track's patch, so it hears about every choice of track.
 	let told = false;
@@ -436,9 +449,9 @@
 							{#if !readonly}
 								<button
 									type="button"
-									aria-label={`Edit patch slot ${index + 1}`}
-									title="Show this patch above"
-									onclick={() => onopen(slot)}>Edit</button
+									aria-label={`Open patch slot ${index + 1}`}
+									title="Open this patch in the Patch view"
+									onclick={() => onopen(slot)}>Open <span aria-hidden="true">◆</span></button
 								>
 								<button
 									type="button"

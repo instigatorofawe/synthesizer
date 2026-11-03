@@ -1,4 +1,4 @@
-# modsynth design, revision 25
+# modsynth design, revision 26
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -1480,6 +1480,69 @@ the sprint's first two stages. Choices made here that the user hasn't weighed in
   Once the take is done the image goes back to leaving out tracks with no notes, so what is heard is again what Export WAV writes.
 - **Tests:** the engine's state carries the take's phase, the beats of the count-in left and a count of clicks, which the e2e tests wait
   on.
+
+**Built for the UX sprint, wave 4** (revision 26), as section 19 describes. This wave builds the plan's last stage: musical units and
+lanes, controls and keys, graph gestures, built-ins, and the browser and address. It also builds a song layer with a Tempo lane and
+volume and pan in the track heads, which the user asked for during the wave: "Consider having tempo as another layer on the timeline
+(that perhaps can be expanded out as needed). Maybe a few other things can live there as well. Ideally we have graphical
+representations of the most commonly used controls". And Fit in the roll keeps the rows' height, after the user found that "the fit
+button also vertically zooms, which can't be undone". Choices made here that the user hasn't weighed in on:
+- **Units:**
+  - A bare number in a position field is a bar, as in the top bar, and in a length field it is ticks.
+  - Lengths over a bar read as `noteValue` has them (`5/4`) for a note or a ramp, and in bars and a note value (`1 bar + 1/4`) for a
+    clip or a window. A trailing dot dots a note value. Triplets aren't named, and still read in ticks.
+  - Typing a note's length sets the Draw length, as resizing one does.
+  - Refusals go to the page's message line for 4 s.
+- **Velocity stems:** a drag paints once it has moved 4 px sideways, and every note whose start it passes is painted, chosen or not. A
+  stem's shade is its opacity, 0.12 to 0.62.
+- **Lane points:**
+  - A point is drawn where its ramp ends, so a ramped point's `tick` in the document is where the ramp starts.
+  - A lane's first point is a step. A point clicked onto an exp curve takes the curve, and anywhere else a new point is a line.
+- **Controls:**
+  - Make default keeps the track's own value, now equal to the default, so it changes one document and one Undo takes it back. ↺
+    takes the track's value away, so the track follows the patch's default again.
+  - In the Patch view, Undo acts on the patch, so a Control's value, which is the song's, is undone from the Song view.
+  - Heard on several tracks, a Control is the chosen track's. A global parameter's writes the song's `globals`.
+  - A value is a button that reads as text: Enter or a double-click types a number, and ↺ resets. Sliders have 500 steps.
+  - Controls show over the side column's Node and Patch tabs, not JSON, and only where the patch can be heard.
+- **Keys:**
+  - The keys play at the roll's Vel, one number for the page that outlasts opening another song. C and V step it by 10, and ↑ and ↓ in
+    its field by 1.
+  - Hold has no key, since H is a piano key. A key a take records is never latched, and step entry still writes at key-up.
+  - At 1280 px with Start audio still showing, Hold and Vel take about 100 px from the view tabs, so long names are cut short sooner.
+- **The graph:**
+  - Delete removes any node chosen alone, the note node and ports included, as before, since an insert drops its note node. With several
+    chosen it leaves the note node and the ports, and says so.
+  - Wires from outside a copy are dropped, even for Mod+D within one patch.
+  - A paste goes at the pointer, or just below and right of the originals, at the nearest place covering no node.
+  - The side column's tab follows the choice, except JSON, which stays until another tab is clicked. JSON's column is 360 px wide.
+  - A double-click on a wire opens the node search there.
+  - A subpatch or sampler copied from an example keeps the example's names, and the compiler says so on the node.
+- **Built-ins:**
+  - *Edit a copy* saves the example's library copy and the patch's copy at once. Putting the copy in place of the original is an unsaved
+    edit, so Undo takes it back and the action never writes under a draft.
+  - The track chosen is the one the keys played the original on, else the first that plays it.
+  - Copies are numbered as a file manager numbers them.
+- **The browser:**
+  - Each section's help is behind a ?, and shows on its own when the list is empty.
+  - The + and ? sit inside their section, after its name.
+  - A name field closes once it's empty and left.
+  - Import sends the files at once, named after the first.
+- **The address:**
+  - The tab's key is `pane`, and Notes goes unsaid.
+  - The place a song opens on isn't written into the address until something is chosen.
+  - A choice from the compile light, or a take writing into a new clip, moves the address too.
+  - The open song's own link in the browser keeps its place, and another song's drops it.
+- **The Tempo lane:**
+  - A drag sets whole BPM, and a tenth with Shift. A click with no drag adds at the tempo playing there.
+  - The lane's range holds during a drag and refits on release.
+  - It is 18 px folded and 72 px unfolded. The fold is kept per lane and timeline in localStorage, and every lane starts folded.
+  - It is purple, so it isn't taken for a clip's automation.
+  - Its menu says "Glide to the next tempo" and "Hold until the next change", not the lane points' Step and Line, since a tempo ramp
+    runs from a change to the next.
+- **Track heads:** volume and pan both fit at the heads' 150 px. They drag from where they are, not to the pointer, so a click changes
+  nothing. Silence reads "-∞".
+- **Fit:** it fits across, and scrolls the notes' pitches into the middle at the rows' height as it was.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

@@ -832,18 +832,30 @@ and hardware still only ever sees image bytes.
   on every form. The config trusts exactly the two loopback origins on that port, and a form posted from any other site is
   still refused. Serving it anywhere else needs authentication and a proxy that sets `PROTOCOL_HEADER`.
 
-**The editor.** The GUI is one page laid out like a DAW: a transport along the top, the patch editor above, the timeline
-below, both resizable, and a browser down the side, which folds away, for the library and the examples. Its address says
-what is open: `?timeline=` or `?recipe=` below, and `?patch=` above, which otherwise shows the chosen track's patch, so
-choosing a track shows its patch. Only the lower panel's parameters reach the server: a load reruns for the parameters it
-reads, so choosing a patch costs no round trip, and the library, which carries every sample in use, loads only when an action
-changes it. A fresh visit opens the timeline saved last, and the old addresses redirect to the same views.
+**The editor.** The GUI is one page laid out like a DAW, for a laptop 1280 to 1440 px wide. A top bar holds the menu, a tab
+for each view, the transport, one Undo and Redo, the on-screen keys, the master meter and Save. Under it one of two views has
+all the height: Song, with the arrangement, the notes, the mix, the JSON, the image and the inspector, and Patch, with one
+patch's graph. The two used to share the page, one above the other, which left the piano roll 102 px at 1280×800; apart, it
+is 408 px for a timeline of one track and 260 px for one of two tracks and a lane [measured]. The view not on screen stays on
+the page, hidden and inert, so its scroll, zoom and choices are there to come back to.
+
+- A tab or `` ` `` switches views. So does a patch opened from a track, the inspector or a mixer insert, and the Patch view's
+  trail back to the song. A switch is a step in the browser's history, made without a navigation, which would move focus, so
+  Back goes to the view before.
+- A browser down the side holds the library and the examples, and a timeline in it opens in Song and a patch in Patch. B
+  folds it to a rail of icons. Below 1400 px wide it is always the rail, and opens over the page rather than pushing it aside.
+- The address says what is open: `?timeline=` or `?recipe=` for the song, `?patch=` or `?part=` for the patch the Patch view
+  shows, which otherwise is the chosen track's, so choosing a track shows its patch there, and `?view=patch`. An address that
+  names a patch and no view opens Patch, as links did before there were views. Only the song's parameters reach the server: a
+  load reruns for the parameters it reads, so choosing a patch or a view costs no round trip, and the library, which carries
+  every sample in use, loads only when an action changes it. A fresh visit opens the timeline saved last, and the old
+  addresses redirect to the same views.
 
 - Edits to any number of patches and timelines are kept as drafts while other things are opened, and Save writes them all
   in one transaction, patches first, so a timeline is never saved against a patch edit that was refused. Each draft names
   the revision it started from, so a stale one refuses the whole save and loses nothing. A draft edited back to what was
   saved stops being one, and leaving with drafts asks first.
-- One engine plays one image: the song, compiled from the drafts, or the patch on screen on its own. A patch a track plays
+- One engine plays one image: the song, compiled from the drafts, or the Patch view's patch on its own. A patch a track plays
   is heard in the song, through that track's mix and inserts, so a patch edit is heard in context as it is made. A voice no
   track plays is compiled on its own as above, and its keys switch the engine to it. Play, a locate, or a note from the
   timeline switches back, to where the song was. The two compile on separate channels, so neither cancels the other, and a
@@ -854,14 +866,17 @@ changes it. A fresh visit opens the timeline saved last, and the old addresses r
   image slot does, and the image before it plays on.
 - Each patch and timeline keeps its own undo history, of up to 200 steps, while others are open, and saving keeps it. A step is the
   document's whole text, so an edit typed into its JSON is undone as an editor's is, and what is typed in one visit to the field is one
-  step. Keys belong to the panel used last, so Delete and undo act on the graph or the timeline, not both.
+  step. Keys and the top bar's Undo and Redo act on the view on screen, so Delete and undo act on the graph or the timeline, not
+  both. An inert view doesn't stop a key handler on the window, so each one asks which view is showing.
 - Every key the editor binds is in one table, `Shortcuts.ts`, with where it works and what it does. Its test holds that none is a piano
   key, bare or with Shift, that none needs Alt, which is Option on a Mac and opens menus in browsers elsewhere, and that no two meet where
   both work. A key goes by where it is, as the piano's do, and Mod is ⌘ on a Mac and Ctrl elsewhere, so Ctrl-click stays a right-click on
   a Mac.
 - Space plays and stops the song from anywhere but a text field, a select or a checkbox, and a button with focus doesn't take it. Home
   goes back to the start, and so does Stop pressed while stopped, since a laptop may have no Home key.
-- The computer keyboard plays the patch keys as most DAWs lay it out: the home row from A is the white keys from the lowest C shown, the row
+- The top bar's keys play what the view on screen is about: the chosen track in the Song view, and in the Patch view its patch,
+  wherever it is heard.
+- The computer keyboard plays them as most DAWs lay it out: the home row from A is the white keys from the lowest C shown, the row
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
   piano, and a field being typed in or a key with a modifier keeps its own meaning, though a button or a slider with focus doesn't. A key
   let go while the page is in the background lets go of its note.
@@ -904,7 +919,7 @@ guards, "used by", the timelines an edit affects and exports treat them as they 
 
 - Only the server writes them. At startup it makes them what `examples/` holds, in one transaction, and it refuses a save or a delete of one however it is asked. So nothing done in the app reaches what ships, and a row changed some other
   way is put back at the next start. The browser lists them apart from the library's own patches, and leaves their recordings out of its samples.
-- A change goes to a copy. Duplicate makes an ordinary patch with the same graph, named "*name* copy", which names the same recordings rather than copying them. When the timeline open below plays the built-in, the copy takes its place
+- A change goes to a copy. Duplicate makes an ordinary patch with the same graph, named "*name* copy", which names the same recordings rather than copying them. When the open timeline plays the built-in, the copy takes its place
   there, as an unsaved edit, so a change is heard where it plays. A copy compiles to the same bytes, because a patch's bytes depend only on its graph, section 20, and a test holds three examples to that, played entirely by copies.
 - An example with one patch names its built-in after itself, as `builtin-Kick808`, and one with several adds the part, as `builtin-PassionChorale-horn`, named "PassionChorale Horn". A graph several examples share is one built-in,
   named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 74 recipes and 6 pieces make 136 built-ins from 140

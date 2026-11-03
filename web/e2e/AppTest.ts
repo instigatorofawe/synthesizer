@@ -66,7 +66,8 @@ const graphView = (page: Page) =>
 const peaksIn = (scope: ReturnType<Page['getByRole']>) =>
 	scope.getByTestId('peak').evaluateAll((list) => list.map((e) => Number(e.getAttribute('data-peak'))));
 const mixerPeaks = (page: Page) => peaksIn(page.getByRole('tabpanel'));
-const patchPeaks = (page: Page) => peaksIn(patchEditor(page));
+// The patch's scopes go on watching while the Song view is on screen and the Patch view is out of sight.
+const patchPeaks = (page: Page) => peaksIn(page.getByRole('region', { name: 'Patch editor', includeHidden: true }));
 
 // Every edit has compiled, and the image made from the last one is playing.
 const settled = (page: Page) =>
@@ -538,12 +539,16 @@ test('a patch no track plays is heard on its own, and Play brings the song back'
 
 test('a patch a track plays is heard in the song, through that track', async ({ page }) => {
 	await page.goto('/?timeline=song');
+	await openView(page, 'patch');
 	await expect(page.getByTestId('hearing')).toContainText('Keys play it on Lead, in the song');
 	const key = page.getByRole('button', { name: '67', exact: true });
 	await key.dispatchEvent('pointerdown'); // Starts audio as well
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	// The track's meter is in the Song view, out of sight
 	await expect
-		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
+		.poll(() =>
+			page.getByRole('meter', { name: 'Level of Lead', includeHidden: true }).getAttribute('data-peak').then(Number)
+		)
 		.toBeGreaterThan(0.01);
 	await key.dispatchEvent('pointerup');
 	await expect(page.getByTestId('playing-alone')).toHaveCount(0);

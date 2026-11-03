@@ -105,6 +105,7 @@ const patchGraph = async (page: Page) => {
 // A new patch with this graph, heard on its own in the Patch view.
 async function newPatch(page: Page, name: string, graph: object) {
 	await page.goto('/');
+	await page.getByRole('button', { name: 'New patch', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New patch name').fill(name);
 	await page.getByLabel('New patch name').press('Enter');
 	await page.waitForURL(/patch=/);
@@ -138,6 +139,7 @@ async function toneSong(page: Page, name: string) {
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill(name);
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
@@ -394,6 +396,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 test("the keys' velocity is the roll's Vel: set in either view, it is what step entry writes", async ({ page }) => {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill('Velocities');
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);

@@ -290,6 +290,7 @@ def read_patch(data: bytes) -> dict:
         require(0 < seconds <= 60, "delay line")
     c.table(inputs * 2, "H")
     used, modes, zone_tables, wide_tables = set(), set(), set(), set()
+    line_kinds = {}  # A delay line holds one kind of sample, so every step on it must agree
     for i, (op, mode, resource, _, *rest) in enumerate(
         c.table(control + voice, "BBHI6H")
     ):
@@ -314,6 +315,13 @@ def read_patch(data: bytes) -> dict:
             require(resource == 0, f"{spec['name']} unused resource")
         if not spec["mode"]:
             require(mode == 0, f"{spec['name']} unused mode")
+        if spec["resource"] == "Delay":
+            require(resource < delays, f"{spec['name']} delay line")
+            kind = spec["name"].endswith("I16")
+            require(
+                line_kinds.setdefault(resource, kind) == kind,
+                "a delay line's steps disagree on its samples",
+            )
         if spec["name"] == "Sample2":
             zone_tables.add(resource)
         if spec["name"] == "Sample3":
@@ -581,6 +589,7 @@ def check_coverage(results: list[dict]) -> None:
     missing += [MIX_OPS[m] for m in MIX_OPS if m not in mix_ops]
     missing += [f"Biquad mode {m}" for m in (0, 1, 2) if (4, m) not in modes]
     missing += [f"DelayRead mode {m}" for m in (0, 1) if (13, m) not in modes]
+    missing += [f"DelayReadI16 mode {m}" for m in (0, 1) if (35, m) not in modes]
     missing += [f"Sample2 mode {m}" for m in range(4) if (27, m) not in modes]
     missing += [f"Sample3 mode {m}" for m in range(6) if (33, m) not in modes]
     require(not missing, "not used by any golden image: " + ", ".join(missing))

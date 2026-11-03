@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 #include <modsynth/Backend.hpp>
 #include <modsynth/Config.hpp>
@@ -54,7 +55,7 @@ union BoundResource {
 };
 
 struct DelayLine {
-    float* data;
+    float* data;  // 16-bit samples instead, for a line the I16 ops use
     u32 length;
     u32 write;
     u32 written;  // saturates at length. Reads older than this return 0, so lines never need clearing.
@@ -178,6 +179,7 @@ struct Kernels {
             case Op::Sample3:
                 return sizeof(Sample3State);
             case Op::Comb:
+            case Op::CombI16:
                 return sizeof(CombState);
             case Op::Follow:
                 return sizeof(FollowState);
@@ -271,16 +273,28 @@ struct Kernels {
                 pan(s, c);
                 break;
             case Op::DelayWrite:
-                delay_write(s, c);
+                delay_write<float>(s, c);
                 break;
             case Op::DelayRead:
-                delay_read(s, c);
+                delay_read<float>(s, c);
                 break;
             case Op::Comb:
-                comb(s, c);
+                comb<float>(s, c);
                 break;
             case Op::Allpass:
-                allpass(s, c);
+                allpass<float>(s, c);
+                break;
+            case Op::DelayWriteI16:
+                delay_write<std::int16_t>(s, c);
+                break;
+            case Op::DelayReadI16:
+                delay_read<std::int16_t>(s, c);
+                break;
+            case Op::CombI16:
+                comb<std::int16_t>(s, c);
+                break;
+            case Op::AllpassI16:
+                allpass<std::int16_t>(s, c);
                 break;
             case Op::Follow:
                 follow(s, c);
@@ -1215,13 +1229,37 @@ struct Kernels {
         return std::min(left, line.length - at);
     }
 
+    // A line holds floats, or for the I16 ops 16-bit samples, as to_q15 makes them: truncated towards zero, because
+    // rounding to nearest would keep a sample of 1 in a loop whose gain is above a half for ever, so a tail would never
+    // reach silence.
+    template <class T>
+    [[nodiscard]] static T* line_data(const DelayLine& line) {
+        return reinterpret_cast<T*>(line.data);
+    }
+    [[nodiscard]] static float load_sample(float x) { return x; }
+    [[nodiscard]] static float load_sample(std::int16_t x) { return from_q15(x); }
+    template <class T>
+    [[nodiscard]] static T store_sample(float x) {
+        if constexpr (std::is_same_v<T, float>) {
+            return x;
+        } else {
+            return to_q15(x);
+        }
+    }
+
+    template <class T>
     static void delay_write(const DecodedStep& s, RunContext& c) {
         DelayLine& line = c.lines[s.resource];
         const float* in = buffer(c, s.in[0]);
+        T* data = line_data<T>(line);
         u32 w = line.write;
         for (u32 i = 0; i < N;) {
             const u32 run = before_wrap(line, w, N - i);
-            std::memcpy(line.data + w, in + i, sizeof(float) * run);
+            if constexpr (std::is_same_v<T, float>) {
+                std::memcpy(data + w, in + i, sizeof(float) * run);
+            } else {
+                for (u32 j = 0; j < run; ++j) data[w + j] = store_sample<T>(in[i + j]);
+            }
             i += run;
             w += run;
             if (w == line.length) w = 0;
@@ -1230,9 +1268,11 @@ struct Kernels {
         line.written = std::min(line.length, line.written + N);
     }
 
+    template <class T>
     static void delay_read(const DecodedStep& s, RunContext& c) {
         const DelayLine& line = c.lines[s.resource];
         float* out = buffer(c, s.out[0]);
+        const T* data = line_data<T>(line);
         const bool before_write = s.mode == kReadBeforeWrite;
         const u32 ceiling = line.length - N - 2;
         const float wanted = clamp(scalar(c, s.in[0]), 0.0f, 3600.0f) * c.rate;
@@ -1247,7 +1287,11 @@ struct Kernels {
         u32 r = line.write >= first ? line.write - first : line.write + line.length - first;
         for (u32 i = zeros; i < N;) {
             const u32 run = before_wrap(line, r, N - i);
-            std::memcpy(out + i, line.data + r, sizeof(float) * run);
+            if constexpr (std::is_same_v<T, float>) {
+                std::memcpy(out + i, data + r, sizeof(float) * run);
+            } else {
+                for (u32 j = 0; j < run; ++j) out[i + j] = load_sample(data[r + j]);
+            }
             i += run;
             r += run;
             if (r == line.length) r = 0;
@@ -1261,11 +1305,13 @@ struct Kernels {
         return std::max<u32>(d, 1);
     }
 
+    template <class T>
     static void comb(const DecodedStep& s, RunContext& c) {
         DelayLine& line = c.lines[s.resource];
         auto& st = state<CombState>(c, s);
         const float* in = buffer(c, s.in[0]);
         float* out = buffer(c, s.out[0]);
+        T* data = line_data<T>(line);
         const u32 d = line_delay(c, line, scalar(c, s.in[1]));
         const float feedback = clamp(scalar(c, s.in[2]), -0.995f, 0.995f);
         const float damp = clamp(scalar(c, s.in[3]), 0.0f, 0.99f);
@@ -1277,12 +1323,12 @@ struct Kernels {
         const u32 zeros = d > written ? std::min(N, d - written) : 0;
         for (u32 i = 0; i < zeros;) {
             const u32 run = before_wrap(line, w, zeros - i);
-            float* to = line.data + w;
+            T* to = data + w;
             for (u32 j = 0; j < run; ++j) {
                 const float y = 0.0f;
                 const float x = in[i + j];  // read first: out may alias in
                 low = y * (1.0f - damp) + low * damp;
-                to[j] = x + low * feedback;
+                to[j] = store_sample<T>(x + low * feedback);
                 out[i + j] = y;
             }
             i += run;
@@ -1292,13 +1338,13 @@ struct Kernels {
         u32 r = w >= d ? w - d : w + line.length - d;
         for (u32 i = zeros; i < N;) {
             const u32 run = before_wrap(line, r, before_wrap(line, w, N - i));
-            float* to = line.data + w;
-            const float* from = line.data + r;
+            T* to = data + w;
+            const T* from = data + r;
             for (u32 j = 0; j < run; ++j) {
-                const float y = from[j];
+                const float y = load_sample(from[j]);
                 const float x = in[i + j];  // read first: out may alias in
                 low = y * (1.0f - damp) + low * damp;
-                to[j] = x + low * feedback;
+                to[j] = store_sample<T>(x + low * feedback);
                 out[i + j] = y;
             }
             i += run;
@@ -1312,10 +1358,12 @@ struct Kernels {
         st.low = flush(low);
     }
 
+    template <class T>
     static void allpass(const DecodedStep& s, RunContext& c) {
         DelayLine& line = c.lines[s.resource];
         const float* in = buffer(c, s.in[0]);
         float* out = buffer(c, s.out[0]);
+        T* data = line_data<T>(line);
         const u32 d = line_delay(c, line, scalar(c, s.in[1]));
         const float feedback = clamp(scalar(c, s.in[2]), -0.995f, 0.995f);
         u32 w = line.write;
@@ -1324,11 +1372,11 @@ struct Kernels {
         const u32 zeros = d > written ? std::min(N, d - written) : 0;
         for (u32 i = 0; i < zeros;) {
             const u32 run = before_wrap(line, w, zeros - i);
-            float* to = line.data + w;
+            T* to = data + w;
             for (u32 j = 0; j < run; ++j) {
                 const float y = 0.0f;
                 const float x = in[i + j];  // read first: out may alias in
-                to[j] = x + y * feedback;
+                to[j] = store_sample<T>(x + y * feedback);
                 out[i + j] = y - x;
             }
             i += run;
@@ -1338,12 +1386,12 @@ struct Kernels {
         u32 r = w >= d ? w - d : w + line.length - d;
         for (u32 i = zeros; i < N;) {
             const u32 run = before_wrap(line, r, before_wrap(line, w, N - i));
-            float* to = line.data + w;
-            const float* from = line.data + r;
+            T* to = data + w;
+            const T* from = data + r;
             for (u32 j = 0; j < run; ++j) {
-                const float y = from[j];
+                const float y = load_sample(from[j]);
                 const float x = in[i + j];  // read first: out may alias in
-                to[j] = x + y * feedback;
+                to[j] = store_sample<T>(x + y * feedback);
                 out[i + j] = y - x;
             }
             i += run;

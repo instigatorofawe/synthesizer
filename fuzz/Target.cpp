@@ -78,8 +78,16 @@ void send_event(Engine& engine, Rng& r, const ProgramHeader& h) {
         const ChunkRef* c = table.find(p.patch(patch), ChunkKind::Patch);
         PatchView v;
         if (!c || !parse_patch({c->data, c->size}, v)) fail("a validated patch no longer parses");
+        // A line an I16 op uses holds 16-bit samples, two to a float. The loader has checked that a line's ops agree.
+        std::array<bool, kMaxPatchDelays> i16{};
+        for (u32 i = 0; i < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++i) {
+            if (op_line_i16(v.step_op(i)) && v.step_resource(i) < i16.size()) i16[v.step_resource(i)] = true;
+        }
         u64 floats = 0;
-        for (u32 i = 0; i < v.h.delays; ++i) floats += static_cast<u64>(v.delay(i) * rate) + frame + 4;
+        for (u32 i = 0; i < v.h.delays; ++i) {
+            const u64 samples = static_cast<u64>(v.delay(i) * rate) + frame + 4;
+            floats += i < i16.size() && i16[i] ? (samples + 1) / 2 : samples;
+        }
         return floats;
     };
     u64 total = 0;

@@ -42,6 +42,7 @@ constexpr Golden kGoldens[] = {
     {"Tones32", 800, 0x76ac201dd55fe56bull, 32},   {"Lanes", 1920, 0x60d243046489eb9eull, 32},
     {"Zones", 1920, 0xed2b4ca7c30b9bb3ull, 32},    {"Hold", 1920, 0xfb0025e9e989fe1full, 32},
     {"Mods", 1920, 0x46f84404be93fbffull, 32},     {"Steals", 1920, 0x6b2f7262a90e47fcull, 32},
+    {"Lines16", 1920, 0xd70dda381da1ef4full, 32},
 };
 
 std::vector<std::byte> read_file(const std::string& path) {
@@ -164,7 +165,8 @@ TEST(Golden, TheCompilerStillWritesTheseBytes) {
 // enums rather than a list, so it cannot fall out of step with the registry.
 TEST(Golden, BetweenThemTheImagesUseEverything) {
     std::vector<bool> ops(static_cast<u32>(Op::kCount)), instructions(static_cast<u32>(Instr::kCount)), mix(8);
-    std::vector<bool> biquad(3), delay_read(2), saw(2), pulse(2), sample2(4), osc_mod(6), math(8), kmath(8), sample3(8);
+    std::vector<bool> biquad(3), delay_read(2), delay_read_i16(2), saw(2), pulse(2), sample2(4), osc_mod(6), math(8),
+        kmath(8), sample3(8);
     std::vector<bool> plays(4);
     bool i16 = false, f32 = false, mono = false, stereo = false, looped = false, one_shot = false;
 
@@ -181,6 +183,7 @@ TEST(Golden, BetweenThemTheImagesUseEverything) {
                     ops[step.op] = true;
                     if (step.op == static_cast<u8>(Op::Biquad)) biquad[step.mode] = true;
                     if (step.op == static_cast<u8>(Op::DelayRead)) delay_read[step.mode] = true;
+                    if (step.op == static_cast<u8>(Op::DelayReadI16)) delay_read_i16[step.mode] = true;
                     if (step.op == static_cast<u8>(Op::Saw)) saw[step.mode] = true;
                     if (step.op == static_cast<u8>(Op::Pulse)) pulse[step.mode] = true;
                     if (step.op == static_cast<u8>(Op::Sample2)) sample2[step.mode] = true;
@@ -215,6 +218,7 @@ TEST(Golden, BetweenThemTheImagesUseEverything) {
                 mix[static_cast<u32>(MixOp::Gather)]);
     for (u32 i = 0; i < biquad.size(); ++i) EXPECT_TRUE(biquad[i]) << "biquad mode " << i;
     for (u32 i = 0; i < delay_read.size(); ++i) EXPECT_TRUE(delay_read[i]) << "delay read mode " << i;
+    for (u32 i = 0; i < delay_read_i16.size(); ++i) EXPECT_TRUE(delay_read_i16[i]) << "i16 delay read mode " << i;
     for (u32 i = 0; i < saw.size(); ++i) EXPECT_TRUE(saw[i]) << "saw mode " << i;
     for (u32 i = 0; i < pulse.size(); ++i) EXPECT_TRUE(pulse[i]) << "pulse mode " << i;
     for (u32 i = 0; i < sample2.size(); ++i) EXPECT_TRUE(sample2[i]) << "sample2 mode " << i;
@@ -245,6 +249,7 @@ TEST(Golden, EachImageDeclaresTheRevisionItNeeds) {
     EXPECT_EQ(revision("Hold.image"), 5u);
     EXPECT_EQ(revision("Mods.image"), 6u);
     EXPECT_EQ(revision("Steals.image"), 7u);
+    EXPECT_EQ(revision("Lines16.image"), 8u);
 }
 
 // A frozen image must never quietly change its sound by landing on an engine of another size.

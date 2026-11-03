@@ -572,7 +572,7 @@ class Synth {
         DecodedStep* control;
         DecodedStep* voice;
         BoundResource* resources;
-        u32* line_lengths;
+        u32* line_lengths;  // in samples, with kLineI16 set on a line of 16-bit ones
         u32 voice_state;
         u32 control_state;
         bool ends;
@@ -749,6 +749,37 @@ class Synth {
         return static_cast<u32>(seconds * rate) + frame + 4;
     }
 
+    // A line's length is at most 60 s at a few hundred kHz, so its top bit is free to say what it holds.
+    static constexpr u32 kLineI16 = 0x80000000u;
+
+    // Which of a patch's delay lines hold 16-bit samples, marked from its voice steps. The validator made every step on
+    // a line agree. Sizing also runs on patches it hasn't passed, where a line out of range is f32, the larger, so
+    // nothing is undercounted.
+    class LineKinds {
+       public:
+        void mark(u8 op, u16 line) {
+            if (op_line_i16(op) && line < kMaxPatchDelays) words_[line / 32] |= 1u << (line % 32);
+        }
+        [[nodiscard]] bool i16(u32 line) const {
+            return line < kMaxPatchDelays && ((words_[line / 32] >> (line % 32)) & 1u) != 0;
+        }
+
+       private:
+        u32 words_[kMaxPatchDelays / 32] = {};
+    };
+
+    // A patch's delay lines, in floats of bulk memory. On its own so that measure_patch, which reserve runs for every
+    // slot, stays small enough to inline as it did before a line could hold 16-bit samples.
+    [[gnu::noinline]] static u64 line_floats_of(const PatchView& v, float rate, u32 frame) {
+        LineKinds kinds;
+        for (u32 i = v.h.control_steps; i < static_cast<u32>(v.h.control_steps) + v.h.voice_steps; ++i) {
+            kinds.mark(v.step_op(i), v.step_resource(i));
+        }
+        u64 floats = 0;
+        for (u32 i = 0; i < v.h.delays; ++i) floats += line_floats(line_length(v.delay(i), rate, frame), kinds.i16(i));
+        return floats;
+    }
+
     [[nodiscard]] static PatchSizes measure_patch(const PatchView& v, float rate, const Layout& l) {
         PatchSizes s;
         const auto aligned = [&l](u32 n) { return (n + l.state_align - 1) / l.state_align * l.state_align; };
@@ -756,7 +787,7 @@ class Synth {
         s.voice_state = aligned(v.h.delays * l.delay_line);
         for (u32 i = 0; i < v.h.control_steps; ++i) s.control_state += aligned(state(v.step(i).op));
         for (u32 i = 0; i < v.h.voice_steps; ++i) s.voice_state += aligned(state(v.step(v.h.control_steps + i).op));
-        for (u32 i = 0; i < v.h.delays; ++i) s.bulk_floats += line_length(v.delay(i), rate, l.frame_size);
+        if (v.h.delays) s.bulk_floats = line_floats_of(v, rate, l.frame_size);
         return s;
     }
 
@@ -985,6 +1016,7 @@ class Synth {
         const auto aligned = [](u32 n) { return (n + K::state_align - 1) / K::state_align * K::state_align; };
         u32 control_state = 0, voice_state = aligned(line_bytes);
         b.ends = false;
+        LineKinds kinds;
         const u32 total = static_cast<u32>(v.h.control_steps) + v.h.voice_steps;
         for (u32 i = 0; i < total; ++i) {
             const bool control = i < v.h.control_steps;
@@ -1001,10 +1033,13 @@ class Synth {
             for (u32 a = 0; a < sig.outs; ++a) d.out[a] = decode_operand(w.out[a], g, v);
             for (u32 a = 0; a < sig.ins; ++a) d.in[a] = decode_operand(w.in[a], g, v);
             if (sig.ends) b.ends = true;
+            if (v.h.delays && !control) kinds.mark(w.op, w.resource);
         }
         b.control_state = control_state;
         b.voice_state = voice_state;
-        for (u32 i = 0; i < v.h.delays; ++i) b.line_lengths[i] = line_length(v.delay(i), rate_);
+        for (u32 i = 0; i < v.h.delays; ++i) {
+            b.line_lengths[i] = line_length(v.delay(i), rate_) | (kinds.i16(i) ? kLineI16 : 0u);
+        }
         for (u32 i = 0; i < v.h.refs; ++i) {
             const ChunkRef* c = g.chunks->find(v.ref(i));
             if (c->kind == static_cast<u8>(ChunkKind::Table)) {
@@ -1151,8 +1186,9 @@ class Synth {
         auto* lines = reinterpret_cast<DelayLine*>(v.state);
         float* bulk = v.bulk;
         for (u32 i = 0; i < view.h.delays; ++i) {
-            lines[i] = {bulk, b.line_lengths[i], 0, 0};  // Never cleared: `written` makes old contents unreachable
-            bulk += b.line_lengths[i];
+            const u32 length = b.line_lengths[i] & ~kLineI16;
+            lines[i] = {bulk, length, 0, 0};  // Never cleared: `written` makes old contents unreachable
+            bulk += line_floats(length, (b.line_lengths[i] & kLineI16) != 0);
         }
         for (u32 i = 0; i < view.h.params; ++i) {
             const ParamDesc d = view.param(i);
@@ -1203,8 +1239,8 @@ class Synth {
                 if (op_signature(Op(t.op)).resource == Resource::Delay && !control) {
                     const auto* a = reinterpret_cast<const DelayLine*>(from_state) + f.resource;
                     auto* b = reinterpret_cast<DelayLine*>(to_state) + t.resource;
-                    if (a->length == b->length) {
-                        std::memcpy(b->data, a->data, sizeof(float) * a->length);
+                    if (a->length == b->length) {  // The same op, so the same kind of sample
+                        std::memcpy(b->data, a->data, sizeof(float) * line_floats(a->length, op_line_i16(t.op)));
                         b->write = a->write;
                         b->written = a->written;
                     }

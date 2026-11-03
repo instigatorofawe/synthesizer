@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { HISTORY_LIMIT, History, type Undoable } from '#lib/History.ts';
 
 // A document as the page holds one, with its edits going through a history as the page's go.
-function document(history: History<string>, key: string, text: string) {
+function opened(history: History<string>, key: string, text: string) {
 	const doc: { text: string; edit: (next: string, typing?: boolean) => void; buttons: Undoable } = {
 		text,
 		edit(next, typing = false) {
@@ -17,7 +17,7 @@ function document(history: History<string>, key: string, text: string) {
 describe('the undo history', () => {
 	it('undoes and redoes edits in order', () => {
 		const history = new History<string>();
-		const doc = document(history, 'patch:a', 'one');
+		const doc = opened(history, 'patch:a', 'one');
 		expect(doc.buttons.canUndo).toBe(false);
 		doc.edit('two');
 		doc.edit('three');
@@ -38,7 +38,7 @@ describe('the undo history', () => {
 
 	it('drops what could be redone when a new edit comes after an undo', () => {
 		const history = new History<string>();
-		const doc = document(history, 'timeline:a', 'one');
+		const doc = opened(history, 'timeline:a', 'one');
 		doc.edit('two');
 		doc.edit('three');
 		doc.buttons.undo();
@@ -53,9 +53,9 @@ describe('the undo history', () => {
 
 	it('keeps a history for each document, whichever is open', () => {
 		const history = new History<string>();
-		const patch = document(history, 'patch:a', 'p0');
-		const timeline = document(history, 'timeline:a', 't0');
-		const other = document(history, 'patch:b', 'q0');
+		const patch = opened(history, 'patch:a', 'p0');
+		const timeline = opened(history, 'timeline:a', 't0');
+		const other = opened(history, 'patch:b', 'q0');
 		patch.edit('p1');
 		timeline.edit('t1');
 		other.edit('q1');
@@ -73,7 +73,7 @@ describe('the undo history', () => {
 
 	it('takes a run of typing as one step, until it ends', () => {
 		const history = new History<string>();
-		const doc = document(history, 'patch:a', '{}');
+		const doc = opened(history, 'patch:a', '{}');
 		doc.edit('{ ', true);
 		doc.edit('{ "', true);
 		doc.edit('{ "a', true);
@@ -95,7 +95,7 @@ describe('the undo history', () => {
 
 	it('ends a run of typing at an undo, so typing after it is a new step', () => {
 		const history = new History<string>();
-		const doc = document(history, 'patch:a', 'a');
+		const doc = opened(history, 'patch:a', 'a');
 		doc.edit('ab', true);
 		doc.buttons.undo();
 		doc.edit('ac', true);
@@ -107,7 +107,7 @@ describe('the undo history', () => {
 
 	it('forgets the oldest step past its limit', () => {
 		const history = new History<string>();
-		const doc = document(history, 'timeline:a', '0');
+		const doc = opened(history, 'timeline:a', '0');
 		for (let i = 1; i <= HISTORY_LIMIT + 50; i++) doc.edit(String(i));
 		let undone = 0;
 		while (doc.buttons.canUndo) {
@@ -120,8 +120,8 @@ describe('the undo history', () => {
 
 	it('forgets a document that was deleted, and only that one', () => {
 		const history = new History<string>();
-		const kept = document(history, 'patch:a', 'a');
-		const gone = document(history, 'patch:b', 'b');
+		const kept = opened(history, 'patch:a', 'a');
+		const gone = opened(history, 'patch:b', 'b');
 		kept.edit('a1');
 		gone.edit('b1', true);
 		history.keep(new Set(['patch:a']));

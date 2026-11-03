@@ -1,7 +1,7 @@
 {
  "patches": {
   "g0": {
-   "name": "g0",
+   "name": "grain 0",
    "graph": {
     "nodes": [
      {
@@ -62,7 +62,7 @@
    }
   },
   "g1": {
-   "name": "g1",
+   "name": "grain 1",
    "graph": {
     "nodes": [
      {
@@ -123,7 +123,7 @@
    }
   },
   "g2": {
-   "name": "g2",
+   "name": "grain 2",
    "graph": {
     "nodes": [
      {
@@ -184,7 +184,7 @@
    }
   },
   "g3": {
-   "name": "g3",
+   "name": "grain 3",
    "graph": {
     "nodes": [
      {
@@ -245,7 +245,7 @@
    }
   },
   "g4": {
-   "name": "g4",
+   "name": "grain 4",
    "graph": {
     "nodes": [
      {
@@ -306,7 +306,7 @@
    }
   },
   "g5": {
-   "name": "g5",
+   "name": "grain 5",
    "graph": {
     "nodes": [
      {
@@ -367,7 +367,7 @@
    }
   },
   "g6": {
-   "name": "g6",
+   "name": "grain 6",
    "graph": {
     "nodes": [
      {
@@ -428,7 +428,7 @@
    }
   },
   "g7": {
-   "name": "g7",
+   "name": "grain 7",
    "graph": {
     "nodes": [
      {
@@ -489,7 +489,7 @@
    }
   },
   "g8": {
-   "name": "g8",
+   "name": "grain 8",
    "graph": {
     "nodes": [
      {
@@ -550,7 +550,7 @@
    }
   },
   "g9": {
-   "name": "g9",
+   "name": "grain 9",
    "graph": {
     "nodes": [
      {
@@ -611,7 +611,7 @@
    }
   },
   "g10": {
-   "name": "g10",
+   "name": "grain 10",
    "graph": {
     "nodes": [
      {
@@ -672,7 +672,7 @@
    }
   },
   "g11": {
-   "name": "g11",
+   "name": "grain 11",
    "graph": {
     "nodes": [
      {
@@ -733,7 +733,7 @@
    }
   },
   "g12": {
-   "name": "g12",
+   "name": "grain 12",
    "graph": {
     "nodes": [
      {
@@ -794,7 +794,7 @@
    }
   },
   "g13": {
-   "name": "g13",
+   "name": "grain 13",
    "graph": {
     "nodes": [
      {
@@ -855,7 +855,7 @@
    }
   },
   "g14": {
-   "name": "g14",
+   "name": "grain 14",
    "graph": {
     "nodes": [
      {
@@ -916,7 +916,7 @@
    }
   },
   "g15": {
-   "name": "g15",
+   "name": "grain 15",
    "graph": {
     "nodes": [
      {

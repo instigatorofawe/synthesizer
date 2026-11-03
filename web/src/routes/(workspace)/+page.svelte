@@ -21,11 +21,11 @@
 	import Meter from '#lib/Meter.svelte';
 	import PatchPanel from '#lib/PatchPanel.svelte';
 	import ReportPanel from '#lib/ReportPanel.svelte';
-	import { buildRequest, reachable, type CompileReport } from '#lib/Request.ts';
+	import { buildRequest, missingAssets, reachable, type AssetEntry, type CompileReport } from '#lib/Request.ts';
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import Splitter from '#lib/Splitter.svelte';
-	import { BEATS_PER_BAR, patchUses, settlingWrites, tempoAt, type PatchUse } from '#lib/TimelineEdit.ts';
+	import { BEATS_PER_BAR, patchUses, replacePatch, settlingWrites, tempoAt, type PatchUse } from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
 	import {
 		actionOn,
@@ -110,6 +110,11 @@
 	const savedPatch = $derived(
 		shown && !shown.example ? data.library.patches.find((p) => p.id === shown.patch.id) : undefined
 	);
+	const shownBuiltin = $derived(savedPatch?.builtin ?? false);
+	// What Duplicate copies: the patch on screen, or for an example's patch, the built-in one it is in every library as.
+	const duplicateId = $derived(
+		!shown ? null : shown.example ? (recipe?.builtins[shown.patch.id] ?? null) : savedPatch ? savedPatch.id : null
+	);
 	const savedPatchText = $derived(savedPatch ? JSON.stringify(savedPatch.graph, null, 1) : '');
 	const patchDraft = $derived(savedPatch ? drafts[draftKey('patch', savedPatch.id)] : undefined);
 	const patchName = $derived(shown?.patch.name ?? '');
@@ -140,7 +145,7 @@
 	}
 
 	function patchEdited(change: { name?: string; text?: string; graph?: Graph }) {
-		if (!savedPatch) return;
+		if (!savedPatch || savedPatch.builtin) return;
 		const key = draftKey('patch', savedPatch.id);
 		const base = {
 			kind: 'patch' as const,
@@ -181,6 +186,62 @@
 			drafts = next;
 		};
 	};
+
+	// A copy of a built-in patch takes its place in the timeline open below, as an unsaved edit, so that changing it is heard
+	// where it plays. Either way the copy opens above.
+	const duplicating: SubmitFunction = () => {
+		return async ({ result, update }) => {
+			await update({ reset: false });
+			if (result.type !== 'success') return;
+			const made = result.data?.duplicated as { from: string; to: string } | undefined;
+			if (!made) return;
+			const original = data.library.patches.find((p) => p.id === made.from);
+			if (original?.builtin && saved && timelineDoc && referencedPatches(timelineDoc).includes(made.from)) {
+				timelineEdited({ text: JSON.stringify(replacePatch(timelineDoc, made.from, made.to), null, 1) });
+			}
+			open({ patch: made.to, part: null });
+		};
+	};
+
+	// ------------------------------------------------------------------------------------------------------- recordings
+
+	// The library's load carries the recordings of what someone made or uses, and a built-in patch's arrive from /assets once
+	// it is opened or put in an edit. Until they do, nothing compiles, so a compile never misses one that is on its way.
+	let fetchedAssets = $state.raw<AssetEntry[]>([]);
+	let fetchingAssets = $state(0);
+	let assetProblem = $state('');
+	const requestedAssets = new Set<string>();
+	const assets = $derived.by(() => {
+		const held = new Set(data.library.assets.map((asset) => asset.id));
+		return [...data.library.assets, ...fetchedAssets.filter((asset) => !held.has(asset.id))];
+	});
+	const neededAssets = $derived(
+		missingAssets(
+			[...(timelineDoc ? referencedPatches(timelineDoc) : []), ...(shown && !shown.example ? [shown.patch.id] : [])],
+			library,
+			assets
+		)
+	);
+	$effect(() => {
+		const wanted = neededAssets.filter((id) => !requestedAssets.has(id));
+		if (wanted.length) untrack(() => void fetchAssets(wanted));
+	});
+
+	async function fetchAssets(ids: string[]) {
+		for (const id of ids) requestedAssets.add(id);
+		fetchingAssets++;
+		try {
+			const response = await fetch(`/assets?${new URLSearchParams(ids.map((id) => ['id', id]))}`);
+			if (!response.ok) throw new Error(`the server said ${response.status}`);
+			fetchedAssets = [...fetchedAssets, ...((await response.json()) as AssetEntry[])];
+			assetProblem = '';
+		} catch (e) {
+			for (const id of ids) requestedAssets.delete(id); // So the next edit that needs them asks again
+			assetProblem = `Recordings didn't load: ${e instanceof Error ? e.message : String(e)}`;
+		} finally {
+			fetchingAssets--;
+		}
+	}
 
 	// A deleted patch or timeline takes its draft with it.
 	$effect(() => {
@@ -249,8 +310,8 @@
 		// A document that doesn't fit the schema goes whole, so that the compiler is what says what's wrong with it.
 		const checked = timelineSchema.safeParse(timelineParsed.value);
 		const reached = checked.success
-			? reachable(referencedPatches(checked.data), library, data.library.assets)
-			: { patches: library, assets: data.library.assets };
+			? reachable(referencedPatches(checked.data), library, assets)
+			: { patches: library, assets };
 		const programs = [{ id: saved.id, name: timelineName, timeline: timelineParsed.value as Timeline }];
 		return {
 			request: buildRequest(reached.patches, reached.assets, programs),
@@ -265,7 +326,7 @@
 		const timeline = isInsert(shown.patch.graph)
 			? { master: { inserts: [{ id: 1, patch: id }] } }
 			: { tracks: [{ id: 1, name: patchName, voices: 8, slots: [id] }] };
-		const reached = reachable([id], library, data.library.assets);
+		const reached = reachable([id], library, assets);
 		return buildRequest(
 			reached.patches,
 			reached.assets,
@@ -308,6 +369,7 @@
 	}
 
 	async function compile(source: Source) {
+		if (fetchingAssets > 0) return; // Their arrival schedules this again
 		const mine = asked[source];
 		const done = () => {
 			if (asked[source] === mine) compiling[source] = false;
@@ -372,11 +434,11 @@
 	// What each image is made of. Reading it here is what runs these again when any of it changes, and an image whose request
 	// hasn't changed isn't compiled again.
 	$effect(() => {
-		void [recipe, saved, timelineText, timelineName, library, data.library.assets];
+		void [recipe, saved, timelineText, timelineName, library, assets, fetchingAssets];
 		schedule('song');
 	});
 	$effect(() => {
-		void [aloneWanted, shown, patchName, library, data.library.assets];
+		void [aloneWanted, shown, patchName, library, assets, fetchingAssets];
 		schedule('alone');
 	});
 
@@ -703,7 +765,10 @@
 					name={patchName}
 					graph={shown?.patch.graph ?? null}
 					text={patchText}
-					readonly={shown?.example ?? true}
+					readonly={!shown || shown.example || shownBuiltin}
+					builtin={shownBuiltin}
+					duplicate={duplicateId}
+					{duplicating}
 					dirty={patchDraft !== undefined}
 					users={savedPatch?.users ?? []}
 					parts={recipe && shown?.example ? recipe.patches : []}
@@ -776,6 +841,7 @@
 		{#if form?.message}<span class="problem">{form.message}</span>{/if}
 		{#if form?.saved}<span class="muted">Saved.</span>{/if}
 		{#if renderProblem}<span class="problem">WAV export: {renderProblem}</span>{/if}
+		{#if assetProblem}<span class="problem">{assetProblem}</span>{/if}
 		{#if rejected}<span class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</span
 			>{/if}
 		{#if timelineParsed.error}<span class="problem">Timeline JSON: {timelineParsed.error}</span>{/if}
@@ -783,7 +849,7 @@
 		{#each errors as problem (`${problem.where} ${problem.message}`)}
 			<span class="problem" data-testid="compile-error"><code>{problem.where}</code> {problem.message}</span>
 		{/each}
-		{#if goodSong && !busy && !form?.message && !form?.saved && !rejected && !errors.length && !timelineParsed.error && !patchProblem}
+		{#if goodSong && !busy && !form?.message && !form?.saved && !rejected && !assetProblem && !errors.length && !timelineParsed.error && !patchProblem}
 			<span class="muted">{(goodSong.report.image_bytes / 1024).toFixed(1)} KB image</span>
 		{/if}
 		{#if !started}<span class="muted">Audio starts with Play, a key, or Start audio.</span>{/if}

@@ -1,12 +1,13 @@
 // What the browser lists and every editor draws from. It reads no part of the address, so opening another timeline or patch
-// doesn't send it again: the library holds the samples, which can run to megabytes.
+// doesn't send it again: the library holds the samples, which can run to megabytes. A built-in patch's recordings come only
+// once something uses it, and the page asks /assets for those of one it opens before then.
 import { nodeCatalog } from '#lib/server/Compile.ts';
 import { db } from '#lib/server/Db.ts';
 import { GROUPS, RECIPES } from '#lib/server/Recipes.ts';
 import {
 	allPatches,
-	assetsFor,
 	bundlesWithMembers,
+	libraryAssets,
 	listAssets,
 	listPatches,
 	listTimelines,
@@ -18,6 +19,7 @@ export const load = async () => {
 	const patches = allPatches(db()).map((patch) => ({
 		...patch,
 		revision: rows.get(patch.id)?.revision ?? 0,
+		builtin: rows.get(patch.id)?.builtin ?? false,
 		users: patchUsers(db(), patch.id)
 	}));
 	return {
@@ -25,10 +27,7 @@ export const load = async () => {
 			patches,
 			timelines: listTimelines(db()),
 			samples: listAssets(db()),
-			assets: assetsFor(
-				db(),
-				patches.map((patch) => patch.id)
-			),
+			assets: libraryAssets(db()),
 			bundles: bundlesWithMembers(db())
 		},
 		examples: GROUPS.map((group) => ({

@@ -71,6 +71,11 @@ struct PatchView {
     [[nodiscard]] float delay(u32 i) const { return load<float>(base + delays + i * sizeof(float)); }
     [[nodiscard]] u16 in_port(u32 i) const { return load<u16>(base + in_ports + i * sizeof(u16)); }
     [[nodiscard]] WireStep step(u32 i) const { return load<WireStep>(base + steps + i * sizeof(WireStep)); }
+    // Two fields of a step, for a walk that needs only those, so it doesn't copy the whole step each time.
+    [[nodiscard]] u8 step_op(u32 i) const { return load<u8>(base + steps + i * sizeof(WireStep)); }
+    [[nodiscard]] u16 step_resource(u32 i) const {
+        return load<u16>(base + steps + i * sizeof(WireStep) + offsetof(WireStep, resource));
+    }
 };
 
 namespace detail {
@@ -203,6 +208,8 @@ class Bits {
         buffers.set(port);
     }
     Bits asset_refs, zones_checked, wide_zones_checked;  // A table two ops share is checked for each one's rows
+    Bits f32_lines, i16_lines;  // A delay line holds one kind of sample, so every step on it must agree
+    static_assert(kMaxPatchDelays <= kMaxRegisters);
     for (u32 i = 0; i < h.refs; ++i) {
         const u64 hash = p.ref(i);
         if (chunks.find(hash, ChunkKind::Asset)) {
@@ -306,9 +313,13 @@ class Bits {
             case Resource::Asset:
                 if (s.resource >= h.refs || !chunks.find(p.ref(s.resource), ChunkKind::Asset)) return false;
                 break;
-            case Resource::Delay:
+            case Resource::Delay: {
                 if (s.resource >= h.delays) return false;
+                const bool i16 = op_line_i16(s.op);
+                if ((i16 ? f32_lines : i16_lines).get(s.resource)) return false;
+                (i16 ? i16_lines : f32_lines).set(s.resource);
                 break;
+            }
             case Resource::None:
                 if (s.resource != 0) return false;
                 break;

@@ -728,3 +728,141 @@ TEST(Shape, StaysOnTheCurveForAnyInput) {
     const auto out = shaped({0.25f, 0.5f, 0.75f}, {-3.0f, kNan, -kInfinity});
     for (const float sample : out) EXPECT_EQ(sample, 0.25f);
 }
+
+namespace {
+
+// One step on a delay line it owns, fed a signal a frame at a time. A write and a read share the line, as a delay
+// node's two steps do.
+template <SynthConfig C = kMono>
+struct Line {
+    Line(std::initializer_list<Op> ops, u8 mode, std::initializer_list<float> inputs, float seconds = 0.05f)
+        : scalars(inputs), buffers(2 * C.frame_size) {
+        const auto length = static_cast<u32>(seconds * kRate) + C.frame_size + 4;
+        storage.resize(length);
+        line = {storage.data(), length, 0, 0};
+        context.lines = &line;
+        context.buffers = buffers.data();
+        context.banks[static_cast<u16>(Bank::Const)] = scalars.data();
+        context.state = reinterpret_cast<std::byte*>(state);
+        context.rate = kRate;
+        context.inverse_rate = 1.0f / kRate;
+        for (const Op op : ops) {
+            DecodedStep s{};
+            s.op = static_cast<u8>(op);
+            s.mode = mode;
+            const OpSignature sig = op_signature(op);
+            if (sig.outs) s.out[0] = {static_cast<u16>(Bank::Buffer), 1};
+            for (u16 i = 0; i < sig.ins; ++i) {
+                s.in[i] = sig.in[i] == Arg::Buffer ? DecodedOperand{static_cast<u16>(Bank::Buffer), 0}
+                                                   : DecodedOperand{static_cast<u16>(Bank::Const), i};
+            }
+            steps.push_back(s);
+        }
+    }
+
+    std::vector<float> run(const std::vector<float>& in) {
+        std::vector<float> out;
+        for (std::size_t at = 0; at < in.size(); at += C.frame_size) {
+            std::copy_n(in.begin() + static_cast<std::ptrdiff_t>(at), C.frame_size, buffers.begin());
+            for (const DecodedStep& s : steps) Kernels<C, ScalarBackend>::run_step(s, context);
+            out.insert(out.end(), buffers.begin() + C.frame_size, buffers.end());
+        }
+        return out;
+    }
+
+    std::vector<float> scalars;
+    std::vector<float> buffers;
+    std::vector<float> storage;  // twice what an i16 line needs, which is harmless
+    DelayLine line{};
+    u64 state[8] = {};
+    std::vector<DecodedStep> steps;
+    RunContext context{};
+};
+
+std::vector<float> wobble(u32 samples, float level) {
+    std::vector<float> x(samples);
+    for (u32 i = 0; i < samples; ++i) {
+        x[i] = level * static_cast<float>(std::sin(0.031 * i) * 0.7 + std::sin(0.173 * i + 1.0) * 0.3);
+    }
+    return x;
+}
+
+float truncated(float x) { return static_cast<float>(static_cast<std::int32_t>(x * 32768.0f)) / 32768.0f; }
+
+}  // namespace
+
+TEST(I16Lines, ADelayGivesBackWhatWentInCutToSixteenBits) {
+    const auto in = wobble(4096, 0.9f);
+    for (const u8 mode : {u8{0}, kReadBeforeWrite}) {
+        Line<> f32({Op::DelayWrite, Op::DelayRead}, mode, {0.01f});
+        Line<> i16({Op::DelayWriteI16, Op::DelayReadI16}, mode, {0.01f});
+        if (mode == kReadBeforeWrite) {  // A feedback read comes before its write
+            std::swap(f32.steps[0], f32.steps[1]);
+            std::swap(i16.steps[0], i16.steps[1]);
+        }
+        const auto exact = f32.run(in), narrow = i16.run(in);
+        ASSERT_EQ(exact.size(), narrow.size());
+        u32 delayed = 0;
+        for (std::size_t i = 0; i < exact.size(); ++i) {
+            ASSERT_EQ(narrow[i], truncated(exact[i])) << "mode " << int(mode) << " at " << i;
+            delayed += exact[i] != 0.0f;
+        }
+        EXPECT_GT(delayed, 3000u);
+    }
+}
+
+TEST(I16Lines, HoldFullScaleCutTowardsZeroAndTakeANanAsSilence) {
+    const float lsb = 1.0f / 32768.0f;
+    std::vector<float> in(kFrame * 4, 0.0f);
+    const std::vector<std::pair<float, float>> cases = {
+        {2.0f, 32767 * lsb}, {-2.0f, -1.0f},      {kNan, 0.0f},        {kInfinity, 32767 * lsb},
+        {1.0f, 32767 * lsb}, {-1.0f, -1.0f},      {0.99f * lsb, 0.0f}, {-0.99f * lsb, 0.0f},
+        {1.5f * lsb, lsb},   {-1.5f * lsb, -lsb}, {-kInfinity, -1.0f}, {0.25f, 0.25f},
+    };
+    for (std::size_t i = 0; i < cases.size(); ++i) in[i] = cases[i].first;
+    Line<> line({Op::DelayWriteI16, Op::DelayReadI16}, 0, {0.0f}, 0.01f);
+    const auto out = line.run(in);
+    for (std::size_t i = 0; i < cases.size(); ++i) EXPECT_EQ(out[i], cases[i].second) << i;
+}
+
+TEST(I16Lines, ACombAndAnAllpassStayNearTheirF32Forms) {
+    const auto in = wobble(48000, 0.1f);  // A comb at this feedback gains up to 6.25 times, and stays below full scale
+    const struct {
+        Op exact, narrow;
+        std::initializer_list<float> inputs;
+    } kinds[] = {{Op::Comb, Op::CombI16, {0.0f, 0.0297f, 0.84f, 0.2f}},
+                 {Op::Allpass, Op::AllpassI16, {0.0f, 0.0051f, 0.5f}}};
+    for (const auto& k : kinds) {
+        Line<> f32({k.exact}, 0, k.inputs), i16({k.narrow}, 0, k.inputs);
+        const auto a = f32.run(in), b = i16.run(in);
+        float peak = 0.0f, worst = 0.0f;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            peak = std::max(peak, std::fabs(a[i]));
+            worst = std::max(worst, std::fabs(a[i] - b[i]));
+        }
+        EXPECT_GT(peak, 0.05f);
+        EXPECT_LT(20.0f * std::log10(worst / peak), -65.0f) << static_cast<int>(k.exact);
+    }
+}
+
+TEST(I16Lines, ACombDrivenPastFullScaleStaysFinite) {
+    const auto in = wobble(48000, 4.0f);
+    Line<> line({Op::CombI16}, 0, {0.0f, 0.0061f, 0.995f, 0.0f});
+    for (const float s : line.run(in)) {
+        ASSERT_TRUE(std::isfinite(s));
+        ASSERT_LE(std::fabs(s), 1.0f);
+    }
+}
+
+// A line that rounded to nearest would keep a sample of 1 in a comb whose feedback is above a half for ever, as a buzz
+// at -90 dB that never ends. Truncating towards zero lets every tail reach silence.
+TEST(I16Lines, ATailDiesAwayToNothing) {
+    for (const Op op : {Op::CombI16, Op::AllpassI16}) {
+        std::vector<float> in(48000 * 4, 0.0f);
+        for (u32 i = 0; i < 4800; ++i) in[i] = 0.3f * static_cast<float>(std::sin(0.05 * i));
+        Line<> line({op}, 0, {0.0f, 0.0297f, 0.9f, 0.1f});
+        const auto out = line.run(in);
+        for (std::size_t i = out.size() - 4800; i < out.size(); ++i)
+            ASSERT_EQ(out[i], 0.0f) << static_cast<int>(op) << " at " << i;
+    }
+}

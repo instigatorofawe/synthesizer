@@ -358,6 +358,67 @@ TEST(Synth, SwappingToTheSameImageIsInaudible) {
     EXPECT_LT(worst, 1e-5f);
 }
 
+// The demo with its reverb's combs and allpasses on 16-bit lines, which revision 8 added. Its combs run up to about
+// twice full scale, where a 16-bit line clips, so this halves what goes in and doubles what comes out, as an author
+// would. Halving is exact, so the f32 reverb would sound the same either way.
+std::vector<std::byte> compile_demo_i16() {
+    json request = demo();
+    json& graph = request["patches"]["reverb"]["graph"];
+    for (json& n : graph["nodes"]) {
+        if (n.at("type") == "comb" || n.at("type") == "allpass") n["line"] = "i16";
+        if (n.at("id") == 19) n["inputs"]["b"] = n["inputs"]["b"].get<double>() * 2;
+    }
+    for (json& e : graph["edges"]) {
+        if (e.at("from") == 2) e["from"] = 90;
+    }
+    graph["nodes"].push_back({{"id", 90}, {"type", "mul"}, {"inputs", {{"b", 0.5}}}});
+    graph["edges"].push_back({{"from", 2}, {"to", 90}, {"input", "a"}});
+    return compile_image(request).image;
+}
+
+TEST(I16Lines, HalveWhatTheLinesTakeAndSoundAlmostTheSame) {
+    const auto wide = compile_demo(), narrow = compile_demo_i16();
+    const LoadedImage a(wide), b(narrow);
+    const auto need_a = Synth<kStereo>::bytes_required(a.table, a.loader.program_hash(0), kRate);
+    const auto need_b = Synth<kStereo>::bytes_required(b.table, b.loader.program_hash(0), kRate);
+    EXPECT_NEAR(static_cast<double>(need_b.bulk), static_cast<double>(need_a.bulk) / 2, 64.0)
+        << "the demo's bulk memory is its reverb's lines";
+
+    Rig<kStereo> f32(wide), i16(narrow);
+    play(f32);
+    play(i16);
+    const auto x = render_stereo(f32, 600), y = render_stereo(i16, 600);
+    float peak = 0, worst = 0;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        peak = std::max(peak, std::fabs(x[i]));
+        worst = std::max(worst, std::fabs(x[i] - y[i]));
+    }
+    EXPECT_GT(worst, 0.0f);
+    EXPECT_LT(20.0f * std::log10(worst / peak), -68.0f);  // 70.6 dB below [measured]
+    EXPECT_EQ(i16.engine.guard_trips(), 0u);
+}
+
+TEST(I16Lines, ASwapCarriesThemAndASwapToF32StartsThemAfresh) {
+    const auto narrow = compile_demo_i16();
+    Rig<kStereo> rig(narrow), reference(narrow);
+    play(rig);
+    play(reference);
+    render_stereo(rig, 150);
+    render_stereo(reference, 150);
+    rig.swap_to(narrow);
+    const auto after = render_stereo(rig, 300), expected = render_stereo(reference, 300);
+    ASSERT_EQ(rig.engine.generation(), 2u);
+    float worst = 0;
+    for (std::size_t i = 0; i < after.size(); ++i) worst = std::max(worst, std::fabs(after[i] - expected[i]));
+    EXPECT_LT(worst, 1e-5f);
+
+    rig.swap_to(compile_demo());  // Other ops, so nothing carries, and the lines start from silence
+    render_stereo(rig, 300);
+    EXPECT_EQ(rig.engine.generation(), 3u);
+    EXPECT_EQ(rig.engine.load_error(), LoadError::None);
+    EXPECT_EQ(rig.engine.guard_trips(), 0u);
+}
+
 TEST(Synth, AnEditDuringPlaybackIsNoisyOnlyInTheWayItShouldBe) {
     json request = demo();
     const auto image = compile_image(request).image;

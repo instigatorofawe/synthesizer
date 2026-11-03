@@ -1,7 +1,7 @@
-# modsynth design, revision 19
+# modsynth design, revision 20
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
-The wire format is frozen at version 1, now at revision 7. `docs/Format.md` is its specification, and where this document and that one differ, that
+The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
 one is right. This document replaces all earlier revisions, and everything needed from them is included here. Sections about later milestones are
 still proposals. Section 24 lists what is agreed but not built, and what is still undecided.
 
@@ -257,7 +257,8 @@ differs. The target profile records `channels`.
 Requirement 4 originally put the rate in the NTTP, and revision 3 proposed 0 to mean run time. A single runtime path is
 simpler, and parameters are physical units anyway. Hardware gains an option from it: running at 32 kHz gives 50% more
 cycles per sample and a third less delay memory with no change to the image's bytes. How it sounds does move, because control rate and the shortest
-feedback loop follow the rate, which open 21 covers.
+feedback loop follow the rate. That is accepted, and the rate stays a run-time setting rather than one an image declares, as frame size is (open 21):
+frequencies stay correct at any rate, and only what is timed in frames shifts.
 
 Delay lengths, phase increments, envelope and filter coefficients, and tick conversion are all derived at bind time. A
 rate change is a rebind through the same path as a generation swap, and it can fail on a device if the result no longer
@@ -281,7 +282,8 @@ embedded. It adds one requirement.
 feature a target lacks is unavailable when compiling for it, so the compile fails, and the loader refusing is the backstop, because
 delivery is one-way. Cheaper, less precise features exist, such as `Tone` or `"mode": "naive"`, but an author picks them and they sound the
 same everywhere. Nothing is rounded, substituted or lowered by target. A mono build folds at run time, which is the one exception, and
-it is treated as an output format, a position open 20 still has to confirm.
+it is treated as an output format (open 20). Every opcode runs on the board, and a new one stays available on embedded unless a measured
+budget fails, in which case a build leaves it out and a request for that target can't use it (open 19).
 
 **Target profile.** Revision 3 had devices report their state sizes, which cannot work without a link. Instead the firmware build writes
 a profile:
@@ -309,6 +311,10 @@ and how many voices each track could have with the others as they are, which a r
 
     Program "p" could need 58367 cycles in a frame, and this target has 51944. Every voice sounding at once is counted.
     Track 1 has 2 voices, and fits with 1.
+
+The bound counts a track's voices, not the notes it holds at once. How long a note sounds after its release is an envelope's to decide, and a
+lane can move it, so only the voice count bounds what sounds, and a refusal is never wrong. A Program that never uses all its voices, such as
+PrecutGrainCloud with 12 voices for grains of which 2 sound at once, fits once it asks for fewer, which the error says (open 33).
 
 Not built yet: showing fit in the editor.
 
@@ -405,7 +411,7 @@ index. One path serves every case.
 - Live events are validated at queue ingress and fuzzed. [measured: `note_on(200, ...)` crashed.]
 - Table contents are checked for non-finite values, sliced.
 - Each voice has an output guard, because about 14% of accepted fuzz images produced NaN or infinity [measured]. A guard trips only on values that
-  aren't finite, so a finite blow-up still reaches the output. Open 9 covers that.
+  aren't finite, so a finite blow-up still reaches the output. Section 24 has what is agreed to stop it (open 9).
 - Delay lines clear lazily, because a hostile image took 5.8 ms of a 2.67 ms frame [measured]. A device's cost table sets a
   compile-time and load-time limit alongside the memory limit, section 10, so on a device no image can overrun a frame. A desktop or a
   browser has no such limit, and an image there can still take longer than a frame.
@@ -531,7 +537,8 @@ Whole voice (2 oscillators, noise, 2 filters, envelope), per voice with 4 held:
 What became of the findings this model gave Milestone 7:
 
 - CMSIS-DSP is built with `ARM_MATH_LOOPUNROLL`. The table above models 10.8% for one voice, and on the board the median change in mean cycles was
-  0.0% [board], open 25.
+  0.0% [board], with Vocoder 9.9% slower and PhaseModElectricPiano 8.4% faster. So it stays a supported backend, held to the same checks, and
+  is no target's default (open 25).
 - `-ffp-contract=off` is set on every target, for section 16's reason.
 - Scalar kernels hold coefficients in locals, and the tuning above did the same for envelopes and samplers.
 - Kernels no longer call libm. What replaced it runs at control rate, and the cost table prices it with the steps that use it.
@@ -553,8 +560,12 @@ calibration. Cortex-M7 parts are not modelled, because the M4 table does not app
 
 RAM limits reverb before CPU does. Voice state is about 270 bytes per voice, but Freeverb-sized lines take 55 KB mono at
 48 kHz in f32. Stereo f32 will not fit an L476 alongside anything else. Mono i16 takes 27 KB, or mono f32 at 32 kHz takes
-37 KB. Lines are f32 today. An i16 line sounds different, so by section 10's rule it can't be a backend's choice: it would be an author's, through a new
-op or mode.
+37 KB. An i16 line sounds different, so by section 10's rule it can't be a backend's choice, and since revision 20 it is an author's: a `delay`,
+`comb` or `allpass` node with `"line": "i16"` compiles to the I16 form of its ops, format revision 8, whose line holds 16-bit samples in half
+the memory (open 32). A line's full scale is ±1, as an i16 recording's is, and it holds anything past that there, so an author keeps a line
+below it. The demo's reverb runs its combs up to about twice full scale: on i16 lines as it stands it differs from its f32 sound by up to 22 dB below its peak, and with
+its input halved and its output doubled 70.6 dB below its peak [measured]. Each further halving costs about 6 dB. The pieces keep their stereo f32 reverb, since
+they don't fit an L476's core either, but for the Invention, written for the board in a mono room of f32 lines, 33 KB.
 
 ## 16. Testing without a board
 
@@ -619,6 +630,11 @@ can't run there.
 moved more than 1% from them, if `firmware/NucleoCosts.hpp` isn't what they and the board's calibration give, or if a Program's dearest frame
 takes more instructions than its bound. A count depends on the compiler too, so that job runs in Debian trixie, whose arm-none-eabi-gcc
 14.2.1 wrote the baseline, and a change meant to move counts runs `tools/Bench.py m4` there and then `tools/Bench.py baseline`.
+
+The pieces stay out of the QEMU bench (open 31). Their full renders would take 13 minutes against 5.2 for every recipe, and the bound already
+says which fit the board: the first four, without their reverb, take 4 to 20 times a frame's budget [board], The Entertainer 7.4 times, and
+the Invention fits, room and all. `bench/ParallelBench.cpp` times their first 20
+seconds on a host, section 18.
 
 **The size gate.** `firmware/Check.sh` fails a board firmware over 112 KB of flash, with 16 KB left before its 128 KB runs into slot A. The
 scalar build takes 94.8 KB and the CMSIS one 96.7 KB.
@@ -1026,14 +1042,35 @@ CI runs each target for a short time on a new seed. That is a smoke test, and th
 
 ## 24. Agreed work and open decisions
 
-Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in section 5, 5 and 6 in section 6, 7 in section 7 and 8 in section 9. Open 24
-closed as yes, with the embedded recipes below. Opens
-17 and 18 went with the target rule, so there is no per-tier golden contract and no patch form chosen by target.
+Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in section 5, 5 and 6 in section 6, 7 in section 7 and 8 in section 9. Opens
+17 and 18 went with the target rule, so there is no per-tier golden contract and no patch form chosen by target. In revision 20 the user closed
+the embedded opens as they were recommended: 19 and 20 in section 10, 21 in section 9, 25 in section 15, 31 in section 17 and 33 in section 10.
+They decided 24, 26 and 32 too, and chose the direction for open 9, below. Open 24 is built, as the embedded recipes below.
 
 **Agreed, not built.**
 
 - Events off the frame boundary, section 6.
 - Delivery over BLE, and showing a target's fit in the editor, section 10.
+- **What stops a finite blow-up reaching speakers** (open 9), both parts of the direction it had. A request compiled for a device renders its
+  image on the desktop first, at the target's rate and frame size, and fails if any sample's magnitude passes full scale, so a device never
+  needs a limiter of its own. Desktop and browser playback and WAV export pass through a limiter in the host, after the engine, at full scale.
+  Neither changes the engine, and the NaN guards stay on every target.
+- **Time signatures and pickups** (open 26), which the user wants. The editor draws every timeline in 4/4 from tick 0, so Für Elise, in 3/8
+  after an eighth's pickup, is in its third bar where the ruler shows bar 2. The plan is a meter map and a pickup in the timeline document,
+  which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change.
+
+**Built for the board's memory** (revision 20), as section 15 describes: delay lines of 16-bit samples, an author's choice, closing open 32.
+Choices made there that the user hasn't weighed in on:
+- **Four new ops** rather than a mode, `DelayWriteI16`, `DelayReadI16`, `CombI16` and `AllpassI16`, since the lines of `Opcodes.def` never change
+  and `Comb` has no mode to give one. A line's ops must all be one kind or the other, which the loader checks.
+- **Full scale is ±1**, as an i16 recording's is, held there rather than wrapped. An author keeps a line below it, at about 6 dB for each
+  halving. A scale with headroom built in would have cost every line that doesn't need it. A NaN goes in as 0, which is what a Cortex-M4's
+  fixed-point conversion gives, so on the board one instruction does what takes about ten elsewhere, to the same bits.
+- **Truncation towards zero**, not rounding. Rounded to nearest, a comb or allpass whose feedback is above a half keeps a sample of 1 in its
+  line for ever: a Freeverb comb still played 4 of them, −78 dB, after 4 s of silence [measured], so a reverb would never go quiet. Truncated,
+  every tail reaches 0. The price is 12 dB of agreement with the f32 sound: the demo's reverb,
+  halved going in, is 70.6 dB below its peak from it rather than 82.6 [measured], as the quietest part of a tail dies a little sooner.
+- **In a graph** the field is `"line": "i16"` on `delay`, `comb` and `allpass`, and the editor offers it from the compiler's catalog.
 
 **Built for the examples' patches in the library**, as section 19 describes. The user asked for every patch the recipes and pieces use to be in the library from the start, read-only, with a duplicate
 to change one. Choices made there that the user hasn't weighed in on:
@@ -1069,7 +1106,7 @@ weighed in on:
 - **A slowdown in the notes:** a tempo change can cut a frame in two, and the bound charges every track and voice for each piece, 6% of the
   Invention's frame. So its last two bars slow down through where their notes fall, and its tempo map is one change.
 - **A reverb the board holds, from today's steps:** SmallRoom and the Invention use a mono room of four combs and two allpasses, whose lines are only
-  as long as their delays, 33 KB in all. If open 32 brings a cheaper one, they can take it. TapeEcho's repeats are one comb, 36 KB, a feedback delay
+  as long as their delays, 33 KB in all. Open 32's i16 lines, built in the same revision, would take half that. They keep f32 lines, which their counts and timings were taken with. TapeEcho's repeats are one comb, 36 KB, a feedback delay
   through a lowpass in one step.
 - **The Entertainer's form:** C plays once, the time that leads on, so the piece lasts three minutes. The repeat of B is an octave up, as marked.
 - **Groups:** the embedded recipes are a group of their own, and TempoRamp and ClipVariations start an "arrangement" group, for what a timeline does
@@ -1099,7 +1136,6 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 
 | # | Question | Position so far |
 |---|---|---|
-| 9 | What stops a finite blow-up reaching speakers? | A direction, not final: a volume limiter on desktop, and on embedded a render that validates the image when it is built on a desktop. To keep the target rule, the limiter would sit in the host after the engine, the validation ceiling at or below its threshold, and the NaN guards stay on every target. |
 | 10 | Should graphs get feedback shorter than a frame? | Recommended no. Keep it inside ops such as `OscMod`. Frame 32 already raises the limit to 1500 Hz. |
 | 11 | How far do events go off the frame boundary? | Recommended: live notes on their sample, and new ops that start on it. Changing a parameter within a frame would mean splitting frames, and frame 32 may make that unnecessary. |
 | 12 | MPE, polyphonic aftertouch and per-note bend? | Nothing prevents them. A voice would remember its NoteOn's channel, and events would address that. Held voices would need per-voice smoothing. Recommended: leave out unless MPE is a goal. The pieces found a need short of MPE: a brass or string note can't swell once it starts, so the chorale shapes its phrases by velocity, and the Grieg's crescendo moves each section's fader in ramps of four to eight bars. Revision 7 lets a legato line bring each slurred note's velocity, which covers a phrase on one voice and not a swell within a note. |
@@ -1107,16 +1143,12 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 | 14 | Envelope curves and looping envelopes? | Recommended later, as an `Env2` with a Table, because curves don't fit in 4 inputs. |
 | 15 | A live arpeggiator? | Recommended: leave it to the host, so the engine holds no keys. |
 | 16 | Clap, wavetable scanning, granular and shared LFO shapes? | Recommended: keep the workarounds until a real patch needs more. |
-| 19 | What is unavailable on embedded? | Nothing today: both board builds run every opcode. The check is built, section 10, so a build that leaves an opcode out makes it unavailable to requests that target it. Recommended: keep planned ops on embedded unless a measured budget fails. |
-| 20 | Are mono builds an exception to the target rule? | Recommended yes, as section 10 has it, with channel count as an output format. Folding was chosen before the rule existed and hasn't been confirmed since. |
-| 21 | Does sample rate need the same treatment as frame size? | Recommended no: leave it at run time and document it. Frequencies stay correct, and only frame-timed behaviour shifts, such as control rate and the shortest feedback loop. |
 | 23 | What authenticates an image over BLE? | A hash doesn't, and anyone in range can connect. Validation protects memory, but a valid image can still be very loud or overload the CPU. Recommended: BLE bonding, or signed images. |
-| 25 | Does CMSIS-DSP save enough on this chip? | No [board]. Over 60 programs the median change in mean cycles is 0.0%, with Vocoder 9.9% slower and PhaseModElectricPiano 8.4% faster. Section 15's model had 10.8% for one voice. Recommended: keep it as a supported backend, since it passes the same checks, and don't make it any target's default. |
-| 26 | Time signatures and pickups? | The editor draws every timeline in 4/4 from tick 0. Für Elise, in 3/8 after an eighth's pickup, is in its third bar where the ruler shows bar 2, and the chorale's pickup puts every bar line a beat early. Recommended: a meter map and a pickup in the timeline document, which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change. |
 | 27 | A sustain pedal? | A timeline has none, so `MakePieces.py` writes Für Elise's pedalling into how long its notes are. The piano roll then shows the pedal's notes rather than the player's, and moving a pedal change means rewriting durations. Recommended: a pedal lane per track that the compiler applies to note lengths, as it writes a tempo ramp as steps, so the format and engine stay as they are. A key played live under the pedal would still need the engine to hold its voice. |
 | 28 | Importing MIDI files? | Every piece began as a MIDI file or LilyPond source, and the app imports only WAV. A Standard MIDI File reader is 45 lines of `MakePieces.py`. Recommended: import a file as a new timeline, a track for each of its tracks, with its tempo map, and its pedal once open 27 gives it somewhere to go. |
-| 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks open 21's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
+| 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks section 9's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
 | 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
-| 31 | Should the benchmarks cover the pieces? | Partly done: `bench/ParallelBench.cpp` times the first 20 seconds of each on a host, serially and on a pool, section 18. On the board the first four's bound, without their reverb, is 4 to 20 times a frame's budget [board], and The Entertainer's 7.4 times. The Invention fits, room and all. Recommended: leave them out of the QEMU bench, whose full renders would take 13 minutes, as the bound already says which fit. |
-| 32 | Should there be a reverb an L476 can hold? | Every piece but the Invention sends to a stereo reverb that needs 188 KB of bulk memory, and the board has 64 KB, so none of those plays there [board]. The Invention and SmallRoom use a mono room of four combs and two allpasses, at 33 KB. The demo's reverb fits, at 47 KB. Section 15 has the arithmetic: mono i16 lines take 27 KB. A reverb that fits wouldn't make the pieces play on an L476: without theirs, they run at 164% to 469% of the core [board]. Recommended: a mono reverb mode, or i16 lines as a new op, chosen by an author like any other cheaper feature, and the pieces left as they are. |
-| 33 | Should the bound count a track's notes rather than its voices? | The compiler knows how many notes a track holds at once, but not how long each sounds after its release, which an envelope's time decides and a lane can move, so only the voice count bounds what sounds. Counting voices refuses some Programs that never use them all: PrecutGrainCloud has 12 voices for grains of which 2 sound at once, and would fit with 10. Recommended: keep counting voices, so a refusal is never wrong, and let the error and the report say how many fit, as they do. |
+
+**Declined.** Importing PureData patches, which the user decided against in revision 20 after it was scoped: the graph already has PureData's
+nodes, wires, inlets and subpatches, but its control logic, message envelopes and voice idioms have no counterpart here, and many common
+objects would each need a new op. It stays declined unless the user raises it again.

@@ -68,6 +68,11 @@ function(configure_firmware name channels backend script)
     add_custom_command(TARGET ${name} POST_BUILD COMMAND arm-none-eabi-size $<TARGET_FILE:${name}>)
 endfunction()
 
+# Main.cpp puts the golden images in with .incbin, which no dependency scan sees, so they're named here: a changed image
+# rebuilds every firmware that renders it.
+file(GLOB MODSYNTH_GOLDEN_IMAGES CONFIGURE_DEPENDS ${MODSYNTH_GOLDEN}/*.image)
+set_source_files_properties(Main.cpp PROPERTIES OBJECT_DEPENDS "${MODSYNTH_GOLDEN_IMAGES}")
+
 function(add_firmware name channels backend frame)
     add_executable(${name} Main.cpp)
     configure_firmware(${name} ${channels} ${backend} Link.ld)
@@ -145,6 +150,7 @@ set(MODSYNTH_FUZZ_SEED_J ${MODSYNTH_GOLDEN}/Zones.image CACHE FILEPATH "Tenth im
 set(MODSYNTH_FUZZ_SEED_K ${MODSYNTH_GOLDEN}/Hold.image CACHE FILEPATH "Eleventh image to fuzz from")
 set(MODSYNTH_FUZZ_SEED_L ${MODSYNTH_GOLDEN}/Mods.image CACHE FILEPATH "Twelfth image to fuzz from")
 set(MODSYNTH_FUZZ_SEED_M ${MODSYNTH_GOLDEN}/Steals.image CACHE FILEPATH "Thirteenth image to fuzz from")
+set(MODSYNTH_FUZZ_SEED_N ${MODSYNTH_GOLDEN}/Lines16.image CACHE FILEPATH "Fourteenth image to fuzz from")
 set(MODSYNTH_FUZZ_SECONDS 60 CACHE STRING "How long the fuzzer runs")
 set(MODSYNTH_FUZZ_RANDOM 1 CACHE STRING "Random seed for the fuzzer")
 set(FUZZ_FLAGS ${ARCH} -O2 -g -ffp-contract=off -fno-math-errno -fno-exceptions -fno-rtti -fno-threadsafe-statics
@@ -172,9 +178,15 @@ target_compile_definitions(Fuzz PRIVATE
     MODSYNTH_FUZZ_SEED_K="${MODSYNTH_FUZZ_SEED_K}"
     MODSYNTH_FUZZ_SEED_L="${MODSYNTH_FUZZ_SEED_L}"
     MODSYNTH_FUZZ_SEED_M="${MODSYNTH_FUZZ_SEED_M}"
+    MODSYNTH_FUZZ_SEED_N="${MODSYNTH_FUZZ_SEED_N}"
     MODSYNTH_FUZZ_SECONDS=${MODSYNTH_FUZZ_SECONDS}
     MODSYNTH_FUZZ_RANDOM=${MODSYNTH_FUZZ_RANDOM}
 )
+# The seeds go in with .incbin too.
+set_source_files_properties(Fuzz.cpp PROPERTIES OBJECT_DEPENDS "${MODSYNTH_FUZZ_SEED_A};${MODSYNTH_FUZZ_SEED_B};\
+${MODSYNTH_FUZZ_SEED_C};${MODSYNTH_FUZZ_SEED_D};${MODSYNTH_FUZZ_SEED_E};${MODSYNTH_FUZZ_SEED_F};${MODSYNTH_FUZZ_SEED_G};\
+${MODSYNTH_FUZZ_SEED_H};${MODSYNTH_FUZZ_SEED_I};${MODSYNTH_FUZZ_SEED_J};${MODSYNTH_FUZZ_SEED_K};${MODSYNTH_FUZZ_SEED_L};\
+${MODSYNTH_FUZZ_SEED_M};${MODSYNTH_FUZZ_SEED_N}")
 target_compile_options(Fuzz PRIVATE ${FUZZ_FLAGS})
 target_link_options(Fuzz PRIVATE ${ARCH} -nostartfiles --specs=nano.specs --specs=nosys.specs
     -Wl,--gc-sections -T ${CMAKE_CURRENT_SOURCE_DIR}/An386.ld)

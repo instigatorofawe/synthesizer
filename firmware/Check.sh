@@ -28,7 +28,7 @@ for image in Demo AllOps Waves Tones; do
     python3 tools/CompareAudio.py "golden/$image.mono.f32" "build/firmware/Mono128.$image.f32"
     python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/StereoCmsis128.$image.f32"
 done
-for image in Lanes Zones Hold Mods Steals; do
+for image in Lanes Zones Hold Mods Steals Lines16; do
     python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/Stereo.$image.f32"
     python3 tools/CompareAudio.py "golden/$image.mono.f32" "build/firmware/Mono.$image.f32"
     python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/StereoCmsis.$image.f32"

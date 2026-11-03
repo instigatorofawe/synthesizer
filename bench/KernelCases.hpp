@@ -165,6 +165,15 @@ inline constexpr KernelCase kKernelCases[] = {
     {.name = "Comb, filling", .op = Op::Comb, .in = {0.0f, 0.05f, 0.8f, 0.2f}, .written = 2400 - 16},
     {.name = "Allpass, filling", .op = Op::Allpass, .in = {0.0f, 0.05f, 0.5f}, .written = 2400 - 16},
     {.name = "DelayRead, filling", .op = Op::DelayRead, .in = {0.05f}, .written = 2400 + 16},
+    // The same on a line of 16-bit samples, which converts each one going in and coming out.
+    {.name = "DelayWriteI16", .op = Op::DelayWriteI16},
+    {.name = "DelayReadI16", .op = Op::DelayReadI16, .in = {0.05f}},
+    {.name = "DelayReadI16, feedback", .op = Op::DelayReadI16, .mode = kReadBeforeWrite, .in = {0.05f}},
+    {.name = "CombI16", .op = Op::CombI16, .in = {0.0f, 0.05f, 0.8f, 0.2f}},
+    {.name = "AllpassI16", .op = Op::AllpassI16, .in = {0.0f, 0.05f, 0.5f}},
+    {.name = "CombI16, filling", .op = Op::CombI16, .in = {0.0f, 0.05f, 0.8f, 0.2f}, .written = 2400 - 16},
+    {.name = "AllpassI16, filling", .op = Op::AllpassI16, .in = {0.0f, 0.05f, 0.5f}, .written = 2400 - 16},
+    {.name = "DelayReadI16, filling", .op = Op::DelayReadI16, .in = {0.05f}, .written = 2400 + 16},
     {.name = "Follow", .op = Op::Follow, .in = {0.0f, 0.1f}},
     {.name = "Follow, moving", .op = Op::Follow, .in = {0.0f, 0.1f}, .wobble = 0b10},
     {.name = "KMul", .op = Op::KMul, .in = {2.0f, 3.0f}},
@@ -359,7 +368,7 @@ class KernelRig {
     float table_[kTable + 1] = {};
     float floats_[2 * (kRecording + 1)] = {};
     std::int16_t whole_[2 * (kRecording + 1)] = {};
-    float line_data_[kLine] = {};
+    float line_data_[kLine] = {};  // or 16-bit samples, for the I16 ops
     alignas(8) std::byte state_[256] = {};
     DelayLine line_{};
     BoundResource resources_[2] = {};

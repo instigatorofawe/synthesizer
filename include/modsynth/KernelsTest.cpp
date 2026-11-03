@@ -811,11 +811,11 @@ TEST(I16Lines, ADelayGivesBackWhatWentInCutToSixteenBits) {
     }
 }
 
-TEST(I16Lines, HoldFullScaleCutTowardsZeroAndSendANanToTheBottom) {
+TEST(I16Lines, HoldFullScaleCutTowardsZeroAndTakeANanAsSilence) {
     const float lsb = 1.0f / 32768.0f;
     std::vector<float> in(kFrame * 4, 0.0f);
     const std::vector<std::pair<float, float>> cases = {
-        {2.0f, 32767 * lsb}, {-2.0f, -1.0f},      {kNan, -1.0f},       {kInfinity, 32767 * lsb},
+        {2.0f, 32767 * lsb}, {-2.0f, -1.0f},      {kNan, 0.0f},        {kInfinity, 32767 * lsb},
         {1.0f, 32767 * lsb}, {-1.0f, -1.0f},      {0.99f * lsb, 0.0f}, {-0.99f * lsb, 0.0f},
         {1.5f * lsb, lsb},   {-1.5f * lsb, -lsb}, {-kInfinity, -1.0f}, {0.25f, 0.25f},
     };

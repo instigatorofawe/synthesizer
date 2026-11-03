@@ -21,6 +21,34 @@ namespace modsynth {
     return static_cast<std::int32_t>(x + (x < 0.0f ? -0.5f : 0.5f));
 }
 
+// A 16-bit sample of a delay line, docs/Format.md: x * 32768 truncated towards zero and held to -32768 to 32767, with a
+// NaN as 0. A Cortex-M4's fixed-point conversion is exactly that in one instruction, where the portable form takes
+// about ten, and both give the same bits for every float. Reading one back is exact either way.
+#if defined(__arm__) && defined(__ARM_FP) && (__ARM_FP & 4) && __ARM_ARCH >= 7
+#define MODSYNTH_Q15_CONVERT 1
+#endif
+
+[[nodiscard]] inline std::int16_t to_q15(float x) {
+#ifdef MODSYNTH_Q15_CONVERT
+    asm("vcvt.s16.f32 %0, %0, #15" : "+t"(x));
+    return static_cast<std::int16_t>(std::bit_cast<std::int32_t>(x));
+#else
+    const float v = x * 32768.0f;  // A power of two, so exact unless it overflows, and then held like any other
+    if (!(v == v)) return 0;
+    return static_cast<std::int16_t>(static_cast<std::int32_t>(clamp(v, -32768.0f, 32767.0f)));
+#endif
+}
+
+[[nodiscard]] inline float from_q15(std::int16_t s) {
+#ifdef MODSYNTH_Q15_CONVERT
+    float x = std::bit_cast<float>(static_cast<std::int32_t>(s));
+    asm("vcvt.f32.s16 %0, %0, #15" : "+t"(x));
+    return x;
+#else
+    return static_cast<float>(s) * (1.0f / 32768.0f);
+#endif
+}
+
 // 2^x, for x clamped to -126 to 127. A Taylor series on the fractional part, which is at most a half.
 [[nodiscard]] inline float pow2(float x) {
     x = clamp(x, -126.0f, 127.0f);

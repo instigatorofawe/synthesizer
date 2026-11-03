@@ -1039,11 +1039,12 @@ They decided 24, 26 and 32 too, and chose the direction for open 9, below.
 Choices made there that the user hasn't weighed in on:
 - **Four new ops** rather than a mode, `DelayWriteI16`, `DelayReadI16`, `CombI16` and `AllpassI16`, since the lines of `Opcodes.def` never change
   and `Comb` has no mode to give one. A line's ops must all be one kind or the other, which the loader checks.
-- **Full scale is ±1**, as an i16 recording's is, held there rather than wrapped, so a NaN goes in as −1. An author keeps a line below it, at
-  6 dB of noise for each halving. A scale with headroom built in would have cost every line that doesn't need it.
+- **Full scale is ±1**, as an i16 recording's is, held there rather than wrapped. An author keeps a line below it, at about 6 dB for each
+  halving. A scale with headroom built in would have cost every line that doesn't need it. A NaN goes in as 0, which is what a Cortex-M4's
+  fixed-point conversion gives, so on the board one instruction does what takes about ten elsewhere, to the same bits.
 - **Truncation towards zero**, not rounding. Rounded to nearest, a comb or allpass whose feedback is above a half keeps a sample of 1 in its
   line for ever: a Freeverb comb still played 4 of them, −78 dB, after 4 s of silence [measured], so a reverb would never go quiet. Truncated,
-  every tail reaches 0, and a store is one conversion on every target. The price is 12 dB of agreement with the f32 sound: the demo's reverb,
+  every tail reaches 0. The price is 12 dB of agreement with the f32 sound: the demo's reverb,
   halved going in, is 70.6 dB below its peak from it rather than 82.6 [measured], as the quietest part of a tail dies a little sooner.
 - **In a graph** the field is `"line": "i16"` on `delay`, `comb` and `allpass`, and the editor offers it from the compiler's catalog.
 

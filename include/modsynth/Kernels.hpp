@@ -1229,22 +1229,21 @@ struct Kernels {
         return std::min(left, line.length - at);
     }
 
-    // A line holds floats, or for the I16 ops 16-bit samples: x * 32768, held to the i16 range, so a NaN is -32768,
-    // and truncated towards zero, which every target's conversion does in one instruction. Rounding to nearest would
-    // keep a sample of 1 in a loop whose gain is above a half for ever, so a tail would never reach silence. Reading
-    // one back is exact.
+    // A line holds floats, or for the I16 ops 16-bit samples, as to_q15 makes them: truncated towards zero, because
+    // rounding to nearest would keep a sample of 1 in a loop whose gain is above a half for ever, so a tail would never
+    // reach silence.
     template <class T>
     [[nodiscard]] static T* line_data(const DelayLine& line) {
         return reinterpret_cast<T*>(line.data);
     }
     [[nodiscard]] static float load_sample(float x) { return x; }
-    [[nodiscard]] static float load_sample(std::int16_t x) { return static_cast<float>(x) * (1.0f / 32768.0f); }
+    [[nodiscard]] static float load_sample(std::int16_t x) { return from_q15(x); }
     template <class T>
     [[nodiscard]] static T store_sample(float x) {
         if constexpr (std::is_same_v<T, float>) {
             return x;
         } else {
-            return static_cast<T>(static_cast<std::int32_t>(clamp(x * 32768.0f, -32768.0f, 32767.0f)));
+            return to_q15(x);
         }
     }
 

@@ -640,7 +640,7 @@
 		{ label: 'Copy', keys: 'copy', action: copyChosen },
 		...(readonly
 			? []
-			: [
+			: ([
 					{ label: 'Duplicate', keys: 'duplicate', action: duplicateChosen },
 					{
 						label: deletable.length > 1 ? `Delete ${deletable.length} nodes` : 'Delete',
@@ -648,7 +648,7 @@
 						disabled: !deletable.length,
 						action: removeChosen
 					}
-				])
+				] satisfies MenuItem[]))
 	];
 
 	function wireItems(): MenuItem[] {

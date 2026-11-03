@@ -184,7 +184,7 @@
 				action: () => change(index, { shape }),
 				disabled: !point || point.shape === shape || (shape !== 'step' && !roomFor(point))
 			})),
-			{ label: 'Delete', action: () => removed(index) }
+			{ label: 'Delete', keys: 'roll.delete', action: () => removed(index) }
 		];
 	}
 

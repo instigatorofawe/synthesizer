@@ -15,7 +15,10 @@
 	});
 
 	const GESTURES: { what: string; does: string }[] = [
-		{ what: 'Click in the roll', does: 'Add a note as long as the Draw length; drag before letting go to set its length' },
+		{
+			what: 'Click in the roll',
+			does: 'Add a note as long as the Draw length; drag before letting go to set its length'
+		},
 		{ what: 'Drag across an empty row', does: 'Draw a clip of whole bars in the arrangement' },
 		{ what: `${modName}-drag`, does: 'Copy notes, clips or nodes, leaving the originals where they were' },
 		{ what: 'Shift-drag on the graph', does: 'Choose the nodes a box touches; Shift-click adds or takes away one' },

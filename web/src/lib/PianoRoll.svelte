@@ -24,6 +24,7 @@
 	import {
 		addNote,
 		addPoint,
+		BEATS_PER_BAR,
 		describeLane,
 		duplicateNotes,
 		growToHold,
@@ -104,6 +105,7 @@
 	} = $props();
 
 	const KEYS = 48;
+	const RULER = 16; // The bar ruler at the top, which stays there as the rows scroll under it
 	const VELOCITY = 56;
 	const EDGE = 6;
 	const AUDITION_MS = 220;
@@ -641,8 +643,8 @@
 			scroller.scrollLeft = Math.max(0, Math.min(x - FOLLOW_MARGIN, end + FOLLOW_MARGIN - width));
 		if (note === undefined) return;
 		const y = rowOf(note);
-		if (y < scroller.scrollTop || y + rowHeight > scroller.scrollTop + scroller.clientHeight)
-			scroller.scrollTop = y - scroller.clientHeight / 2;
+		if (y < scroller.scrollTop || y + rowHeight > scroller.scrollTop + rowsSeen())
+			scroller.scrollTop = y - rowsSeen() / 2;
 	}
 
 	// Step entry's keys, while it is on, wherever focus is but a field, a menu, a dialog or the browser, which keep their own.
@@ -763,12 +765,16 @@
 		onview({ beat: beatWidth, row: rowHeight, left, top }, zoomed);
 	}
 
+	// How much of the rows is in sight: the scroller less the ruler, which stays over its top. A row's y is in sight from the
+	// scroll's top to that and this.
+	const rowsSeen = () => scroller.clientHeight - RULER;
+
 	// A zoom to `beat` pixels a beat and `row` pixels a row, which keeps the tick and the note under the pointer where they
 	// were. Without a pointer it keeps the left edge and the middle row.
 	async function zoom(beat: number, row: number, pointer?: { clientX: number; clientY: number }) {
 		const box = scroller.getBoundingClientRect();
 		const x = pointer ? pointer.clientX - box.left : KEYS;
-		const y = pointer ? pointer.clientY - box.top : scroller.clientHeight / 2;
+		const y = pointer ? pointer.clientY - box.top : RULER + rowsSeen() / 2;
 		const [left, top] = [scroller.scrollLeft, scroller.scrollTop];
 		const across = clampBeat(beat) / beatWidth;
 		rowAim = Math.min(ROWS.most, Math.max(ROWS.least, row));
@@ -777,7 +783,7 @@
 		rowHeight = Math.round(rowAim);
 		await settle(); // The roll is its new size before it scrolls
 		scroller.scrollLeft = anchored(left, x, across, KEYS);
-		scroller.scrollTop = anchored(top, y, down);
+		scroller.scrollTop = anchored(top, y, down, RULER);
 		report(true);
 	}
 
@@ -793,7 +799,7 @@
 
 	// The clip's bars across the roll, and its notes in the middle of it, at the rows' height as it is. `.` does it too.
 	export async function fit() {
-		const fitted = fitRoll(clip, ppq, { width: scroller.clientWidth - KEYS, height: scroller.clientHeight }, rowHeight);
+		const fitted = fitRoll(clip, ppq, { width: scroller.clientWidth - KEYS, height: rowsSeen() }, rowHeight);
 		beatWidth = fitted.beat;
 		await settle();
 		scroller.scrollLeft = fitted.left;
@@ -826,7 +832,7 @@
 		if (!view) beatWidth = Math.min(96, Math.max(16, (scroller.clientWidth - KEYS) / (clip.length / ppq + 1)));
 		const pitches = clip.notes.map((note) => note.note);
 		const middle = pitches.length ? (Math.min(...pitches) + Math.max(...pitches)) / 2 : 60;
-		scroller.scrollTop = rowOf(middle) - scroller.clientHeight / 2;
+		scroller.scrollTop = rowOf(middle) - rowsSeen() / 2;
 	});
 
 	// Step entry brings its cursor into sight as it starts, and leaving it lets go of a chord not yet written.
@@ -985,174 +991,204 @@
 <div class="frame">
 	<div class="roll" bind:this={scroller} onscroll={scrolled} onwheel={wheel}>
 		<div class="inner" style:width="{KEYS + width}px">
-			<svg class="keys" width={KEYS} height={rollHeight} aria-hidden="true">
-				{#each { length: 128 }, row}
-					{@const note = 127 - row}
+			<!-- The clip's bars, counted from its start, over the rows and staying there as they scroll. -->
+			<div class="rule">
+				<div class="corner" style:width="{KEYS}px"></div>
+				<svg class="ruler" {width} height={RULER} aria-hidden="true" data-testid="roll-ruler">
+					<rect class="ground" {width} height={RULER} />
 					<rect
-						class="key"
-						class:black={isBlackKey(note)}
-						y={row * rowHeight}
-						width={KEYS}
-						height={rowHeight}
-						role="presentation"
-						data-testid={`key-${note}`}
-						onpointerdown={(event) => pressKey(event, note)}
+						class="past"
+						x={shown.length * perTick}
+						width={Math.max(0, width - shown.length * perTick)}
+						height={RULER}
 					/>
-					{#if note % 12 === 0}<text class="octave" x="4" y={row * rowHeight + rowHeight - 2}>{noteName(note)}</text
-						>{/if}
-				{/each}
-			</svg>
-			<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-			<svg
-				bind:this={roll}
-				{width}
-				height={rollHeight}
-				role="application"
-				aria-label="Piano roll"
-				tabindex="0"
-				data-testid="roll"
-				data-per-tick={perTick}
-				data-row-height={rowHeight}
-				onkeydown={keydown}
-				onpointermove={hover}
-				onpointerleave={() => (ghost = null)}
-				oncontextmenu={rollMenu}
-			>
-				{#each { length: 128 }, row}
-					<rect
-						class="lane"
-						class:black={isBlackKey(127 - row)}
-						y={row * rowHeight}
-						{width}
-						height={rowHeight}
-						role="presentation"
-						onpointerdown={pressGround}
-						ondblclick={doubleGround}
-					/>
-				{/each}
-				{#each { length: beats + 1 }, beat}
-					<line
-						class:bar={beat % 4 === 0}
-						class="beat"
-						x1={beat * ppq * perTick}
-						x2={beat * ppq * perTick}
-						y1="0"
-						y2={rollHeight}
-					/>
-				{/each}
-				<rect
-					class="past"
-					x={shown.length * perTick}
-					width={Math.max(0, width - shown.length * perTick)}
-					height={rollHeight}
-				/>
-				{#each shown.notes as note, index (index)}
-					<g
-						class="note"
-						class:chosen={chosen.has(index)}
-						data-testid={`note-${index}`}
-						data-tick={note.tick}
-						data-note={note.note}
-						data-dur={note.dur}
-						data-vel={note.vel}
-					>
-						<rect
-							class="body"
-							x={note.tick * perTick}
-							y={rowOf(note.note) + 1}
-							width={Math.max(note.dur * perTick, 3)}
-							height={rowHeight - 2}
-							rx="2"
-							role="presentation"
-							onpointerdown={(event) => pressNote(event, index, 'move')}
-							oncontextmenu={(event) => noteMenu(event, index)}
-						/>
-						{#if !readonly}
-							<rect
-								class="edge"
-								x={Math.max(note.dur * perTick, 3) + note.tick * perTick - EDGE}
-								y={rowOf(note.note) + 1}
-								width={EDGE}
-								height={rowHeight - 2}
-								role="presentation"
-								data-testid={`edge-${index}`}
-								onpointerdown={(event) => pressNote(event, index, 'size')}
-								oncontextmenu={(event) => noteMenu(event, index)}
-							/>
+					{#each { length: beats + 1 }, beat}
+						{@const x = beat * ppq * perTick}
+						{#if beat % BEATS_PER_BAR === 0}
+							<line class="bar" x1={x} x2={x} y1="0" y2={RULER} />
+							<text x={x + 3} y={RULER - 4}>{beat / BEATS_PER_BAR + 1}</text>
+						{:else}
+							<line class="tick" x1={x} x2={x} y1={RULER - 4} y2={RULER} />
+							{#if beatWidth >= 48}<text class="beatno" x={x + 3} y={RULER - 4}
+									>{Math.floor(beat / BEATS_PER_BAR) + 1}.{(beat % BEATS_PER_BAR) + 1}</text
+								>{/if}
 						{/if}
-					</g>
-				{/each}
-				{#if !readonly}
-					<rect
-						class="end"
-						x={shown.length * perTick - 3}
-						width="6"
-						height={rollHeight}
-						role="presentation"
-						data-testid="clip-end"
-						onpointerdown={(event) => {
-							event.stopPropagation();
-							gesture = { kind: 'length', clip };
-						}}
-					/>
-				{/if}
-				{#if ghost && !gesture && stepping}
-					<line class="aim" x1={ghost.tick * perTick} x2={ghost.tick * perTick} y1="0" y2={rollHeight} />
-				{:else if ghost && !gesture}
-					<rect
-						class="ghost"
-						x={ghost.tick * perTick}
-						y={rowOf(ghost.note) + 1}
-						width={Math.max(draw * perTick, 3)}
-						height={rowHeight - 2}
-						rx="2"
-					/>
-				{/if}
-				{#if ghostLabel}
-					{@const at = gesture?.kind === 'draw' ? gesture.note : { ...ghost!, dur: draw }}
-					<text
-						class="ghost-label"
-						x={(at.tick + at.dur) * perTick + 6}
-						y={rowOf(at.note) + rowHeight - 2}
-						data-testid="ghost">{ghostLabel}</text
-					>
-				{/if}
-				{#if gesture?.kind === 'band'}
-					<rect
-						class="band"
-						x={Math.min(gesture.from.x, gesture.at.x)}
-						y={Math.min(gesture.from.y, gesture.at.y)}
-						width={Math.abs(gesture.at.x - gesture.from.x)}
-						height={Math.abs(gesture.at.y - gesture.from.y)}
-					/>
-				{/if}
-				{#if playhead !== null}
-					<line class="playhead" x1={playhead * perTick} x2={playhead * perTick} y1="0" y2={rollHeight} />
-				{/if}
-				{#if stepping}
-					<!-- What the keys held down will write, which goes into the clip once the last of them is let go -->
-					{#each chord?.notes ?? [] as note (note.note)}
+					{/each}
+					{#if playhead !== null}
+						<line class="playhead" x1={playhead * perTick} x2={playhead * perTick} y1="0" y2={RULER} />
+					{/if}
+				</svg>
+			</div>
+			<div class="rows">
+				<svg class="keys" width={KEYS} height={rollHeight} aria-hidden="true">
+					{#each { length: 128 }, row}
+						{@const note = 127 - row}
 						<rect
-							class="pending"
-							x={note.tick * perTick}
-							y={rowOf(note.note) + 1}
-							width={Math.max(note.dur * perTick, 3)}
-							height={rowHeight - 2}
-							rx="2"
-							data-testid="step-note"
+							class="key"
+							class:black={isBlackKey(note)}
+							y={row * rowHeight}
+							width={KEYS}
+							height={rowHeight}
+							role="presentation"
+							data-testid={`key-${note}`}
+							onpointerdown={(event) => pressKey(event, note)}
+						/>
+						{#if note % 12 === 0}<text class="octave" x="4" y={row * rowHeight + rowHeight - 2}>{noteName(note)}</text
+							>{/if}
+					{/each}
+				</svg>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+				<svg
+					bind:this={roll}
+					{width}
+					height={rollHeight}
+					role="application"
+					aria-label="Piano roll"
+					tabindex="0"
+					data-testid="roll"
+					data-per-tick={perTick}
+					data-row-height={rowHeight}
+					onkeydown={keydown}
+					onpointermove={hover}
+					onpointerleave={() => (ghost = null)}
+					oncontextmenu={rollMenu}
+				>
+					{#each { length: 128 }, row}
+						<rect
+							class="lane"
+							class:black={isBlackKey(127 - row)}
+							y={row * rowHeight}
+							{width}
+							height={rowHeight}
+							role="presentation"
+							onpointerdown={pressGround}
+							ondblclick={doubleGround}
 						/>
 					{/each}
-					<line
-						class="cursor"
-						x1={cursor.tick * perTick}
-						x2={cursor.tick * perTick}
-						y1="0"
-						y2={rollHeight}
-						data-testid="step-cursor"
-						data-tick={cursor.tick}
+					{#each { length: beats + 1 }, beat}
+						<line
+							class:bar={beat % BEATS_PER_BAR === 0}
+							class="beat"
+							x1={beat * ppq * perTick}
+							x2={beat * ppq * perTick}
+							y1="0"
+							y2={rollHeight}
+						/>
+					{/each}
+					<rect
+						class="past"
+						x={shown.length * perTick}
+						width={Math.max(0, width - shown.length * perTick)}
+						height={rollHeight}
 					/>
-				{/if}
-			</svg>
+					{#each shown.notes as note, index (index)}
+						<g
+							class="note"
+							class:chosen={chosen.has(index)}
+							data-testid={`note-${index}`}
+							data-tick={note.tick}
+							data-note={note.note}
+							data-dur={note.dur}
+							data-vel={note.vel}
+						>
+							<rect
+								class="body"
+								x={note.tick * perTick}
+								y={rowOf(note.note) + 1}
+								width={Math.max(note.dur * perTick, 3)}
+								height={rowHeight - 2}
+								rx="2"
+								role="presentation"
+								onpointerdown={(event) => pressNote(event, index, 'move')}
+								oncontextmenu={(event) => noteMenu(event, index)}
+							/>
+							{#if !readonly}
+								<rect
+									class="edge"
+									x={Math.max(note.dur * perTick, 3) + note.tick * perTick - EDGE}
+									y={rowOf(note.note) + 1}
+									width={EDGE}
+									height={rowHeight - 2}
+									role="presentation"
+									data-testid={`edge-${index}`}
+									onpointerdown={(event) => pressNote(event, index, 'size')}
+									oncontextmenu={(event) => noteMenu(event, index)}
+								/>
+							{/if}
+						</g>
+					{/each}
+					{#if !readonly}
+						<rect
+							class="end"
+							x={shown.length * perTick - 3}
+							width="6"
+							height={rollHeight}
+							role="presentation"
+							data-testid="clip-end"
+							onpointerdown={(event) => {
+								event.stopPropagation();
+								gesture = { kind: 'length', clip };
+							}}
+						/>
+					{/if}
+					{#if ghost && !gesture && stepping}
+						<line class="aim" x1={ghost.tick * perTick} x2={ghost.tick * perTick} y1="0" y2={rollHeight} />
+					{:else if ghost && !gesture}
+						<rect
+							class="ghost"
+							x={ghost.tick * perTick}
+							y={rowOf(ghost.note) + 1}
+							width={Math.max(draw * perTick, 3)}
+							height={rowHeight - 2}
+							rx="2"
+						/>
+					{/if}
+					{#if ghostLabel}
+						{@const at = gesture?.kind === 'draw' ? gesture.note : { ...ghost!, dur: draw }}
+						<text
+							class="ghost-label"
+							x={(at.tick + at.dur) * perTick + 6}
+							y={rowOf(at.note) + rowHeight - 2}
+							data-testid="ghost">{ghostLabel}</text
+						>
+					{/if}
+					{#if gesture?.kind === 'band'}
+						<rect
+							class="band"
+							x={Math.min(gesture.from.x, gesture.at.x)}
+							y={Math.min(gesture.from.y, gesture.at.y)}
+							width={Math.abs(gesture.at.x - gesture.from.x)}
+							height={Math.abs(gesture.at.y - gesture.from.y)}
+						/>
+					{/if}
+					{#if playhead !== null}
+						<line class="playhead" x1={playhead * perTick} x2={playhead * perTick} y1="0" y2={rollHeight} />
+					{/if}
+					{#if stepping}
+						<!-- What the keys held down will write, which goes into the clip once the last of them is let go -->
+						{#each chord?.notes ?? [] as note (note.note)}
+							<rect
+								class="pending"
+								x={note.tick * perTick}
+								y={rowOf(note.note) + 1}
+								width={Math.max(note.dur * perTick, 3)}
+								height={rowHeight - 2}
+								rx="2"
+								data-testid="step-note"
+							/>
+						{/each}
+						<line
+							class="cursor"
+							x1={cursor.tick * perTick}
+							x2={cursor.tick * perTick}
+							y1="0"
+							y2={rollHeight}
+							data-testid="step-cursor"
+							data-tick={cursor.tick}
+						/>
+					{/if}
+				</svg>
+			</div>
 		</div>
 	</div>
 	{#if offer}
@@ -1317,6 +1353,47 @@
 	}
 	.inner {
 		display: flex;
+		flex-direction: column;
+	}
+	.rows {
+		display: flex;
+	}
+	.rule {
+		position: sticky;
+		top: 0;
+		z-index: 2; /* Over the keys, which stay at the left */
+		display: flex;
+	}
+	.rule .corner {
+		position: sticky;
+		left: 0;
+		z-index: 1;
+		flex: none;
+		background: var(--panel);
+		border-bottom: 1px solid var(--line);
+		box-sizing: border-box;
+	}
+	.ruler .ground {
+		fill: var(--panel);
+	}
+	.ruler .past {
+		fill: #0d1117a0;
+	}
+	.ruler line {
+		stroke: #484f58;
+	}
+	.ruler .bar {
+		stroke: #6e7681;
+	}
+	.ruler text {
+		fill: var(--muted);
+		font-size: 10px;
+	}
+	.ruler .beatno {
+		opacity: 0.7;
+	}
+	.ruler .playhead {
+		stroke: #f0883e;
 	}
 	.roll svg {
 		display: block;

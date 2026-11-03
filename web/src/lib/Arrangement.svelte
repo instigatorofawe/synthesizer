@@ -556,29 +556,32 @@
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} onkeydown={keydown} />
 
 <div class="arrangement" bind:this={view} data-testid="arrangement-view" onwheel={wheel}>
-	<div class="heads" bind:this={heads} style:padding-top="{TOP}px">
-		<!-- The song layer's heads. ▸ or a double-click on a folded lane unfolds it, and ▾ folds it again. -->
-		<div class="layer" role="group" aria-label="Song lanes" style:height="{layer}px">
-			{#each SONG_LANES as lane (lane.id)}
-				{@const open = unfolded.has(lane.id)}
-				<div class="lanehead" class:open style:height="{laneHeight(open)}px" data-testid={`lane-head-${lane.id}`}>
-					<button
-						type="button"
-						class="fold"
-						aria-expanded={open}
-						aria-label={`${lane.name} lane`}
-						title={open ? `Fold the ${lane.name} lane` : `Unfold the ${lane.name} lane`}
-						onclick={() => fold(lane.id)}><span aria-hidden="true">{open ? '▾' : '▸'}</span> {lane.name}</button
-					>
-					{#if open && lane.id === 'tempo'}
-						<!-- The lane's scale, the BPM at its top and at its foot. -->
-						<span class="scale" aria-hidden="true">
-							<span>{bpmText(tempoScale.high)}</span>
-							<span>{bpmText(tempoScale.low)}</span>
-						</span>
-					{/if}
-				</div>
-			{/each}
+	<div class="heads" bind:this={heads}>
+		<!-- The ruler's corner and the song layer's heads, which stay at the top as the tracks scroll under them. ▸ or a
+			 double-click on a folded lane unfolds it, and ▾ folds it again. -->
+		<div class="corner" style:padding-top="{TOP}px">
+			<div class="layer" role="group" aria-label="Song lanes" style:height="{layer}px">
+				{#each SONG_LANES as lane (lane.id)}
+					{@const open = unfolded.has(lane.id)}
+					<div class="lanehead" class:open style:height="{laneHeight(open)}px" data-testid={`lane-head-${lane.id}`}>
+						<button
+							type="button"
+							class="fold"
+							aria-expanded={open}
+							aria-label={`${lane.name} lane`}
+							title={open ? `Fold the ${lane.name} lane` : `Unfold the ${lane.name} lane`}
+							onclick={() => fold(lane.id)}><span aria-hidden="true">{open ? '▾' : '▸'}</span> {lane.name}</button
+						>
+						{#if open && lane.id === 'tempo'}
+							<!-- The lane's scale, the BPM at its top and at its foot. -->
+							<span class="scale" aria-hidden="true">
+								<span>{bpmText(tempoScale.high)}</span>
+								<span>{bpmText(tempoScale.low)}</span>
+							</span>
+						{/if}
+					</div>
+				{/each}
+			</div>
 		</div>
 		{#each doc.tracks as track (track.id)}
 			{@const names = track.slots.map(patchName)}
@@ -668,44 +671,77 @@
 	</div>
 
 	<div class="scroller">
-		<svg bind:this={svg} {width} {height} role="application" aria-label="Arrangement" data-testid="arrangement">
-			<!-- Under the song layer's lanes, which draw over the bars and take the pointer there. -->
-			<rect class="songlayer" y={TOP} {width} height={layer} />
-			<rect
-				class="ruler"
-				{width}
-				height={RULER}
-				role="presentation"
-				data-testid="ruler"
-				onpointerdown={(event) => onlocate(snapTick(ticksAt(canvas(event).x), grid))}
-			/>
-			<rect
-				class="loopstrip"
-				y={RULER}
-				{width}
-				height={LOOP}
-				role="presentation"
-				data-testid="loop-strip"
-				onpointerdown={startLoop}
-				><title
-					>Drag for a loop. A click turns it on or off, and a drag on it moves it, or by an end stretches it.</title
-				></rect
-			>
-			{#if shownLoop}
+		<!-- The ruler, the loop strip and the song layer stay at the top as the tracks scroll, as a DAW's do. The tracks' canvas
+			 starts under them, so a y on it is the same either way. -->
+		<div class="band" style:height="{tracksTop}px" data-testid="arrangement-band">
+			<svg {width} height={tracksTop}>
+				<!-- Under the song layer's lanes, which draw over the bars and take the pointer there. -->
+				<rect class="songlayer" y={TOP} {width} height={layer} />
 				<rect
-					class="brace"
-					class:off={!shownOn}
-					x={shownLoop.start * perTick}
-					y={RULER + 2}
-					width={(shownLoop.end - shownLoop.start) * perTick}
-					height={LOOP - 4}
-					data-testid="loop-brace"
-					data-on={shownOn}
-					data-start={shownLoop.start}
-					data-end={shownLoop.end}
+					class="ruler"
+					{width}
+					height={RULER}
+					role="presentation"
+					data-testid="ruler"
+					onpointerdown={(event) => onlocate(snapTick(ticksAt(canvas(event).x), grid))}
 				/>
-			{/if}
+				<rect
+					class="loopstrip"
+					y={RULER}
+					{width}
+					height={LOOP}
+					role="presentation"
+					data-testid="loop-strip"
+					onpointerdown={startLoop}
+					><title
+						>Drag for a loop. A click turns it on or off, and a drag on it moves it, or by an end stretches it.</title
+					></rect
+				>
+				{#if shownLoop}
+					<rect
+						class="brace"
+						class:off={!shownOn}
+						x={shownLoop.start * perTick}
+						y={RULER + 2}
+						width={(shownLoop.end - shownLoop.start) * perTick}
+						height={LOOP - 4}
+						data-testid="loop-brace"
+						data-on={shownOn}
+						data-start={shownLoop.start}
+						data-end={shownLoop.end}
+					/>
+				{/if}
 
+				{#each { length: bars + 1 }, bar}
+					<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={0} y2={tracksTop} />
+					{#if bar < bars}
+						<text class="number" x={bar * barWidth + 4} y={14}>{bar + 1}</text>
+					{/if}
+				{/each}
+				<line class="playhead" x1={tick * perTick} x2={tick * perTick} y1={0} y2={tracksTop} />
+			</svg>
+			<TempoLane
+				{doc}
+				y={TOP}
+				{width}
+				{perTick}
+				{grid}
+				open={unfolded.has('tempo')}
+				{readonly}
+				onchange={(next) => onchange(next)}
+				onpreview={ontempo}
+				onunfold={() => fold('tempo', true)}
+			/>
+		</div>
+		<svg
+			bind:this={svg}
+			{width}
+			{height}
+			style:margin-top="{-tracksTop}px"
+			role="application"
+			aria-label="Arrangement"
+			data-testid="arrangement"
+		>
 			{#each doc.tracks as track, row (track.id)}
 				<rect
 					class="row"
@@ -722,10 +758,7 @@
 			{/each}
 
 			{#each { length: bars + 1 }, bar}
-				<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={0} y2={height} />
-				{#if bar < bars}
-					<text class="number" x={bar * barWidth + 4} y={14}>{bar + 1}</text>
-				{/if}
+				<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={tracksTop} y2={height} />
 			{/each}
 
 			{#each blocks as block (block.key)}
@@ -781,18 +814,6 @@
 
 			<line class="playhead" x1={tick * perTick} x2={tick * perTick} y1={0} y2={height} data-testid="playhead" />
 		</svg>
-		<TempoLane
-			{doc}
-			y={TOP}
-			{width}
-			{perTick}
-			{grid}
-			open={unfolded.has('tempo')}
-			{readonly}
-			onchange={(next) => onchange(next)}
-			onpreview={ontempo}
-			onunfold={() => fold('tempo', true)}
-		/>
 	</div>
 </div>
 
@@ -825,7 +846,7 @@
 	.heads {
 		position: sticky;
 		left: 0;
-		z-index: 1;
+		z-index: 3; /* Over the band, which scrolls under it sideways */
 		background: var(--panel);
 		border-right: 1px solid var(--line);
 		box-sizing: border-box;
@@ -958,6 +979,19 @@
 	.scroller {
 		position: relative;
 		min-width: 0;
+	}
+	.corner,
+	.band {
+		position: sticky;
+		top: 0;
+		z-index: 2;
+	}
+	.corner {
+		background: var(--panel);
+		box-shadow: 0 1px 0 var(--line);
+	}
+	.band {
+		box-shadow: 0 1px 0 var(--line);
 	}
 	/* The song layer's heads, over the tracks' and set apart from them. */
 	.layer {

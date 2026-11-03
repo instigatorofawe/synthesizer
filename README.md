@@ -65,8 +65,10 @@ as fields, one Undo and Redo for the view on screen, the keys, the master meter 
 any problems with links to them, and Save. A browser down the side, which folds to a rail, holds the library and the examples. A new
 timeline starts with a track playing an electric piano and an empty clip open in the roll. A click in the roll adds a note, and a
 clip grows to hold one placed past its end. R turns on step entry, where the keys write notes and chords at a cursor, → rests and
-Backspace steps back, and C and V set the velocity of new notes. The arrangement is only as tall as its tracks, ⤢ or a double-click
-on a clip gives the notes the whole view, I folds the inspector, and each clip keeps its zoom. Track heads have mute and solo, and
+Backspace steps back, and C and V set the velocity of new notes. ● or Shift+R records: a bar is counted in with a click, and what the
+keys play while the song plays is written into the chosen track, snapped to the grid, adding to the clip on each pass round a loop.
+The arrangement is only as tall as its tracks, ⤢ or a double-click on a clip gives the notes the whole view, I folds the inspector,
+and each clip keeps its zoom. Track heads have mute and solo, and
 C, V and D with ⌘ or Ctrl copy, paste and duplicate notes and clips. A track's patch is chosen from one searchable list, and its name in the
 track head opens it in the Patch view. A patch draws as a graph, with wires dragged between nodes, a node search on N or a
 double-click, errors on the nodes they belong to, and scopes on any node. The computer keyboard from A to ' with Z and X for the

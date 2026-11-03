@@ -13,6 +13,7 @@
 		octaves = 2,
 		disabled = false,
 		writing = false,
+		recording = false,
 		where = '',
 		onnote
 	}: {
@@ -20,8 +21,9 @@
 		octaves?: number;
 		disabled?: boolean;
 		writing?: boolean; // Whether step entry writes what the keys play, which they play as they otherwise would
+		recording?: boolean; // Whether a take is recording what they play
 		where?: string; // Where the keys are heard, or why they can't be
-		onnote: (note: number, on: boolean) => void;
+		onnote: (note: number, on: boolean, at: number) => void; // `at` is when, on the page's clock, as a take needs
 	} = $props();
 
 	const WHITE = 14; // px
@@ -35,15 +37,15 @@
 	// A black key sits over the line between the white keys either side of it.
 	const left = (note: number) => whites.indexOf(note - 1) * WHITE + WHITE - 4.5;
 
-	function press(note: number) {
+	function press(note: number, at = performance.now()) {
 		if (held.has(note)) return;
 		held.add(note);
-		onnote(note, true);
+		onnote(note, true, at);
 	}
 
-	function release(note: number) {
+	function release(note: number, at = performance.now()) {
 		if (!held.delete(note)) return;
-		onnote(note, false);
+		onnote(note, false, at);
 	}
 
 	function keydown(event: KeyboardEvent) {
@@ -57,7 +59,7 @@
 			base = moved;
 		} else if (note !== null && !typed.has(event.code)) {
 			typed.set(event.code, note);
-			press(note);
+			press(note, event.timeStamp);
 		}
 	}
 
@@ -65,7 +67,7 @@
 		const note = typed.get(event.code);
 		if (note === undefined) return;
 		typed.delete(event.code);
-		release(note);
+		release(note, event.timeStamp);
 	}
 
 	// A key let go while the page wasn't looking would otherwise hold its note for ever.
@@ -84,10 +86,11 @@
 <div
 	class="keyboard"
 	class:writing
+	class:recording
 	style:width="{whites.length * WHITE}px"
 	role="group"
 	aria-label="Keys"
-	title={`${writing ? 'Step entry: keys write notes at the cursor in the roll. ' : ''}${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up.`}
+	title={`${writing ? 'Step entry: keys write notes at the cursor in the roll. ' : ''}${recording ? 'Recording: the take writes what the keys play. ' : ''}${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up.`}
 >
 	{#each notes as note (note)}
 		<button
@@ -100,9 +103,9 @@
 			aria-keyshortcuts={keyFor(note, base) || undefined}
 			title={keyFor(note, base) ? `${noteName(note)} (${keyFor(note, base)})` : noteName(note)}
 			{disabled}
-			onpointerdown={() => press(note)}
-			onpointerup={() => release(note)}
-			onpointerleave={() => release(note)}
+			onpointerdown={(event) => press(note, event.timeStamp)}
+			onpointerup={(event) => release(note, event.timeStamp)}
+			onpointerleave={(event) => release(note, event.timeStamp)}
 		>
 			{#if note % 12 === 0}<span>{noteName(note)}</span>{/if}
 		</button>
@@ -119,6 +122,12 @@
 	/* Step entry is on, so what is played is written too. */
 	.keyboard.writing {
 		outline: 2px solid #3fb950;
+		outline-offset: 1px;
+		border-radius: 2px;
+	}
+	/* A take is recording what is played. */
+	.keyboard.recording {
+		outline: 2px solid #f85149;
 		outline-offset: 1px;
 		border-radius: 2px;
 	}

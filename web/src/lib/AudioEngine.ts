@@ -31,6 +31,17 @@ export interface EngineState {
 	guardTrips: number;
 	limited: number; // The lowest gain the limiter used since the last state, or 1 if it turned nothing down
 	time: number; // Seconds of audio rendered since audio started, however long that took
+	recording: number; // 0 with no take, 1 while a bar is counted in, 2 while a take runs
+	countIn: number; // The beats of the count-in still to come
+	clicks: number; // Clicks the worklet has begun since audio started
+}
+
+// A key the worklet stamped while a take ran: where the song was when it was heard going down or up (Recording.ts).
+export interface PlayedKey {
+	on: boolean;
+	note: number;
+	tick: number;
+	elapsed: number;
 }
 
 export interface TapBlock {
@@ -133,13 +144,18 @@ export class AudioEngine {
 		loading: false,
 		guardTrips: 0,
 		limited: 1,
-		time: 0
+		time: 0,
+		recording: 0,
+		countIn: 0,
+		clicks: 0
 	};
 	onState: (state: EngineState) => void = () => {};
 	onTap: (slot: number, block: TapBlock) => void = () => {};
 	onTargets: (targets: TapTarget[]) => void = () => {};
 	onRejected: (reason: string) => void = () => {}; // An image the engine would not take, so the old one is still playing
 	onLive: (report: CompileReport) => void = () => {}; // An image has just become the one playing
+	onPlayed: (key: PlayedKey) => void = () => {}; // A key stamped while a take runs
+	onTakeEnd: (at: { tick: number; elapsed: number }) => void = () => {}; // Where the song was as a take ended
 
 	private context: AudioContext | null = null;
 	private node: AudioWorkletNode | null = null;
@@ -191,6 +207,10 @@ export class AudioEngine {
 				generation: message.generation as number
 			});
 			this.node?.port.postMessage({ type: 'tap-return', buffer }, [buffer]);
+		} else if (message.type === 'played') {
+			this.onPlayed(message as unknown as PlayedKey);
+		} else if (message.type === 'take-end') {
+			this.onTakeEnd(message as unknown as { tick: number; elapsed: number });
 		}
 	}
 
@@ -244,6 +264,28 @@ export class AudioEngine {
 		this.node?.port.postMessage({ type: 'event', ...event });
 	}
 
+	// When the audio that was coming out at `at`, a time on the page's clock such as an event's timeStamp, was made, on the
+	// audio clock the worklet keeps. A key pressed in time with what is heard is in time with that, which is what puts a
+	// recorded note where it was meant, however long the output's latency is.
+	heardAt(at = performance.now()): number {
+		const context = this.context;
+		if (!context) return 0;
+		const stamp = context.getOutputTimestamp?.();
+		if (stamp?.contextTime && stamp.performanceTime) return stamp.contextTime + (at - stamp.performanceTime) / 1000;
+		const latency = (context.outputLatency || 0) + (context.baseLatency || 0);
+		return context.currentTime - latency + (at - performance.now()) / 1000;
+	}
+
+	// A take: a bar counted in at `bpm` before the song plays from `start`, or none if `bpm` is 0 or the song is playing, and
+	// then each note sent with a time is stamped with where the song was when it was heard.
+	record(ppq: number, beatsPerBar: number, bpm: number, start: number) {
+		this.node?.port.postMessage({ type: 'record', ppq, beatsPerBar, beats: beatsPerBar, bpm, start });
+	}
+
+	stopRecording(at?: number) {
+		this.node?.port.postMessage({ type: 'record-stop', heard: this.heardAt(at) });
+	}
+
 	play() {
 		this.send({ kind: EventKind.Play });
 	}
@@ -256,11 +298,15 @@ export class AudioEngine {
 	setLoop(start: number, end: number) {
 		this.send({ kind: EventKind.SetLoop, tick: start, tickEnd: end });
 	}
-	noteOn(track: number, note: number, velocity = 100) {
-		this.send({ kind: EventKind.NoteOn, target: track, note, velocity });
+	// A note given the time its key went down or up, on the page's clock, is stamped for a take.
+	noteOn(track: number, note: number, velocity = 100, at?: number) {
+		this.send({ kind: EventKind.NoteOn, target: track, note, velocity, ...this.stamp(at) });
 	}
-	noteOff(track: number, note: number) {
-		this.send({ kind: EventKind.NoteOff, target: track, note });
+	noteOff(track: number, note: number, at?: number) {
+		this.send({ kind: EventKind.NoteOff, target: track, note, ...this.stamp(at) });
+	}
+	private stamp(at: number | undefined): Record<string, number> {
+		return at === undefined ? {} : { heard: this.heardAt(at) };
 	}
 	setParam(track: number, param: number, value: number) {
 		this.send({ kind: EventKind.SetParam, target: track, param, value });

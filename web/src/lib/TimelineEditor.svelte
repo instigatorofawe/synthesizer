@@ -172,6 +172,16 @@
 		roll?.stepKey(note, on);
 	}
 
+	// What a take snaps to and writes at, as a clicked note does: the roll's Snap and Vel.
+	export function takeSettings(): { grid: number; velocity: number } {
+		return { grid, velocity };
+	}
+
+	// A take writes what the keys play, so step entry gives way to it.
+	export function stopStepping() {
+		stepping = false;
+	}
+
 	const playhead = $derived.by(() => {
 		if (!clip || !placed || placed.clip !== clip.id) return null;
 		const { start, length } = windowOf(doc, placed);

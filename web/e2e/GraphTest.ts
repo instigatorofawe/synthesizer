@@ -57,15 +57,17 @@ async function drag(page: Page, from: string, to: string | { x: number; y: numbe
 	await page.mouse.up();
 }
 
-// The point of the canvas furthest from every node, on screen.
+// The point of the canvas furthest from every node, on screen, and high enough that the search, which keeps inside the window,
+// can open there, as the Patch view gives the canvas the whole height.
 const emptySpot = (page: Page) =>
 	graph(page).evaluate((svg) => {
 		const box = svg.getBoundingClientRect();
 		const bodies = [...svg.querySelectorAll('g.node rect.body')].map((rect) => rect.getBoundingClientRect());
-		let best = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+		const lowest = Math.min(box.bottom, innerHeight - 340);
+		let best = { x: box.left + box.width / 2, y: (box.top + lowest) / 2 };
 		let room = -Infinity;
 		for (let x = box.left + 30; x < box.right - 30; x += 10)
-			for (let y = box.top + 20; y < box.bottom - 20; y += 10) {
+			for (let y = box.top + 20; y < lowest - 20; y += 10) {
 				const clear = Math.min(
 					...bodies.map((b) => Math.max(b.left - x, x - b.right, b.top - y, y - b.bottom)),
 					Infinity

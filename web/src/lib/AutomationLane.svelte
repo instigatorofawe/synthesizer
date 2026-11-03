@@ -1,7 +1,24 @@
 <script lang="ts">
-	import ContextMenu from '#lib/ContextMenu.svelte';
+	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { matches, modKey } from '#lib/Shortcuts.ts';
-	import { addPoint, laneCurve, removePoint, setPoint, snapTick, type Clip, type Lane } from '#lib/TimelineEdit.ts';
+	import {
+		SHAPES,
+		addLanePoint,
+		laneCurve,
+		lanePoints,
+		lanesOf,
+		noteValue,
+		position,
+		removeLanePoint,
+		setLanePoint,
+		snapTick,
+		type Clip,
+		type Lane,
+		type LanePoint,
+		type Shape
+	} from '#lib/TimelineEdit.ts';
+	import UnitField from '#lib/UnitField.svelte';
+	import { noteLengths, readLength, readPosition } from '#lib/Units.ts';
 
 	let {
 		clip,
@@ -9,19 +26,24 @@
 		label,
 		min,
 		max,
+		start,
+		ppq,
 		perTick,
 		width,
 		grid,
 		readonly = false,
 		testid,
 		onchange,
-		onremove
+		onremove,
+		onsay
 	}: {
 		clip: Clip;
 		lane: Lane;
 		label: string;
 		min: number;
 		max: number;
+		start?: number; // Where what the lane moves stands before it moves it, if the page knows, which a first ramp starts from
+		ppq: number;
 		perTick: number;
 		width: number;
 		grid: number;
@@ -29,27 +51,31 @@
 		testid: string;
 		onchange: (clip: Clip) => void;
 		onremove: () => void;
+		onsay: (text: string) => void; // Says why something typed into a field was refused
 	} = $props();
 
 	const HEIGHT = 64;
 	const PAD = 6;
+	const SHAPE_NAMES: Record<Shape, string> = { step: 'Step', line: 'Line', exp: 'Exp' };
 
 	let svg: SVGSVGElement;
 	let chosen = $state<number | null>(null); // An index into `clip.automation`
-	// A point being dragged, in `clip`, which `base` is as it was pressed: a new point is in `base` but not yet in `clip`.
-	let held = $state.raw<{ index: number; base: Clip; clip: Clip } | null>(null);
+	// A point being dragged: `from` is its place in `base`, as it was pressed, and `index` its place in `clip`, as it is now. A
+	// new point is in `base` but not yet in the document, until it is let go.
+	let held = $state.raw<{ from: number; index: number; base: Clip; clip: Clip } | null>(null);
 	let menu = $state.raw<{ x: number; y: number; index: number } | null>(null);
 
-	const shown = $derived(held?.clip ?? clip);
-	const current = $derived(chosen === null ? undefined : shown.automation[chosen]);
-	// The lane's points as they are while one is dragged, the new one too, which isn't in the lane until it is let go.
-	const drawn = $derived.by(() => {
-		const points = lane.points.map(({ index }) => ({ index, point: shown.automation[index] }));
-		if (held && held.index >= clip.automation.length)
-			points.push({ index: held.index, point: held.clip.automation[held.index] });
-		return points;
-	});
+	// The lane as it is while a point is dragged, the new one too, and its points where the lane gets to them.
+	const shown = $derived(held ? (lanesOf(held.clip).find((l) => l.key === lane.key) ?? lane) : lane);
+	const points = $derived(lanePoints(shown, start));
+	const current = $derived(chosen === null ? undefined : points.find((point) => point.index === chosen));
 	const yOf = (value: number) => PAD + (1 - (value - min) / (max - min)) * (HEIGHT - 2 * PAD);
+
+	// Whether a point has room for a line from the one before it, or from the clip's start for the first.
+	function roomFor(point: LanePoint) {
+		const k = points.indexOf(point);
+		return point.tick > (k > 0 ? points[k - 1].tick : 0);
+	}
 
 	function pointer(event: { clientX: number; clientY: number }) {
 		const box = svg.getBoundingClientRect();
@@ -61,7 +87,7 @@
 	}
 
 	const polyline = $derived(
-		laneCurve({ ...lane, points: [...drawn].sort((a, b) => a.point.tick - b.point.tick) }, clip.length)
+		laneCurve(shown, clip.length, start)
 			.map(({ tick, value }) => `${(tick * perTick).toFixed(1)},${yOf(value).toFixed(1)}`)
 			.join(' ')
 	);
@@ -73,13 +99,16 @@
 		event.stopPropagation();
 		svg.focus({ preventScroll: true });
 		chosen = index;
-		if (!readonly && !secondary(event)) held = { index, base: clip, clip };
+		if (!readonly && !secondary(event)) held = { from: index, index, base: clip, clip };
 	}
 
+	// A point dragged keeps its line from the point before it, and the point after it stays joined to it (`setLanePoint`).
 	function pointerMove(event: PointerEvent) {
 		if (!held) return;
 		const { tick, value } = pointer(event);
-		held = { ...held, clip: setPoint(held.base, held.index, { tick, value }) };
+		const moved = setLanePoint(held.base, held.from, { tick, value }, start);
+		held = { ...held, index: moved.index, clip: moved.clip };
+		chosen = moved.index;
 	}
 
 	function pointerUp() {
@@ -88,37 +117,44 @@
 		if (finished && finished.clip !== clip) onchange(finished.clip);
 	}
 
-	// A click on the lane adds a point there, and dragging before letting go moves it. A point already at that tick is
-	// chosen instead, which is also what the second click of a double-click finds.
+	// A click on the lane adds a point there, joined to the one before by a line, and dragging before letting go moves it. A
+	// point already at that tick is chosen instead, which is also what the second click of a double-click finds.
 	function pressGround(event: PointerEvent) {
 		svg.focus({ preventScroll: true });
 		chosen = null;
 		if (readonly || secondary(event)) return;
 		const { tick, value, past } = pointer(event);
 		if (past) return;
-		const there = lane.points.find(({ point }) => point.tick === tick);
+		const there = points.find((point) => point.tick === tick);
 		if (there) {
 			chosen = there.index;
-			held = { index: there.index, base: clip, clip };
+			held = { from: there.index, index: there.index, base: clip, clip };
 			return;
 		}
-		const base = addPoint(clip, lane, tick, value);
-		chosen = clip.automation.length; // Taken first, because the parent's change reaches `clip` at once
-		held = { index: chosen, base, clip: base };
+		const added = addLanePoint(clip, lane, tick, value, start);
+		chosen = added.index;
+		held = { from: added.index, index: added.index, base: added.clip, clip: added.clip };
 	}
 
 	// A double-click adds a point too, if its first click didn't.
 	function doubled(event: MouseEvent) {
 		if (readonly) return;
 		const { tick, value, past } = pointer(event);
-		if (past || lane.points.some(({ point }) => point.tick === tick)) return;
-		chosen = clip.automation.length;
-		onchange(addPoint(clip, lane, tick, value));
+		if (past || points.some((point) => point.tick === tick)) return;
+		edited(addLanePoint(clip, lane, tick, value, start));
 	}
+
+	function edited(next: { clip: Clip; index: number }) {
+		chosen = next.index;
+		if (next.clip !== clip) onchange(next.clip);
+	}
+
+	const change = (index: number, what: Parameters<typeof setLanePoint>[2]) =>
+		edited(setLanePoint(clip, index, what, start));
 
 	function removed(index: number) {
 		chosen = null;
-		onchange(removePoint(clip, index));
+		onchange(removeLanePoint(clip, index, start));
 	}
 
 	// Delete in a lane is about its points, so it never reaches the arrangement, where it would take the clip away.
@@ -134,8 +170,19 @@
 		}
 	}
 
-	// The menu closes before an item acts, so the item holds the point it is for rather than reading the menu.
-	const pointItems = (index: number) => [{ label: 'Delete', action: () => removed(index) }];
+	// The menu closes before an item acts, so each item holds the point it is for rather than reading the menu. It sets how the
+	// lane gets to the point, and a line or a curve needs room after the point before.
+	function pointItems(index: number): MenuItem[] {
+		const point = points.find((p) => p.index === index);
+		return [
+			...SHAPES.map((shape) => ({
+				label: SHAPE_NAMES[shape],
+				action: () => change(index, { shape }),
+				disabled: !point || point.shape === shape || (shape !== 'step' && !roomFor(point))
+			})),
+			{ label: 'Delete', action: () => removed(index) }
+		];
+	}
 
 	function pointMenu(event: MouseEvent, index: number) {
 		event.preventDefault();
@@ -145,10 +192,9 @@
 		if (!readonly) menu = { x: event.clientX, y: event.clientY, index };
 	}
 
-	function field(name: 'tick' | 'value' | 'ramp', text: string) {
+	function valueTyped(text: string) {
 		const value = Number(text);
-		if (chosen === null || Number.isNaN(value)) return;
-		onchange(setPoint(clip, chosen, { [name]: value }));
+		if (chosen !== null && text.trim() !== '' && !Number.isNaN(value)) change(chosen, { value });
 	}
 </script>
 
@@ -157,14 +203,17 @@
 <div class="head">
 	<span>{label}</span>
 	{#if current}
+		{@const index = current.index}
 		<fieldset disabled={readonly}>
-			<label
-				>tick <input
-					type="number"
-					min="0"
-					aria-label={`${label} point tick`}
+			<label title="Where the lane gets to this point's value, as bar.beat.tick from the clip's start"
+				>at <UnitField
+					label={`${label} point tick`}
 					value={current.tick}
-					onchange={(e) => field('tick', e.currentTarget.value)}
+					format={(tick) => position(tick, ppq)}
+					read={readPosition(ppq, clip.length)}
+					onvalue={(tick) => change(index, { tick })}
+					{onsay}
+					width="5rem"
 				/></label
 			>
 			<label
@@ -173,32 +222,37 @@
 					step="any"
 					aria-label={`${label} point value`}
 					value={current.value}
-					onchange={(e) => field('value', e.currentTarget.value)}
+					onchange={(e) => valueTyped(e.currentTarget.value)}
 				/></label
 			>
-			<label>
-				ramp
-				<input
-					type="number"
-					min="0"
-					aria-label={`${label} point ramp`}
-					value={current.ramp ?? 0}
-					onchange={(e) => field('ramp', e.currentTarget.value)}
-				/>
+			<label
+				title="How the lane gets to this point from the one before: at once, in a line, or along an exp curve, which moves by equal ratios, evenly in decibels for a gain and in pitch for a frequency"
+			>
+				shape
+				<select
+					aria-label={`${label} point shape`}
+					value={current.shape}
+					onchange={(e) => change(index, { shape: e.currentTarget.value as Shape })}
+				>
+					{#each SHAPES as shape (shape)}
+						<option value={shape} disabled={shape !== 'step' && !roomFor(current)}>{shape}</option>
+					{/each}
+				</select>
 			</label>
-			{#if current.ramp}
-				<label title="Exp moves by equal ratios: evenly in decibels for a gain, and in pitch for a frequency">
-					curve
-					<select
-						aria-label={`${label} point curve`}
-						value={current.curve ?? 'linear'}
-						onchange={(e) =>
-							chosen !== null && onchange(setPoint(clip, chosen, { curve: e.currentTarget.value as 'linear' | 'exp' }))}
-					>
-						<option value="linear">linear</option>
-						<option value="exp">exp</option>
-					</select>
-				</label>
+			{#if current.shape !== 'step'}
+				<label
+					title="How long the lane takes to get here. As long as the gap from the point before, it joins them, and it is never longer."
+					>ramp <UnitField
+						label={`${label} point ramp`}
+						value={current.ramp}
+						format={(ramp) => noteValue(ramp, ppq)}
+						read={readLength(ppq, 0)}
+						choices={noteLengths(ppq)}
+						onvalue={(ramp) => change(index, { ramp })}
+						{onsay}
+						width="5rem"
+					/></label
+				>
 			{/if}
 		</fieldset>
 	{/if}
@@ -218,20 +272,23 @@
 	oncontextmenu={(event) => event.preventDefault()}
 >
 	<rect class="ground" {width} height={HEIGHT} role="presentation" ondblclick={doubled} onpointerdown={pressGround} />
-	<polyline class="curve" points={polyline} />
-	{#each drawn as { index, point } (index)}
+	<polyline class="curve" points={polyline} data-testid={`${testid}-curve`} />
+	{#each points as point (point.index)}
 		<circle
 			class="point"
-			class:chosen={chosen === index}
+			class:chosen={chosen === point.index}
 			cx={point.tick * perTick}
 			cy={yOf(point.value)}
 			r="5"
 			role="button"
 			tabindex="-1"
-			aria-label={`Point at ${point.tick}`}
-			data-testid={`${testid}-point-${index}`}
-			onpointerdown={(event) => startPoint(event, index)}
-			oncontextmenu={(event) => pointMenu(event, index)}
+			aria-label={`Point at ${position(point.tick, ppq)}`}
+			data-testid={`${testid}-point-${point.index}`}
+			data-tick={point.tick}
+			data-value={point.value}
+			data-shape={point.shape}
+			onpointerdown={(event) => startPoint(event, point.index)}
+			oncontextmenu={(event) => pointMenu(event, point.index)}
 		/>
 	{/each}
 </svg>

@@ -1187,9 +1187,11 @@ test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[1]?.ramp).toBe(480);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
+	// The point is where its ramp ends, which starts at the point before, so moving it lengthens the ramp.
 	const point = (await page.getByTestId('lane-0-point-1').boundingBox())!;
 	await press(page, { x: point.x + 5, y: point.y + 5 }, { x: point.x + 5 + 96, y: lane.y + lane.height - 4 });
-	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[1].tick).toBe(960);
+	await expect(page.getByTestId('lane-0-point-1')).toHaveAttribute('data-tick', '960');
+	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[1]).toMatchObject({ tick: 0, ramp: 960 });
 
 	// A fader lane at zero: the track still sounds at its own scope, which is before the fader, and the master goes quiet.
 	await page.getByLabel('Add a lane').selectOption({ label: 'Fader' });
@@ -1316,7 +1318,7 @@ test('a placement plays a window of its clip, transposed and softer', async ({ p
 	for (const [label, value] of [
 		['Transpose', '12'],
 		['Velocity scale', '0.5'],
-		['Window start', '480']
+		['Window start', '1.2'] // A position in the clip, its second beat
 	]) {
 		await page.getByLabel(label, { exact: true }).fill(value);
 		await page.getByLabel(label, { exact: true }).blur();

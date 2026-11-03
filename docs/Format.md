@@ -29,7 +29,7 @@ Three kinds of change are possible after this freeze, and nothing else is.
 Each of these raises the **revision**. An engine has a `kFormatRevision`, and a manifest states the lowest revision that
 can read it. An engine refuses a higher one with "image needs a newer engine", which is different from an image being
 damaged. A compiler writes the lowest revision that covers what it actually used, so an image that uses nothing new keeps
-loading on old engines. This document describes revision 7. The opcode table says which revision added each opcode.
+loading on old engines. This document describes revision 8. The opcode table says which revision added each opcode.
 
 The **version** byte in each chunk header is for a change that an old engine must not attempt. Version 1 is the only
 version so far, and no such change is planned. A version above the engine's in the manifest, which comes first, gets the same refusal. In any later chunk
@@ -225,7 +225,7 @@ exactly at the end of the last section.
 | Parameters | 20 bytes | `params` |
 | References | u64 hash of a Table or Asset | `refs` |
 | Constants | f32, finite | `consts` |
-| Delay lines | f32 maximum seconds, above 0 and at most 60 | `delays` |
+| Delay lines | f32 maximum seconds, above 0 and at most 60. What a line holds is up to the steps that use it, below. | `delays` |
 | Input ports | u16 left, u16 right, each a buffer index | `inputs` |
 | Control steps, then voice steps | 20 bytes | `control_steps + voice_steps` |
 
@@ -323,6 +323,10 @@ samples.
 | 31 | KMath | S | S a, S b, S c | 0 min, 1 max, 2 abs, 3 clip, 4 floor, 5 divide, 6 compare, 7 select | | either | 6 |
 | 32 | Shape | B | B in | | Table | voice | 6 |
 | 33 | Sample3 | B left, B right | S note, S start | bit 0 reverse, bit 1 tail, bit 2 release | Table | voice | 7 |
+| 34 | DelayWriteI16 | | B in | | Delay | voice | 8 |
+| 35 | DelayReadI16 | B | S seconds | 0 after the write, 1 before it | Delay | voice | 8 |
+| 36 | CombI16 | B | B in, S seconds, S feedback, S damp | | Delay | voice | 8 |
+| 37 | AllpassI16 | B | B in, S seconds, S feedback | | Delay | voice | 8 |
 
 What each one does:
 
@@ -400,6 +404,9 @@ What each one does:
 - **Comb.** A feedback comb with a one-pole low-pass in the loop: `low = y * (1 - damp) + low * damp`, then the line takes
   `in + low * feedback` and the output is `y`, the delayed sample. Feedback is clamped to ±0.995 and damp to 0 to 0.99.
 - **Allpass.** The line takes `in + y * feedback`, and the output is `y - in`. Feedback is clamped to ±0.995.
+- **DelayWriteI16, DelayReadI16, CombI16, AllpassI16.** DelayWrite, DelayRead, Comb and Allpass on a line of 16-bit samples, which takes half
+  the memory. A value `x` goes into the line as `round(clamp(x * 32768, -32768, 32767))`, rounding half away from zero, so anything past full
+  scale is held there and a NaN is −32768. A sample `s` comes out as `s * (1 / 32768)`, which is exact. Everything else is as their f32 forms.
 - **Follow.** A peak follower: `level = max(|in|, level * exp_minus(1 / (release * rate)))`. Release is clamped to 0.0001 to 60.
 - **KMul, KAdd.** One scalar operation.
 - **KMtoF.** `440 * pow2((note - 69) / 12)`, with `note` clamped to −48 to 200.
@@ -496,6 +503,7 @@ silence if it is not finite.
 - `out_left` and `out_right` name buffers that have been written.
 - No step uses an opcode added after the manifest's revision.
 - Each reference names a Table or an Asset that exists, and each step's resource is in range and of the right kind.
+- The steps on one delay line agree on what it holds: all of them are I16 ops, or none is.
 - A Sample2's Table is a zone table, and a Sample3's a wide zone table, as section 5 describes.
 
 ## 7. Program chunk (kind 4)
@@ -810,7 +818,7 @@ the format's, so the same image still loads on an engine with no table.
 
 ## 10. Golden images
 
-`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, `Lanes` and `Zones` from revision 4, `Hold` from revision 5, `Mods` from revision 6, and `Steals` from revision 7, each with its render on a stereo and a mono engine. They are the
+`golden/` holds images written at this freeze, `Waves` from revision 1, `Tones` from revision 2, frame 32 forms of four of them from revision 3, `Lanes` and `Zones` from revision 4, `Hold` from revision 5, `Mods` from revision 6, `Steals` from revision 7, and `Lines16` from revision 8, each with its render on a stereo and a mono engine. They are the
 contract in executable form.
 
 - A golden image and its render never change, and CI fails a pull request that edits or removes one.

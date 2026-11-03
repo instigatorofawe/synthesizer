@@ -50,6 +50,11 @@ MODSYNTH_OP(Math,       30, 1,   Buffer, 3,  Either, Either, Either, None,   Non
 MODSYNTH_OP(KMath,      31, 1,   Scalar, 3,  Scalar, Scalar, Scalar, None,   None,    7,       true,   false)
 MODSYNTH_OP(Shape,      32, 1,   Buffer, 1,  Buffer, None,   None,   None,   Table,   0,       false,  false)
 MODSYNTH_OP(Sample3,    33, 2,   Buffer, 2,  Scalar, Scalar, None,   None,   Table,   7,       false,  true)
+// The four above that use a delay line, on a line of 16-bit samples, which takes half the memory
+MODSYNTH_OP(DelayWriteI16, 34, 0, None,   1,  Buffer, None,   None,   None,   Delay,   0,       false,  false)
+MODSYNTH_OP(DelayReadI16,  35, 1, Buffer, 1,  Scalar, None,   None,   None,   Delay,   1,       false,  false)
+MODSYNTH_OP(CombI16,       36, 1, Buffer, 4,  Buffer, Scalar, Scalar, Scalar, Delay,   0,       false,  false)
+MODSYNTH_OP(AllpassI16,    37, 1, Buffer, 3,  Buffer, Scalar, Scalar, None,   Delay,   0,       false,  false)
 
 // Instructions. a, b and c say which fields it uses. An unused field must be zero.
 //             name      id  a  b  c

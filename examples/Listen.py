@@ -220,10 +220,14 @@ def main() -> None:
             if mode and args.mode and mode != args.mode:
                 continue
             print(f"{name} {mode or ''}".strip(), flush=True)
-            speaker.play(render(sound, mode, args.gain), samplerate=RATE)
+            speaker.play(
+                modsynth.limit(render(sound, mode, args.gain), RATE), samplerate=RATE
+            )
     for recipe in chosen:
         print(f"{recipe['name']}: {recipe['listen_for']}", flush=True)
-        speaker.play(render_recipe(recipe, args.gain), samplerate=RATE)
+        speaker.play(
+            modsynth.limit(render_recipe(recipe, args.gain), RATE), samplerate=RATE
+        )
 
 
 if __name__ == "__main__":

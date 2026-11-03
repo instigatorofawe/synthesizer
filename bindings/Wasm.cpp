@@ -8,6 +8,7 @@
 #include <emscripten/emscripten.h>
 #include <new>
 
+#include <modsynth/Limiter.hpp>
 #include <modsynth/Modsynth.hpp>
 
 using namespace modsynth;
@@ -47,6 +48,8 @@ u32 g_live_slot = kImageSlots - 1;
 u32 g_seen_generation = 0;
 u32 g_earlier_generations = 0;  // From engines since replaced, so the count the worklet follows only ever rises
 TapBlock g_tap;
+// What the page plays and exports never passes full scale, whatever an image does (open 9 in the design).
+Limiter g_limiter{48000.0f};
 
 template <class F>
 auto with_engine(F&& f) {
@@ -90,6 +93,7 @@ extern "C" {
 EMSCRIPTEN_KEEPALIVE void ms_init(float rate) {
     for (u32 i = 0; i < kImageSlots; ++i) g_tables[i] = ChunkTable(g_refs[i]);
     g_rate = rate;
+    g_limiter = Limiter(rate);
     start_default();
 }
 
@@ -120,6 +124,7 @@ EMSCRIPTEN_KEEPALIVE void ms_render() {
     with_engine([](auto& synth) {
         for (u32 at = 0; at < kQuantum; at += synth.frame_size) synth.render({g_out[0] + at, g_out[1] + at});
     });
+    g_limiter.process(g_out[0], g_out[1], kQuantum);
     if (const u32 now = generation(); now != g_seen_generation) {
         g_seen_generation = now;
         g_live_slot = next_slot();
@@ -153,6 +158,8 @@ EMSCRIPTEN_KEEPALIVE std::uint32_t ms_generation() { return generation(); }
 EMSCRIPTEN_KEEPALIVE std::uint32_t ms_voices() {
     return with_engine([](auto& synth) { return synth.active_voices(); });
 }
+// The lowest gain the limiter has used since this was last asked, or 1 if it hasn't turned anything down.
+EMSCRIPTEN_KEEPALIVE float ms_limited() { return g_limiter.take_lowest(); }
 EMSCRIPTEN_KEEPALIVE std::uint32_t ms_guard_trips() {
     return with_engine([](auto& synth) { return synth.guard_trips(); });
 }

@@ -9,7 +9,7 @@
 
 The notes come from the Mutopia Project's editions, which their typesetters placed in the public domain, and everything
 else is a performance made here: the instruments, the tempo and its rubato, dynamics, pedalling, articulation and the
-mix. Bach's chorale is copied from its LilyPond source below. The other three are read from the MIDI files LilyPond wrote
+mix. Bach's chorale is copied from its LilyPond source below. The others are read from the MIDI files LilyPond wrote
 from theirs, in examples/Pieces/Scores. Each piece is rendered once to set its master gain, so its peak lands where the
 recipes' do.
 
@@ -21,6 +21,9 @@ Sources, all at https://www.mutopiaproject.org/ftp/ and typeset by the Mutopia m
     PassionChorale        BachJS/O_Haupt_voll_Blut/O_Haupt_voll_Blut.ly, dwb
     FurElise.mid          BeethovenLv/WoO59/fur_Elise_WoO59/fur_Elise_WoO59.mid, Stelios Samelis
     MountainKing.mid      GriegE/O46/Dans_l_antre_du_roi_de_la_montagne/Dans_l_antre_du_roi_de_la_montagne.mid, Coyau
+    BachInventionInF.mid  BachJS/BWV779/bach-invention-08/bach-invention-08.mid, Allen Garvin, from the Bach-Gesellschaft
+    Entertainer.mid       JoplinS/entertainer/entertainer.mid, Chris Sawer, from the original edition of 1902
+Each of these editions is marked Public Domain on Mutopia, placed there by its typesetter.
 """
 
 import itertools
@@ -340,6 +343,67 @@ def hall(feedback: float, damp: float, wet: float) -> dict:
             )
         sides.append(g.mul(bank, wet))
     g.out(*sides)
+    return g.json()
+
+
+def upright() -> dict:
+    """An old upright piano: two strings a few cents apart for each note, which beat as a tired one's unisons do,
+    struck bright and mellowing as they ring, longer in the bass."""
+    g = Graph()
+    key = g.node("note")
+    f = g.mtof(key.pitch)
+    strings = g.add(g.osc("saw", g.mul(f, 1.0032)), g.osc("saw", g.mul(f, 0.9968)))
+    strike = g.snap(g.env(0.0005, 0.3, 0.0, 0.1))
+    harmonics = g.mul(
+        g.add(g.mul(strike, 9.0), 2.2), g.add(g.mul(key.velocity, 0.9), 0.35)
+    )
+    cutoff = g.node(
+        "math", {"a": g.add(g.mul(f, harmonics), 250.0), "b": 14000.0}, mode="min"
+    )
+    tone = g.filter("lowpass", strings, cutoff, 0.6)
+    ring = g.env(0.001, g.keyed(key.pitch, 2.0), 0.0, 0.16)
+    level = g.mul(g.add(g.mul(g.mul(key.velocity, key.velocity), 0.8), 0.2), 0.16)
+    g.out(g.filter("highpass", g.mul(g.mul(tone, ring), level), 50.0))
+    return g.json()
+
+
+def console(wave: str) -> dict:
+    """One sound channel of an old games console, which is what a board can afford: a single naive oscillator and a
+    plucked envelope that dies away faster in the treble, with no filter. Its track's fader sets its level, which costs
+    nothing."""
+    g = Graph()
+    key = g.node("note")
+    f = g.mtof(key.pitch)
+    if wave == "square":
+        tone = g.osc("square", f, mode="naive", width=0.3)
+    else:
+        tone = g.osc(wave, f)
+    ring = g.env(0.001, g.keyed(key.pitch, 0.9), 0.15, 0.04)
+    g.out(g.mul(tone, ring))
+    return g.json()
+
+
+def small_room(feedback: float, damp: float, wet: float) -> dict:
+    """A mono room a board can hold: four of the hall's combs and two of its allpasses, each line only as long as its
+    delay, 31 KB in all where the hall's take 188 KB. It costs a sixth of a frame on the board."""
+    g = Graph()
+    source = g.node("in")
+    mono = g.mul(g.add(source.l, source.r), 0.5)
+    bank = None
+    for seconds in (0.0297, 0.0371, 0.0411, 0.0437):
+        comb = g.node(
+            "comb",
+            {"in": mono, "time": seconds, "feedback": feedback, "damp": damp},
+            max=round(seconds + 0.0005, 4),
+        )
+        bank = comb if bank is None else g.add(bank, comb)
+    for seconds in (0.0077, 0.0051):
+        bank = g.node(
+            "allpass",
+            {"in": bank, "time": seconds, "feedback": 0.5},
+            max=round(seconds + 0.0005, 4),
+        )
+    g.out(g.mul(bank, wet))
     return g.json()
 
 
@@ -1052,11 +1116,165 @@ def king() -> tuple[dict, str]:
     return song.project("king", "In the Hall of the Mountain King"), listen
 
 
+def invention() -> tuple[dict, str]:
+    """Bach, Invention No. 8 in F major, BWV 779, on two channels of an old games console, sized so the NUCLEO-L476RG
+    plays it, room and all."""
+    bar = 3 * PPQ
+    notes = read_midi(SCORES / "BachInventionInF.mid")
+    length = 34 * bar
+    right, left = 1, 2
+    # It slows over the last two bars from 104 to 76 bpm. A tempo change can cut a frame in two, which the board's
+    # bound counts for every track and voice, so the slowing is written into where the notes fall instead.
+    start, span, fast, slow = 32 * bar, 2 * bar - PPQ, 104.0, 76.0
+    k = (slow - fast) / span
+
+    def warp(tick: int) -> int:
+        x = tick - start
+        if x <= 0:
+            return tick
+        bent = fast / k * math.log((fast + k * min(x, span)) / fast)
+        return start + round(bent + max(0, x - span) * fast / slow)
+
+    played = []
+    for n in notes:
+        # Every note a little short of its value, so the one voice a hand has has let it go before the next takes it.
+        end = n.tick + max(30, n.dur * 3 // 4)
+        played.append(
+            replace(n, tick=warp(n.tick), dur=warp(end) - warp(n.tick), vel=100)
+        )
+    # The last chord is broken, its third and then its root, and leaves out its fifth: one voice a hand can't hold more.
+    last = sorted(
+        (n for n in played if n.part == right and n.tick == warp(33 * bar)),
+        key=lambda n: n.pitch,
+    )
+    played.remove(last[1])
+    last[0].dur = PPQ // 4
+    last[2].tick += PPQ // 4
+    last[2].dur -= PPQ // 4
+    length = warp(length)
+
+    tempo = Tempo(104)
+
+    song = Song(tempo, [("invention", 0)], length)
+    song.patch("pulse", "Pulse channel", console("square"))
+    song.patch("triangle", "Triangle channel", console("triangle"))
+    song.patch("room", "Small room", small_room(0.78, 0.4, 0.2))
+    song.bus("room", "room")
+    for name, part, patch, voices, gain, pan in (
+        ("Right hand", right, "pulse", 1, 0.22, 0.3),
+        ("Left hand", left, "triangle", 1, 0.45, -0.3),
+    ):
+        song.track(
+            name,
+            [patch],
+            [n for n in played if n.part == part],
+            voices=voices,
+            gain=gain,
+            pan=pan,
+            sends={"room": 0.35},
+        )
+    listen = (
+        "Bach's two-part invention in F as an old games console would play it, a pulse wave for the right hand and a "
+        "triangle for the left, chasing each other across the speakers in a small room: a whole piece the NUCLEO-L476RG "
+        "plays."
+    )
+    return song.project("invention", "Invention No. 8"), listen
+
+
+def entertainer() -> tuple[dict, str]:
+    """Joplin, The Entertainer, on an old upright piano."""
+    bar = 2 * PPQ
+    printed = read_midi(SCORES / "Entertainer.mid")
+    # LilyPond unfolded every repeat: an introduction of 4 bars, then A twice, B twice, A, C twice, 4 bars back to C major,
+    # and D twice, 152 bars. This plays C once, its second time, which leads on, and the repeat of B an octave up, as
+    # marked.
+    cut = (84 * bar, 100 * bar)
+    notes = []
+    for n in printed:
+        if cut[0] <= n.tick < cut[1]:
+            continue
+        shift = cut[1] - cut[0] if n.tick >= cut[1] else 0
+        up = 12 if n.part == 1 and 52 * bar <= n.tick < 67 * bar else 0
+        notes.append(replace(n, tick=n.tick - shift, pitch=n.pitch + up))
+    intro, a1, b1, b2, a3 = 0, 4 * bar, 36 * bar, 52 * bar, 68 * bar
+    c, link, d1, d2 = 84 * bar, 100 * bar, 104 * bar, 120 * bar
+    length = 136 * bar
+    right, left = 1, 2
+
+    # Each strain at its own level, and the bass stronger than the chords it answers.
+    dynamic = [(intro, 92), (a1, 74), (b1 - bar, 74), (b1, 88), (b2, 94), (a3, 76)]
+    dynamic += [
+        (c, 66),
+        (link, 70),
+        (d1, 84),
+        (d2, 90),
+        (length - 4 * bar, 92),
+        (length, 100),
+    ]
+    bass = {}
+    for n in notes:
+        if n.part == left:
+            bass[n.tick] = min(bass.get(n.tick, 127), n.pitch)
+    for n in notes:
+        level = curve(dynamic, n.tick)
+        if n.part == left:
+            level += 6 if n.pitch == bass[n.tick] and n.tick % PPQ == 0 else -6
+        else:
+            level += (
+                3 if n.tick % (PPQ // 2) != 0 else 0
+            )  # The syncopations, which the tune leans on
+        n.vel = velocity(level + wobble(n.tick, n.pitch))
+    notes = cut_restrikes(notes)
+
+    tempo = Tempo(88)
+    # Not fast, and steady, as Joplin asked, with a breath before the tune comes back and a slower last two bars.
+    tempo.glide(a1 - bar // 2, a1, 88, 80)
+    tempo.at(a1, 88)
+    tempo.glide(a3 - bar, a3, 88, 78)
+    tempo.at(a3, 88)
+    tempo.glide(d1 - bar, d1, 88, 82)
+    tempo.at(d1, 88)
+    tempo.glide(length - 2 * bar, length - PPQ // 2, 88, 60)
+
+    sections = [
+        ("intro", intro),
+        ("a", a1),
+        ("b", b1),
+        ("b-high", b2),
+        ("a-return", a3),
+    ]
+    sections += [("c", c), ("link", link), ("d", d1), ("d-again", d2)]
+    song = Song(tempo, sections, length)
+    song.patch("piano", "Upright piano", upright())
+    song.patch("room", "Parlour", hall(0.78, 0.4, 0.08))
+    song.bus("room", "room")
+    for name, part, voices, pan in (
+        ("Right hand", right, 12, 0.12),
+        ("Left hand", left, 10, -0.12),
+    ):
+        song.track(
+            name,
+            ["piano"],
+            [n for n in notes if n.part == part],
+            voices=voices,
+            pan=pan,
+            sends={"room": 0.22},
+            steal="fade",
+        )
+    listen = (
+        "Joplin's rag on an old upright whose unisons have drifted apart, not fast and steady as he asked, its bass "
+        "striding under the syncopated tune, the second time through the B strain an octave up, as marked."
+    )
+    return song.project("entertainer", "The Entertainer"), listen
+
+
 MAKERS = {
     "BachPreludeInC": prelude,
     "PassionChorale": chorale,
     "FurElise": elise,
     "HallOfTheMountainKing": king,
+    "BachInventionInF": invention,
+    "TheEntertainer": entertainer,
 }
 
 

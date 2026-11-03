@@ -1,0 +1,653 @@
+{
+ "patches": {
+  "lead": {
+   "name": "lead",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "lfo",
+      "inputs": {
+       "rate": 5.5,
+       "depth": 0.18
+      }
+     },
+     {
+      "id": 3,
+      "type": "add"
+     },
+     {
+      "id": 4,
+      "type": "mtof"
+     },
+     {
+      "id": 5,
+      "type": "osc",
+      "wave": "square",
+      "mode": "naive",
+      "inputs": {
+       "width": 0.25
+      }
+     },
+     {
+      "id": 6,
+      "type": "env",
+      "inputs": {
+       "attack": 0.002,
+       "decay": 0.12,
+       "sustain": 0.65,
+       "release": 0.04
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul",
+      "inputs": {
+       "b": 0.3
+      }
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "b"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "in"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "freq"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "to": 9,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "bass": {
+   "name": "bass",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "triangle"
+     },
+     {
+      "id": 4,
+      "type": "env",
+      "inputs": {
+       "attack": 0.002,
+       "decay": 0.05,
+       "sustain": 0.9,
+       "release": 0.03
+      }
+     },
+     {
+      "id": 5,
+      "type": "mul",
+      "inputs": {
+       "b": 0.6
+      }
+     },
+     {
+      "id": 6,
+      "type": "mul"
+     },
+     {
+      "id": 7,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "b"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "noise": {
+   "name": "noise",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "noise"
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": -0.0068
+      }
+     },
+     {
+      "id": 4,
+      "type": "add",
+      "inputs": {
+       "b": 0.6
+      }
+     },
+     {
+      "id": 5,
+      "type": "env",
+      "inputs": {
+       "attack": 0.001,
+       "sustain": 0.0,
+       "release": 0.02
+      }
+     },
+     {
+      "id": 6,
+      "type": "mul",
+      "inputs": {
+       "b": 0.35
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul"
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "decay"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "to": 9,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 150
+     }
+    ],
+    "clips": [
+     {
+      "id": "melody",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 76,
+        "vel": 100,
+        "dur": 220
+       },
+       {
+        "tick": 240,
+        "note": 79,
+        "vel": 100,
+        "dur": 220
+       },
+       {
+        "tick": 480,
+        "note": 84,
+        "vel": 100,
+        "dur": 440
+       },
+       {
+        "tick": 960,
+        "note": 83,
+        "vel": 100,
+        "dur": 220
+       },
+       {
+        "tick": 1200,
+        "note": 79,
+        "vel": 100,
+        "dur": 220
+       },
+       {
+        "tick": 1440,
+        "note": 76,
+        "vel": 100,
+        "dur": 440
+       },
+       {
+        "tick": 1920,
+        "note": 77,
+        "vel": 100,
+        "dur": 220
+       },
+       {
+        "tick": 2160,
+        "note": 81,
+        "vel": 100,
+        "dur": 220
+       },
+       {
+        "tick": 2400,
+        "note": 84,
+        "vel": 100,
+        "dur": 220
+       },
+       {
+        "tick": 2640,
+        "note": 86,
+        "vel": 100,
+        "dur": 220
+       },
+       {
+        "tick": 2880,
+        "note": 84,
+        "vel": 100,
+        "dur": 900
+       }
+      ]
+     },
+     {
+      "id": "line",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 48,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 240,
+        "note": 60,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 480,
+        "note": 48,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 720,
+        "note": 60,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 960,
+        "note": 45,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 1200,
+        "note": 57,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 1440,
+        "note": 45,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 1680,
+        "note": 57,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 1920,
+        "note": 41,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 2160,
+        "note": 53,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 2400,
+        "note": 41,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 2640,
+        "note": 53,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 2880,
+        "note": 43,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 3120,
+        "note": 55,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 3360,
+        "note": 43,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 3600,
+        "note": 55,
+        "vel": 100,
+        "dur": 200
+       }
+      ]
+     },
+     {
+      "id": "beat",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 240,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 480,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 480,
+        "note": 54,
+        "vel": 120,
+        "dur": 60
+       },
+       {
+        "tick": 720,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 960,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 1200,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 1440,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 1440,
+        "note": 54,
+        "vel": 120,
+        "dur": 60
+       },
+       {
+        "tick": 1680,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 1920,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 2160,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 2400,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 2400,
+        "note": 54,
+        "vel": 120,
+        "dur": 60
+       },
+       {
+        "tick": 2640,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 2880,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 3120,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 3360,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       },
+       {
+        "tick": 3360,
+        "note": 54,
+        "vel": 120,
+        "dur": 60
+       },
+       {
+        "tick": 3600,
+        "note": 72,
+        "vel": 70,
+        "dur": 60
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 1,
+      "slots": [
+       "lead"
+      ],
+      "placements": [
+       {
+        "clip": "melody",
+        "tick": 0
+       }
+      ]
+     },
+     {
+      "id": 2,
+      "voices": 1,
+      "slots": [
+       "bass"
+      ],
+      "placements": [
+       {
+        "clip": "line",
+        "tick": 0
+       }
+      ]
+     },
+     {
+      "id": 3,
+      "voices": 2,
+      "slots": [
+       "noise"
+      ],
+      "placements": [
+       {
+        "clip": "beat",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.455
+    }
+   }
+  }
+ ]
+}

@@ -9,7 +9,10 @@ export default defineConfig({
 	timeout: 30000,
 	use: {
 		baseURL: `http://127.0.0.1:${port}`,
-		launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] }
+		launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
+		// Kept only for a test that fails, for CI to upload.
+		screenshot: 'only-on-failure',
+		trace: 'retain-on-failure'
 	},
 	webServer: {
 		command: 'rm -rf .e2e && node build/index.js',

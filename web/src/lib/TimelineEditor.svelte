@@ -13,6 +13,7 @@
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { clampVelocity, stepVelocity, type Cursor } from '#lib/StepEntry.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -74,7 +75,8 @@
 		onchange,
 		ontrack = () => {},
 		onopen = () => {},
-		onnewpatch
+		onnewpatch,
+		onwriting = () => {}
 	}: {
 		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
 		doc: Timeline;
@@ -96,6 +98,7 @@
 		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
+		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -113,6 +116,12 @@
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
+	let velocity = $state(100); // The velocity of new notes, clicked or stepped, which C and V step
+	// Step entry, which R or the Step toggle turns on and Esc leaves. It outlasts a change of clip, and its cursor is kept for
+	// each clip, so coming back to one carries on where it left off.
+	let stepping = $state(false);
+	const cursors = new Map<string, Cursor>();
+	let roll = $state<ReturnType<typeof PianoRoll>>();
 	const drawChoices = $derived.by(() => {
 		const lengths = drawLengths(doc.ppq);
 		if (lengths.some((length) => length.ticks === draw)) return lengths;
@@ -142,6 +151,16 @@
 	const length = $derived(program?.length_ticks ?? songLength(doc));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
 	const badClips = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).clip ?? [])));
+
+	// The piano keys write into the roll while step entry is on and the roll shows a clip. The page asks before it routes them.
+	const writing = $derived(stepping && active && !readonly && tab === 'notes' && !!clip);
+	$effect(() => onwriting(writing));
+	$effect(() => () => onwriting(false));
+
+	// A piano key from the page, for step entry to write. The roll ignores it unless it is writing.
+	export function stepKey(note: number, on: boolean) {
+		roll?.stepKey(note, on);
+	}
 
 	const playhead = $derived.by(() => {
 		if (!clip || !placed || placed.clip !== clip.id) return null;
@@ -295,7 +314,6 @@
 	});
 
 	// Each clip keeps how the roll showed it: its zoom and row height across a reload, and its scroll while the page is open.
-	let roll = $state<ReturnType<typeof PianoRoll>>();
 	const viewKey = (clip: string) => zoomKey(id, clip);
 	function rollViewOf(clip: string): RollView | null {
 		const seen = rollViews.get(viewKey(clip));
@@ -403,6 +421,24 @@
 		draw = stepLength(draw, doc.ppq, by);
 	}
 
+	// R turns step entry on or off, wherever focus is but a field or a dialog. From another tab it opens the notes to write
+	// in, and with no clip there is nothing to write into. C and V step the velocity of new notes.
+	function noteKeys(event: KeyboardEvent) {
+		const target = event.target as Element | null;
+		if (readonly || !active || typingIn(target) || target?.closest?.('dialog')) return;
+		if (matches(event, 'step-entry')) {
+			event.preventDefault();
+			if (event.repeat || !clip) return;
+			stepping = tab !== 'notes' || !stepping;
+			tab = 'notes';
+		} else if (matches(event, 'softer') || matches(event, 'louder')) {
+			event.preventDefault();
+			velocity = stepVelocity(velocity, matches(event, 'louder') ? 1 : -1);
+		}
+	}
+
+	onMount(() => on(window, 'keydown', noteKeys));
+
 	onMount(() => {
 		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
 		return on(window, 'keydown', stepDraw);
@@ -484,6 +520,23 @@
 				<select aria-label="Draw length" bind:value={draw}>
 					{#each drawChoices as choice (choice.ticks)}<option value={choice.ticks}>{choice.label}</option>{/each}
 				</select>
+			</label>
+			<label
+				title={`How hard a new note is played, from 1 to 127. ${label('softer')} and ${label('louder')} step it by 10.`}
+			>
+				Vel
+				<input
+					class="velocity"
+					type="number"
+					min="1"
+					max="127"
+					aria-label="Velocity of new notes"
+					value={velocity}
+					onchange={(e) => {
+						velocity = clampVelocity(Number(e.currentTarget.value) || velocity);
+						e.currentTarget.value = String(velocity);
+					}}
+				/>
 			</label>
 		{/if}
 		<label>
@@ -872,22 +925,33 @@
 				>
 			{/each}
 		</div>
-		<button
-			type="button"
-			class="expand"
-			aria-label="Expand"
-			aria-pressed={expanded}
-			title={expanded
-				? 'Bring the arrangement and the inspector back (Esc)'
-				: 'Give this the whole view. A double-click on a clip does too, and Esc comes back.'}
-			onclick={() => expand()}>⤢</button
-		>
+		<!-- Step is for the notes, and ⤢ for whichever tab is open. -->
+		<div class="rolltools" role="toolbar" aria-label="Notes">
+			{#if tab === 'notes' && clip && !readonly}
+				<button
+					type="button"
+					class="step"
+					aria-pressed={stepping}
+					title={`Step entry (${label('step-entry')}): the piano keys write notes at a cursor, each as long as Draw`}
+					onclick={() => (stepping = !stepping)}><span aria-hidden="true">●</span> Step</button
+				>
+			{/if}
+			<button
+				type="button"
+				class="expand"
+				aria-label="Expand"
+				aria-pressed={expanded}
+				title={expanded
+					? 'Bring the arrangement and the inspector back (Esc)'
+					: 'Give this the whole view. A double-click on a clip does too, and Esc comes back.'}
+				onclick={() => expand()}>⤢</button
+			>
+		</div>
 		<div class="pane" class:notes={tab === 'notes'} role="tabpanel">
 			{#if tab === 'notes'}
 				{#if clip}
 					{#key clip.id}
 						<PianoRoll
-							bind:this={roll}
 							{clip}
 							ppq={doc.ppq}
 							{grid}
@@ -898,6 +962,11 @@
 							canAudition={reported !== undefined}
 							{readonly}
 							bind:draw
+							bind:this={roll}
+							bind:stepping
+							{velocity}
+							{active}
+							{cursors}
 							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
 							view={rollViewOf(clip.id)}
 							{expanded}
@@ -1062,16 +1131,43 @@
 		overflow: auto;
 		font-size: 0.8rem;
 	}
-	/* The tabs, with ⤢ at the right of their strip, over what the chosen one shows. */
 	.detail {
 		grid-area: detail;
 		min-height: 0;
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		grid-template-rows: auto minmax(0, 1fr);
+		display: flex;
+		flex-direction: column;
+		position: relative;
+	}
+	/* The roll's own controls, and ⤢, sit at the right end of the tab strip. */
+	.rolltools {
+		position: absolute;
+		top: 0;
+		right: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding-top: 0.3rem;
+		font-size: 0.8rem;
+	}
+	.rolltools button {
+		padding: 0.1rem 0.6rem;
+		font-size: 0.8rem;
+	}
+	.step span {
+		color: var(--muted);
+	}
+	.step[aria-pressed='true'] {
+		border-color: #3fb950;
+	}
+	.step[aria-pressed='true'] span {
+		color: #3fb950;
+	}
+	.toolbar input.velocity {
+		width: 3.2rem;
+		padding: 0.1rem 0.25rem;
 	}
 	.tabs {
-		grid-area: 1 / 1 / 2 / 3;
+		flex: none;
 		display: flex;
 		gap: 0.15rem;
 		padding-top: 0.3rem;
@@ -1091,10 +1187,7 @@
 		border-color: var(--line);
 		color: var(--text);
 	}
-	.expand {
-		grid-area: 1 / 2;
-		align-self: end;
-		margin: 0 0 0.15rem;
+	.rolltools .expand {
 		padding: 0 0.4rem;
 		font-size: 1rem;
 		line-height: 1.2;
@@ -1104,7 +1197,7 @@
 		border-color: var(--accent);
 	}
 	.pane {
-		grid-area: 2 / 1 / 3 / 3;
+		flex: 1;
 		min-height: 0;
 		overflow: auto;
 		padding-top: 0.4rem;

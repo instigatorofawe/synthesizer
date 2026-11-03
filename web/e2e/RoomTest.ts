@@ -129,6 +129,17 @@ test('Expand gives the notes the whole view, by ⤢ and by a double-click on a c
 	await expect(page.getByTestId('note-0')).toHaveClass(/chosen/);
 	await page.keyboard.press('Escape');
 	await expect(page.getByTestId('note-0')).not.toHaveClass(/chosen/);
+
+	// Step entry is a mode nearer than Expand, so Esc leaves it first.
+	const step = page.getByRole('button', { name: 'Step', exact: true });
+	await expand(page).click();
+	await page.keyboard.press('r');
+	await expect(step).toHaveAttribute('aria-pressed', 'true');
+	await page.keyboard.press('Escape');
+	await expect(step).toHaveAttribute('aria-pressed', 'false');
+	await expect(arrangement(page)).toBeHidden();
+	await page.keyboard.press('Escape');
+	await expect(arrangement(page)).toBeVisible();
 });
 
 test('Expand folds the inspector too, I shows it beside the notes, and coming back leaves it as it was', async ({

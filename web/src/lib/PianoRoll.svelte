@@ -1,10 +1,24 @@
 <script lang="ts">
 	import { onDestroy, onMount, tick as settle, untrack } from 'svelte';
+	import { on } from 'svelte/events';
 	import AutomationLane from '#lib/AutomationLane.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
-	import { followScroll } from '#lib/Follow.ts';
+	import { FOLLOW_MARGIN, followScroll } from '#lib/Follow.ts';
 	import { ROW, ROWS, anchored, clampBeat, fitRoll, wheelAction, type RollView } from '#lib/RollView.ts';
-	import { matches, modHeld, modKey } from '#lib/Shortcuts.ts';
+	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import {
+		START,
+		chordEnd,
+		lengthen as lengthenHeld,
+		moveTo,
+		press,
+		release,
+		rest,
+		stepBack,
+		write,
+		type Chord,
+		type Cursor
+	} from '#lib/StepEntry.ts';
 	import {
 		addNote,
 		addPoint,
@@ -43,6 +57,10 @@
 		canAudition,
 		readonly = false,
 		draw = $bindable(),
+		velocity = 100,
+		stepping = $bindable(false),
+		active = true,
+		cursors = new Map(),
 		cangrow = () => true,
 		view = null,
 		expanded = false,
@@ -61,6 +79,10 @@
 		canAudition: boolean;
 		readonly?: boolean;
 		draw: number; // How long a clicked note is, in ticks. It follows the last note added, resized or chosen, as FL Studio's does.
+		velocity?: number; // The velocity of a new note, clicked or stepped, which C and V set
+		stepping?: boolean; // Whether step entry is on, in which the piano keys write notes at a cursor (StepEntry.ts)
+		active?: boolean; // Whether keys are for this roll, which they are while the Song view is on screen
+		cursors?: Map<string, Cursor>; // Where step entry's cursor was in each clip, kept for when the roll comes back to it
 		cangrow?: (length: number) => boolean; // Whether the clip can be this long without running into the clip after it
 		view?: RollView | null; // Where the roll starts: the clip's zoom, row height and scroll as it was left, if it was
 		expanded?: boolean; // Whether the notes have the whole view, which Esc leaves before it lets go of the notes
@@ -99,15 +121,25 @@
 	let ghost = $state.raw<{ tick: number; note: number } | null>(null); // The empty cell under the pointer
 	let menu = $state.raw<{ x: number; y: number } | null>(null);
 	let notice = $state<string | null>(null); // Said after a clip grows, with an Undo beside it
-	let offer = $state.raw<{ note: Note; length: number } | null>(null); // A note that would have grown the clip into the next
+	// A note that would have grown the clip into the next, clicked or from step entry
+	let offer = $state.raw<{ note: Note; length: number; step?: true } | null>(null);
 	let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	let mod = $state('Ctrl'); // What the hint calls Mod, which only the browser knows
+	// Step entry's cursor, where it last was in this clip, and the chord whose keys are down. A key pressed when no step could
+	// be written is refused, and letting it go writes nothing.
+	let cursor = $state.raw<Cursor>(untrack(() => cursors.get(clip.id) ?? START));
+	let chord = $state.raw<Chord | null>(null);
+	const refused = new Set<number>();
 
 	const perTick = $derived(beatWidth / ppq);
 	const bar = $derived(ticksPerBar({ ppq }));
 	const shown = $derived(gesture && 'clip' in gesture ? gesture.clip : clip);
 	const widthTicks = $derived(
-		Math.max(shown.length + PAST_BARS * bar, ...shown.notes.map((n) => n.tick + n.dur + ppq))
+		Math.max(
+			shown.length + PAST_BARS * bar,
+			...shown.notes.map((n) => n.tick + n.dur + ppq),
+			stepping ? Math.max(cursor.tick, chord ? chordEnd(chord) : 0) + bar : 0
+		)
 	);
 	const width = $derived(widthTicks * perTick);
 	const beats = $derived(Math.ceil(widthTicks / ppq));
@@ -130,6 +162,12 @@
 		return { tick: Math.max(0, Math.floor(at.x / perTick / grid) * grid), note: noteAt(at.y) };
 	}
 
+	// The line of the grid nearest the pointer, which is where a click in step entry puts the cursor.
+	function lineAt(event: { clientX: number; clientY: number }) {
+		const at = canvas(event);
+		return { tick: snapTick(at.x / perTick, grid), note: noteAt(at.y) };
+	}
+
 	// A right-click chooses what it is on and opens its menu, and Ctrl-click is a right-click on a Mac, so neither drags.
 	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && modKey() === 'Meta');
 
@@ -138,7 +176,7 @@
 
 	// What the ghost says: the note a click would add, or the one being drawn. Past the end it says what that does to the clip.
 	const ghostLabel = $derived.by(() => {
-		const note = gesture?.kind === 'draw' ? gesture.note : ghost && { ...ghost, dur: draw };
+		const note = gesture?.kind === 'draw' ? gesture.note : ghost && !stepping && { ...ghost, dur: draw };
 		if (!note) return null;
 		const grown = growToHold(clip, note.tick, ppq);
 		if (grown === clip) return describe(note);
@@ -182,9 +220,16 @@
 	function pressGround(event: PointerEvent) {
 		roll.focus({ preventScroll: true });
 		offer = null;
+		pressed = null;
 		if (secondary(event)) return;
 		if (event.shiftKey) {
 			gesture = { kind: 'band', from: canvas(event), at: canvas(event) };
+			return;
+		}
+		// In step entry a click moves the cursor, and adds nothing.
+		if (stepping) {
+			chosen = new Set();
+			moveCursor(moveTo(lineAt(event).tick));
 			return;
 		}
 		if (readonly) {
@@ -192,25 +237,30 @@
 			return;
 		}
 		const { tick, note } = cellAt(event);
+		pressed = { tick, note };
 		// A note already there is too short to hit, or the first click of a double-click put it there.
 		const there = clip.notes.findIndex((n) => n.tick === tick && n.note === note);
 		if (there >= 0) {
 			chosen = new Set([there]);
 			return;
 		}
-		const added = { tick, note, vel: 100, dur: draw };
+		const added = { tick, note, vel: velocity, dur: draw };
 		ghost = null;
 		chosen = new Set([clip.notes.length]);
 		gesture = { kind: 'draw', from: canvas(event), note: added, drawn: false, clip: addNote(clip, added) };
 		audition(note);
 	}
 
-	// A double-click on empty grid adds a note too. Its first click almost always has, so this adds one only if it hasn't.
-	function doubleGround(event: MouseEvent) {
-		if (readonly) return;
-		const { tick, note } = cellAt(event);
+	// A double-click on empty grid adds a note too. Its first click almost always has, so this adds one only if it hasn't, in
+	// the cell that click chose. The double-click's own position is in whole pixels where a press's isn't, so near the edge
+	// of a row it can fall in the next one, and a note there would be a second. In step entry the first click moved the
+	// cursor, and so does the second.
+	let pressed: { tick: number; note: number } | null = null;
+	function doubleGround() {
+		if (readonly || stepping || !pressed) return;
+		const { tick, note } = pressed;
 		if (clip.notes.some((n) => n.tick === tick && n.note === note)) return;
-		place({ tick, note, vel: 100, dur: draw });
+		place({ tick, note, vel: velocity, dur: draw });
 	}
 
 	function tell(text: string) {
@@ -239,12 +289,20 @@
 
 	function lengthen() {
 		if (!offer) return;
-		const { note } = offer;
+		const { note, step } = offer;
 		const length = Math.max(clip.length, offer.length);
 		offer = null;
-		draw = note.dur;
-		chosen = new Set([clip.notes.length]);
-		onchange(addNote({ ...clip, length }, note));
+		if (step) {
+			// The step that was refused is written after all, and the cursor moves on past it.
+			const written = write({ ...clip, length }, cursor, { start: note.tick, notes: [note], held: [] }, ppq);
+			chosen = new Set();
+			moveCursor(written.cursor);
+			onchange(written.clip);
+		} else {
+			draw = note.dur;
+			chosen = new Set([clip.notes.length]);
+			onchange(addNote({ ...clip, length }, note));
+		}
 		tell(`Clip is now ${bars(length)}`);
 	}
 
@@ -269,10 +327,10 @@
 		});
 	});
 
-	// The ghost follows the pointer over empty grid, from cell to cell.
+	// The ghost follows the pointer over empty grid, from cell to cell, or in step entry from line to line.
 	function hover(event: PointerEvent) {
 		const empty = (event.target as Element).classList.contains('lane');
-		const cell = readonly || gesture || menu || !empty ? null : cellAt(event);
+		const cell = readonly || gesture || menu || !empty ? null : stepping ? lineAt(event) : cellAt(event);
 		if (cell?.tick !== ghost?.tick || cell?.note !== ghost?.note) ghost = cell;
 	}
 
@@ -383,14 +441,8 @@
 			chosen = copied.chosen;
 			onchange(copied.clip);
 		} else if (by('escape')) {
-			// The first Esc lets go of what is held or offered, and the next lets go of the notes. Expand comes between, and the
-			// editor leaves it, so Esc goes on to the editor only then.
-			if (gesture?.kind === 'draw') chosen = new Set();
-			if (gesture) gesture = null;
-			else if (offer) offer = null;
-			else if (expanded) return;
-			else chosen = new Set();
-			event.preventDefault();
+			// Expand is the editor's to leave, so Esc goes on to it then.
+			if (escape()) event.preventDefault();
 		} else if (by('roll.up') || by('roll.down') || by('roll.octave-up') || by('roll.octave-down')) {
 			event.preventDefault();
 			nudge(0, (event.code === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1));
@@ -399,6 +451,115 @@
 			nudge((event.code === 'ArrowLeft' ? -1 : 1) * grid, 0);
 		}
 	}
+
+	// Esc lets go of one thing at a time: what is being dragged or drawn, then an offer, then step entry, then Expand, which
+	// the editor leaves, and then the notes. Whether it let go of something here.
+	function escape() {
+		if (gesture?.kind === 'draw') chosen = new Set();
+		if (gesture) gesture = null;
+		else if (offer) offer = null;
+		else if (stepping) stepping = false;
+		else if (expanded) return false;
+		else chosen = new Set();
+		return true;
+	}
+
+	// ------------------------------------------------------------------------------------------------------- step entry
+
+	// A piano key, from the page, which step entry writes while it is on. A key pressed joins the chord at the cursor, and
+	// once the last of the chord's keys is let go the chord is written, as one edit, and the cursor moves on past it. Past the
+	// clip's end the clip grows, as it does for a clicked note, unless that would run it into the next clip on its track:
+	// then nothing is written, and lengthening the clip anyway is offered.
+	export function stepKey(note: number, on: boolean) {
+		if (!on) {
+			if (refused.delete(note) || !chord?.held.includes(note)) return;
+			chord = release(chord, note);
+			if (!chord.held.length) writeChord(chord);
+			return;
+		}
+		if (!stepping || readonly || !active) return;
+		if (!chord && !mayWrite(cursor.tick, { tick: cursor.tick, note, vel: velocity, dur: draw })) {
+			refused.add(note);
+			return;
+		}
+		offer = null;
+		chord = press(chord, cursor, note, draw, velocity);
+		reveal(chord.start, note);
+	}
+
+	// Whether a step at `tick` fits the clip, or can grow it to fit. If not, lengthening is offered for `note`.
+	function mayWrite(tick: number, note: Note) {
+		const grown = growToHold(clip, tick, ppq);
+		if (grown === clip || cangrow(grown.length)) return true;
+		offer = { note, length: grown.length, step: true };
+		return false;
+	}
+
+	function writeChord(done: Chord) {
+		chord = null;
+		if (!done.notes.length || !mayWrite(done.start, done.notes[0])) return;
+		const grows = growToHold(clip, done.start, ppq) !== clip; // Asked before the change, which reaches `clip` at once
+		const written = write(clip, cursor, done, ppq);
+		chosen = new Set(); // A note it replaces moves the others' places
+		moveCursor(written.cursor);
+		onchange(written.clip);
+		if (grows) tell(`Clip is now ${bars(written.clip.length)}`);
+	}
+
+	function moveCursor(next: Cursor) {
+		cursor = next;
+		cursors.set(clip.id, next);
+		reveal(next.tick);
+	}
+
+	// Backspace: the last step taken back, or with none behind the cursor, the cursor back by the Draw length.
+	function stepBackOnce() {
+		const back = stepBack(clip, cursor, draw);
+		moveCursor(back.cursor);
+		if (back.clip === clip) return;
+		chosen = new Set();
+		onchange(back.clip);
+	}
+
+	// Keeps the cursor and what is written after it in sight, and a note being written.
+	function reveal(tick: number, note?: number) {
+		if (!scroller) return;
+		const x = tick * perTick;
+		const width = scroller.clientWidth - KEYS;
+		if (x < scroller.scrollLeft || x + draw * perTick > scroller.scrollLeft + width)
+			scroller.scrollLeft = Math.max(0, x - FOLLOW_MARGIN);
+		if (note === undefined) return;
+		const y = rowOf(note);
+		if (y < scroller.scrollTop || y + rowHeight > scroller.scrollTop + scroller.clientHeight)
+			scroller.scrollTop = y - scroller.clientHeight / 2;
+	}
+
+	// Step entry's keys, while it is on, wherever focus is but a field, a menu, a dialog or the browser, which keep their own.
+	// The roll and the arrangement would move or delete what is chosen with → and Backspace, so these are heard first, on the
+	// way down, and go no further. Esc goes no further either, so one press leaves one thing.
+	function stepKeys(event: KeyboardEvent) {
+		if (!stepping || readonly || !active) return;
+		const target = event.target as Element | null;
+		if (typingIn(target) || target?.closest?.('[role="menu"], dialog, nav')) return;
+		if (matches(event, 'step.rest')) {
+			offer = null;
+			if (chord) chord = lengthenHeld(chord, grid);
+			else moveCursor(rest(cursor, draw));
+		} else if (matches(event, 'step.back')) {
+			offer = null;
+			// With keys still down, it drops what they would have written.
+			if (chord) chord = null;
+			else stepBackOnce();
+		} else if (matches(event, 'escape')) {
+			escape();
+		} else {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
+	onMount(() => on(window, 'keydown', stepKeys, { capture: true }));
 
 	function noteMenu(event: MouseEvent, index: number) {
 		event.preventDefault();
@@ -556,6 +717,16 @@
 		const middle = pitches.length ? (Math.min(...pitches) + Math.max(...pitches)) / 2 : 60;
 		scroller.scrollTop = rowOf(middle) - scroller.clientHeight / 2;
 	});
+
+	// Step entry brings its cursor into sight as it starts, and leaving it lets go of a chord not yet written.
+	$effect(() => {
+		const started = stepping;
+		untrack(() => {
+			if (started) return reveal(cursor.tick);
+			chord = null;
+			refused.clear();
+		});
+	});
 </script>
 
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} />
@@ -574,6 +745,9 @@
 		title={`Zoom in. ${mod} with the wheel zooms, and ${mod}+Shift with it sets the rows' height.`}>+</button
 	>
 	<button type="button" onclick={fit} title="Fit the roll to the clip's notes (.)">Fit</button>
+	{#if stepping}
+		<span class="at" data-testid="step-at">Step at {position(cursor.tick, ppq)}</span>
+	{/if}
 	{#if one}
 		<fieldset disabled={readonly}>
 			<span class="muted">{chosen.size === 1 ? noteName(one.note) : `${chosen.size} notes`}</span>
@@ -676,11 +850,12 @@
 				</label>
 			{/if}
 		</fieldset>
+	{:else if stepping}
+		{@const hint = `Keys write at the cursor, as long as Draw. Hold keys for a chord, and → while holding makes them longer. → rests, Backspace steps back, a click moves the cursor, and Esc leaves.`}
+		<span class="muted hint" title={hint}>{hint}</span>
 	{:else if !readonly}
-		<span class="muted">
-			Click to add a note, and drag to set its length. Drag a note to move it, its end to resize it, and hold {mod} to copy
-			it. Delete or a right-click removes it. Shift-drag selects, and arrows nudge.
-		</span>
+		{@const hint = `Click to add a note, and drag to set its length. Drag a note to move it, its end to resize it, and hold ${mod} to copy it. Delete or a right-click removes it. Shift-drag selects, and arrows nudge.`}
+		<span class="muted hint" title={hint}>{hint}</span>
 	{/if}
 </div>
 
@@ -798,7 +973,9 @@
 						}}
 					/>
 				{/if}
-				{#if ghost && !gesture}
+				{#if ghost && !gesture && stepping}
+					<line class="aim" x1={ghost.tick * perTick} x2={ghost.tick * perTick} y1="0" y2={rollHeight} />
+				{:else if ghost && !gesture}
 					<rect
 						class="ghost"
 						x={ghost.tick * perTick}
@@ -828,6 +1005,29 @@
 				{/if}
 				{#if playhead !== null}
 					<line class="playhead" x1={playhead * perTick} x2={playhead * perTick} y1="0" y2={rollHeight} />
+				{/if}
+				{#if stepping}
+					<!-- What the keys held down will write, which goes into the clip once the last of them is let go -->
+					{#each chord?.notes ?? [] as note (note.note)}
+						<rect
+							class="pending"
+							x={note.tick * perTick}
+							y={rowOf(note.note) + 1}
+							width={Math.max(note.dur * perTick, 3)}
+							height={rowHeight - 2}
+							rx="2"
+							data-testid="step-note"
+						/>
+					{/each}
+					<line
+						class="cursor"
+						x1={cursor.tick * perTick}
+						x2={cursor.tick * perTick}
+						y1="0"
+						y2={rollHeight}
+						data-testid="step-cursor"
+						data-tick={cursor.tick}
+					/>
 				{/if}
 			</svg>
 		</div>
@@ -914,20 +1114,28 @@
 {/if}
 
 <style>
+	/* One line, whatever is chosen: a click that adds a note chooses it, and if the hint gave way to taller fields, the roll
+	   would move under the pointer, and a double-click's second click would land on another row. What doesn't fit scrolls. */
 	.toolbar {
 		flex: none;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		min-height: 2rem;
+		height: 2rem;
 		font-size: 0.8rem;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: none;
 		margin: 0.2rem 0;
 	}
 	.toolbar button {
 		padding: 0 0.5rem;
 	}
-	/* A hint is one line, cut short where the roll is narrow, so it never takes a row of notes. */
+	.toolbar > * {
+		flex: none;
+	}
+	/* A hint, the lane bar's too, is cut short where the roll is narrow. */
+	.toolbar > .hint,
 	.toolbar > .muted {
 		flex: 1 1 0;
 		min-width: 0;
@@ -1037,6 +1245,26 @@
 	.playhead {
 		stroke: #f0883e;
 		pointer-events: none;
+	}
+	.cursor {
+		stroke: #3fb950;
+		stroke-width: 2;
+		pointer-events: none;
+	}
+	.aim {
+		stroke: #3fb95080;
+		stroke-dasharray: 3 3;
+		pointer-events: none;
+	}
+	.pending {
+		fill: #3fb950;
+		stroke: #0d1117;
+		pointer-events: none;
+	}
+	.at {
+		flex: none;
+		color: #3fb950;
+		font-variant-numeric: tabular-nums;
 	}
 	.ghost {
 		fill: #2f81f740;

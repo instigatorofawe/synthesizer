@@ -233,7 +233,7 @@ test('rapid edits settle on the newest image, with scopes on its registers', asy
 	await everyStripHeard(page);
 });
 
-test('the status bar says an edit is compiling until its image plays', async ({ page }) => {
+test('the compile light says an edit is compiling until its image plays', async ({ page }) => {
 	// Slow every reply from the compiler, and every image on its way to the engine, so the edit is seen waiting for each.
 	await page.addInitScript(() => {
 		window.Worker = class extends window.Worker {

@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { loudest } from './Engine.ts';
 import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated, as AppTest's do.
@@ -184,19 +185,17 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	const roll = page.getByTestId('roll');
 	const box = (await roll.boundingBox())!;
 	const key = (await page.getByTestId('key-60').boundingBox())!;
-	// A note the whole bar long, so it still sounds when the meter is first read, which on a slow machine comes late.
-	await page.getByLabel('Draw length').selectOption({ label: '1 bar' });
 	await page.mouse.dblclick(box.x + 2, key.y + key.height / 2);
 	await expect(page.getByTestId('note-0')).toBeAttached();
-	await expect(page.getByTestId('note-0')).toHaveAttribute('data-dur', '1920');
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	// The image with the note is the one playing. An image that arrives after Play has passed tick 0 never starts the note.
 	await expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	// The meter holds the loudest since Play, so a short note shows whenever it is read.
 	const level = page.getByRole('meter', { name: 'Level of Track 1' });
-	await expect.poll(async () => Number(await level.getAttribute('data-peak')), { timeout: 8000 }).toBeGreaterThan(0.01);
+	await expect.poll(() => loudest(level), { timeout: 8000 }).toBeGreaterThan(0.01);
 
 	// Its edits wait with the timeline's, and Save writes both.
 	await openView(page, 'patch');

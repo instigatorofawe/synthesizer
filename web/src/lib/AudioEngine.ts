@@ -30,6 +30,7 @@ export interface EngineState {
 	loading: boolean;
 	guardTrips: number;
 	limited: number; // The lowest gain the limiter used since the last state, or 1 if it turned nothing down
+	time: number; // Seconds of audio rendered since audio started, however long that took
 }
 
 export interface TapBlock {
@@ -131,7 +132,8 @@ export class AudioEngine {
 		error: 0,
 		loading: false,
 		guardTrips: 0,
-		limited: 1
+		limited: 1,
+		time: 0
 	};
 	onState: (state: EngineState) => void = () => {};
 	onTap: (slot: number, block: TapBlock) => void = () => {};

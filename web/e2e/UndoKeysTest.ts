@@ -1,5 +1,6 @@
 import { expect, test as base, type Page } from '@playwright/test';
 import { redoButton, undoButton } from './Chrome.ts';
+import { engineRenders } from './Engine.ts';
 
 // The transport's keys, Stop pressed twice, and an undo history for each patch and timeline that outlasts opening others.
 
@@ -68,7 +69,7 @@ test('Space plays and stops from anywhere but a field, and a button with focus d
 	await play.focus();
 	await page.keyboard.press('Space');
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
-	await page.waitForTimeout(300);
+	await engineRenders(page, 0.3);
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
 
 	// The roll has focus, and it doesn't scroll.
@@ -88,7 +89,7 @@ test('Space plays and stops from anywhere but a field, and a button with focus d
 	await page.keyboard.press('End');
 	await page.keyboard.press('Space');
 	await expect(name).toHaveValue('Song ');
-	await page.waitForTimeout(300);
+	await engineRenders(page, 0.3);
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
 });
 
@@ -103,7 +104,7 @@ test('Stop pressed again goes back to the start, and so does Home', async ({ pag
 	await stop.click();
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
 	const stopped = await tickShown(page);
-	await page.waitForTimeout(300);
+	await engineRenders(page, 0.3);
 	expect(await tickShown(page)).toBe(stopped); // Once, it only stops
 	expect(stopped).toBeGreaterThan(0);
 	await stop.click();

@@ -16,6 +16,7 @@
 	let clipped = $state(false);
 	let triggered = $state(false);
 	let peak = $state(0);
+	let loudest = $state(0); // Held since Play or since the image playing now began, as the ring keeps it
 
 	function draw() {
 		const context = canvas.getContext('2d');
@@ -39,20 +40,21 @@
 		context.strokeStyle = '#3fb950';
 		context.beginPath();
 		let over = false;
-		let loudest = 0;
+		let inView = 0;
 		columns(ring, start, span, width).forEach(({ min, max }, x) => {
 			context.moveTo(x + 0.5, y(max));
 			context.lineTo(x + 0.5, Math.max(y(min), y(max) + 1));
 			if (max > 1 || min < -1) over = true;
-			loudest = Math.max(loudest, Math.abs(min), Math.abs(max));
+			inView = Math.max(inView, Math.abs(min), Math.abs(max));
 		});
 		context.stroke();
 		clipped = over;
-		peak = loudest;
+		peak = inView;
 	}
 
 	onMount(() => {
 		let frame = requestAnimationFrame(function loop() {
+			loudest = ring.loudest;
 			draw();
 			frame = requestAnimationFrame(loop);
 		});
@@ -65,7 +67,13 @@
 		<span>{label}</span>
 		<span class="flags">
 			{#if clipped}<b class="clip">clip</b>{/if}
-			<span class="dim" data-testid="peak" data-peak={peak}>
+			<span
+				class="dim"
+				data-testid="peak"
+				data-peak={peak}
+				data-loudest={loudest}
+				title="Loudest since Play: {loudest > 0 ? `${(20 * Math.log10(loudest)).toFixed(1)} dB` : 'silent'}"
+			>
 				{peak > 0 ? `${(20 * Math.log10(peak)).toFixed(1)} dB` : 'silent'}
 			</span>
 			{#if !compact}<span class:dim={!triggered}>{triggered ? 'trig' : 'auto'}</span>{/if}

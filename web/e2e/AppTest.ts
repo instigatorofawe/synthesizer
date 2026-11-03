@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test as base, type Page } from '@playwright/test';
 import { fromSongMenu, loopButton, openLight, undoButton } from './Chrome.ts';
+import { engineRenders, goesRound, loudest } from './Engine.ts';
 import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated: what is typed into it before then is lost, and a slow machine shows it.
@@ -64,33 +65,31 @@ async function graphJson(page: Page) {
 const graphView = (page: Page) =>
 	page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'Graph' }).click();
 
-const peaksIn = (scope: ReturnType<Page['getByRole']>) =>
-	scope.getByTestId('peak').evaluateAll((list) => list.map((e) => Number(e.getAttribute('data-peak'))));
-const mixerPeaks = (page: Page) => peaksIn(page.getByRole('tabpanel'));
+const peaksIn = (scope: ReturnType<Page['getByRole']>, held = false) =>
+	scope
+		.getByTestId('peak')
+		.evaluateAll((list, held) => list.map((e) => Number(e.getAttribute(held ? 'data-loudest' : 'data-peak'))), held);
+const mixerLoudest = (page: Page) => peaksIn(page.getByRole('tabpanel'), true);
 // The patch's scopes go on watching while the Song view is on screen and the Patch view is out of sight.
-const patchPeaks = (page: Page) => peaksIn(page.getByRole('region', { name: 'Patch editor', includeHidden: true }));
+const patchRegion = (page: Page) => page.getByRole('region', { name: 'Patch editor', includeHidden: true });
+const patchPeaks = (page: Page) => peaksIn(patchRegion(page));
+// The loudest each of them has been since Play, or since the image playing now began.
+const patchLoudest = (page: Page) => peaksIn(patchRegion(page), true);
 
 // Every edit has compiled, and the image made from the last one is playing.
 const settled = (page: Page) =>
 	expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
 
-// Each of the song's four mixer strips shows a level at some point: the pluck is silent between its notes, so not all at once. The
-// song lasts seven seconds, and a slow machine can reach its end, where it stops, before this, so it starts again from the
-// beginning first.
+// Each of the song's four mixer strips has been heard since Play. The pluck is silent between its notes, so they aren't all heard
+// at once. The song lasts seven seconds, and a slow machine can reach its end, where it stops, before this, so it starts again
+// from the beginning first.
 async function everyStripHeard(page: Page) {
 	await tab(page, 'Mixer');
 	const ruler = (await page.getByTestId('ruler').boundingBox())!;
 	await page.mouse.click(ruler.x + 1, ruler.y + ruler.height / 2);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
-	const heard = new Set<number>();
 	await expect
-		.poll(
-			async () => {
-				for (const [strip, peak] of (await mixerPeaks(page)).entries()) if (peak > 0.01) heard.add(strip);
-				return heard.size;
-			},
-			{ timeout: 8000, intervals: [100] }
-		)
+		.poll(async () => (await mixerLoudest(page)).filter((level) => level > 0.01).length, { timeout: 8000 })
 		.toBe(4);
 }
 
@@ -119,11 +118,8 @@ test('a timeline plays in an AudioWorklet and the scopes see every bus', async (
 	await expect(page.getByText('Lead', { exact: true }).first()).toBeVisible();
 	await everyStripHeard(page);
 	const before = Number(await page.getByTestId('tick').textContent());
-	await page.waitForTimeout(400);
-	expect(Number(await page.getByTestId('tick').textContent())).toBeGreaterThan(before);
-	await expect
-		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
-		.toBeGreaterThan(0.01);
+	await expect.poll(async () => Number(await page.getByTestId('tick').textContent())).toBeGreaterThan(before);
+	await expect.poll(() => loudest(page.getByRole('meter', { name: 'Level of Lead' }))).toBeGreaterThan(0.01);
 	expect(problems).toEqual([]);
 });
 
@@ -135,7 +131,7 @@ test('a song stops at its end, and Play starts it again from the top', async ({ 
 	await expect(state).toHaveAttribute('data-playing', 'true');
 	await expect(state).toHaveAttribute('data-playing', 'false', { timeout: 15000 }); // It lasts seven seconds
 	const end = await tickShown(page);
-	await page.waitForTimeout(300);
+	await engineRenders(page, 0.3);
 	expect(await tickShown(page)).toBe(end);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect(state).toHaveAttribute('data-playing', 'true');
@@ -154,9 +150,8 @@ test('a loop goes round past the end instead of stopping', async ({ page }) => {
 	await expect(page.getByTestId('loop-brace')).toBeVisible();
 	const ruler = (await page.getByTestId('ruler').boundingBox())!;
 	await page.mouse.click(ruler.x + 1, ruler.y + ruler.height / 2); // Into the loop, wherever the song had got to
-	await page.waitForTimeout(9000); // Longer than the song
+	await goesRound(page, 2, 1920);
 	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true');
-	expect(await tickShown(page)).toBeLessThanOrEqual(1920);
 });
 
 // Where the playhead is in the arrangement's view, from its left edge, and how wide the view is past the track heads.
@@ -180,7 +175,8 @@ test('the arrangement follows the playhead off its edge, unless it was scrolled 
 	expect(seen.at).toBeLessThanOrEqual(seen.width);
 	// Scrolled back to the start, away from the playhead, it stays there.
 	await page.getByTestId('arrangement-view').evaluate((view) => (view.scrollLeft = 0));
-	await page.waitForTimeout(600);
+	const left = await tickShown(page);
+	await expect.poll(() => tickShown(page), { timeout: 8000 }).toBeGreaterThan(left + 480); // A beat on
 	expect((await playheadInView(page)).scroll).toBe(0);
 });
 
@@ -212,7 +208,7 @@ test('a compile from page load cannot race the first load', async ({ page }) => 
 	await page.goto('/?timeline=song');
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
-	await page.waitForTimeout(2000);
+	await settled(page); // The slow compile has come back, and anything it sent to the engine is playing
 	await expect(page.getByTestId('generation')).toHaveText('1');
 });
 
@@ -224,9 +220,12 @@ test('rapid edits settle on the newest image, with scopes on its registers', asy
 	// A send moves bus registers, so scopes left on an older report would read the wrong bus.
 	const removed = text.replace(/"sends": \[[^\]]*\]/, '"sends": []');
 	expect(removed).not.toBe(text);
+	// Each compile starts while the last may be loading.
+	const compiles = async () => Number(await page.getByTestId('compiles').textContent());
 	for (const version of [removed, text, removed]) {
+		const before = await compiles();
 		await editor.fill(version);
-		await page.waitForTimeout(280); // Just past the debounce, so each compile starts while the last may be loading
+		await expect.poll(compiles).toBeGreaterThan(before);
 	}
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
@@ -451,7 +450,7 @@ test('choosing a track shows its patch, and the browser shows another', async ({
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== 'song');
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Beside a patch');
-	await page.waitForTimeout(300);
+	await settled(page); // The new timeline has compiled
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Square, in the library but on no timeline');
 	await expect(page).toHaveURL(/patch=unused/);
 });
@@ -596,7 +595,8 @@ test('an edit to a patch the song does not use, or opening another, swaps nothin
 		await graphJson(page)
 	).fill(JSON.stringify({ ...JSON.parse(await page.getByLabel('Graph JSON').inputValue()), x: 1 }));
 	await browser(page).getByRole('link', { name: 'Room' }).click();
-	await page.waitForTimeout(1000); // Past the debounce, so any compile has been and gone
+	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Room');
+	await settled(page); // Any compile has been and gone, and anything it sent to the engine is playing
 	await expect(page.getByTestId('generation')).toHaveText('1');
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 });
@@ -771,7 +771,7 @@ test('a recipe plays from the examples without touching the library', async ({ p
 	await browser(page).getByRole('link', { name: 'Kick808' }).click();
 	await expect(page).toHaveURL(/recipe=Kick808/);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
-	await expect.poll(async () => Math.max(0, ...(await patchPeaks(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
+	await expect.poll(async () => Math.max(0, ...(await patchLoudest(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
 	await page.goto('/');
 	await expect(
 		browser(page).getByRole('list', { name: 'Timelines' }).getByRole('link', { name: 'Kick808' })
@@ -934,7 +934,7 @@ test('a probe in a recipe reads the voice of the patch on screen', async ({ page
 	await page.getByRole('button', { name: 'Probe out' }).click();
 	await expect.poll(async () => (await patchPeaks(page)).length, { timeout: 8000 }).toBe(2); // The track and the probe
 	await page.getByRole('button', { name: 'Play', exact: true }).click(); // From the start again, once it has ended
-	await expect.poll(async () => Math.max(0, ...(await patchPeaks(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
+	await expect.poll(async () => Math.max(0, ...(await patchLoudest(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
 });
 
 async function newTimeline(page: Page, name: string) {
@@ -1009,6 +1009,7 @@ async function startAudio(page: Page) {
 
 const stripPeak = async (page: Page, chain: string) =>
 	Number(await page.getByTestId(`strip-${chain}`).getByTestId('peak').getAttribute('data-peak'));
+const stripLoudest = (page: Page, chain: string) => loudest(page.getByTestId(`strip-${chain}`).getByTestId('peak'));
 
 const undo = (page: Page) => undoButton(page).click();
 
@@ -1026,10 +1027,9 @@ test('a song built from nothing plays, saves and comes back', async ({ page }) =
 	await startAudio(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await tab(page, 'Mixer');
-	await expect.poll(() => stripPeak(page, 'track:1'), { timeout: 8000 }).toBeGreaterThan(0.01);
-	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);
-	await page.waitForTimeout(2300); // The clip is two seconds, so this has gone round the loop
-	expect(Number(await page.getByTestId('tick').textContent())).toBeLessThan(1920);
+	await expect.poll(() => stripLoudest(page, 'track:1'), { timeout: 8000 }).toBeGreaterThan(0.01);
+	await expect.poll(() => stripLoudest(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);
+	await goesRound(page, 1, 1920); // The clip is a bar
 
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('Saved.')).toBeVisible();
@@ -1161,8 +1161,7 @@ test('a drawn loop reaches an engine that starts later', async ({ page }) => {
 	await expect(loopButton(page)).toHaveAttribute('aria-pressed', 'true');
 	await startAudio(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
-	await page.waitForTimeout(1500);
-	expect(Number(await page.getByTestId('tick').textContent())).toBeLessThan(960);
+	await goesRound(page, 1, 960);
 	await expect(page.getByTestId('voices')).toBeAttached(); // Under the compile light's list
 });
 
@@ -1196,8 +1195,8 @@ test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({
 	await startAudio(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await tab(page, 'Mixer');
-	await expect.poll(() => stripPeak(page, 'track:1'), { timeout: 8000 }).toBeGreaterThan(0.01);
-	expect(await stripPeak(page, 'master')).toBeLessThan(0.001);
+	await expect.poll(() => stripLoudest(page, 'track:1'), { timeout: 8000 }).toBeGreaterThan(0.01);
+	expect(await stripLoudest(page, 'master')).toBeLessThan(0.001);
 
 	await tab(page, 'Notes');
 	await page.getByRole('button', { name: 'Remove lane Fader' }).click();
@@ -1260,8 +1259,8 @@ test('a fader is heard as it moves, and only compiles when let go', async ({ pag
 	await expect(page.getByTestId('generation')).toHaveText('2', { timeout: 8000 });
 	expect((await timelineDoc(page)).master.gain).toBe(0);
 	await tab(page, 'Mixer');
-	await page.waitForTimeout(400);
-	expect(await stripPeak(page, 'master')).toBeLessThan(0.001);
+	await engineRenders(page, 0.4);
+	expect(await stripLoudest(page, 'master')).toBeLessThan(0.001); // Since the new image began
 
 	await undo(page);
 	await expect(page.getByTestId('generation')).toHaveText('3', { timeout: 8000 });
@@ -1466,8 +1465,8 @@ test('insert and global sliders are heard as they move, and stay where they are 
 	await expect.poll(async () => (await timelineDoc(page)).tracks[0].inserts[0].params).toEqual({ '3': 0 });
 	await tab(page, 'Mixer');
 	await expect(page.getByTestId('generation')).not.toHaveText(generation!, { timeout: 8000 });
-	await page.waitForTimeout(300);
-	expect(await stripPeak(page, 'master')).toBeLessThan(0.001);
+	await engineRenders(page, 0.3);
+	expect(await stripLoudest(page, 'master')).toBeLessThan(0.001); // Since the new image began
 
 	// The document says 1 again, and that has to win over the 0 the swap would carry.
 	await undo(page);
@@ -1475,11 +1474,13 @@ test('insert and global sliders are heard as they move, and stay where they are 
 
 	await moveSlider(page, 'level', '0', 'input');
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 4000 }).toBeLessThan(0.001);
+	const unmoved = await page.getByTestId('generation').textContent();
 	await moveSlider(page, 'level', '0', 'change');
 	await expect.poll(async () => (await timelineDoc(page)).globals).toEqual({ '7': 0 });
 	await tab(page, 'Mixer');
-	await page.waitForTimeout(500);
-	expect(await stripPeak(page, 'master')).toBeLessThan(0.001);
+	await expect(page.getByTestId('generation')).not.toHaveText(unmoved!, { timeout: 8000 });
+	await engineRenders(page, 0.5);
+	expect(await stripLoudest(page, 'master')).toBeLessThan(0.001); // Since the new image began
 	await undo(page);
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.1);
 });
@@ -1618,9 +1619,7 @@ const samples = (page: Page) => browser(page).getByRole('list', { name: 'Samples
 
 test('WAV files become an instrument that plays, and its samples stay while it does', async ({ page }) => {
 	await page.goto('/');
-	// Each sample plays once, so it has to outlast the wait for the meters, which on a slow machine comes after a half-second
-	// sample has ended.
-	await page.getByLabel('WAV files').setInputFiles([wavFile('Sine_A3.wav', 3), wavFile('Sine_A4.wav', 3)]);
+	await page.getByLabel('WAV files').setInputFiles([wavFile('Sine_A3.wav'), wavFile('Sine_A4.wav')]);
 	await page.getByLabel('Instrument name').fill('Imported sines');
 	await page.getByRole('button', { name: 'Import' }).click();
 	await page.waitForURL(/patch=/);
@@ -1641,7 +1640,8 @@ test('WAV files become an instrument that plays, and its samples stay while it d
 	const key = page.getByRole('button', { name: '60', exact: true });
 	await key.dispatchEvent('pointerdown'); // Starts audio, with the instrument on its own since no track plays it
 	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true', { timeout: 10000 });
-	await expect.poll(async () => Math.max(0, ...(await patchPeaks(page))), { timeout: 8000 }).toBeGreaterThan(0.1);
+	// Each sample plays once, for half a second, so the meter's hold shows it whenever it is read.
+	await expect.poll(async () => Math.max(0, ...(await patchLoudest(page))), { timeout: 8000 }).toBeGreaterThan(0.1);
 	await key.dispatchEvent('pointerup');
 
 	await page.goto('/');

@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { loudest } from './Engine.ts';
 import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated, as in AppTest.
@@ -29,12 +30,11 @@ const shows = (page: Page, view: 'song' | 'patch') =>
 	expect(page.getByTestId(`view-${view}`)).toHaveAttribute('aria-selected', 'true');
 const notesTab = (page: Page) =>
 	page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: /^Notes/ });
-// A track's meter is in its head, in the Song view, which is still there while the Patch view is on screen.
+// The loudest a track has been since Play or since the image playing now began. A pluck dies away while its key is held, so
+// its level may be gone when it's read, but not this. A track's meter is in its head, in the Song view, which is still there
+// while the Patch view is on screen.
 const level = (page: Page, track: string) =>
-	page
-		.getByRole('meter', { name: `Level of ${track}`, includeHidden: true })
-		.getAttribute('data-peak')
-		.then(Number);
+	loudest(page.getByRole('meter', { name: `Level of ${track}`, includeHidden: true }));
 
 // What scrolls the piano roll, which is how much of it is on screen: its height, and how far down it is scrolled, after
 // scrolling it by `by`.

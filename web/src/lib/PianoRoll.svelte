@@ -723,11 +723,10 @@
 		else void zoom(beatWidth, rowAim * action.by, event);
 	}
 
-	// The clip's notes, as large as the roll can show them all, which `.` does too.
+	// The clip's bars across the roll, and its notes in the middle of it, at the rows' height as it is. `.` does it too.
 	export async function fit() {
-		const fitted = fitRoll(clip, ppq, { width: scroller.clientWidth - KEYS, height: scroller.clientHeight });
+		const fitted = fitRoll(clip, ppq, { width: scroller.clientWidth - KEYS, height: scroller.clientHeight }, rowHeight);
 		beatWidth = fitted.beat;
-		rowHeight = rowAim = fitted.row;
 		await settle();
 		scroller.scrollLeft = fitted.left;
 		scroller.scrollTop = fitted.top;
@@ -788,7 +787,9 @@
 		aria-label="Zoom the roll in"
 		title={`Zoom in. ${mod} with the wheel zooms, and ${mod}+Shift with it sets the rows' height.`}>+</button
 	>
-	<button type="button" onclick={fit} title="Fit the roll to the clip's notes (.)">Fit</button>
+	<button type="button" onclick={fit} title="Fit the clip's bars across the roll, and scroll to its notes (.)"
+		>Fit</button
+	>
 	{#if stepping}
 		<span class="at" data-testid="step-at">Step at {position(cursor.tick, ppq)}</span>
 	{/if}

@@ -854,7 +854,8 @@ to.
   starts folded, as the browser does, and each side of 1400 remembers what it was left as, so opening it on a laptop leaves a
   wide screen alone.
 - The roll scrolls as a page does, and Shift with the wheel scrolls it sideways. Mod with the wheel, or a pinch, zooms it where
-  the pointer is, and Mod and Shift with the wheel make its rows taller or shorter. `.` or Fit fits it to the clip's notes. Each
+  the pointer is, and Mod and Shift with the wheel make its rows taller or shorter. `.` or Fit fits the clip's bars across it
+  and scrolls its notes into the middle, leaving the rows' height alone, so the zoom buttons take back all it did. Each
   clip keeps its zoom and its rows' height across a reload, in localStorage under the timeline and the clip, and its scroll
   while the page is open, so a clip comes back as it was left. None of it is in the document, which the compiler would refuse.
 - The address says what is open: `?timeline=` or `?recipe=` for the song, `?patch=` or `?part=` for the patch the Patch view
@@ -1359,7 +1360,9 @@ here that the user hasn't weighed in on:
   - The inspector is remembered on each side of 1400 px.
   - A zoom chosen by hand is kept across a reload, for the last 200 clips, and the scroll while the page is open. Zoom runs from 8 to
     400 px a beat and rows from 6 to 32 px, and a wheel notch zooms by 2^(1/3).
-  - Fit fits the bars the notes are in, and their pitches with two rows to spare, or a clip with no notes from its length and C3 to C5.
+  - Fit fits the bars the notes are in, or a clip with no notes from its length, and centres the notes' pitches, or middle C. It
+    keeps the rows' height: at first it set it too, to the pitches with two rows to spare, and nothing but Mod+Shift with the
+    wheel could set it back.
 - **The transport and the compile light:**
   - Problems with compiling or with what plays go in the light's list, and what an action did goes in a short message. "Saved." shows
     for 4 s, and a refusal stays until its ×. Warnings make the light amber, and the limiting light holds 1.5 s.

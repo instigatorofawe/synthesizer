@@ -273,7 +273,9 @@ test('the wheel scrolls, Shift scrolls sideways, Mod or a pinch zooms, Mod+Shift
 	await wheel(page, ['ControlOrMeta', 'Shift'], 0, -100);
 	await expect.poll(async () => (await roll(page)).row).toBeGreaterThan(start.row);
 
-	// . fits the clip's notes into the roll, every one of them in sight.
+	// . fits the clip's bars across the roll and scrolls its notes into the middle, at the rows' height as it was, so the zoom
+	// buttons take back all it did.
+	const taller = await roll(page);
 	await page.keyboard.press('.');
 	const view = (await page
 		.getByTestId('roll')
@@ -285,22 +287,20 @@ test('the wheel scrolls, Shift scrolls sideways, Mod or a pinch zooms, Mod+Shift
 	};
 	const count = await page.locator('[data-testid^="note-"]').count();
 	expect(count).toBeGreaterThan(4);
-	await expect
-		.poll(async () => {
-			const boxes = await page
-				.locator('[data-testid^="note-"] rect.body')
-				.evaluateAll((rects) =>
-					rects.map(
-						(r) => r.getBoundingClientRect().toJSON() as { x: number; y: number; right: number; bottom: number }
-					)
-				);
-			return boxes.every(
-				(b) => b.x >= view.x && b.right <= view.x + view.width && b.y >= view.y && b.bottom <= view.y + view.height
+	const noteBoxes = () =>
+		page
+			.locator('[data-testid^="note-"] rect.body')
+			.evaluateAll((rects) =>
+				rects.map((r) => r.getBoundingClientRect().toJSON() as { x: number; y: number; right: number; bottom: number })
 			);
-		})
+	await expect
+		.poll(async () => (await noteBoxes()).every((b) => b.x >= view.x && b.right <= view.x + view.width))
 		.toBe(true);
+	const boxes = await noteBoxes();
+	const middle = (Math.min(...boxes.map((b) => b.y)) + Math.max(...boxes.map((b) => b.bottom))) / 2;
+	expect(Math.abs(middle - (view.y + view.height / 2))).toBeLessThanOrEqual(taller.row);
 	const fitted = await roll(page);
-	expect(fitted.row).toBeGreaterThan(start.row); // A tune of an octave fills the roll's height
+	expect(fitted.row).toBe(taller.row);
 	await page.getByRole('button', { name: 'Zoom the roll out' }).click();
 	await page.getByRole('button', { name: 'Fit', exact: true }).click(); // The button does what . does
 	await expect.poll(async () => (await roll(page)).perTick).toBeCloseTo(fitted.perTick);

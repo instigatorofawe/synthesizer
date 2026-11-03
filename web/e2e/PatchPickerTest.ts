@@ -210,8 +210,9 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	await page.keyboard.type('Bass made here');
 	await expect(options(page)).toHaveText(['+New patch for this track, named “Bass made here”']);
 	await page.keyboard.press('Enter');
+	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Bass made here'); // Open in the Patch view
+	await openView(page, 'song');
 	await expect(slot).toHaveValue('Bass made here');
 	await expect(headPatch(page, 1)).toHaveText('Bass made here');
-	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Bass made here');
 	expect(problems).toEqual([]);
 });

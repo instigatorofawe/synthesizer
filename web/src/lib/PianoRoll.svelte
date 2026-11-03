@@ -49,6 +49,8 @@
 		type LaneChoice,
 		type Note
 	} from '#lib/TimelineEdit.ts';
+	import UnitField from '#lib/UnitField.svelte';
+	import { noteLengths, readLength, readPitch, readPosition } from '#lib/Units.ts';
 
 	let {
 		clip,
@@ -71,7 +73,8 @@
 		onchange,
 		onaudition,
 		onundo = () => {},
-		onview = () => {}
+		onview = () => {},
+		onsay
 	}: {
 		clip: Clip;
 		ppq: number;
@@ -94,6 +97,7 @@
 		onaudition: (note: number, on: boolean) => void;
 		onundo?: () => void; // The timeline's own undo, for the Undo beside "Clip is now 2 bars"
 		onview?: (view: RollView, zoomed: boolean) => void; // As it scrolls, and as someone zooms it, which `zoomed` says
+		onsay: (text: string) => void; // Says why something typed into a field was refused, where the page says such things
 	} = $props();
 
 	const KEYS = 48;
@@ -109,7 +113,8 @@
 		// A copy moves `indices` of `base`, which holds the originals and the copies, so the originals stay where they were.
 		| { kind: 'move'; anchor: number; from: Point; base: Clip; indices: Set<number>; copy: boolean; clip: Clip }
 		| { kind: 'size'; anchor: number; from: Point; clip: Clip }
-		| { kind: 'velocity'; clip: Clip; indices: Set<number>; lane: Element }
+		// A press on the velocity strip: the notes it was pressed on, if any, and where it was pressed and last was, in the strip.
+		| { kind: 'velocity'; clip: Clip; pressed: Set<number>; painting: boolean; from: Point; at: Point; lane: Element }
 		| { kind: 'length'; clip: Clip }
 		| { kind: 'band'; from: Point; at: Point }
 		| { kind: 'draw'; from: Point; note: Note; drawn: boolean; clip: Clip };
@@ -377,8 +382,7 @@
 			const note = { ...gesture.note, dur: Math.max(grid, end - gesture.note.tick) };
 			gesture = { ...gesture, drawn: true, note, clip: addNote(clip, note) };
 		} else if (gesture.kind === 'velocity') {
-			const { indices, lane } = gesture;
-			gesture = { ...gesture, clip: setNotes(clip, indices, { vel: velocityFor(event, lane) }) };
+			gesture = painted(gesture, canvas(event, gesture.lane));
 		} else if (gesture.kind === 'length') {
 			const length = Math.max(grid, snapTick(canvas(event).x / perTick, grid));
 			gesture = { ...gesture, clip: { ...clip, length } };
@@ -411,16 +415,47 @@
 		onchange(held.clip);
 	}
 
-	function velocityFor(event: PointerEvent, element: Element) {
-		return Math.min(127, Math.max(1, Math.round((1 - canvas(event, element).y / VELOCITY) * 127)));
+	const velocityAt = (y: number) => Math.min(127, Math.max(1, Math.round((1 - y / VELOCITY) * 127)));
+
+	// The stems, each from its note's start to its end, as tall as it is loud. The loudest are drawn first, so the quieter
+	// notes of a chord stand in front of them, and chosen notes go on top, so a chord's can be reached once it is chosen.
+	const stems = $derived(
+		shown.notes
+			.map((note, index) => ({ note, index }))
+			.sort((a, b) => Number(chosen.has(a.index)) - Number(chosen.has(b.index)) || b.note.vel - a.note.vel)
+	);
+
+	// A press on a stem sets its note, or all the chosen notes if it is one of them, to the velocity under the pointer, and a
+	// drag up or down goes on setting them. A drag across the strip paints instead: each note whose start it passes takes the
+	// velocity under the pointer as it passed, and the notes it was pressed on keep what the press gave them.
+	function pressStrip(event: PointerEvent) {
+		if (readonly || secondary(event)) return;
+		const lane = event.currentTarget as Element;
+		const stem = (event.target as Element).closest('[data-index]');
+		const index = stem ? Number(stem.getAttribute('data-index')) : null;
+		const pressed = index === null ? new Set<number>() : chosen.has(index) ? chosen : new Set([index]);
+		const at = canvas(event, lane);
+		const pressedClip = pressed.size ? setNotes(clip, pressed, { vel: velocityAt(at.y) }) : clip;
+		gesture = { kind: 'velocity', clip: pressedClip, pressed, painting: false, from: at, at, lane };
 	}
 
-	function pressVelocity(event: PointerEvent, index: number) {
-		event.stopPropagation();
-		if (readonly) return;
-		const lane = (event.currentTarget as Element).closest('svg') as Element;
-		const indices = chosen.has(index) ? chosen : new Set([index]);
-		gesture = { kind: 'velocity', clip: setNotes(clip, indices, { vel: velocityFor(event, lane) }), indices, lane };
+	function painted(g: Extract<Gesture, { kind: 'velocity' }>, at: Point): Extract<Gesture, { kind: 'velocity' }> {
+		const [left, right] = [Math.min(g.at.x, at.x), Math.max(g.at.x, at.x)];
+		const passed = new Map<number, number>();
+		if (right > left) {
+			clip.notes.forEach((note, index) => {
+				const x = note.tick * perTick;
+				if (x < left || x > right) return;
+				passed.set(index, velocityAt(g.at.y + ((x - g.at.x) / (at.x - g.at.x)) * (at.y - g.at.y)));
+			});
+		}
+		const painting = g.painting || passed.size > 0 || Math.abs(at.x - g.from.x) > DRAG;
+		let next = g.clip;
+		if (!painting && g.pressed.size) next = setNotes(next, g.pressed, { vel: velocityAt(at.y) });
+		if (passed.size) {
+			next = { ...next, notes: next.notes.map((n, i) => (passed.has(i) ? { ...n, vel: passed.get(i)! } : n)) };
+		}
+		return { ...g, clip: next, painting, at };
 	}
 
 	function nudge(ticks: number, notes: number) {
@@ -797,35 +832,45 @@
 	{/if}
 	{#if one}
 		<fieldset disabled={readonly}>
-			<span class="muted">{chosen.size === 1 ? noteName(one.note) : `${chosen.size} notes`}</span>
 			{#if chosen.size === 1}
-				<label
-					>tick <input
-						type="number"
-						min="0"
-						aria-label="Note tick"
-						value={one.tick}
-						onchange={(e) => field('tick', e.currentTarget.value)}
-					/></label
-				>
-				<label
-					>note <input
-						type="number"
-						min="0"
-						max="127"
-						aria-label="Note pitch"
+				<label title="Its pitch, as a name such as E4, F#3 or Bb2, or a MIDI number"
+					>pitch <UnitField
+						label="Note pitch"
 						value={one.note}
-						onchange={(e) => field('note', e.currentTarget.value)}
+						format={noteName}
+						read={readPitch}
+						onvalue={(note) => onchange(setNotes(clip, chosen, { note }))}
+						{onsay}
+						width="3.6rem"
 					/></label
 				>
+				<label title="Where it starts, as bar.beat.tick from the clip's start, or a bar"
+					>at <UnitField
+						label="Note tick"
+						value={one.tick}
+						format={(tick) => position(tick, ppq)}
+						read={readPosition(ppq)}
+						onvalue={(tick) => withRoom(setNotes(clip, chosen, { tick }))}
+						{onsay}
+						width="5.2rem"
+					/></label
+				>
+			{:else}
+				<span class="muted">{chosen.size} notes</span>
 			{/if}
-			<label
-				>length <input
-					type="number"
-					min="1"
-					aria-label="Note length"
+			<label title="How long it is, as a note value such as 1/8 or 3/16, in bars, or in ticks"
+				>length <UnitField
+					label="Note length"
 					value={one.dur}
-					onchange={(e) => field('dur', e.currentTarget.value)}
+					format={(dur) => noteValue(dur, ppq)}
+					read={readLength(ppq)}
+					choices={noteLengths(ppq)}
+					onvalue={(dur) => {
+						draw = dur;
+						onchange(setNotes(clip, chosen, { dur }));
+					}}
+					{onsay}
+					width="5.2rem"
 				/></label
 			>
 			<label
@@ -1105,19 +1150,33 @@
 
 <div class="below" use:follows>
 	<div style:width="{KEYS + width}px" style:padding-left="{KEYS}px" style:box-sizing="border-box">
-		<svg {width} height={VELOCITY} role="application" aria-label="Velocity" data-testid="velocity">
-			{#each shown.notes as note, index (index)}
-				<rect
-					class="velocity"
-					class:chosen={chosen.has(index)}
-					x={note.tick * perTick - 1}
-					y={VELOCITY - (note.vel / 127) * VELOCITY}
-					width="6"
-					height={(note.vel / 127) * VELOCITY}
-					role="presentation"
-					data-testid={`velocity-${index}`}
-					onpointerdown={(event) => pressVelocity(event, index)}
-				/>
+		<svg
+			{width}
+			height={VELOCITY}
+			role="application"
+			aria-label="Velocity"
+			data-testid="velocity"
+			onpointerdown={pressStrip}
+		>
+			<rect class="strip" {width} height={VELOCITY} />
+			{#each stems as { note, index } (index)}
+				{@const height = (note.vel / 127) * VELOCITY}
+				{@const x = note.tick * perTick}
+				{@const across = Math.max(note.dur * perTick, 3)}
+				<g class="stem" class:chosen={chosen.has(index)} data-index={index}>
+					<rect
+						class="velocity"
+						style:fill-opacity={0.12 + (0.5 * note.vel) / 127}
+						{x}
+						y={VELOCITY - height}
+						width={across}
+						{height}
+						role="presentation"
+						data-testid={`velocity-${index}`}
+						data-vel={note.vel}
+					/>
+					<rect class="cap" {x} y={VELOCITY - height} width={across} height="2" />
+				</g>
 			{/each}
 		</svg>
 		{#each lanes as lane, index (lane.key)}
@@ -1128,12 +1187,15 @@
 				label={about.label}
 				min={about.min}
 				max={about.max}
+				start={about.start}
+				{ppq}
 				{perTick}
 				{width}
 				{grid}
 				{readonly}
 				testid={`lane-${index}`}
 				{onchange}
+				{onsay}
 				onremove={() => onchange(removeLane(clip, lane.key))}
 			/>
 		{/each}
@@ -1154,8 +1216,8 @@
 			{#each free as choice (choice.key)}<option value={choice.key}>{choice.label}</option>{/each}
 		</select>
 		<span class="muted"
-			>Click a lane to add a point, and drag one to move it. Delete or a right-click removes it. A point's ramp is how
-			many ticks it takes to get there.</span
+			>Click a lane to add a point, joined to the one before by a line, and drag one to move it. A right-click makes it
+			a step, a line or a curve, or removes it, as Delete does.</span
 		>
 	</div>
 {/if}
@@ -1357,11 +1419,22 @@
 		border-radius: 0 0 6px 6px;
 		background: #0d1117;
 	}
+	/* A stem's shade says how loud it is, as its height does, so the stems of a chord, which overlap, still read apart. */
+	.strip {
+		fill: transparent;
+	}
 	.velocity {
 		fill: #2f81f7;
 		cursor: ns-resize;
 	}
-	.velocity.chosen {
+	.cap {
+		fill: #58a6ff;
+		pointer-events: none;
+	}
+	.stem.chosen .velocity {
+		fill: #f0883e;
+	}
+	.stem.chosen .cap {
 		fill: #f0883e;
 	}
 </style>

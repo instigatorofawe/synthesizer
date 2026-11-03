@@ -4,6 +4,7 @@ import {
 	addBus,
 	addClip,
 	addInsert,
+	addLanePoint,
 	addNote,
 	addPlayChange,
 	addPoint,
@@ -26,6 +27,7 @@ import {
 	laneChoices,
 	laneCurve,
 	laneKey,
+	lanePoints,
 	lanesOf,
 	makeUnique,
 	MASTER,
@@ -47,6 +49,7 @@ import {
 	removeClip,
 	removeInsert,
 	removeLane,
+	removeLanePoint,
 	removeNotes,
 	removePlacement,
 	removePlayChange,
@@ -71,6 +74,7 @@ import {
 	setSend,
 	windowOf,
 	setInsertPatch,
+	setLanePoint,
 	setPlacement,
 	setPlay,
 	setPlayChange,
@@ -85,8 +89,10 @@ import {
 	stepLength,
 	trackKey,
 	type Clip,
+	type Lane,
 	type LaneTarget,
-	type PatchLike
+	type PatchLike,
+	type Point
 } from '#lib/TimelineEdit.ts';
 
 const clipNamed = (id: string, length = 1920, notes: Partial<Clip['notes'][number]>[] = []): Clip => ({
@@ -1022,5 +1028,275 @@ describe('the gaps the pieces found', () => {
 		const loose = { ...clip, notes: [{ tick: 130, note: 60, vel: 90, dur: 10 }] };
 		expect(quantize(loose, new Set([0]), 120).notes[0].tick).toBe(120);
 		expect(quantize(loose, new Set([0]), 120, 0.5).notes[0].tick).toBe(125);
+	});
+});
+
+// What the compiler plays at a tick, written out again from `LaneState` and `compile_clip` in Compiler.hpp, for straight ramps:
+// each point, by tick and then as the clip lists it, goes from where the lane is then to its value, at once or over its ramp.
+// The editor's drawing and its points are held to this.
+function played(clip: Clip, key: string, start: number, tick: number): number {
+	const points = clip.automation
+		.map((point, i) => ({ point, i }))
+		.filter(({ point }) => laneKey(point.param, point.target) === key)
+		.sort((a, b) => a.point.tick - b.point.tick || a.i - b.i);
+	type State = { from: number; to: number; begin: number; end: number };
+	const at = (s: State, t: number) =>
+		t >= s.end ? s.to : t <= s.begin ? s.from : s.from + ((s.to - s.from) * (t - s.begin)) / (s.end - s.begin);
+	let state: State = { from: start, to: start, begin: 0, end: 0 };
+	for (const { point } of points) {
+		if (point.tick > tick) break;
+		const ramp = point.ramp ?? 0;
+		state = { from: at(state, point.tick), to: point.value, begin: point.tick, end: point.tick + ramp };
+	}
+	return at(state, tick);
+}
+
+// Where a polyline is at a tick, past any jump at that tick, or undefined before it starts.
+function drawnAt(curve: { tick: number; value: number }[], tick: number): number | undefined {
+	const k = curve.findLastIndex((p) => p.tick <= tick);
+	if (k < 0) return undefined;
+	const [a, b] = [curve[k], curve[k + 1]];
+	return b ? a.value + ((b.value - a.value) * (tick - a.tick)) / (b.tick - a.tick) : a.value;
+}
+
+const laneIn = (clip: Clip, key: string) => lanesOf(clip).find((lane) => lane.key === key)!;
+
+// That a lane draws what it plays, tick by tick, and that each of its points is on that. A point with another at its tick is
+// the top or the foot of a jump, where the lane is only on the way past.
+function drawsWhatPlays(clip: Clip, key: string, start: number, every = 30) {
+	const lane = laneIn(clip, key);
+	const curve = laneCurve(lane, clip.length, start);
+	for (let tick = 0; tick <= clip.length; tick += every) {
+		const drawn = drawnAt(curve, tick);
+		if (drawn !== undefined) expect(drawn, `at ${tick}`).toBeCloseTo(played(clip, key, start, tick), 9);
+	}
+	const shown = lanePoints(lane, start);
+	shown.forEach((point, k) => {
+		const jump = shown[k + 1]?.tick === point.tick;
+		if (jump && point.shape === 'step') return;
+		const tick = jump ? point.tick - 1e-6 : point.tick;
+		expect(played(clip, key, start, tick), `the point at ${point.tick}`).toBeCloseTo(point.value, 5);
+	});
+}
+
+describe('lane points', () => {
+	const cutoff = { key: laneKey(1, undefined), param: 1 };
+	const at0 = () => addPoint(clipNamed('c'), cutoff, 0, 100);
+	const points = (clip: Clip) => lanePoints(laneIn(clip, cutoff.key));
+	const shapes = (clip: Clip) => points(clip).map((p) => [p.tick, p.shape]);
+	const add = (clip: Clip, tick: number, value: number) => addLanePoint(clip, cutoff, tick, value).clip;
+
+	it('show where a ramp ends, which is where the lane gets to its value', () => {
+		const demo = {
+			...clipNamed('c'),
+			automation: [
+				{ param: 1, tick: 0, value: 500 },
+				{ param: 1, tick: 0, value: 2400, ramp: 1800 }
+			]
+		};
+		expect(points(demo)).toEqual([
+			{ index: 0, tick: 0, value: 500, ramp: 0, shape: 'step' },
+			{ index: 1, tick: 1800, value: 2400, ramp: 1800, shape: 'line' }
+		]);
+	});
+
+	it('are joined by lines as they are clicked in, each ramping from the point before', () => {
+		const clip = add(add(add(at0(), 480, 200), 960, 50), 1440, 150);
+		expect(clip.automation).toEqual([
+			{ param: 1, tick: 0, value: 100 },
+			{ param: 1, tick: 0, value: 200, ramp: 480 },
+			{ param: 1, tick: 480, value: 50, ramp: 480 },
+			{ param: 1, tick: 960, value: 150, ramp: 480 }
+		]);
+		expect(shapes(clip)).toEqual([
+			[0, 'step'],
+			[480, 'line'],
+			[960, 'line'],
+			[1440, 'line']
+		]);
+		// One straight line from each point to the next, and the last held to the clip's end.
+		expect(laneCurve(laneIn(clip, cutoff.key), 1920).map((p) => [p.tick, p.value])).toEqual([
+			[0, 100],
+			[480, 200],
+			[960, 50],
+			[1440, 150],
+			[1920, 150]
+		]);
+		drawsWhatPlays(clip, cutoff.key, 100);
+	});
+
+	it('split a line or a curve they land on, and the point after joins the new one', () => {
+		const line = add(add(at0(), 960, 300), 480, 200);
+		expect(line.automation).toEqual([
+			{ param: 1, tick: 0, value: 100 },
+			{ param: 1, tick: 480, value: 300, ramp: 480 },
+			{ param: 1, tick: 0, value: 200, ramp: 480 }
+		]);
+		drawsWhatPlays(line, cutoff.key, 100);
+		const curved = setLanePoint(add(at0(), 960, 300), 1, { shape: 'exp' }).clip;
+		expect(shapes(add(curved, 480, 200))).toEqual([
+			[0, 'step'],
+			[480, 'exp'],
+			[960, 'exp']
+		]);
+		// A lane's first point is a step, wherever it goes.
+		expect(addLanePoint(clipNamed('c'), cutoff, 480, 1).clip.automation).toEqual([{ param: 1, tick: 480, value: 1 }]);
+	});
+
+	it('become a step, a line or a curve, and a step keeps the line out of it', () => {
+		const clip = add(add(at0(), 480, 200), 960, 50);
+		const step = setLanePoint(clip, 1, { shape: 'step' });
+		expect(step.index).toBe(1);
+		expect(step.clip.automation).toEqual([
+			{ param: 1, tick: 0, value: 100 },
+			{ param: 1, tick: 480, value: 200 },
+			{ param: 1, tick: 480, value: 50, ramp: 480 }
+		]);
+		drawsWhatPlays(step.clip, cutoff.key, 100);
+		const line = setLanePoint(step.clip, 1, { shape: 'line' }).clip;
+		expect(line.automation).toEqual(clip.automation);
+		expect(setLanePoint(line, 1, { shape: 'exp' }).clip.automation[1]).toEqual({
+			param: 1,
+			tick: 0,
+			value: 200,
+			ramp: 480,
+			curve: 'exp'
+		});
+		// A point at the clip's start has no room for a line, so it stays a step.
+		expect(setLanePoint(clip, 0, { shape: 'line' }).clip).toBe(clip);
+	});
+
+	it('keep their neighbours joined as they move, even past one', () => {
+		const clip = add(add(at0(), 480, 200), 960, 50);
+		const later = setLanePoint(clip, 1, { tick: 720 }).clip;
+		expect(later.automation.slice(1)).toEqual([
+			{ param: 1, tick: 0, value: 200, ramp: 720 },
+			{ param: 1, tick: 720, value: 50, ramp: 240 }
+		]);
+		const past = setLanePoint(clip, 1, { tick: 1200, value: 300 });
+		expect(points(past.clip).map((p) => [p.tick, p.value, p.shape])).toEqual([
+			[0, 100, 'step'],
+			[960, 50, 'line'],
+			[1200, 300, 'line']
+		]);
+		expect(past.clip.automation[past.index]).toEqual({ param: 1, tick: 960, value: 300, ramp: 240 });
+		drawsWhatPlays(past.clip, cutoff.key, 100);
+	});
+
+	it('keep a ramp shorter than its gap as long as it was, unless the gap gets shorter', () => {
+		// Hold, and then a quarter note's ramp into the point at the second beat, as LegatoPortamento's are.
+		const clip = { ...at0(), automation: [...at0().automation, { param: 1, tick: 720, value: 200, ramp: 240 }] };
+		expect(points(clip)[1]).toMatchObject({ tick: 960, ramp: 240, shape: 'line' });
+		expect(setLanePoint(clip, 1, { tick: 1440 }).clip.automation[1]).toEqual({
+			param: 1,
+			tick: 1200,
+			value: 200,
+			ramp: 240
+		});
+		expect(add(clip, 840, 150).automation[1]).toEqual({ param: 1, tick: 840, value: 200, ramp: 120 });
+		// A ramp typed longer than its gap fills the gap, and one of nothing is a step.
+		expect(setLanePoint(clip, 1, { ramp: 5000 }).clip.automation[1]).toEqual({
+			param: 1,
+			tick: 0,
+			value: 200,
+			ramp: 960
+		});
+		expect(setLanePoint(clip, 1, { ramp: 0 }).clip.automation[1]).toEqual({ param: 1, tick: 960, value: 200 });
+	});
+
+	it('come out with the line into the next joined to the one before, and the last leaves the one before holding', () => {
+		const clip = add(add(at0(), 480, 200), 960, 50);
+		expect(removeLanePoint(clip, 1).automation).toEqual([
+			{ param: 1, tick: 0, value: 100 },
+			{ param: 1, tick: 0, value: 50, ramp: 960 }
+		]);
+		expect(removeLanePoint(clip, 2).automation).toEqual(clip.automation.slice(0, 2));
+		// Without a point before, the line runs from the clip's start, from wherever the lane stood.
+		const first = removeLanePoint(clip, 0);
+		expect(first.automation[0]).toEqual({ param: 1, tick: 0, value: 200, ramp: 480 });
+		expect(laneCurve(laneIn(first, cutoff.key), 1920, 900)[0]).toEqual({ tick: 0, value: 900 });
+		drawsWhatPlays(first, cutoff.key, 900);
+	});
+
+	it('that start at one tick are listed in the order the lane gets to them, as the compiler plays them', () => {
+		// A ramp from the clip's start, and a step put in front of it: both start at 480, and the step has to go first.
+		const ramp = { ...clipNamed('c'), automation: [{ param: 1, tick: 0, value: 200, ramp: 960 }] };
+		const added = addLanePoint(ramp, cutoff, 480, 100, 0);
+		expect(added.clip.automation).toEqual([
+			{ param: 1, tick: 480, value: 100 },
+			{ param: 1, tick: 480, value: 200, ramp: 480 }
+		]);
+		expect(added.index).toBe(0);
+		drawsWhatPlays(added.clip, cutoff.key, 0);
+		// And a line turned into a step, after the line out of it was made.
+		const later = add(add(at0(), 960, 300), 480, 200);
+		const stepped = setLanePoint(later, 2, { shape: 'step' });
+		expect(stepped.clip.automation.map((p) => [p.tick, p.value])).toEqual([
+			[0, 100],
+			[480, 200],
+			[480, 300]
+		]);
+		expect(stepped.index).toBe(1);
+		drawsWhatPlays(stepped.clip, cutoff.key, 100);
+	});
+
+	it('leave other lanes, and what an edit leaves alone, as they were', () => {
+		const fader = { target: { mix: 'fader', track: 1 } as LaneTarget };
+		let clip = addPoint(at0(), fader, 0, 1);
+		clip = add(clip, 480, 200);
+		clip = addPoint(clip, fader, 960, 0.5);
+		const moved = setLanePoint(clip, 2, { value: 250 }).clip;
+		expect(moved.automation[1]).toBe(clip.automation[1]);
+		expect(moved.automation[3]).toBe(clip.automation[3]);
+		expect(moved.automation[2]).toEqual({ param: 1, tick: 0, value: 250, ramp: 480 });
+		expect(setLanePoint(clip, 2, { value: 200 }).clip).toBe(clip);
+		const keys = { tick: 0, param: 1, value: 1 }; // As a recipe lists them
+		const listed = { ...clipNamed('c'), automation: [keys, { tick: 0, param: 1, value: 2, ramp: 480 }] };
+		expect(Object.keys(setLanePoint(listed, 1, { value: 3 }).clip.automation[0])).toEqual(['tick', 'param', 'value']);
+	});
+
+	it('show a ramp cut short where it had got to, and play the same once an edit lays it out again', () => {
+		const cut = {
+			...clipNamed('c'),
+			automation: [
+				{ param: 1, tick: 0, value: 0.5 },
+				{ param: 1, tick: 0, value: 1, ramp: 1920 },
+				{ param: 1, tick: 960, value: 0.2 }
+			]
+		};
+		expect(points(cut).map((p) => [p.tick, p.value, p.ramp])).toEqual([
+			[0, 0.5, 0],
+			[960, 0.75, 960],
+			[960, 0.2, 0]
+		]);
+		drawsWhatPlays(cut, cutoff.key, 0.5);
+		const edited = setLanePoint(cut, 2, { value: 0.25 }).clip;
+		expect(edited.automation[1]).toEqual({ param: 1, tick: 0, value: 0.75, ramp: 960 });
+		drawsWhatPlays(edited, cutoff.key, 0.5);
+	});
+
+	// Every lane of every example and piece reads as it plays, and a lane that nothing has changed stays as it is.
+	const examples = import.meta.glob<{ programs?: { timeline: Timeline }[] }>(
+		['../../../examples/*.json', '../../../examples/Pieces/*.json', '../../../examples/Recipes/*.json'],
+		{ eager: true, import: 'default' }
+	);
+	const lanes = Object.entries(examples).flatMap(([file, project]) =>
+		(project.programs ?? []).flatMap(({ timeline }) =>
+			timeline.clips.flatMap((clip) =>
+				lanesOf({ ...clip, automation: clip.automation ?? [] } as Clip).map((lane: Lane) => ({ file, clip, lane }))
+			)
+		)
+	);
+
+	it('in the examples, read as they play, and stay as they are until they are changed', () => {
+		expect(lanes.length).toBeGreaterThan(20);
+		for (const { file, clip, lane } of lanes) {
+			const start = lane.points[0].point.value;
+			drawsWhatPlays(clip as Clip, lane.key, start, 120);
+			for (const { index } of lane.points) {
+				expect(setLanePoint(clip as Clip, index, {}).clip, `${file} ${clip.id} ${index}`).toBe(clip);
+				expect(setLanePoint(clip as Clip, index, { value: (clip.automation[index] as Point).value }).clip).toBe(clip);
+			}
+		}
 	});
 });

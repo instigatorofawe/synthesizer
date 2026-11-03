@@ -1607,6 +1607,7 @@
 							onsolo={toggleSolo}
 							ontempo={(tempo) => (draggedTempo = tempo)}
 							onkey={(note, on) => started && soundNote(note, on)}
+							onsay={say}
 						/>
 					{/key}
 				{:else}

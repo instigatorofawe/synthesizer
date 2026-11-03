@@ -34,19 +34,19 @@ async function newTimeline(page: Page, name: string) {
 	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	await expect(page.getByTestId('arrangement')).toBeVisible();
 	await emptyNewSong(page);
 }
 
 async function slots(page: Page) {
-	const tabs = page.getByRole('tablist', { name: 'Timeline views' });
+	const tabs = page.getByRole('tablist', { name: 'Song views' });
 	await tabs.getByRole('tab', { name: /^JSON/ }).click();
-	const doc = JSON.parse(await page.getByLabel('Timeline JSON').inputValue());
+	const doc = JSON.parse(await page.getByLabel('Song JSON').inputValue());
 	await tabs.getByRole('tab', { name: /^Notes/ }).click();
 	return doc.tracks.map((track: { slots: string[] }) => track.slots);
 }
@@ -117,7 +117,7 @@ test('a track head names its patch, not its id, and the name opens that patch', 
 	await page.getByLabel('New patch name').press('Enter');
 	await page.waitForURL(/patch=/);
 	const id = new URL(page.url()).searchParams.get('patch')!;
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Named heads');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Named heads');
 
 	await openView(page, 'song'); // A patch made in the browser opens in the Patch view
 	await addTrack(page);

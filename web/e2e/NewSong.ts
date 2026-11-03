@@ -16,9 +16,9 @@ const EMPTY = {
 // timeline was before there was a template: saved, with no undo behind it, and no clip seen yet whose view a new one of the
 // same name would come back to.
 export async function emptyNewSong(page: Page) {
-	const tabs = page.getByRole('tablist', { name: 'Timeline views' });
+	const tabs = page.getByRole('tablist', { name: 'Song views' });
 	await tabs.getByRole('tab', { name: /^JSON/ }).click();
-	await page.getByLabel('Timeline JSON').fill(JSON.stringify(EMPTY, null, 1));
+	await page.getByLabel('Song JSON').fill(JSON.stringify(EMPTY, null, 1));
 	await expect(page.getByTestId('unsaved')).toBeVisible();
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);

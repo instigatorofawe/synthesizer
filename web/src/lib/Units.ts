@@ -113,9 +113,10 @@ export function parsePitch(text: string): number | null {
 }
 
 // A length typed as a note value, as bars or as ticks, or as several of those added together: 1/8, 3/16, 1/8. (a dotted 1/8),
-// 1/8T (an eighth-note triplet),
-// 2 bars, 1.5 bars, 1 bar + 1/4, 240 ticks. A bare number is ticks, so a length no note value names can still be had. A bar is a
-// whole note, as 4/4 has it. What isn't a whole number of ticks, or is less than `least`, is no length.
+// 1/8T (an eighth-note triplet), 2 bars, 1.5 bars, 1 bar + 1/4, 240 ticks. A bar is a whole note, as 4/4 has it, and a bare
+// number is bars, the unit every length field reads in, as a length typed into Live or Logic is: a note value is a part of a
+// bar. Ticks need the word, so a length no note value names can still be had. What isn't a whole number of ticks, or is less
+// than `least`, is no length.
 export function parseLength(text: string, ppq: number, least = 1): number | null {
 	const whole = ppq * BEATS_PER_BAR;
 	const terms = text
@@ -126,9 +127,9 @@ export function parseLength(text: string, ppq: number, least = 1): number | null
 		.map((term) => term.trim());
 	let ticks = 0;
 	for (const term of terms) {
-		const bars = /^(\d+(?:\.\d+)?|\.\d+)\s*bars?$/.exec(term);
+		const bars = /^(\d+(?:\.\d+)?|\.\d+)\s*(?:bars?)?$/.exec(term);
 		const fraction = /^(\d+)\s*\/\s*(\d+)\s*(t?)\s*(\.*)$/.exec(term);
-		const plain = /^(\d+)(?:\s*ticks?)?$/.exec(term);
+		const plain = /^(\d+)\s*ticks?$/.exec(term);
 		if (bars) ticks += Number(bars[1]) * whole;
 		else if (fraction && Number(fraction[2]) > 0) {
 			const third = fraction[3] ? 2 / 3 : 1; // A triplet, 1/8T, is three in the time of two
@@ -176,7 +177,7 @@ export const refusals = {
 	pitch: (text: string) =>
 		`${quoted(text)} isn't a pitch. Type a note, as E4, F#3 or Bb2, or a MIDI number from 0 to 127.`,
 	length: (text: string) =>
-		`${quoted(text)} isn't a length. Type a note value, as 1/8 or 3/16, bars, as 2 bars, or ticks, as 240.`,
+		`${quoted(text)} isn't a length. Type a note value, as 1/8 or 3/16, bars, as 2, or ticks, as 240 ticks.`,
 	// A position in a clip that is past its end, which is where nothing in the clip can start.
 	pastEnd: (text: string, length: number, ppq: number) =>
 		`${quoted(text)} is past the clip's end, at ${position(length, ppq)}. Type a position before it.`

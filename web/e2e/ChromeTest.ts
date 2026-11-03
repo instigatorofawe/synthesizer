@@ -25,7 +25,7 @@ test.beforeEach(({ page }) => {
 });
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
-const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Timeline editor' });
+const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Song editor' });
 const patchEditor = (page: Page) => page.getByRole('region', { name: 'Patch editor' });
 const light = (page: Page) => page.getByTestId('status').getByRole('button', { name: /^Compile status/ });
 const settled = (page: Page) =>
@@ -33,7 +33,7 @@ const settled = (page: Page) =>
 
 async function tab(page: Page, name: 'Notes' | 'JSON') {
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: new RegExp(`^${name}`) })
 		.click();
 }
@@ -41,7 +41,7 @@ async function tab(page: Page, name: 'Notes' | 'JSON') {
 // Changes the open timeline's JSON, as parsed.
 async function editTimeline(page: Page, change: (doc: Record<string, unknown>) => void) {
 	await tab(page, 'JSON');
-	const json = page.getByLabel('Timeline JSON');
+	const json = page.getByLabel('Song JSON');
 	const doc = JSON.parse(await json.inputValue());
 	change(doc);
 	await json.fill(JSON.stringify(doc, null, 1));
@@ -50,7 +50,7 @@ async function editTimeline(page: Page, change: (doc: Record<string, unknown>) =
 
 const timelineDoc = async (page: Page) => {
 	await tab(page, 'JSON');
-	const doc = JSON.parse(await page.getByLabel('Timeline JSON').inputValue());
+	const doc = JSON.parse(await page.getByLabel('Song JSON').inputValue());
 	await tab(page, 'Notes');
 	return doc;
 };
@@ -108,7 +108,7 @@ test('the compile light says what is wrong, and each problem goes where it is', 
 	await list.getByRole('button', { name: /^Pluck › pluck-a/ }).click();
 	await expect(page.getByTestId('view-song')).toHaveAttribute('aria-selected', 'true');
 	await expect(page.getByTestId('track-2')).toHaveAttribute('aria-pressed', 'true');
-	await expect(page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: /^Notes/ })).toHaveText(
+	await expect(page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: /^Notes/ })).toHaveText(
 		'Notes: pluck-a'
 	);
 
@@ -125,12 +125,7 @@ test("the Song tab's menu holds what is done to the song as a whole", async ({ p
 	const opener = page.getByRole('button', { name: 'Song menu' });
 	await opener.click();
 	const menu = page.getByRole('menu', { name: 'Song' });
-	await expect(menu.getByRole('menuitem')).toHaveText([
-		'Rename',
-		'Export WAV',
-		'Export saved version',
-		'Delete timeline'
-	]);
+	await expect(menu.getByRole('menuitem')).toHaveText(['Rename', 'Export WAV', 'Export saved version', 'Delete song']);
 	await expect(menu.getByRole('menuitem', { name: 'Rename' })).toBeFocused();
 	await page.keyboard.press('Escape');
 	await expect(menu).toHaveCount(0);
@@ -140,7 +135,7 @@ test("the Song tab's menu holds what is done to the song as a whole", async ({ p
 	await openView(page, 'patch');
 	await fromSongMenu(page, 'Rename');
 	await expect(page.getByTestId('view-song')).toHaveAttribute('aria-selected', 'true');
-	const name = page.getByLabel('Timeline name', { exact: true });
+	const name = page.getByLabel('Song name', { exact: true });
 	await expect(name).toBeFocused();
 	await page.keyboard.type('Ballad, renamed');
 	await expect(name).toHaveValue('Ballad, renamed');
@@ -161,12 +156,12 @@ test("the Song tab's menu holds what is done to the song as a whole", async ({ p
 	expect((await download).suggestedFilename()).toBe('Ballad.msimg');
 
 	// Delete timeline, on one made for it
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill('Short lived');
-	await page.getByLabel('New timeline name').press('Enter');
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Short lived');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill('Short lived');
+	await page.getByLabel('New song name').press('Enter');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Short lived');
 	await expect(browser(page).getByRole('link', { name: 'Short lived' })).toBeVisible();
-	await fromSongMenu(page, 'Delete timeline');
+	await fromSongMenu(page, 'Delete song');
 	await expect(browser(page).getByRole('link', { name: 'Short lived' })).toHaveCount(0);
 
 	// An example has no timeline to rename or delete, and goes to the library from here
@@ -295,7 +290,7 @@ test('typing a position moves the playhead, and typing a tempo changes the one p
 	await expect(tempo).toHaveValue('140');
 
 	// A glide reads how far it has got, and typing into it sets where it starts
-	await page.getByLabel('Ramp from bar 1').check();
+	await page.getByLabel('Glide from bar 1').check();
 	await position.fill('2');
 	await position.press('Enter');
 	await expect(tempo).toHaveValue('115');

@@ -969,7 +969,7 @@
 				{:else}
 					<span class="muted">{chosen.size} notes</span>
 				{/if}
-				<label title="How long it is, as a note value such as 1/8 or 3/16, in bars, or in ticks"
+				<label title="How long it is, as a note value such as 1/8 or 3/16, in bars, as 2, or in ticks, as 240 ticks"
 					>length <UnitField
 						label="Note length"
 						value={one.dur}

@@ -28,9 +28,9 @@ test.beforeEach(({ page }) => {
 async function savedSong(page: Page) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click();
-	await page.getByLabel('New timeline name').fill('Esc');
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click();
+	await page.getByLabel('New song name').fill('Esc');
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
 	const roll = page.getByTestId('roll');
 	const box = (await roll.boundingBox())!;
@@ -84,7 +84,7 @@ test('Esc cancels a drag of a note, a clip, a track head’s fader and the Mixer
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
 
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: /^Mixer/ })
 		.click();
 	const fader = page.getByLabel('Fader for Track 1');

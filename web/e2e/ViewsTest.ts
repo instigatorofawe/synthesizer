@@ -28,8 +28,7 @@ const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' }
 const rail = (page: Page) => page.getByRole('toolbar', { name: 'Library and examples' });
 const shows = (page: Page, view: 'song' | 'patch') =>
 	expect(page.getByTestId(`view-${view}`)).toHaveAttribute('aria-selected', 'true');
-const notesTab = (page: Page) =>
-	page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: /^Notes/ });
+const notesTab = (page: Page) => page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: /^Notes/ });
 // The loudest a track has been since Play or since the image playing now began. A pluck dies away while its key is held, so
 // its level may be gone when it's read, but not this. A track's meter is in its head, in the Song view, which is still there
 // while the Patch view is on screen.
@@ -65,7 +64,7 @@ test('the tabs and ` switch views, and a field keeps its `', async ({ page }) =>
 	await expect(page.getByTestId('graph')).toBeHidden();
 	await expect(page).not.toHaveURL(/view=/);
 
-	const name = page.getByLabel('Timeline name', { exact: true });
+	const name = page.getByLabel('Song name', { exact: true });
 	await name.press('End');
 	await name.press('Backquote');
 	await expect(name).toHaveValue('Song`');
@@ -74,7 +73,7 @@ test('the tabs and ` switch views, and a field keeps its `', async ({ page }) =>
 
 test('the top bar fits a 1280 px screen, long names and all', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await page.getByLabel('Timeline name', { exact: true }).fill('A song with a very long name that goes on and on');
+	await page.getByLabel('Song name', { exact: true }).fill('A song with a very long name that goes on and on');
 	await openView(page, 'patch');
 	await page.getByLabel('Patch name', { exact: true }).fill('A patch with a name just as long as the song has');
 	const bar = page.locator('header.topbar');
@@ -141,16 +140,17 @@ test('a clip opens its patch, and the song comes back on the same clip, as it wa
 
 test('Back goes to the view before, on the tab it was left on', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: 'Mixer' }).click();
+	await page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: 'Mixer' }).click();
 	await page.getByRole('button', { name: 'Edit insert 1 on room' }).click();
 	await shows(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Room');
 
 	await page.goBack();
 	await shows(page, 'song');
-	await expect(
-		page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: 'Mixer' })
-	).toHaveAttribute('aria-selected', 'true');
+	await expect(page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: 'Mixer' })).toHaveAttribute(
+		'aria-selected',
+		'true'
+	);
 	await page.goForward();
 	await shows(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Room');
@@ -231,7 +231,7 @@ test('below 1400 px the browser is a rail, and opens over the page until it is u
 	await expect(rail(page)).toBeVisible();
 	const left = (await page.getByTestId('arrangement').boundingBox())!.x;
 
-	await rail(page).getByRole('button', { name: 'Timelines' }).click();
+	await rail(page).getByRole('button', { name: 'Songs' }).click();
 	await expect(browser(page)).toBeVisible();
 	expect((await page.getByTestId('arrangement').boundingBox())!.x).toBe(left); // Over the page, not beside it
 	await page.keyboard.press('Escape');

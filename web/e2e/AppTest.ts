@@ -30,7 +30,7 @@ test.beforeEach(({ page }) => {
 });
 
 const patchEditor = (page: Page) => page.getByRole('region', { name: 'Patch editor' });
-const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Timeline editor' });
+const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Song editor' });
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 
 async function startPlaying(page: Page, timeline = 'song') {
@@ -48,14 +48,14 @@ async function startPlaying(page: Page, timeline = 'song') {
 
 async function tab(page: Page, name: 'Notes' | 'Mixer' | 'JSON' | 'Image') {
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: new RegExp(`^${name}`) })
 		.click();
 }
 
 async function timelineJson(page: Page) {
 	await tab(page, 'JSON');
-	return page.getByLabel('Timeline JSON');
+	return page.getByLabel('Song JSON');
 }
 
 // The patch's JSON is a tab of the graph's side column, beside the graph.
@@ -106,7 +106,7 @@ test('the seeded library lists patches, timelines and a bundle', async ({ page }
 test('a fresh visit opens the timeline saved last, with its patch a view away', async ({ page }) => {
 	await page.goto('/');
 	await expect(page).toHaveURL(/\?timeline=ballad/);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Ballad');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad');
 	await expect(page.getByTestId('arrangement')).toBeVisible();
 	await openView(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Stereo lead');
@@ -345,9 +345,9 @@ test('a tempo ramp glides to the next change, and the transport shows how far it
 	await timelineEditor(page).getByRole('button', { name: 'Add a change at the playhead' }).click();
 	await page.getByLabel('Tempo at bar 3', { exact: true }).fill('100');
 	await page.getByLabel('Tempo at bar 3', { exact: true }).press('Enter');
-	// Only a change with a later one can ramp.
-	await expect(page.getByLabel('Ramp from bar 3')).toHaveCount(0);
-	await page.getByLabel('Ramp from bar 1').check();
+	// Only a change with a later one can glide.
+	await expect(page.getByLabel('Glide from bar 3')).toHaveCount(0);
+	await page.getByLabel('Glide from bar 1').check();
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	expect(await page.getByTestId('generation').textContent()).not.toBe('1');
@@ -360,10 +360,10 @@ test('a tempo ramp glides to the next change, and the transport shows how far it
 		{ tick: 3840, bpm: 100 }
 	]);
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: /^Notes/ })
 		.click();
-	await page.getByLabel('Ramp from bar 1').uncheck();
+	await page.getByLabel('Glide from bar 1').uncheck();
 	await expect(page.getByTestId('tempo')).toHaveValue('140');
 });
 
@@ -390,27 +390,27 @@ test('a timeline saves, and a stale tab is refused', async ({ page, context }) =
 	other.on('dialog', (dialog) => dialog.accept());
 	await other.goto('/?timeline=ballad');
 
-	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad two');
+	await page.getByLabel('Song name', { exact: true }).fill('Ballad two');
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('Saved.')).toBeVisible();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
 
-	await other.getByLabel('Timeline name', { exact: true }).fill('Stale');
+	await other.getByLabel('Song name', { exact: true }).fill('Stale');
 	await other.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(other.getByText('changed elsewhere')).toBeVisible();
 	await expect(other.getByTestId('unsaved')).toHaveText('1 unsaved'); // Refused, so nothing was lost
 
 	await page.reload();
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Ballad two');
-	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad two');
+	await page.getByLabel('Song name', { exact: true }).fill('Ballad');
 	await page.keyboard.press('ControlOrMeta+s');
 	await expect(page.getByText('Saved.')).toBeVisible();
 });
 
 test('edits to a timeline and its patches save together', async ({ page }) => {
 	await page.goto('/?timeline=ballad');
-	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad, edited');
+	await page.getByLabel('Song name', { exact: true }).fill('Ballad, edited');
 	await browser(page).getByRole('link', { name: 'Sampled pluck' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Sampled pluck');
 	await page.getByLabel('Patch name', { exact: true }).fill('Pluck, edited');
@@ -419,12 +419,12 @@ test('edits to a timeline and its patches save together', async ({ page }) => {
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('Saved.')).toBeVisible();
 	await page.reload();
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Ballad, edited');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad, edited');
 	await expect(browser(page).getByRole('link', { name: 'Pluck, edited' })).toBeVisible();
 	await expect(browser(page).getByRole('link', { name: 'Stereo lead' })).toBeVisible();
 
 	await openView(page, 'song');
-	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad');
+	await page.getByLabel('Song name', { exact: true }).fill('Ballad');
 	await browser(page).getByRole('link', { name: 'Pluck, edited' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Pluck, edited');
 	await page.getByLabel('Patch name', { exact: true }).fill('Sampled pluck');
@@ -449,11 +449,11 @@ test('choosing a track shows its patch, and the browser shows another', async ({
 	// A patch the address names stays, whatever track a timeline opens on, as when one is made while it is shown.
 	await page.goto('/?timeline=song&patch=unused');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Square, in the library but on no timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill('Beside a patch');
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill('Beside a patch');
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== 'song');
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Beside a patch');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Beside a patch');
 	await settled(page); // The new timeline has compiled
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Square, in the library but on no timeline');
 	await expect(page).toHaveURL(/patch=unused/);
@@ -780,9 +780,9 @@ test('a recipe plays from the examples without touching the library', async ({ p
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect.poll(async () => Math.max(0, ...(await patchLoudest(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
 	await page.goto('/');
-	await expect(
-		browser(page).getByRole('list', { name: 'Timelines' }).getByRole('link', { name: 'Kick808' })
-	).toHaveCount(0);
+	await expect(browser(page).getByRole('list', { name: 'Songs' }).getByRole('link', { name: 'Kick808' })).toHaveCount(
+		0
+	);
 	expect(problems).toEqual([]);
 });
 
@@ -805,7 +805,7 @@ test('a recipe added to the library is an ordinary timeline that plays the built
 	await page.goto('/?recipe=PluckedString');
 	await fromSongMenu(page, 'Add to library');
 	await page.waitForURL('**/?timeline=recipe-PluckedString');
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('PluckedString');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('PluckedString');
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
@@ -947,11 +947,11 @@ test('a probe in a recipe reads the voice of the patch on screen', async ({ page
 async function newTimeline(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	await expect(page.getByTestId('arrangement')).toBeVisible();
 	await emptyNewSong(page);
 }
@@ -1189,8 +1189,8 @@ test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({
 	const lane = (await page.getByTestId('lane-0').boundingBox())!;
 	await page.mouse.dblclick(lane.x + 96, lane.y + 10);
 	await expect(page.locator('[data-testid^="lane-0-point-"]')).toHaveCount(2);
-	await page.getByLabel('cutoff point ramp').fill('480');
-	await page.getByLabel('cutoff point ramp').blur();
+	await page.getByLabel('cutoff point over').fill('480 ticks');
+	await page.getByLabel('cutoff point over').blur();
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[1]?.ramp).toBe(480);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
@@ -1459,7 +1459,7 @@ test('insert and global sliders are heard as they move, and stay where they are 
 	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
 	await page.mouse.dblclick(x, y);
-	await page.getByLabel('Note length').fill('1900');
+	await page.getByLabel('Note length').fill('1900 ticks');
 	await page.getByLabel('Note length').blur();
 	await tab(page, 'Mixer');
 	await page.getByLabel('Add an insert to Track 1').selectOption(insert);
@@ -1507,7 +1507,7 @@ test('a value edited in the JSON is what plays, over what a swap would carry', a
 	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
 	await page.mouse.dblclick(x, y);
-	await page.getByLabel('Note length').fill('1900');
+	await page.getByLabel('Note length').fill('1900 ticks');
 	await page.getByLabel('Note length').blur();
 	await loopButton(page).click();
 	await startAudio(page);

@@ -42,11 +42,11 @@ const patchLoudest = (page: Page) =>
 async function newSong(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	await expect(page.getByTestId('roll')).toBeVisible();
 }
 
@@ -60,9 +60,9 @@ async function addNote(page: Page, note: number) {
 
 // Each track's slots, as the timeline's JSON has them.
 async function slots(page: Page): Promise<Record<number, string[]>> {
-	const tabs = page.getByRole('tablist', { name: 'Timeline views' });
+	const tabs = page.getByRole('tablist', { name: 'Song views' });
 	await tabs.getByRole('tab', { name: /^JSON/ }).click();
-	const doc = JSON.parse(await page.getByLabel('Timeline JSON').inputValue());
+	const doc = JSON.parse(await page.getByLabel('Song JSON').inputValue());
 	await tabs.getByRole('tab', { name: /^Notes/ }).click();
 	return Object.fromEntries(doc.tracks.map((track: { id: number; slots: string[] }) => [track.id, track.slots]));
 }
@@ -137,7 +137,7 @@ test("Edit a copy on an example's patch puts the copy on the track that played i
 	await openView(page, 'song');
 	await expect(page.getByTestId('track-1')).toHaveAttribute('aria-pressed', 'true');
 	expect(await slots(page)).toEqual({ 1: ['builtin-ReverseSwell-swell', crash], 2: [boom] });
-	const timelines = browser(page).getByRole('list', { name: 'Timelines' });
+	const timelines = browser(page).getByRole('list', { name: 'Songs' });
 	await expect(timelines.getByRole('link', { name: /^ReverseSwell/ })).toHaveCount(1); // The one copy, not another
 	expect(problems).toEqual([]);
 });
@@ -187,7 +187,7 @@ test('the header counts an unsaved use of a built-in, and agrees with where the 
 	await newSong(page, 'Heard on it');
 	const id = new URL(page.url()).searchParams.get('timeline');
 	await page.goto(`/?timeline=${id}&patch=builtin-DrawbarOrgan`);
-	await expect(page.getByTestId('used-by')).toHaveText('Not used by a timeline');
+	await expect(page.getByTestId('used-by')).toHaveText('Not used by a song');
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'alone');
 
 	// Track 1 plays it, which isn't saved yet
@@ -199,13 +199,13 @@ test('the header counts an unsaved use of a built-in, and agrees with where the 
 	await openView(page, 'patch');
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'song');
 	await expect(page.getByTestId('hearing')).toHaveText('Keys play it on Track 1, in the song.');
-	await expect(page.getByTestId('used-by')).toHaveText('Used by 1 timeline: Heard on it');
+	await expect(page.getByTestId('used-by')).toHaveText('Used by 1 song: Heard on it');
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 
 	// Saved, it says the same
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
-	await expect(page.getByTestId('used-by')).toHaveText('Used by 1 timeline: Heard on it');
+	await expect(page.getByTestId('used-by')).toHaveText('Used by 1 song: Heard on it');
 
 	// And a use taken away, unsaved, is counted no more
 	await openView(page, 'song');
@@ -215,6 +215,6 @@ test('the header counts an unsaved use of a built-in, and agrees with where the 
 	await browser(page).getByLabel('Filter the browser').fill('DrawbarOrgan');
 	await browser(page).getByTestId('builtins').getByRole('link', { name: 'DrawbarOrgan' }).click();
 	await expect(patchName(page)).toHaveCount(0);
-	await expect(page.getByTestId('used-by')).toHaveText('Not used by a timeline');
+	await expect(page.getByTestId('used-by')).toHaveText('Not used by a song');
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'alone');
 });

@@ -1,6 +1,6 @@
 // Mod+K's quick open: what it can open, and how what was typed ranks it.
 export interface Openable {
-	kind: 'Timeline' | 'Example' | 'Patch' | 'Built-in';
+	kind: 'Song' | 'Example' | 'Patch' | 'Built-in';
 	name: string;
 	href: string;
 }

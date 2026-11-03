@@ -1,7 +1,7 @@
 <script lang="ts" module>
 	// The browser's lists, which its rail has an icon for each of.
 	export const SECTIONS = [
-		{ id: 'timelines', name: 'Timelines', icon: '♫' },
+		{ id: 'timelines', name: 'Songs', icon: '♫' },
 		{ id: 'patches', name: 'Patches', icon: '◆' },
 		{ id: 'samples', name: 'Samples', icon: '∿' },
 		{ id: 'builtins', name: 'Built-in patches', icon: '▣' },
@@ -15,10 +15,10 @@
 	const SAMPLES =
 		"WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like Piano_C4.wav says which key it was recorded at.";
 	const BUILTINS =
-		"Every example's patches, for any timeline to play. They can't be changed: Edit a copy makes one that can.";
-	const BUNDLES = 'Several timelines compiled into one image, for a device to choose between.';
+		"Every example's patches, for any song to play. They can't be changed: Edit a copy makes one that can.";
+	const BUNDLES = 'Several songs compiled into one image, for a device to choose between.';
 	const EXAMPLES =
-		'Short pieces that ship with the app. Each plays as it is, its patches are built in, and adding one to the library copies its timeline to change.';
+		'Short pieces that ship with the app. Each plays as it is, its patches are built in, and adding one to the library copies its song to change.';
 </script>
 
 <script lang="ts">
@@ -92,11 +92,13 @@
 	let pointing = $state<string | null>(null); // The patch under the pointer
 
 	const usedWords = (users: { name: string }[]) =>
-		users.length ? `Used by ${users.map((u) => u.name).join(', ')}` : 'Not used by a timeline';
+		users.length ? `Used by ${users.map((u) => u.name).join(', ')}` : 'Not used by a song';
 
 	// The list whose name field is open, from the + in its heading. It takes focus as it opens, Enter makes the thing, and Esc
 	// or leaving it empty closes it.
 	type Adding = 'timeline' | 'patch' | 'bundle';
+	// What each is called on screen. A timeline is the format's word for a song, and the page says song.
+	const WORDS: Record<Adding, string> = { timeline: 'song', patch: 'patch', bundle: 'bundle' };
 	let adding = $state<Adding | null>(null);
 	let field = $state<HTMLInputElement>();
 
@@ -222,9 +224,9 @@
 		type="button"
 		class="tool"
 		data-opens={what}
-		aria-label={`New ${what}`}
+		aria-label={`New ${WORDS[what]}`}
 		aria-expanded={adding === what}
-		title={`Make a ${what}`}
+		title={`Make a ${WORDS[what]}`}
 		onmousedown={(event) => event.preventDefault()}
 		onclick={(event) => void add(what, event.currentTarget.closest('details'))}>+</button
 	>
@@ -238,7 +240,7 @@
 				bind:this={field}
 				name="name"
 				placeholder="Name, then Enter"
-				aria-label={`New ${what} name`}
+				aria-label={`New ${WORDS[what]} name`}
 				autocomplete="off"
 				required
 				onkeydown={(event) => fieldKey(event, what)}
@@ -269,10 +271,10 @@
 		<h2>Library</h2>
 
 		<details open data-section="timelines">
-			<summary>Timelines <span class="count">{timelines.length}</span></summary>
+			<summary>Songs <span class="count">{timelines.length}</span></summary>
 			<div class="tools">{@render adder('timeline')}</div>
 			{@render nameField('timeline', 'createTimeline', inSong)}
-			<ul aria-label="Timelines">
+			<ul aria-label="Songs">
 				{#each shownTimelines as timeline (timeline.id)}
 					<li>
 						<a href={timelineHref(timeline.id)} aria-current={timeline.id === openTimeline ? 'page' : undefined}>

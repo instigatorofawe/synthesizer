@@ -31,11 +31,11 @@ const notes = (page: Page) => page.locator('[data-testid^="note-"]');
 async function trackWithClip(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	await emptyNewSong(page);
 	await page.getByRole('button', { name: 'Add track' }).click();
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
@@ -62,9 +62,9 @@ async function addNote(page: Page, tick: number, note: number) {
 }
 
 async function timelineDoc(page: Page) {
-	const tabs = page.getByRole('tablist', { name: 'Timeline views' });
+	const tabs = page.getByRole('tablist', { name: 'Song views' });
 	await tabs.getByRole('tab', { name: /^JSON/ }).click();
-	const doc = JSON.parse(await page.getByLabel('Timeline JSON').inputValue());
+	const doc = JSON.parse(await page.getByLabel('Song JSON').inputValue());
 	await tabs.getByRole('tab', { name: /^Notes/ }).click();
 	return doc;
 }
@@ -111,7 +111,7 @@ test("a note's pitch, place and length are typed as music, and what isn't one is
 	await expect(length).toHaveValue('3/16');
 	await type(length, '1/8.'); // Dotted, which is the same length, and reads as it did
 	await expect(length).toHaveValue('3/16');
-	await type(length, '100'); // A bare number is ticks, for a length no note value names
+	await type(length, '100 ticks'); // Ticks, for a length no note value names
 	await expect(note).toHaveAttribute('data-dur', '100');
 	await expect(length).toHaveValue('100 ticks');
 
@@ -142,8 +142,12 @@ test('the inspector reads the clip and its placement in bars and positions', asy
 	await expect(length).toHaveValue('2 bars');
 	await type(length, '1 bar + 1/2');
 	await expect(length).toHaveValue('1 bar + 1/2');
-	await type(length, '3840'); // Ticks, as a bare number is in a length
+	await type(length, '3840 ticks');
 	await expect(length).toHaveValue('2 bars');
+	await type(length, '8'); // A bare number is bars, as the field reads, as in Live and Logic
+	await expect(length).toHaveValue('8 bars');
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	await type(length, '2');
 
 	const start = page.getByLabel('Clip start');
 	await expect(start).toHaveValue('1.1.000');
@@ -173,9 +177,9 @@ test('the inspector reads the clip and its placement in bars and positions', asy
 
 test('a tempo change inside a bar reads as where it is', async ({ page }) => {
 	await trackWithClip(page, 'Tempo inside');
-	const tabs = page.getByRole('tablist', { name: 'Timeline views' });
+	const tabs = page.getByRole('tablist', { name: 'Song views' });
 	await tabs.getByRole('tab', { name: /^JSON/ }).click();
-	const json = page.getByLabel('Timeline JSON');
+	const json = page.getByLabel('Song JSON');
 	const doc = JSON.parse(await json.inputValue());
 	await json.fill(
 		JSON.stringify(
@@ -190,7 +194,7 @@ test('a tempo change inside a bar reads as where it is', async ({ page }) => {
 			1
 		)
 	);
-	await page.getByRole('region', { name: 'Timeline editor' }).getByText('Tempo, 120 BPM').click();
+	await page.getByRole('region', { name: 'Song editor' }).getByText('Tempo, 120 BPM').click();
 	const inspector = page.locator('#inspector');
 	await expect(inspector.getByText('bar 1', { exact: true })).toBeVisible();
 	await expect(inspector.getByText('3.2.000', { exact: true })).toBeVisible();
@@ -286,7 +290,7 @@ test('points clicked into a lane are joined by lines, as drawn and as compiled, 
 	await page.getByRole('menu', { name: 'cutoff point' }).getByRole('menuitem', { name: 'Step' }).click();
 	await expect(page.getByTestId('lane-0-point-2')).toHaveAttribute('data-shape', 'step');
 	await expect(page.getByLabel('cutoff point shape')).toHaveValue('step');
-	await expect(page.getByLabel('cutoff point ramp')).toHaveCount(0);
+	await expect(page.getByLabel('cutoff point over')).toHaveCount(0);
 	await expect.poll(async () => (await corners(curve)).length).toBe(6);
 	const stepped = await corners(curve);
 	expect(stepped[2][0]).toBeCloseTo(dots[2][0], 0); // Held at the second point's value until the third's tick
@@ -304,8 +308,8 @@ test('points clicked into a lane are joined by lines, as drawn and as compiled, 
 
 	// The last one's ramp, typed as a note value, is shorter than its gap, so it holds and then ramps.
 	await page.getByTestId('lane-0-point-3').click();
-	await type(page.getByLabel('cutoff point ramp'), '1/8');
-	await expect(page.getByLabel('cutoff point ramp')).toHaveValue('1/8');
+	await type(page.getByLabel('cutoff point over'), '1/8');
+	await expect(page.getByLabel('cutoff point over')).toHaveValue('1/8');
 	await expect(page.getByTestId('lane-0-point-3')).toHaveAttribute('data-tick', '1440');
 	await expect
 		.poll(async () => (await timelineDoc(page)).clips[0].automation[3])

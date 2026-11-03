@@ -31,23 +31,23 @@ const keys = (page: Page) => page.getByRole('group', { name: 'Keys' });
 async function newSong(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 }
 
 async function tab(page: Page, name: 'Notes' | 'Mixer' | 'JSON') {
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: new RegExp(`^${name}`) })
 		.click();
 }
 
 async function timelineDoc(page: Page) {
 	await tab(page, 'JSON');
-	const doc = JSON.parse(await page.getByLabel('Timeline JSON').inputValue());
+	const doc = JSON.parse(await page.getByLabel('Song JSON').inputValue());
 	await tab(page, 'Notes');
 	return doc;
 }
@@ -261,7 +261,7 @@ test('Mod+C, Mod+V and Mod+D copy, paste and duplicate clips in the arrangement,
 	expect((await timelineDoc(page)).clips.map((c: { id: string }) => c.id)).toEqual(['clip']);
 
 	// Not while typing in a field, which keeps its keys
-	await page.getByLabel('Timeline name', { exact: true }).press('ControlOrMeta+d');
+	await page.getByLabel('Song name', { exact: true }).press('ControlOrMeta+d');
 	expect(await prevented(page)).toBe(false);
 	expect(await placed(1)).toHaveLength(4);
 
@@ -274,7 +274,7 @@ test('Mod+C, Mod+V and Mod+D copy, paste and duplicate clips in the arrangement,
 	await page.keyboard.press('ControlOrMeta+c');
 	await filter.fill('Copied clips');
 	await browser(page).getByRole('link', { name: 'Copied clips' }).click();
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Copied clips');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Copied clips');
 	await page.getByRole('button', { name: 'Add track' }).click();
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 	await expect(page.getByTestId('track-2')).toHaveAttribute('aria-pressed', 'true');

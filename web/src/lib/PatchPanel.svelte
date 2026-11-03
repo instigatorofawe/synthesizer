@@ -184,12 +184,12 @@
 			{:else if builtin}
 				<span class="muted info" data-testid="used-by" title={users.map((u) => u.name).join(', ')}>
 					{users.length
-						? `Used by ${users.length} timeline${users.length === 1 ? '' : 's'}: ${users.map((u) => u.name).join(', ')}`
-						: 'Not used by a timeline'}
+						? `Used by ${users.length} song${users.length === 1 ? '' : 's'}: ${users.map((u) => u.name).join(', ')}`
+						: 'Not used by a song'}
 				</span>
 			{:else if users.length}
 				<span class="muted info" data-testid="used-by" title={users.map((u) => u.name).join(', ')}>
-					Saving changes {users.length} timeline{users.length === 1 ? '' : 's'}: {users.map((u) => u.name).join(', ')}
+					Saving changes {users.length} song{users.length === 1 ? '' : 's'}: {users.map((u) => u.name).join(', ')}
 				</span>
 			{/if}
 			<span class="grow"></span>

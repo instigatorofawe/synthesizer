@@ -25,8 +25,7 @@ test.beforeEach(({ page }) => {
 const arrangement = (page: Page) => page.getByTestId('arrangement-view');
 const expand = (page: Page) => page.getByRole('button', { name: 'Expand' });
 const inspector = (page: Page) => page.getByRole('button', { name: 'Inspector' });
-const notesTab = (page: Page) =>
-	page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: /^Notes/ });
+const notesTab = (page: Page) => page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: /^Notes/ });
 
 // How the roll's scroller shows the clip: its height, its scroll, and the roll's own size and zoom.
 const roll = (page: Page) =>
@@ -174,7 +173,7 @@ test('I folds the inspector, a full-height column, to a rail, and each side of 1
 	await expect(page.getByRole('button', { name: 'Delete clip' })).toBeVisible(); // The foot of the column, in sight
 	const side = (await column.boundingBox())!;
 	const tracks = (await arrangement(page).boundingBox())!;
-	const notes = (await page.getByRole('region', { name: 'Timeline editor' }).getByRole('tabpanel').boundingBox())!;
+	const notes = (await page.getByRole('region', { name: 'Song editor' }).getByRole('tabpanel').boundingBox())!;
 	expect(Math.abs(side.y - tracks.y)).toBeLessThan(2);
 	expect(Math.abs(side.y + side.height - (notes.y + notes.height))).toBeLessThan(2);
 	expect(side.height).toBeGreaterThan(700);
@@ -183,7 +182,7 @@ test('I folds the inspector, a full-height column, to a rail, and each side of 1
 	await page.keyboard.press('i');
 	await expect(column).toBeHidden();
 	await expect(inspector(page)).toHaveAttribute('aria-expanded', 'false');
-	await page.getByLabel('Timeline name', { exact: true }).press('i');
+	await page.getByLabel('Song name', { exact: true }).press('i');
 	await expect(column).toBeHidden();
 	await page.reload();
 	await expect(column).toBeHidden();
@@ -229,7 +228,7 @@ test('each clip keeps its zoom and row height, across clips, tabs and a reload',
 	await expect(notesTab(page)).toHaveText('Notes: lead-a');
 	await same(true);
 
-	await page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: 'Mixer' }).click();
+	await page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: 'Mixer' }).click();
 	await notesTab(page).click();
 	await same(true);
 

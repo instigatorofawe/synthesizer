@@ -63,9 +63,13 @@ describe('a length', () => {
 		expect(parseLength('1 bar + 1/8T', PPQ)).toBe(PPQ * 4 + PPQ / 3);
 	});
 
-	it('is ticks when it is a bare number, so an odd one can still be had', () => {
-		expect(parseLength('240', PPQ)).toBe(240);
-		expect(parseLength('1900', PPQ)).toBe(1900);
+	it('is bars when it is a bare number, as the fields read, and ticks only when it says so', () => {
+		expect(parseLength('8', PPQ)).toBe(8 * 1920);
+		expect(parseLength('1.5', PPQ)).toBe(2880);
+		expect(parseLength('.25', PPQ)).toBe(480);
+		expect(parseLength('2 + 1/4', PPQ)).toBe(4320);
+		expect(parseLength('240 ticks', PPQ)).toBe(240);
+		expect(parseLength('1900 ticks', PPQ)).toBe(1900);
 		expect(parseLength('7 ticks', PPQ)).toBe(7);
 		expect(parseLength('1 tick', PPQ)).toBe(1);
 	});
@@ -101,6 +105,7 @@ describe('a length', () => {
 			expect(parseLength(text, PPQ), text).toBeNull();
 		}
 		expect(parseLength('0', PPQ, 0)).toBe(0); // A ramp of nothing is a step
+		expect(parseLength('0.0001', PPQ)).toBeNull(); // Not a whole tick
 		expect(parseLength('1/128', 96)).toBe(3);
 		expect(parseLength('1/256', 96)).toBeNull();
 	});
@@ -157,7 +162,7 @@ describe('a field', () => {
 		expect(readPitch('H2')).toBe("“H2” isn't a pitch. Type a note, as E4, F#3 or Bb2, or a MIDI number from 0 to 127.");
 		expect(readLength(PPQ)('1/8')).toBe(240);
 		expect(readLength(PPQ)(' long ')).toBe(
-			"“long” isn't a length. Type a note value, as 1/8 or 3/16, bars, as 2 bars, or ticks, as 240."
+			"“long” isn't a length. Type a note value, as 1/8 or 3/16, bars, as 2, or ticks, as 240 ticks."
 		);
 		expect(readLength(PPQ, 0)('0')).toBe(0);
 	});

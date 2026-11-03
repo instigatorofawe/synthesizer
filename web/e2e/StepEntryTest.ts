@@ -43,11 +43,11 @@ async function written(page: Page) {
 async function stepClip(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	await page.getByRole('button', { name: 'Add track' }).click(); // It asks which patch the track plays
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 	const row = page.locator('[data-testid^="row-"]').last();

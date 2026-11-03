@@ -37,21 +37,21 @@ const box = async (page: Page, id: string) => (await page.getByTestId(id).boundi
 
 async function tab(page: Page, name: 'Notes' | 'Mixer' | 'JSON') {
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: new RegExp(`^${name}`) })
 		.click();
 }
 
 async function timelineDoc(page: Page) {
 	await tab(page, 'JSON');
-	const doc = JSON.parse(await page.getByLabel('Timeline JSON').inputValue());
+	const doc = JSON.parse(await page.getByLabel('Song JSON').inputValue());
 	await tab(page, 'Notes');
 	return doc as { tempo: Tempo[]; tracks: { id: number; gain: number; pan: number }[] };
 }
 
 async function setTempo(page: Page, tempo: Tempo[]) {
 	await tab(page, 'JSON');
-	const json = page.getByLabel('Timeline JSON');
+	const json = page.getByLabel('Song JSON');
 	const doc = JSON.parse(await json.inputValue());
 	doc.tempo = tempo;
 	await json.fill(JSON.stringify(doc, null, 1));

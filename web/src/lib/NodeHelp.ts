@@ -47,7 +47,7 @@ export const NODE_HELP: Record<string, NodeHelp> = {
 	param: {
 		name: 'Parameter',
 		group: 'Notes and values',
-		description: "A value from the patch's parameters, which a timeline's lanes and controls change.",
+		description: "A value from the patch's parameters, which a song's lanes and controls change.",
 		synonyms: ['knob', 'control', 'macro', 'automation', 'slider'],
 		inputs: {}
 	},

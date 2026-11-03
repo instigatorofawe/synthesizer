@@ -27,7 +27,7 @@ const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' }
 const rail = (page: Page) => page.getByRole('toolbar', { name: 'Library and examples' });
 const shows = (page: Page, view: 'song' | 'patch') =>
 	expect(page.getByTestId(`view-${view}`)).toHaveAttribute('aria-selected', 'true');
-const tabs = (page: Page) => page.getByRole('tablist', { name: 'Timeline views' });
+const tabs = (page: Page) => page.getByRole('tablist', { name: 'Song views' });
 const songTab = (page: Page, name: RegExp | string) => tabs(page).getByRole('tab', { name });
 const chosen = (page: Page, track: number) =>
 	expect(page.getByTestId(`track-${track}`)).toHaveAttribute('aria-pressed', 'true');
@@ -58,7 +58,7 @@ const measure = (page: Page) =>
 
 test('the browser is narrow, and short enough for a laptop with the examples shut', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await rail(page).getByRole('button', { name: 'Timelines' }).click();
+	await rail(page).getByRole('button', { name: 'Songs' }).click();
 	await expect(browser(page)).toBeVisible();
 	// What each list is for is behind its ?, and what makes something behind its +
 	await expect(browser(page).getByText("Every example's patches")).toHaveCount(0);
@@ -83,8 +83,8 @@ test('the browser is narrow, and short enough for a laptop with the examples shu
 test('the + in Timelines makes a timeline, and Esc closes its field', async ({ page }) => {
 	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/?timeline=song');
-	const add = browser(page).getByRole('button', { name: 'New timeline', exact: true });
-	const field = browser(page).getByLabel('New timeline name');
+	const add = browser(page).getByRole('button', { name: 'New song', exact: true });
+	const field = browser(page).getByLabel('New song name');
 	await expect(field).toHaveCount(0);
 
 	await add.click();
@@ -102,7 +102,7 @@ test('the + in Timelines makes a timeline, and Esc closes its field', async ({ p
 	await field.fill('Made by the plus');
 	await field.press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== 'song');
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Made by the plus');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Made by the plus');
 	await expect(browser(page).getByRole('link', { name: 'Made by the plus' })).toHaveAttribute('aria-current', 'page');
 	await expect(field).toHaveCount(0);
 	await expect(add).toHaveAttribute('aria-expanded', 'false');
@@ -225,11 +225,11 @@ test("a patch's tooltip in the browser counts the song's unsaved edits", async (
 	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/?timeline=song');
 	const square = browser(page).getByRole('link', { name: /^Square/ });
-	await expect(square).toHaveAttribute('title', 'Not used by a timeline');
+	await expect(square).toHaveAttribute('title', 'Not used by a song');
 
 	// Lead plays it instead, unsaved
 	await songTab(page, 'JSON').click();
-	const json = page.getByLabel('Timeline JSON');
+	const json = page.getByLabel('Song JSON');
 	const doc = JSON.parse(await json.inputValue());
 	doc.tracks[0].slots = ['unused'];
 	await json.fill(JSON.stringify(doc, null, 1));

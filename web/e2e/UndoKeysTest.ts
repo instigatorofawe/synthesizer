@@ -86,7 +86,7 @@ test('Space plays and stops from anywhere but a field, and a button with focus d
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');
 
 	// A field keeps its Space.
-	const name = page.getByLabel('Timeline name', { exact: true });
+	const name = page.getByLabel('Song name', { exact: true });
 	await name.focus();
 	await page.keyboard.press('End');
 	await page.keyboard.press('Space');
@@ -199,10 +199,10 @@ test("a timeline's undo outlasts opening another timeline", async ({ page }) => 
 	await expect(page.getByTestId('placement-1-0')).toHaveCount(0);
 
 	await browser(page).getByRole('link', { name: 'Ballad' }).click();
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Ballad');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad');
 	await expect(undo).toBeDisabled(); // A history of its own
 	await browser(page).getByRole('link', { name: 'Song' }).click();
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Song');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Song');
 	await expect(page.getByTestId('placement-1-0')).toHaveCount(0);
 	await undo.click();
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();

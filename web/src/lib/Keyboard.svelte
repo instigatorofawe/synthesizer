@@ -11,7 +11,7 @@
 	// Two octaves of keys in the top bar, for whichever view is on screen to play. Each key is a button named by its note,
 	// and the computer keyboard plays them too: A to ' from the lowest C shown, with Z and X moving the keys an octave.
 	// There is one set of keys on the page, so the page decides where a key is heard, and it listens on the window whichever
-	// view is showing. Hold and the velocity they play at sit either side of them, and are the page's too: Hold changes only
+	// view is showing. Latch and the velocity they play at sit either side of them, and are the page's too: Latch changes only
 	// what is heard, and the velocity is the one new notes are written at.
 	let {
 		low = 48,
@@ -36,10 +36,10 @@
 		where?: string; // Where the keys are heard, or why they can't be
 		onnote: (note: number, on: boolean, at: number) => void; // `at` is when, on the page's clock, as a take needs
 		hold?: boolean; // Whether a key let go keeps sounding
-		latched?: ReadonlySet<number>; // The notes Hold keeps sounding, whose keys are up
+		latched?: ReadonlySet<number>; // The notes Latch keeps sounding, whose keys are up
 		velocity?: number;
 		onhold?: (on: boolean) => void;
-		onletgo?: () => void; // Esc: let go of every note Hold keeps
+		onletgo?: () => void; // Esc: let go of every note Latch keeps
 		stripIn?: HTMLElement | null; // The Patch view's strip, which the keys are drawn into, wider and bigger, while it is open
 	} = $props();
 
@@ -153,7 +153,7 @@
 		if (disabled) releaseAll();
 	});
 
-	// Esc lets go of what Hold keeps, on its way to whatever else it closes or leaves, so it is heard first and goes on.
+	// Esc lets go of what Latch keeps, on its way to whatever else it closes or leaves, so it is heard first and goes on.
 	onMount(() =>
 		on(
 			window,
@@ -174,9 +174,9 @@
 	aria-pressed={hold}
 	data-held={latched.size}
 	title={hold
-		? `Hold: a key let go keeps sounding until it is played again. Turn Hold off, or press ${label('escape')}, to let go of them all.`
-		: 'Hold: keep each note sounding after its key is let go, until it is played again or Hold is turned off'}
-	onclick={() => onhold(!hold)}>Hold</button
+		? `Latch: a key let go keeps sounding until it is played again. Turn Latch off, or press ${label('escape')}, to let go of them all.`
+		: 'Latch: keep each note sounding after its key is let go, until it is played again or Latch is turned off'}
+	onclick={() => onhold(!hold)}>Latch</button
 >
 
 <div class="keyshome">
@@ -226,7 +226,7 @@
 <label
 	class="velocity"
 	use:leavesFields
-	title={`How hard the keys play, and new notes are written, from 1 to 127. It is the roll's Vel. ${label('softer')} and ${label('louder')} step it by 10.`}
+	title={`How hard the keys play, and new notes are written, from 1 to 127. ${label('softer')} and ${label('louder')} step it by 10.`}
 >
 	<span>Vel</span>
 	<input
@@ -326,7 +326,7 @@
 	.wide .key.black .letter {
 		color: #8b949e;
 	}
-	/* A note Hold keeps sounding after its key came up. */
+	/* A note Latch keeps sounding after its key came up. */
 	.key.latched:not(:disabled) {
 		background: #56d364;
 	}

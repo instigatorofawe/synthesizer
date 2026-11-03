@@ -62,7 +62,7 @@
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
-	import { clampVelocity, type Cursor } from '#lib/StepEntry.ts';
+	import type { Cursor } from '#lib/StepEntry.ts';
 	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import { landing, type SongPlace } from '#lib/Workspace.ts';
 
@@ -97,7 +97,7 @@
 		ontempo = () => {},
 		onkey,
 		onsay = () => {},
-		velocity = $bindable(100)
+		velocity = 100
 	}: {
 		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
 		doc: Timeline;
@@ -128,9 +128,9 @@
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
 		ontempo?: (tempo: Timeline['tempo'] | null) => void; // The tempo while the Tempo lane is dragged, then null
-		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, once audio has started
+		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do
 		onsay?: (text: string) => void; // Says why something typed into a field was refused, where the page says such things
-		velocity?: number; // The velocity of new notes, clicked or stepped, which is the keys' too, so the page keeps it
+		velocity?: number; // The velocity of new notes, clicked or stepped, which is the keys' Vel, the page's
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -142,6 +142,8 @@
 	let selection = $state<Selection>({ track: opened.track, placement: opened.placement });
 	let clipId = $state<string | null>(opened.clip);
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
+	// Clips snap apart from notes, as in Live and Logic: to bars, until a finer step is chosen. The Tempo lane follows clips.
+	let clipGrid = $state(untrack(() => ticksPerBar(doc)));
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
 	// Step entry, which R or the Step toggle turns on and Esc leaves. It outlasts a change of clip, and its cursor is kept for
@@ -190,7 +192,7 @@
 		roll?.stepKey(note, on);
 	}
 
-	// What a take snaps to and writes at, as a clicked note does: the roll's Snap and Vel.
+	// What a take snaps to and writes at, as a clicked note does: the roll's Snap, and the Vel beside the keys.
 	export function takeSettings(): { grid: number; velocity: number } {
 		return { grid, velocity };
 	}
@@ -294,10 +296,18 @@
 
 	const trackName = (track: { id: number; name: string }) => track.name || `Track ${track.id}`;
 
+	// A new track comes with a clip as long as a new song's, at the bar the playhead is in, and the roll opens on it, so what
+	// the keys and step entry write goes into the track they play.
 	function newTrack(patch: string) {
 		const added = addTrack(doc, patch);
-		commit(added.doc);
-		selection = { track: added.id, placement: null };
+		const bar = ticksPerBar(doc);
+		const at = Math.floor(tick / bar) * bar;
+		const made = addClip(added.doc, TEMPLATE_BARS * bar);
+		const next = place(made.doc, added.id, made.id, at);
+		commit(next);
+		selection = { track: added.id, placement: placementIndex(next, added.id, made.id, at) };
+		clipId = made.id;
+		tab = 'notes';
 		return added.id;
 	}
 
@@ -622,7 +632,7 @@
 	class:expanded
 	class:inspecting={inspecting === true}
 	class:folded={inspecting === false}
-	aria-label="Timeline editor"
+	aria-label="Song editor"
 >
 	<div class="toolbar">
 		{@render heading?.()}
@@ -646,27 +656,19 @@
 					{#each drawChoices as choice (choice.ticks)}<option value={choice.ticks}>{choice.label}</option>{/each}
 				</select>
 			</label>
-			<label
-				title={`How hard a new note is played, from 1 to 127. ${label('softer')} and ${label('louder')} step it by 10.`}
-			>
-				Vel
-				<input
-					class="velocity"
-					type="number"
-					min="1"
-					max="127"
-					aria-label="Velocity of new notes"
-					value={velocity}
-					onchange={(e) => {
-						velocity = clampVelocity(Number(e.currentTarget.value) || velocity);
-						e.currentTarget.value = String(velocity);
-					}}
-				/>
-			</label>
 		{/if}
-		<label>
+		<label title="Where a clicked note starts, and the step a dragged note's length goes by">
 			Snap
 			<select aria-label="Snap" bind:value={grid}>
+				{#each grids(doc.ppq) as choice (choice.label)}<option value={choice.ticks}>{choice.label}</option>{/each}
+			</select>
+		</label>
+		<span class="divider" aria-hidden="true"></span>
+		<label
+			title="Where a clip drawn, moved or repeated in the arrangement starts and ends, and where a tempo change goes"
+		>
+			Clips
+			<select aria-label="Clip snap" bind:value={clipGrid}>
 				{#each grids(doc.ppq) as choice (choice.label)}<option value={choice.ticks}>{choice.label}</option>{/each}
 			</select>
 		</label>
@@ -692,7 +694,7 @@
 			{doc}
 			{selection}
 			{barWidth}
-			{grid}
+			grid={clipGrid}
 			{tick}
 			{playing}
 			{loop}
@@ -754,14 +756,14 @@
 								onchange={(e) => commit(setTempo(doc, index, { bpm: number(e) }))}
 							/>
 							{#if doc.tempo.some((t) => t.tick > change.tick)}
-								<label class="ramp" title="Glide to the next change's tempo, instead of holding this one until it">
+								<label class="glide" title="Glide to the next change's tempo, instead of holding this one until it">
 									<input
 										type="checkbox"
-										aria-label={`Ramp from bar ${barOf(change.tick, doc.ppq)}`}
+										aria-label={`Glide from bar ${barOf(change.tick, doc.ppq)}`}
 										checked={change.ramp ?? false}
 										onchange={(e) => commit(setTempo(doc, index, { ramp: e.currentTarget.checked }))}
 									/>
-									ramp
+									glide
 								</label>
 							{/if}
 							{#if index > 0 && !readonly}
@@ -926,7 +928,8 @@
 							onchange={(e) => rename(e.currentTarget.value)}
 						/></label
 					>
-					<label title="How long the clip is, in bars, as a note value such as 1/2, or in ticks"
+					<label
+						title="How long the clip is: a number is bars, as 8, and it takes a note value such as 1/2, or ticks, as 240 ticks"
 						>length <UnitField
 							label="Clip length"
 							value={clip.length}
@@ -978,7 +981,8 @@
 									width="8rem"
 								/></label
 							>
-							<label title="For this long, each repeat, in bars, as a note value or in ticks"
+							<label
+								title="For this long, each repeat: a number is bars, and it takes a note value, or ticks, as 240 ticks"
 								>for <UnitField
 									label="Window length"
 									value={window.length}
@@ -1069,7 +1073,7 @@
 
 	<div class="detail">
 		<div class="strip">
-			<div class="tabs" role="tablist" aria-label="Timeline views">
+			<div class="tabs" role="tablist" aria-label="Song views">
 				<button type="button" role="tab" aria-selected={tab === 'notes'} onclick={() => (tab = 'notes')}>
 					Notes{clip ? `: ${clip.id}` : ''}
 				</button>
@@ -1230,6 +1234,11 @@
 		flex: none;
 		white-space: nowrap;
 	}
+	.toolbar .divider {
+		width: 1px;
+		align-self: stretch;
+		background: var(--line);
+	}
 	.hint {
 		min-width: 0;
 		white-space: nowrap;
@@ -1348,10 +1357,6 @@
 	.step[aria-pressed='true'] span {
 		color: #3fb950;
 	}
-	.toolbar input.velocity {
-		width: 3.2rem;
-		padding: 0.1rem 0.25rem;
-	}
 	.tabs {
 		flex: none;
 		display: flex;
@@ -1426,14 +1431,14 @@
 		margin: 0.2rem 0 0.35rem;
 		font-size: 0.72rem;
 	}
-	.ramp {
+	.glide {
 		display: flex;
 		align-items: center;
 		gap: 0.2rem;
 		font-size: 0.75rem;
 		color: var(--muted);
 	}
-	.inspector .ramp input {
+	.inspector .glide input {
 		width: auto;
 		margin: 0;
 	}

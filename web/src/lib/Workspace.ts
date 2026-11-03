@@ -135,14 +135,6 @@ export function withView(search: string, view: View): string {
 	return withParams(search, { view: view === 'song' && !params.has('patch') && !params.has('part') ? null : view });
 }
 
-// What the top bar's Undo and Redo act on: the history of whatever the view on screen edits.
-export interface Undoable {
-	readonly canUndo: boolean;
-	readonly canRedo: boolean;
-	undo(): void;
-	redo(): void;
-}
-
 // A form action on this page, sent from where the page is, so the page stays where it is when it comes back.
 export function actionOn(search: string, name: string): string {
 	const params = new URLSearchParams(search);

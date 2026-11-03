@@ -19,6 +19,7 @@
 	import { downloadBytes, downloadImage } from '#lib/Download.ts';
 	import { renderWav } from '#lib/Render.ts';
 	import { nodeOfError } from '#lib/GraphEdit.ts';
+	import { History } from '#lib/History.ts';
 	import Keyboard from '#lib/Keyboard.svelte';
 	import Meter from '#lib/Meter.svelte';
 	import PatchPanel from '#lib/PatchPanel.svelte';
@@ -26,6 +27,7 @@
 	import { buildRequest, missingAssets, reachable, type AssetEntry, type CompileReport } from '#lib/Request.ts';
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
+	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { BEATS_PER_BAR, patchUses, replacePatch, settlingWrites, tempoAt, type PatchUse } from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
 	import ViewTabs from '#lib/ViewTabs.svelte';
@@ -43,7 +45,6 @@
 		withParams,
 		withView,
 		type Draft,
-		type Undoable,
 		type View
 	} from '#lib/Workspace.ts';
 
@@ -143,9 +144,43 @@
 		drafts = draft ? { ...rest, [key]: draft } : rest;
 	}
 
-	function timelineEdited(change: { name?: string; text?: string }) {
+	// Each patch and timeline keeps its own undo history while others are open, of its text, so that an edit made in its JSON
+	// is undone as one made in its editor is. How an edit came about decides what that history makes of it: one keystroke of a
+	// run typed into the JSON joins the others, the run ends when the field is left, and a step undone or redone isn't an edit.
+	type How = 'edit' | 'typing' | 'history';
+	const history = new History<string>();
+
+	// Puts an edit to a document's text in its history.
+	function remember(key: string, now: string, next: string | undefined, how: How) {
+		if (how === 'history' || next === undefined) return;
+		if (next !== now) history.record(key, now, how === 'typing');
+		else if (how === 'edit') history.end(key); // A field left, with nothing more typed into it
+	}
+
+	// Undo and Redo for the timeline open and the patch on screen, for any button or key that acts on one. An example and a
+	// built-in patch can't be changed, so they have none.
+	const timelineHistory = $derived(
+		saved
+			? history.of(draftKey('timeline', saved.id), {
+					now: () => timelineText,
+					apply: (text) => timelineEdited({ text }, 'history')
+				})
+			: null
+	);
+	const patchHistory = $derived(
+		savedPatch && !savedPatch.builtin
+			? history.of(draftKey('patch', savedPatch.id), {
+					now: () => patchText,
+					apply: (text) => patchEdited({ text }, 'history')
+				})
+			: null
+	);
+
+	function timelineEdited(change: { name?: string; text?: string }, how: How = 'edit') {
 		if (!saved) return;
 		const key = draftKey('timeline', saved.id);
+		remember(key, timelineText, change.text, how);
+		if (change.text === timelineText && change.name === undefined) return;
 		const base = {
 			kind: 'timeline' as const,
 			id: saved.id,
@@ -156,9 +191,12 @@
 		put(key, edited(base, drafts[key], change));
 	}
 
-	function patchEdited(change: { name?: string; text?: string; graph?: Graph }) {
+	function patchEdited(change: { name?: string; text?: string; graph?: Graph }, how: How = 'edit') {
 		if (!savedPatch || savedPatch.builtin) return;
 		const key = draftKey('patch', savedPatch.id);
+		const text = change.graph ? JSON.stringify(change.graph, null, 1) : change.text;
+		remember(key, patchText, text, how);
+		if (text === patchText && change.name === undefined) return;
 		const base = {
 			kind: 'patch' as const,
 			id: savedPatch.id,
@@ -166,7 +204,6 @@
 			name: savedPatch.name,
 			text: savedPatchText
 		};
-		const text = change.graph ? JSON.stringify(change.graph, null, 1) : change.text;
 		const graph = change.graph ?? (text === undefined ? undefined : (parseGraph(text) ?? undefined));
 		put(
 			key,
@@ -255,7 +292,7 @@
 		}
 	}
 
-	// A deleted patch or timeline takes its draft with it.
+	// A deleted patch or timeline takes its draft and its history with it.
 	$effect(() => {
 		const known = new Set([
 			...data.library.patches.map((p) => draftKey('patch', p.id)),
@@ -264,6 +301,7 @@
 		untrack(() => {
 			const gone = Object.keys(drafts).filter((key) => !known.has(key));
 			if (gone.length) drafts = Object.fromEntries(Object.entries(drafts).filter(([key]) => known.has(key)));
+			history.keep(known);
 		});
 	});
 
@@ -279,7 +317,7 @@
 	let want = $state<Source>(untrack(() => (data.open ? 'song' : 'alone')));
 	let live = $state<Source | null>(null); // Which the image now playing is, once one is
 	let waiting: (() => void)[] = []; // Sent when what is wanted goes live
-	let songTick = 0; // Where the song was when a patch on its own took over
+	let songTick = $state(0); // Where the song was when a patch on its own took over
 
 	let compiler: Compiler | undefined;
 	let rendering = $state<number | null>(null); // How far a WAV export has got
@@ -499,6 +537,20 @@
 		});
 	}
 
+	const songPlaying = $derived(live === 'song' && !!engineState?.playing);
+
+	// Stop, and pressed again once stopped, back to the start, as most DAWs do. A laptop may have no Home key.
+	function stop() {
+		if (songPlaying) engine.stop();
+		else toStart();
+	}
+
+	// Back to the start of the song. A patch heard on its own keeps the engine, and the song starts there when it comes back.
+	function toStart() {
+		songTick = 0;
+		if (live === 'song') engine.locate(0);
+	}
+
 	// What the timeline's editors send. Notes and moves of the playhead bring the song back; a control dragged while a patch plays
 	// on its own has nothing to move, and settles when its edit compiles.
 	const controls: SongControls = {
@@ -668,11 +720,6 @@
 		open(recipe ? { part: id, patch: null } : { patch: id, part: null }, false, 'patch');
 	}
 
-	// The top bar's Undo and Redo act on the view on screen, through its editor.
-	let songEditor = $state<{ history: Undoable }>();
-	let patchPanel = $state<{ history: Undoable }>();
-	const undoable = $derived(view === 'song' ? songEditor?.history : patchPanel?.history);
-
 	// The browser sits beside the views on a wide screen, and folds to a rail of icons when asked. Below 1400 px there isn't the
 	// room, so it is always the rail there, and opens over the views until something in it is chosen.
 	const WIDE = 1400;
@@ -705,28 +752,52 @@
 		if (browserOver && !target.closest('.side, .rail, .menu')) browserOver = false;
 	}
 
+	// Undo and Redo, the top bar's and the keys, act on what the view on screen edits.
+	const undoable = $derived(view === 'patch' ? patchHistory : timelineHistory);
+
+	// A key a field takes, Mod+Z undoing what was typed into it among them, is the field's. So is one in a dialog.
+	const keptBy = (target: EventTarget | null) => typingIn(target) || !!(target as Element | null)?.closest?.('dialog');
+
 	// Keys that move around the page: ` flips views, B folds the browser, and Esc closes a browser open over the views. They
-	// go by where a key is, as the piano's do, and leave fields and keys with modifiers alone.
+	// come before the window's keys, which leave a key alone once it has been used here.
 	function pageKeys(event: KeyboardEvent) {
-		if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.repeat) return;
-		const target = event.target as Element | null;
-		if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
-		if (event.code === 'Backquote') {
+		if (event.repeat || keptBy(event.target)) return;
+		if (matches(event, 'flip')) {
 			event.preventDefault();
 			show(view === 'song' ? 'patch' : 'song');
-		} else if (event.code === 'KeyB') {
+		} else if (matches(event, 'browser')) {
 			event.preventDefault();
 			toggleBrowser();
-		} else if (event.code === 'Escape' && browserOver) {
+		} else if (matches(event, 'escape') && browserOver) {
 			browserOver = false;
 		}
 	}
 
 	function keydown(event: KeyboardEvent) {
-		if ((event.metaKey || event.ctrlKey) && event.key === 's') {
+		if (matches(event, 'save')) {
 			event.preventDefault();
 			if (dirty.size) saveForm.requestSubmit();
+			return;
 		}
+		if (event.defaultPrevented || keptBy(event.target)) return;
+		if (matches(event, 'play')) {
+			event.preventDefault(); // Or a button with focus is pressed, and the roll scrolls
+			if (event.repeat) return;
+			if (songPlaying) engine.stop();
+			else if (songDoc) play();
+		} else if (matches(event, 'start')) {
+			event.preventDefault();
+			toStart();
+		} else if (undoable && (matches(event, 'undo') || matches(event, 'redo'))) {
+			event.preventDefault();
+			if (matches(event, 'undo')) undoable.undo();
+			else undoable.redo();
+		}
+	}
+
+	// Some browsers press a button when Space comes back up, so that is the transport's too.
+	function keyup(event: KeyboardEvent) {
+		if (matches(event, 'play') && !keptBy(event.target)) event.preventDefault();
 	}
 
 	function leaving(event: BeforeUnloadEvent) {
@@ -770,7 +841,7 @@
 </script>
 
 <svelte:head><title>{recipe?.entry.name ?? (timelineName || 'modsynth')} · modsynth</title></svelte:head>
-<svelte:window onkeydown={keydown} onbeforeunload={leaving} bind:innerWidth={windowWidth} />
+<svelte:window onkeydown={keydown} onkeyup={keyup} onbeforeunload={leaving} bind:innerWidth={windowWidth} />
 <svelte:document onkeydown={pageKeys} />
 
 <div class="workspace" onpointerdowncapture={outsideBrowser} role="presentation">
@@ -780,7 +851,7 @@
 			class="icon menu"
 			aria-label="Browser"
 			aria-pressed={browserShown}
-			title="Show or hide the browser (B)"
+			title={`Show or hide the browser (${label('browser')})`}
 			onclick={() => toggleBrowser()}
 		>
 			<span aria-hidden="true">☰</span>
@@ -789,9 +860,10 @@
 		{#if !started}
 			<button type="button" onclick={() => use(want)}>Start audio</button>
 		{/if}
-		<button type="button" class="play" onclick={play} disabled={!songDoc}><span aria-hidden="true">▶ </span>Play</button
+		<button type="button" class="play" onclick={play} disabled={!songDoc} title="Play (Space)"
+			><span aria-hidden="true">▶ </span>Play</button
 		>
-		<button type="button" onclick={() => engine.stop()} disabled={!started}
+		<button type="button" onclick={stop} disabled={!started} title="Stop. Pressed again, back to the start (Home)"
 			><span aria-hidden="true">■ </span>Stop</button
 		>
 		<div class="readout" title="Bar and beat">
@@ -804,7 +876,7 @@
 				type="button"
 				class="icon"
 				aria-label="Undo"
-				title={`Undo the last edit to the ${view === 'song' ? 'song' : 'patch'} (Ctrl+Z, ⌘Z on a Mac)`}
+				title={`Undo the last edit to the ${view === 'song' ? 'song' : 'patch'} (${label('undo')})`}
 				disabled={!undoable?.canUndo}
 				onclick={() => undoable?.undo()}><span aria-hidden="true">↶</span></button
 			>
@@ -812,7 +884,7 @@
 				type="button"
 				class="icon"
 				aria-label="Redo"
-				title={`Redo the last edit undone in the ${view === 'song' ? 'song' : 'patch'} (Ctrl+Shift+Z, ⇧⌘Z on a Mac)`}
+				title={`Redo the last edit undone in the ${view === 'song' ? 'song' : 'patch'} (${label('redo')})`}
 				disabled={!undoable?.canRedo}
 				onclick={() => undoable?.redo()}><span aria-hidden="true">↷</span></button
 			>
@@ -822,7 +894,7 @@
 		<span class="grow"></span>
 		{#if dirty.size}<span class="muted unsaved" data-testid="unsaved">{dirty.size} unsaved</span>{/if}
 		<form method="POST" action={actionOn(search, 'save')} use:enhance={saving} bind:this={saveForm}>
-			<button disabled={!dirty.size} title="Save every unsaved patch and timeline (Ctrl+S)">Save</button>
+			<button disabled={!dirty.size} title={`Save every unsaved patch and timeline (${label('save')})`}>Save</button>
 		</form>
 	</header>
 
@@ -842,7 +914,6 @@
 				{#if songDoc}
 					{#key openKey}
 						<TimelineEditor
-							bind:this={songEditor}
 							doc={songDoc}
 							patches={songPatches}
 							program={goodSong?.report.programs[0] ?? null}
@@ -852,6 +923,7 @@
 							targets={songTargets}
 							{rings}
 							engine={controls}
+							history={timelineHistory}
 							readonly={recipe !== null}
 							active={view === 'song'}
 							tabs={[
@@ -873,7 +945,6 @@
 
 			<div id="patch-view" class="view" class:hidden={view !== 'patch'} inert={view !== 'patch'}>
 				<PatchPanel
-					bind:this={patchPanel}
 					patch={shown?.patch ?? null}
 					name={patchName}
 					graph={shown?.patch.graph ?? null}
@@ -902,7 +973,8 @@
 					onsong={() => show('song')}
 					onname={(name) => patchEdited({ name })}
 					ongraph={(graph) => patchEdited({ graph })}
-					ontext={(text) => patchEdited({ text })}
+					ontext={(text, typing) => patchEdited({ text }, typing ? 'typing' : 'edit')}
+					history={patchHistory}
 					onprobes={(next) => (probes = next)}
 					onparam={patchParam}
 					onpart={(id) => open({ part: id, patch: null }, false, 'patch')}
@@ -1034,7 +1106,8 @@
 				aria-label="Timeline JSON"
 				spellcheck="false"
 				value={timelineText}
-				oninput={(e) => timelineEdited({ text: e.currentTarget.value })}></textarea>
+				oninput={(e) => timelineEdited({ text: e.currentTarget.value }, 'typing')}
+				onchange={(e) => timelineEdited({ text: e.currentTarget.value })}></textarea>
 		{/if}
 	</div>
 {/snippet}

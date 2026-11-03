@@ -3,11 +3,12 @@
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
 	import GraphEditor from '#lib/GraphEditor.svelte';
+	import type { Undoable } from '#lib/History.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
 	import type { Ring } from '#lib/ScopeMath.ts';
-	import { actionOn, stay, withView, type Hearing, type Undoable } from '#lib/Workspace.ts';
+	import { actionOn, stay, withView, type Hearing } from '#lib/Workspace.ts';
 
 	// The Patch view: one patch, drawn as a graph or shown as JSON, with scopes on what it makes. A trail back to the song
 	// heads it, through the track the patch is heard on.
@@ -36,6 +37,7 @@
 		hearing,
 		scopes,
 		active,
+		history,
 		song,
 		onsong,
 		onname,
@@ -69,34 +71,18 @@
 		hearing: Hearing;
 		scopes: { slot: number; label: string; ring: Ring }[];
 		active: boolean; // Whether this view is on screen, so keys are for it
+		history: Undoable | null; // The patch's undo, which the page keeps while other things are open
 		song: string; // The open timeline's or example's name
 		onsong: () => void; // Back to the Song view
 		onname: (name: string) => void;
 		ongraph: (graph: Graph) => void;
-		ontext: (text: string) => void;
+		ontext: (text: string, typing: boolean) => void; // Typing until the field is left, which undoes as one step
 		onprobes: (probes: Probe[]) => void;
 		onparam: (param: Param, value: number) => void;
 		onpart: (id: string) => void;
 	} = $props();
 
 	let view = $state<'graph' | 'json'>('graph');
-	let panel: HTMLElement;
-
-	// The top bar's Undo and Redo. The graph editor keeps the patch's history and answers the usual keys for it, so they reach
-	// it as those keys. It can't say when there is nothing to undo, so they are offered whenever the graph can change.
-	function press(redo: boolean) {
-		panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, shiftKey: redo, bubbles: true }));
-	}
-	export const history: Undoable = {
-		get canUndo() {
-			return patch !== null && !readonly && view === 'graph';
-		},
-		get canRedo() {
-			return patch !== null && !readonly && view === 'graph';
-		},
-		undo: () => press(false),
-		redo: () => press(true)
-	};
 
 	// A link, so it can open in another tab, that otherwise switches views without leaving the page.
 	function backToSong(event: MouseEvent) {
@@ -116,7 +102,7 @@
 	const params = $derived(graph?.params ?? []);
 </script>
 
-<section class="patch" aria-label="Patch editor" bind:this={panel}>
+<section class="patch" aria-label="Patch editor">
 	<header>
 		<nav class="trail" aria-label="Where this patch is heard">
 			<a href={withView(search, 'song')} onclick={backToSong} title="Back to the song, as it was left">
@@ -196,7 +182,8 @@
 					spellcheck="false"
 					{readonly}
 					value={text}
-					oninput={(e) => ontext(e.currentTarget.value)}></textarea>
+					oninput={(e) => ontext(e.currentTarget.value, true)}
+					onchange={(e) => ontext(e.currentTarget.value, false)}></textarea>
 			{:else if graph}
 				{#key patch.id}
 					<GraphEditor
@@ -212,6 +199,7 @@
 						{maxProbes}
 						{readonly}
 						{active}
+						{history}
 						onchange={ongraph}
 						{onprobes}
 					>

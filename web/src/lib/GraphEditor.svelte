@@ -29,6 +29,7 @@
 		type LibraryPatch
 	} from '#lib/GraphEdit.ts';
 	import type { Probe } from '#lib/AudioEngine.ts';
+	import type { Undoable } from '#lib/History.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 
@@ -45,6 +46,7 @@
 		maxProbes,
 		readonly = false,
 		active = true,
+		history = null,
 		side,
 		onchange,
 		onprobes
@@ -61,6 +63,7 @@
 		maxProbes: number;
 		readonly?: boolean; // For looking at: a node can be chosen and probed, and nothing changes
 		active?: boolean; // Whether keys are for this editor, when it shares a page with others
+		history?: Undoable | null; // The patch's undo, which the page keeps, and which its keys act on
 		side?: Snippet; // Drawn above the inspector
 		onchange: (graph: Graph) => void;
 		onprobes: (probes: Probe[]) => void;
@@ -78,41 +81,18 @@
 	let selected = $state<number | null>(null);
 	let gesture = $state<Gesture | null>(null);
 	let adding = $state('osc');
-	let past: Graph[] = [];
-	let future: Graph[] = [];
-	let canUndo = $state(false);
-	let canRedo = $state(false);
+	const canUndo = $derived(history?.canUndo ?? false);
+	const canRedo = $derived(history?.canRedo ?? false);
 
 	const laid = $derived(placed(graph));
 	const others = $derived(library.filter((patch) => patch.id !== self));
 	const types = $derived(catalog.map((entry) => entry.type).sort());
 	const chosen = $derived(laid.nodes.find((node) => node.id === selected) ?? null);
 
-	function commit(next: Graph) {
-		past.push(placed(graph));
-		future = [];
-		canUndo = true;
-		canRedo = false;
-		onchange(next);
-	}
-
-	function undo() {
-		const last = past.pop();
-		if (!last) return;
-		future.push(placed(graph));
-		canUndo = past.length > 0;
-		canRedo = true;
-		onchange(last);
-	}
-
-	function redo() {
-		const next = future.pop();
-		if (!next) return;
-		past.push(placed(graph));
-		canUndo = true;
-		canRedo = future.length > 0;
-		onchange(next);
-	}
+	// The page records each edit, so its history outlasts this editor.
+	const commit = (next: Graph) => onchange(next);
+	const undo = () => history?.undo();
+	const redo = () => history?.redo();
 
 	const positionOf = (node: GraphNode): Point =>
 		gesture?.kind === 'move' && gesture.id === node.id ? gesture.at : { x: node.x as number, y: node.y as number };
@@ -265,10 +245,6 @@
 		if ((event.key === 'Delete' || event.key === 'Backspace') && selected !== null) {
 			event.preventDefault();
 			removeSelected();
-		} else if ((event.metaKey || event.ctrlKey) && event.key === 'z') {
-			event.preventDefault();
-			if (event.shiftKey) redo();
-			else undo();
 		}
 	}
 

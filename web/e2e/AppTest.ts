@@ -1036,7 +1036,7 @@ test('notes are moved, stretched, chosen and removed by hand', async ({ page }) 
 	await expect(note).toHaveAttribute('data-note', '56');
 	await page.keyboard.press('ArrowRight');
 	await expect(note).toHaveAttribute('data-tick', '1440');
-	await page.keyboard.press('Control+z');
+	await page.keyboard.press('ControlOrMeta+z');
 	await expect(note).toHaveAttribute('data-tick', '960');
 
 	// A band takes both, and they move as one.
@@ -1051,7 +1051,7 @@ test('notes are moved, stretched, chosen and removed by hand', async ({ page }) 
 
 	await page.keyboard.press('Delete');
 	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(0);
-	await page.keyboard.press('Control+z');
+	await page.keyboard.press('ControlOrMeta+z');
 	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(2);
 	const doc = await timelineDoc(page);
 	expect(doc.clips[0].notes).toHaveLength(2);

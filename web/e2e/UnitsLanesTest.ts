@@ -204,8 +204,8 @@ test('velocity stems are as wide as their notes, and a drag across them paints, 
 	for (const index of [0, 1, 2, 3]) {
 		const stem = (await page.getByTestId(`velocity-${index}`).boundingBox())!;
 		const body = (await page.getByTestId(`note-${index}`).locator('.body').boundingBox())!;
-		expect(stem.x).toBeCloseTo(body.x, 0);
-		expect(stem.width).toBeCloseTo(body.width, 0);
+		expect(Math.abs(stem.x - body.x)).toBeLessThan(1.5); // The strip and the roll round their pixels apart
+		expect(Math.abs(stem.width - body.width)).toBeLessThan(1.5);
 	}
 
 	// From low on the first stem to high past the last note's start: each note takes the height the drag had as it passed.

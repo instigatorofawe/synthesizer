@@ -851,7 +851,7 @@
 							choices={barLengths(doc.ppq)}
 							onvalue={(length) => commit(setClip(doc, clip.id, { ...clip, length }))}
 							{onsay}
-							width="8rem"
+							width="9.5rem"
 						/></label
 					>
 					{#if placed && selection.track !== null && selection.placement !== null}
@@ -903,7 +903,7 @@
 									choices={barLengths(doc.ppq)}
 									onvalue={(length) => commit(setPlacement(doc, at.track, at.index, { length }))}
 									{onsay}
-									width="8rem"
+									width="9.5rem"
 								/></label
 							>
 							<label

@@ -458,7 +458,7 @@ test("keys and the top bar's Undo go to the view on screen", async ({ page }) =>
 	await page.goto('/?timeline=song');
 	await page.getByTestId('placement-1-0').locator('rect').first().click();
 	await openView(page, 'patch');
-	const nodes = patchEditor(page).locator('g.node');
+	const nodes = page.getByTestId('graph').locator('g.node'); // Counted in either view
 	const count = await nodes.count();
 	// Chosen in the graph, which mustn't take the Delete meant for the song once the song is on screen
 	await page.locator('g.node:has(text:has-text("osc"))').first().locator('rect.title').click();
@@ -563,8 +563,11 @@ test('the computer keyboard plays the patch, Z and X move its octave, and a fiel
 	await page.keyboard.down('g'); // G, a fifth above the lowest C, which starts audio as a click on a key does
 	await expect(key(55)).toHaveClass(/down/);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	// The track's meter is in the Song view, out of sight
 	await expect
-		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
+		.poll(() =>
+			page.getByRole('meter', { name: 'Level of Lead', includeHidden: true }).getAttribute('data-peak').then(Number)
+		)
 		.toBeGreaterThan(0.01);
 	await page.keyboard.press('x'); // An octave up while G is held, and letting go still lets go of the G it started
 	await expect(key(72)).toBeVisible();

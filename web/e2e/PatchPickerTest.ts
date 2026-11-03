@@ -114,6 +114,7 @@ test('a track head names its patch, not its id, and the name opens that patch', 
 	const id = new URL(page.url()).searchParams.get('patch')!;
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Named heads');
 
+	await openView(page, 'song'); // A patch made in the browser opens in the Patch view
 	await addTrack(page);
 	await page.keyboard.type('far too long');
 	await page.keyboard.press('Enter');
@@ -169,6 +170,7 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Track 1 patch');
 	await expect(page).toHaveURL(/patch=/);
 	const id = new URL(page.url()).searchParams.get('patch')!;
+	await openView(page, 'song');
 	expect(await slots(page)).toEqual([[id]]);
 	await expect(
 		browser(page).getByRole('list', { name: 'Patches', exact: true }).getByRole('link', { name: 'Track 1 patch' })
@@ -176,7 +178,6 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved'); // The timeline. The patch is saved as it's made.
 
 	// A clip with a note, and the new patch plays it.
-	await openView(page, 'song');
 	const row = (await page.getByTestId('row-1').boundingBox())!;
 	await page.mouse.dblclick(row.x + 10, row.y + 20);
 	await expect(page.getByTestId('roll')).toBeVisible();

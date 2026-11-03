@@ -59,14 +59,14 @@
     "Comb, filling": 516.93,
     "Allpass, filling": 422.62,
     "DelayRead, filling": 205.03,
-    "DelayWriteI16": 548.03,
-    "DelayReadI16": 320.03,
-    "DelayReadI16, feedback": 323.03,
-    "CombI16": 977.92,
-    "AllpassI16": 882.62,
-    "CombI16, filling": 937.92,
-    "AllpassI16, filling": 841.62,
-    "DelayReadI16, filling": 272.03,
+    "DelayWriteI16": 257.03,
+    "DelayReadI16": 287.03,
+    "DelayReadI16, feedback": 290.03,
+    "CombI16": 650.93,
+    "AllpassI16": 555.62,
+    "CombI16, filling": 625.92,
+    "AllpassI16, filling": 528.62,
+    "DelayReadI16, filling": 255.03,
     "Follow": 423.03,
     "Follow, moving": 513.53,
     "KMul": 47.03,
@@ -1424,9 +1424,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1033.81,
-     "p999": 1051.15,
-     "peak": 1051.15,
+     "mean": 709.94,
+     "p999": 727.15,
+     "peak": 727.15,
      "load": 26295,
      "guards": 0
     },
@@ -1436,10 +1436,10 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1159.58,
-     "p999": 1189.99,
-     "peak": 1190.14,
-     "load": 22795,
+     "mean": 832.74,
+     "p999": 862.99,
+     "peak": 863.14,
+     "load": 22796,
      "guards": 0
     },
     "OpAllpassI16": {
@@ -1448,9 +1448,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1062.92,
-     "p999": 1090.15,
-     "peak": 1090.15,
+     "mean": 736.06,
+     "p999": 763.15,
+     "peak": 763.15,
      "load": 22481,
      "guards": 0
     },
@@ -1487,7 +1487,7 @@
      "mean": 901.22,
      "p999": 908.21,
      "peak": 910.4,
-     "load": 18435,
+     "load": 18436,
      "guards": 0
     },
     "OpMath": {
@@ -1905,49 +1905,49 @@
      "op": 34,
      "mode": 0,
      "still": true,
-     "first": 547
+     "first": 257
     },
     "DelayReadI16": {
      "op": 35,
      "mode": 0,
      "still": true,
-     "first": 319
+     "first": 287
     },
     "DelayReadI16, feedback": {
      "op": 35,
      "mode": 1,
      "still": true,
-     "first": 323
+     "first": 289
     },
     "CombI16": {
      "op": 36,
      "mode": 0,
      "still": true,
-     "first": 982
+     "first": 654
     },
     "AllpassI16": {
      "op": 37,
      "mode": 0,
      "still": true,
-     "first": 882
+     "first": 555
     },
     "CombI16, filling": {
      "op": 36,
      "mode": 0,
      "still": true,
-     "first": 942
+     "first": 629
     },
     "AllpassI16, filling": {
      "op": 37,
      "mode": 0,
      "still": true,
-     "first": 841
+     "first": 529
     },
     "DelayReadI16, filling": {
      "op": 35,
      "mode": 0,
      "still": true,
-     "first": 271
+     "first": 254
     },
     "Follow": {
      "op": 16,
@@ -1965,13 +1965,13 @@
      "op": 17,
      "mode": 0,
      "still": true,
-     "first": 46
+     "first": 47
     },
     "KAdd": {
      "op": 18,
      "mode": 0,
      "still": true,
-     "first": 46
+     "first": 47
     },
     "KMtoF, still": {
      "op": 19,
@@ -1983,7 +1983,7 @@
      "op": 19,
      "mode": 0,
      "still": false,
-     "first": 118
+     "first": 117
     },
     "KRatio, still": {
      "op": 20,
@@ -2007,13 +2007,13 @@
      "op": 22,
      "mode": 0,
      "still": true,
-     "first": 122
+     "first": 121
     },
     "KLfo2": {
      "op": 28,
      "mode": 0,
      "still": true,
-     "first": 123
+     "first": 124
     },
     "OscMod, sine": {
      "op": 29,
@@ -2037,19 +2037,19 @@
      "op": 29,
      "mode": 1,
      "still": true,
-     "first": 2074
+     "first": 2073
     },
     "OscMod, saw, 110 Hz": {
      "op": 29,
      "mode": 2,
      "still": true,
-     "first": 2109
+     "first": 2108
     },
     "OscMod, saw, 4186 Hz": {
      "op": 29,
      "mode": 2,
      "still": true,
-     "first": 2169
+     "first": 2168
     },
     "OscMod, saw, sync audio": {
      "op": 29,
@@ -2184,14 +2184,14 @@
     "Comb, filling": 516.93,
     "Allpass, filling": 422.62,
     "DelayRead, filling": 205.03,
-    "DelayWriteI16": 548.03,
-    "DelayReadI16": 320.03,
-    "DelayReadI16, feedback": 323.03,
-    "CombI16": 977.92,
-    "AllpassI16": 882.62,
-    "CombI16, filling": 937.92,
-    "AllpassI16, filling": 841.62,
-    "DelayReadI16, filling": 272.03,
+    "DelayWriteI16": 257.03,
+    "DelayReadI16": 287.03,
+    "DelayReadI16, feedback": 290.03,
+    "CombI16": 650.93,
+    "AllpassI16": 555.62,
+    "CombI16, filling": 625.92,
+    "AllpassI16, filling": 528.62,
+    "DelayReadI16, filling": 255.03,
     "Follow": 423.03,
     "Follow, moving": 513.53,
     "KMul": 47.03,
@@ -3549,9 +3549,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 988.78,
-     "p999": 1006.12,
-     "peak": 1006.12,
+     "mean": 664.91,
+     "p999": 682.12,
+     "peak": 682.12,
      "load": 26296,
      "guards": 0
     },
@@ -3561,9 +3561,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1114.55,
-     "p999": 1144.96,
-     "peak": 1145.12,
+     "mean": 787.71,
+     "p999": 817.96,
+     "peak": 818.12,
      "load": 22796,
      "guards": 0
     },
@@ -3573,10 +3573,10 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1017.88,
-     "p999": 1045.12,
-     "peak": 1045.12,
-     "load": 22481,
+     "mean": 691.03,
+     "p999": 718.12,
+     "peak": 718.12,
+     "load": 22482,
      "guards": 0
     },
     "OpFollow": {
@@ -3587,7 +3587,7 @@
      "frames": 1500,
      "mean": 643.53,
      "p999": 656.62,
-     "peak": 691.12,
+     "peak": 691.11,
      "load": 29639,
      "guards": 0
     },
@@ -3598,7 +3598,7 @@
      "voices": 4,
      "frames": 1500,
      "mean": 625.65,
-     "p999": 639.12,
+     "p999": 639.11,
      "peak": 670.62,
      "load": 42589,
      "guards": 0
@@ -3622,9 +3622,9 @@
      "voices": 4,
      "frames": 1500,
      "mean": 1367.15,
-     "p999": 1379.86,
+     "p999": 1379.87,
      "peak": 1409.36,
-     "load": 25440,
+     "load": 25439,
      "guards": 0
     },
     "OpMathDivide": {
@@ -4030,49 +4030,49 @@
      "op": 34,
      "mode": 0,
      "still": true,
-     "first": 548
+     "first": 257
     },
     "DelayReadI16": {
      "op": 35,
      "mode": 0,
      "still": true,
-     "first": 319
+     "first": 286
     },
     "DelayReadI16, feedback": {
      "op": 35,
      "mode": 1,
      "still": true,
-     "first": 322
+     "first": 289
     },
     "CombI16": {
      "op": 36,
      "mode": 0,
      "still": true,
-     "first": 982
+     "first": 654
     },
     "AllpassI16": {
      "op": 37,
      "mode": 0,
      "still": true,
-     "first": 882
+     "first": 555
     },
     "CombI16, filling": {
      "op": 36,
      "mode": 0,
      "still": true,
-     "first": 942
+     "first": 629
     },
     "AllpassI16, filling": {
      "op": 37,
      "mode": 0,
      "still": true,
-     "first": 842
+     "first": 529
     },
     "DelayReadI16, filling": {
      "op": 35,
      "mode": 0,
      "still": true,
-     "first": 272
+     "first": 254
     },
     "Follow": {
      "op": 16,
@@ -4309,14 +4309,14 @@
     "Comb, filling": 520.91,
     "Allpass, filling": 426.61,
     "DelayRead, filling": 209.02,
-    "DelayWriteI16": 552.02,
-    "DelayReadI16": 324.02,
-    "DelayReadI16, feedback": 327.02,
-    "CombI16": 981.91,
-    "AllpassI16": 886.6,
-    "CombI16, filling": 941.91,
-    "AllpassI16, filling": 845.6,
-    "DelayReadI16, filling": 276.02,
+    "DelayWriteI16": 261.02,
+    "DelayReadI16": 291.02,
+    "DelayReadI16, feedback": 294.02,
+    "CombI16": 654.91,
+    "AllpassI16": 559.6,
+    "CombI16, filling": 629.91,
+    "AllpassI16, filling": 532.61,
+    "DelayReadI16, filling": 259.02,
     "Follow": 427.02,
     "Follow, moving": 517.52,
     "KMul": 51.02,
@@ -5674,9 +5674,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1041.43,
-     "p999": 1058.77,
-     "peak": 1058.77,
+     "mean": 717.57,
+     "p999": 734.78,
+     "peak": 734.78,
      "load": 26296,
      "guards": 0
     },
@@ -5686,9 +5686,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1163.21,
-     "p999": 1193.62,
-     "peak": 1193.77,
+     "mean": 836.36,
+     "p999": 866.62,
+     "peak": 866.77,
      "load": 22795,
      "guards": 0
     },
@@ -5698,10 +5698,10 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1066.54,
-     "p999": 1093.77,
-     "peak": 1093.77,
-     "load": 22481,
+     "mean": 739.69,
+     "p999": 766.77,
+     "peak": 766.77,
+     "load": 22482,
      "guards": 0
     },
     "OpFollow": {
@@ -5759,7 +5759,7 @@
      "voices": 4,
      "frames": 1500,
      "mean": 1457.8,
-     "p999": 1470.52,
+     "p999": 1470.51,
      "peak": 1500.02,
      "load": 34433,
      "guards": 0
@@ -5772,8 +5772,8 @@
      "frames": 1500,
      "mean": 2051.8,
      "p999": 2064.51,
-     "peak": 2094.02,
-     "load": 26128,
+     "peak": 2094.01,
+     "load": 26129,
      "guards": 0
     },
     "OpSample": {
@@ -5796,8 +5796,8 @@
      "frames": 1500,
      "mean": 1516.46,
      "p999": 1543.02,
-     "peak": 1650.52,
-     "load": 182641,
+     "peak": 1650.51,
+     "load": 182640,
      "guards": 0
     },
     "OpSample3": {
@@ -5809,7 +5809,7 @@
      "mean": 2926.06,
      "p999": 2979.01,
      "peak": 3170.51,
-     "load": 184063,
+     "load": 184062,
      "guards": 0
     }
    },
@@ -6155,49 +6155,49 @@
      "op": 34,
      "mode": 0,
      "still": true,
-     "first": 551
+     "first": 259
     },
     "DelayReadI16": {
      "op": 35,
      "mode": 0,
      "still": true,
-     "first": 323
+     "first": 289
     },
     "DelayReadI16, feedback": {
      "op": 35,
      "mode": 1,
      "still": true,
-     "first": 326
+     "first": 292
     },
     "CombI16": {
      "op": 36,
      "mode": 0,
      "still": true,
-     "first": 984
+     "first": 657
     },
     "AllpassI16": {
      "op": 37,
      "mode": 0,
      "still": true,
-     "first": 886
+     "first": 559
     },
     "CombI16, filling": {
      "op": 36,
      "mode": 0,
      "still": true,
-     "first": 944
+     "first": 632
     },
     "AllpassI16, filling": {
      "op": 37,
      "mode": 0,
      "still": true,
-     "first": 844
+     "first": 532
     },
     "DelayReadI16, filling": {
      "op": 35,
      "mode": 0,
      "still": true,
-     "first": 274
+     "first": 258
     },
     "Follow": {
      "op": 16,
@@ -6209,7 +6209,7 @@
      "op": 16,
      "mode": 0,
      "still": false,
-     "first": 517
+     "first": 518
     },
     "KMul": {
      "op": 17,
@@ -6434,14 +6434,14 @@
     "Comb, filling": 518.91,
     "Allpass, filling": 424.61,
     "DelayRead, filling": 207.02,
-    "DelayWriteI16": 550.02,
-    "DelayReadI16": 322.02,
-    "DelayReadI16, feedback": 325.02,
-    "CombI16": 979.91,
-    "AllpassI16": 884.6,
-    "CombI16, filling": 939.91,
-    "AllpassI16, filling": 843.6,
-    "DelayReadI16, filling": 274.02,
+    "DelayWriteI16": 259.02,
+    "DelayReadI16": 289.02,
+    "DelayReadI16, feedback": 292.02,
+    "CombI16": 652.91,
+    "AllpassI16": 557.6,
+    "CombI16, filling": 627.91,
+    "AllpassI16, filling": 530.61,
+    "DelayReadI16, filling": 257.02,
     "Follow": 425.02,
     "Follow, moving": 515.52,
     "KMul": 49.02,
@@ -7799,9 +7799,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 992.34,
-     "p999": 1009.68,
-     "peak": 1009.68,
+     "mean": 668.47,
+     "p999": 685.68,
+     "peak": 685.68,
      "load": 26296,
      "guards": 0
     },
@@ -7811,9 +7811,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1116.12,
-     "p999": 1146.52,
-     "peak": 1146.67,
+     "mean": 789.27,
+     "p999": 819.52,
+     "peak": 819.68,
      "load": 22795,
      "guards": 0
     },
@@ -7823,9 +7823,9 @@
      "bulk": 17664,
      "voices": 4,
      "frames": 1500,
-     "mean": 1019.45,
-     "p999": 1046.68,
-     "peak": 1046.68,
+     "mean": 692.6,
+     "p999": 719.68,
+     "peak": 719.68,
      "load": 22482,
      "guards": 0
     },
@@ -8280,49 +8280,49 @@
      "op": 34,
      "mode": 0,
      "still": true,
-     "first": 549
+     "first": 257
     },
     "DelayReadI16": {
      "op": 35,
      "mode": 0,
      "still": true,
-     "first": 321
+     "first": 287
     },
     "DelayReadI16, feedback": {
      "op": 35,
      "mode": 1,
      "still": true,
-     "first": 324
+     "first": 291
     },
     "CombI16": {
      "op": 36,
      "mode": 0,
      "still": true,
-     "first": 982
+     "first": 655
     },
     "AllpassI16": {
      "op": 37,
      "mode": 0,
      "still": true,
-     "first": 884
+     "first": 557
     },
     "CombI16, filling": {
      "op": 36,
      "mode": 0,
      "still": true,
-     "first": 942
+     "first": 630
     },
     "AllpassI16, filling": {
      "op": 37,
      "mode": 0,
      "still": true,
-     "first": 842
+     "first": 529
     },
     "DelayReadI16, filling": {
      "op": 35,
      "mode": 0,
      "still": true,
-     "first": 272
+     "first": 256
     },
     "Follow": {
      "op": 16,
@@ -8370,7 +8370,7 @@
      "op": 20,
      "mode": 60,
      "still": false,
-     "first": 117
+     "first": 118
     },
     "KSnap": {
      "op": 21,
@@ -8430,13 +8430,13 @@
      "op": 29,
      "mode": 2,
      "still": true,
-     "first": 2228
+     "first": 2227
     },
     "OscMod, sine, sync every other sample": {
      "op": 29,
      "mode": 0,
      "still": true,
-     "first": 5700
+     "first": 5701
     },
     "OscMod, pulse, 4186 Hz": {
      "op": 29,
@@ -8454,13 +8454,13 @@
      "op": 29,
      "mode": 5,
      "still": true,
-     "first": 2285
+     "first": 2286
     },
     "Math, min, audio and scalar": {
      "op": 30,
      "mode": 0,
      "still": true,
-     "first": 407
+     "first": 408
     },
     "Math, clip, audio": {
      "op": 30,
@@ -8472,7 +8472,7 @@
      "op": 30,
      "mode": 4,
      "still": true,
-     "first": 626
+     "first": 625
     },
     "Math, divide, audio": {
      "op": 30,

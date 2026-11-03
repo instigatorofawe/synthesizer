@@ -38,10 +38,10 @@
      {
       "id": 7,
       "type": "delay",
-      "max": 0.2,
+      "max": 0.1,
       "line": "i16",
       "inputs": {
-       "time": 0.13
+       "time": 0.07
       }
      },
      {
@@ -651,7 +651,7 @@
      {
       "id": 1,
       "name": "echo",
-      "voices": 2,
+      "voices": 1,
       "slots": [
        "echo"
       ],
@@ -672,7 +672,7 @@
      {
       "id": 2,
       "name": "drive",
-      "voices": 2,
+      "voices": 1,
       "slots": [
        "drive"
       ],

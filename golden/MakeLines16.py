@@ -3,7 +3,7 @@ back, one that doesn't, combs and allpasses.
 
 Like Mods it sounds like nothing in particular. Its job is to pin what each one does on every target: one comb is driven
 past full scale so its line is held to the i16 range, and the room keeps an f32 allpass among its i16 lines, so a patch
-with both kinds is laid out right. It stays small enough for an L476.
+with both kinds is laid out right. It stays small enough for an L476, in memory and in what a frame costs.
 """
 
 import json
@@ -35,7 +35,7 @@ echo = graph(
         },
         {"id": 5, "type": "mul"},
         {"id": 6, "type": "add"},
-        {"id": 7, "type": "delay", "max": 0.2, "line": "i16", "inputs": {"time": 0.13}},
+        {"id": 7, "type": "delay", "max": 0.1, "line": "i16", "inputs": {"time": 0.07}},
         {"id": 8, "type": "mul", "inputs": {"b": 0.55}},
         {
             "id": 9,
@@ -218,7 +218,7 @@ timeline = {
         {
             "id": 1,
             "name": "echo",
-            "voices": 2,
+            "voices": 1,
             "slots": ["echo"],
             "pan": -0.3,
             "placements": [{"clip": "plucks", "tick": 0}],
@@ -227,7 +227,7 @@ timeline = {
         {
             "id": 2,
             "name": "drive",
-            "voices": 2,
+            "voices": 1,
             "slots": ["drive"],
             "pan": 0.3,
             "placements": [{"clip": "hits", "tick": 0}],

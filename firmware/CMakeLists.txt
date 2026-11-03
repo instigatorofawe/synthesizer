@@ -145,6 +145,7 @@ set(MODSYNTH_FUZZ_SEED_J ${MODSYNTH_GOLDEN}/Zones.image CACHE FILEPATH "Tenth im
 set(MODSYNTH_FUZZ_SEED_K ${MODSYNTH_GOLDEN}/Hold.image CACHE FILEPATH "Eleventh image to fuzz from")
 set(MODSYNTH_FUZZ_SEED_L ${MODSYNTH_GOLDEN}/Mods.image CACHE FILEPATH "Twelfth image to fuzz from")
 set(MODSYNTH_FUZZ_SEED_M ${MODSYNTH_GOLDEN}/Steals.image CACHE FILEPATH "Thirteenth image to fuzz from")
+set(MODSYNTH_FUZZ_SEED_N ${MODSYNTH_GOLDEN}/Lines16.image CACHE FILEPATH "Fourteenth image to fuzz from")
 set(MODSYNTH_FUZZ_SECONDS 60 CACHE STRING "How long the fuzzer runs")
 set(MODSYNTH_FUZZ_RANDOM 1 CACHE STRING "Random seed for the fuzzer")
 set(FUZZ_FLAGS ${ARCH} -O2 -g -ffp-contract=off -fno-math-errno -fno-exceptions -fno-rtti -fno-threadsafe-statics
@@ -172,6 +173,7 @@ target_compile_definitions(Fuzz PRIVATE
     MODSYNTH_FUZZ_SEED_K="${MODSYNTH_FUZZ_SEED_K}"
     MODSYNTH_FUZZ_SEED_L="${MODSYNTH_FUZZ_SEED_L}"
     MODSYNTH_FUZZ_SEED_M="${MODSYNTH_FUZZ_SEED_M}"
+    MODSYNTH_FUZZ_SEED_N="${MODSYNTH_FUZZ_SEED_N}"
     MODSYNTH_FUZZ_SECONDS=${MODSYNTH_FUZZ_SECONDS}
     MODSYNTH_FUZZ_RANDOM=${MODSYNTH_FUZZ_RANDOM}
 )

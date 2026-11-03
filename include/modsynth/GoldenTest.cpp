@@ -42,7 +42,7 @@ constexpr Golden kGoldens[] = {
     {"Tones32", 800, 0x76ac201dd55fe56bull, 32},   {"Lanes", 1920, 0x60d243046489eb9eull, 32},
     {"Zones", 1920, 0xed2b4ca7c30b9bb3ull, 32},    {"Hold", 1920, 0xfb0025e9e989fe1full, 32},
     {"Mods", 1920, 0x46f84404be93fbffull, 32},     {"Steals", 1920, 0x6b2f7262a90e47fcull, 32},
-    {"Lines16", 1920, 0x4d37e7b52b35e9d2ull, 32},
+    {"Lines16", 1920, 0xd70dda381da1ef4full, 32},
 };
 
 std::vector<std::byte> read_file(const std::string& path) {

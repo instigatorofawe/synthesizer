@@ -85,7 +85,10 @@ test('the arrangement is as tall as its tracks, up to a limit, and the notes hav
 	}));
 	expect(crowded.height).toBeLessThanOrEqual(800 * 0.35);
 	expect(crowded.scrolls).toBe(true);
-	expect((await roll(page)).height).toBeGreaterThan(120);
+	// The roll follows the chosen track, and the new ones have no clip yet, so Track 1 is chosen again to bring its notes back.
+	await arrangement(page).evaluate((view) => (view.scrollTop = 0));
+	await page.getByTestId('track-1').click();
+	await expect.poll(async () => (await roll(page)).height).toBeGreaterThan(120);
 });
 
 test('Expand gives the notes the whole view, by ⤢ and by a double-click on a clip, and ⤢ or Esc comes back', async ({

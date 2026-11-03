@@ -534,6 +534,13 @@ describe('lanes', () => {
 		]);
 	});
 
+	it('say which reach past their track, which the compiler refuses on a track that never plays', () => {
+		const reaching = laneChoices(song(), 1, patches)
+			.filter((c) => c.reaches)
+			.map((c) => c.label);
+		expect(reaching).toEqual(['Verb mix', 'Fader', 'Pan', 'Send to room', 'room fader', 'room pan', 'Master fader']);
+	});
+
 	it('start where the document already is', () => {
 		const doc = { ...song() };
 		doc.tracks[0] = { ...doc.tracks[0], params: { '1': 4000 } };

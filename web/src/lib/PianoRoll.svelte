@@ -4,6 +4,7 @@
 	import AutomationLane from '#lib/AutomationLane.svelte';
 	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import { escapeCancels } from '#lib/Drag.ts';
 	import { FOLLOW_MARGIN, followScroll } from '#lib/Follow.ts';
 	import { ROW, ROWS, anchored, clampBeat, fitRoll, wheelAction, type RollView } from '#lib/RollView.ts';
 	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
@@ -58,6 +59,7 @@
 		grid,
 		slots,
 		choices,
+		silent = false,
 		playhead,
 		playing = false,
 		canAudition,
@@ -81,6 +83,7 @@
 		grid: number;
 		slots: string[]; // The track's patches, for notes that choose one
 		choices: LaneChoice[];
+		silent?: boolean; // The clip's track has no notes yet, so it never plays, and a lane that reaches past it can't run
 		playhead: number | null; // In ticks from the start of the clip
 		playing?: boolean; // Whether the song is playing, which the roll follows while it plays this clip
 		canAudition: boolean;
@@ -191,6 +194,15 @@
 		if (grown === clip) return describe(note);
 		return `${describe(note)} · ${cangrow(grown.length) ? `makes the clip ${bars(grown.length)}` : 'past the end'}`;
 	});
+
+	// The lanes' hint, cut short at a laptop's width, and so its title too.
+	const LANE_HINT =
+		'Click a lane to add a point, joined to the one before by a line, and drag one to move it. A right-click makes it ' +
+		'a step, a line or a curve, or removes it, as Delete does.';
+
+	const SILENT_HINT =
+		'Add a note first for a lane that moves the mix, an insert or a global: a track with no notes never plays, so ' +
+		"such a lane couldn't run.";
 
 	const bars = (length: number) => `${length / bar} bar${length === bar ? '' : 's'}`;
 
@@ -526,6 +538,9 @@
 		} else if (by('duplicate')) {
 			event.preventDefault();
 			duplicate();
+		} else if (by('menu')) {
+			event.preventDefault();
+			menuAtChosen();
 		} else if (by('escape')) {
 			// Expand is the editor's to leave, so Esc goes on to it then.
 			if (escape()) event.preventDefault();
@@ -549,6 +564,13 @@
 		else chosen = new Set();
 		return true;
 	}
+
+	// A press on a note can leave focus on the page rather than the roll, so while a drag is under way Esc is taken wherever
+	// focus is.
+	const dragging = $derived(gesture !== null);
+	$effect(() => {
+		if (dragging) return escapeCancels(() => gesture && escape());
+	});
 
 	// ------------------------------------------------------------------------------------------------------- step entry
 
@@ -607,13 +629,16 @@
 		onchange(back.clip);
 	}
 
-	// Keeps the cursor and what is written after it in sight, and a note being written.
+	// Keeps the cursor and what is written after it in sight, and a note being written. Going on past the right edge, the view
+	// moves only as far as the next step needs, so what was just written stays in sight behind it.
 	function reveal(tick: number, note?: number) {
 		if (!scroller) return;
 		const x = tick * perTick;
 		const width = scroller.clientWidth - KEYS;
-		if (x < scroller.scrollLeft || x + draw * perTick > scroller.scrollLeft + width)
-			scroller.scrollLeft = Math.max(0, x - FOLLOW_MARGIN);
+		const end = x + draw * perTick;
+		if (x < scroller.scrollLeft) scroller.scrollLeft = Math.max(0, x - FOLLOW_MARGIN);
+		else if (end > scroller.scrollLeft + width)
+			scroller.scrollLeft = Math.max(0, Math.min(x - FOLLOW_MARGIN, end + FOLLOW_MARGIN - width));
 		if (note === undefined) return;
 		const y = rowOf(note);
 		if (y < scroller.scrollTop || y + rowHeight > scroller.scrollTop + scroller.clientHeight)
@@ -658,8 +683,13 @@
 	// Shift+F10 or the menu key opens the chosen notes' menu, at the first of them.
 	function rollMenu(event: MouseEvent) {
 		event.preventDefault();
+		if (event.target === roll) menuAtChosen();
+		else gesture = null;
+	}
+
+	function menuAtChosen() {
 		gesture = null;
-		if (readonly || event.target !== roll || !chosen.size) return;
+		if (readonly || !chosen.size) return;
 		const first = roll.querySelector(`[data-testid="note-${Math.min(...chosen)}"] .body`);
 		const box = (first ?? roll).getBoundingClientRect();
 		menu = { x: box.left, y: box.bottom };
@@ -1213,12 +1243,16 @@
 			}}
 		>
 			<option value="">Add a lane…</option>
-			{#each free as choice (choice.key)}<option value={choice.key}>{choice.label}</option>{/each}
+			{#each free as choice (choice.key)}
+				{@const waits = silent && !!choice.reaches}
+				<option value={choice.key} disabled={waits}>{choice.label}{waits ? ' (after a note)' : ''}</option>
+			{/each}
 		</select>
-		<span class="muted"
-			>Click a lane to add a point, joined to the one before by a line, and drag one to move it. A right-click makes it
-			a step, a line or a curve, or removes it, as Delete does.</span
-		>
+		{#if silent && free.some((choice) => choice.reaches)}
+			<span class="muted" title={SILENT_HINT} data-testid="lane-waits">{SILENT_HINT}</span>
+		{:else}
+			<span class="muted" title={LANE_HINT}>{LANE_HINT}</span>
+		{/if}
 	</div>
 {/if}
 
@@ -1234,7 +1268,7 @@
 		font-size: 0.8rem;
 		flex-wrap: nowrap;
 		overflow-x: auto;
-		scrollbar-width: none;
+		scrollbar-width: thin; /* What doesn't fit, with the browser and the inspector open, is shown to be there */
 		margin: 0.2rem 0;
 	}
 	.toolbar button {

@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { loopButton, undoButton } from './Chrome.ts';
+import { loopButton, pianoKey, undoButton } from './Chrome.ts';
 import { engineRenders, loudest, settled } from './Engine.ts';
 import { openView } from './Views.ts';
 
@@ -27,7 +27,8 @@ test.beforeEach(({ page }) => {
 });
 
 // A sine as loud as its note's velocity, held while its key is, times a level the song can set: so a meter reads the level
-// and the velocity straight off.
+// and the velocity straight off. Its release is 0.1 ms, so a note that starts again on its own pitch, as a looped one does at
+// each wrap, never adds to the last one still ringing out.
 function tone(level: { scope: string; default: number }) {
 	return {
 		params: [{ id: 7, name: 'level', min: 0, max: 1, smooth_ms: 0, ...level }],
@@ -35,7 +36,7 @@ function tone(level: { scope: string; default: number }) {
 			{ id: 1, type: 'note' },
 			{ id: 2, type: 'mtof' },
 			{ id: 3, type: 'osc', wave: 'sine' },
-			{ id: 4, type: 'env', inputs: { attack: 0.001, decay: 0.01, sustain: 1, release: 0.01 } },
+			{ id: 4, type: 'env', inputs: { attack: 0.001, decay: 0.01, sustain: 1, release: 0.0001 } },
 			{ id: 5, type: 'mul' },
 			{ id: 6, type: 'param', param: 7 },
 			{ id: 8, type: 'mul' },
@@ -149,10 +150,11 @@ async function toneSong(page: Page, name: string) {
 	const doc = {
 		ppq: 480,
 		tempo: [{ tick: 0, bpm: 120 }],
-		// One note held through eight bars, so the loop comes round only after 16 s. The first wrap after a live swap is louder
-		// for a moment, as if the note let go rang on under the one that starts, which a freshly loaded image doesn't do. That's
-		// the engine's, not the Controls', and no measurement here should take it in: on CI's slower runner a one-bar loop came
-		// round inside one and read 1.8 times the level the Control had set.
+		// One note held through eight bars, looped. At each wrap the note starts again on a second voice while the first rings
+		// out its release, and both oscillators start at zero phase. With a 10 ms release, at 120 BPM, where a bar is a whole
+		// number of A4's cycles, the two added in phase to 1.8 times the level for a moment, at every wrap and in every image.
+		// That once read here as the Controls' fault on CI's slower runner, with a one-bar loop. The tone's 0.1 ms release
+		// leaves nothing to add to.
 		clips: [{ id: 'held', length: 15360, notes: [{ tick: 0, note: 69, vel: 127, dur: 15360 }] }],
 		tracks: [{ id: 1, name: 'Tone', voices: 4, slots: [patch], placements: [{ clip: 'held', tick: 0 }] }]
 	};
@@ -206,7 +208,7 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	await slide(page, 'level', 125, false);
 	await expect(level).toHaveAttribute('aria-valuetext', '0.25');
 	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeLessThan(0.3 * full);
-	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
 	expect(await page.getByTestId('compiles').textContent()).toBe(compiles);
 
 	// Let go, the song holds it, and compiles once.
@@ -217,7 +219,7 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	await expect(page.getByTestId('compiles')).toHaveText(String(Number(compiles) + 1));
 	await engineRenders(page, 0.3);
 	expect(await masterLoudest(page)).toBeLessThan(0.3 * full); // Since the new image began, which settled the song's value
-	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
 
 	// It is one step of the song's undo.
 	await openView(page, 'song');
@@ -305,6 +307,27 @@ test('Make default writes the value into the patch, as a step of its undo, and t
 	await expect(controlRow(page, 7)).toHaveAttribute('data-own', 'false');
 });
 
+// Esc cancels a drag, as everywhere: the sound goes back to the value kept, and the song keeps nothing.
+test('Esc during a drag of a Control puts it back, and nothing is kept', async ({ page }) => {
+	await toneSong(page, 'Control cancelled');
+	await openView(page, 'patch');
+	const level = control(page, 'level');
+	await expect(level).toHaveAttribute('aria-valuetext', '1');
+	const box = (await level.boundingBox())!;
+	const y = box.y + box.height / 2;
+	await page.mouse.move(box.x + box.width - 4, y);
+	await page.mouse.down();
+	await page.mouse.move(box.x + box.width / 2, y, { steps: 4 });
+	await expect(level).not.toHaveAttribute('aria-valuetext', '1');
+	await page.keyboard.press('Escape');
+	await expect(level).toHaveAttribute('aria-valuetext', '1');
+	await page.mouse.move(box.x + box.width / 4, y, { steps: 4 });
+	await page.mouse.up();
+	await expect(level).toHaveAttribute('aria-valuetext', '1');
+	await expect(controlRow(page, 7)).toHaveAttribute('data-own', 'false');
+	await expect(page.getByTestId('unsaved')).toHaveCount(0);
+});
+
 test('a slider over a wide range is logarithmic, its middle near the geometric middle, and Make default works heard alone', async ({
 	page
 }) => {
@@ -338,7 +361,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 }) => {
 	await newPatch(page, 'Held', tone({ scope: 'track', default: 1 }));
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'alone');
-	const key = (note: number) => page.getByRole('button', { name: String(note), exact: true });
+	const key = (note: number) => pianoKey(page, note);
 
 	// The keys play at the velocity by them: this tone is as loud as its velocity.
 	const velocity = page.getByLabel('Velocity of the keys');
@@ -357,7 +380,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 	await velocity.blur();
 	await page.keyboard.down('a');
 	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeLessThan(0.3 * full);
-	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
 	await page.keyboard.up('a');
 	await expect(voices(page)).toHaveText('0');
 
@@ -370,7 +393,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 	await expect(holdButton(page)).toHaveAttribute('data-held', '1');
 	await engineRenders(page, 0.5);
 	await expect(voices(page)).toHaveText('1');
-	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
 
 	// Played again, it goes.
 	await page.keyboard.press('a');

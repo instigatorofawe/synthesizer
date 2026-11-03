@@ -44,6 +44,7 @@
 		type LibraryPatch,
 		type Point
 	} from '#lib/GraphEdit.ts';
+	import { leavesFields } from '#lib/Fields.ts';
 	import { friendlyName, helpOf, rangeText, shown } from '#lib/NodeHelp.ts';
 	import NodePalette from '#lib/NodePalette.svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
@@ -974,7 +975,7 @@
 			{/if}
 		</div>
 
-		<aside class="inspector">
+		<aside class="inspector" use:leavesFields>
 			<div class="tabs" role="tablist" aria-label="Side column">
 				<button type="button" role="tab" aria-selected={tab === 'node'} onclick={() => (tab = 'node')}
 					>{wireShown ? 'Wire' : picked.length > 1 ? 'Nodes' : 'Node'}</button
@@ -1191,7 +1192,8 @@
 											value={chosen[option.name] ?? ''}
 											onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, false)}
 										>
-											<option value="">default</option>
+											<!-- The compiler's table lists an option's default first, which the node's title names too. -->
+											<option value="">default ({option.choices[0]})</option>
 											{#each option.choices as choice (choice)}<option value={choice}>{choice}</option>{/each}
 										</select>
 									{:else if option.name === 'patch'}
@@ -1301,7 +1303,7 @@
 										<input
 											type={name === 'name' ? 'text' : 'number'}
 											step="any"
-											aria-label={`param ${param.id} ${name}`}
+											aria-label={`${param.name || `param ${param.id}`} ${name}`}
 											value={field(param[name])}
 											onchange={(e) =>
 												changeParam(index, {

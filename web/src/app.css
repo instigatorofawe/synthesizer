@@ -3,7 +3,7 @@
 	--panel: #11161d;
 	--line: #262d36;
 	--text: #d7dde4;
-	--muted: #7d8590;
+	--muted: #848d97; /* 4.8:1 on a chosen track head's #1a212b, the darkest it sits on, and AA asks 4.5 */
 	--accent: #58a6ff;
 	color-scheme: dark;
 	font-family: system-ui, sans-serif;

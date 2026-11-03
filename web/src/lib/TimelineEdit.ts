@@ -842,6 +842,9 @@ export interface LaneChoice {
 	min: number;
 	max: number;
 	start: number; // Where a new lane's first point goes
+	// It moves more than its own track: the mix, an insert or a global. A track with no notes never plays, and the compiler
+	// refuses such a lane on one, as it would be lost without a sound.
+	reaches?: true;
 }
 
 const paramsOf = (patch: PatchLike | undefined): Param[] => patch?.graph.params ?? [];
@@ -849,7 +852,7 @@ const paramsOf = (patch: PatchLike | undefined): Param[] => patch?.graph.params 
 function mixChoices(doc: Timeline, track: Track | undefined): LaneChoice[] {
 	const choices: LaneChoice[] = [];
 	const add = (label: string, target: LaneTarget, min: number, max: number, start: number) =>
-		choices.push({ key: laneKey(undefined, target), label, target, min, max, start });
+		choices.push({ key: laneKey(undefined, target), label, target, min, max, start, reaches: true });
 	if (track) {
 		add('Fader', { mix: 'fader', track: track.id }, 0, 2, track.gain);
 		add('Pan', { mix: 'pan', track: track.id }, -1, 1, track.pan);
@@ -881,7 +884,8 @@ export function laneChoices(doc: Timeline, trackId: number | null, patches: Patc
 				param: param.id,
 				min: param.min,
 				max: param.max,
-				start: track?.params[String(param.id)] ?? param.default
+				start: track?.params[String(param.id)] ?? param.default,
+				...(param.scope === 'global' ? { reaches: true as const } : {})
 			});
 		}
 	}
@@ -898,7 +902,8 @@ export function laneChoices(doc: Timeline, trackId: number | null, patches: Patc
 					target,
 					min: param.min,
 					max: param.max,
-					start: insert.params?.[String(param.id)] ?? param.default
+					start: insert.params?.[String(param.id)] ?? param.default,
+					reaches: true
 				});
 			}
 		}

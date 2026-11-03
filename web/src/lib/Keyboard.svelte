@@ -2,6 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { on } from 'svelte/events';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { leavesFields } from '#lib/Fields.ts';
 	import { baseAfter, belongsElsewhere, keyFor, noteForKey } from '#lib/KeyboardKeys.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { clampVelocity } from '#lib/StepEntry.ts';
@@ -137,7 +138,7 @@
 			class:down={held.has(note)}
 			class:latched={latched.has(note) && !held.has(note)}
 			style:left="{isBlackKey(note) ? left(note) : whites.indexOf(note) * WHITE}px"
-			aria-label={String(note)}
+			aria-label={noteName(note)}
 			aria-keyshortcuts={keyFor(note, base) || undefined}
 			title={keyFor(note, base) ? `${noteName(note)} (${keyFor(note, base)})` : noteName(note)}
 			{disabled}
@@ -151,6 +152,7 @@
 </div>
 <label
 	class="velocity"
+	use:leavesFields
 	title={`How hard the keys play, and new notes are written, from 1 to 127. It is the roll's Vel. ${label('softer')} and ${label('louder')} step it by 10.`}
 >
 	<span>Vel</span>

@@ -63,7 +63,7 @@ export const isInsert = (graph: Graph) => graph.nodes.some((node) => node.type =
 // A voice no track plays is heard on its own. An insert has no notes of its own, so it is only heard on what it's inserted on.
 export type Hearing =
 	| { kind: 'song'; track: number; slot: number; id: number; name: string }
-	| { kind: 'alone' }
+	| { kind: 'alone'; track: string | null } // The track that plays it, which has no notes yet, if one does
 	| { kind: 'none'; why: string };
 
 export function hearing(
@@ -98,7 +98,10 @@ export function hearing(
 				: 'An insert has no keys. Add it to a track or bus in the mixer to hear it.'
 		};
 	}
-	if (canBeAlone) return { kind: 'alone' };
+	if (canBeAlone) {
+		const quiet = program ? voices[0]?.track : undefined;
+		return { kind: 'alone', track: quiet ? quiet.name || `Track ${quiet.id}` : null };
+	}
 	return {
 		kind: 'none',
 		why: voices.length ? 'Its track has no notes yet, so the image leaves it out.' : 'No track plays it.'

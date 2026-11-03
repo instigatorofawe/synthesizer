@@ -8,6 +8,11 @@ export const undoButton = (page: Page) =>
 export const redoButton = (page: Page) =>
 	page.getByRole('group', { name: 'Undo and redo' }).getByRole('button', { name: 'Redo' });
 
+// A key of the on-screen piano, which is named by its note: 60 is C4.
+const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+export const pianoKey = (page: Page, note: number) =>
+	page.getByRole('button', { name: `${NAMES[note % 12]}${Math.floor(note / 12) - 1}`, exact: true });
+
 // The loop's button, beside Play and Stop.
 export const loopButton = (page: Page) => page.getByRole('button', { name: 'Loop', exact: true });
 

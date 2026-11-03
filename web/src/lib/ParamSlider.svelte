@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { rangeEscape } from '#lib/Drag.ts';
 	import { shown } from '#lib/NodeHelp.ts';
 	import { typedValue, valueText } from '#lib/ParamValues.ts';
 	import type { Param } from '#lib/Schema.ts';
@@ -47,6 +48,13 @@
 	function letGo(event: Event) {
 		dragged = null;
 		onchange(at(event));
+	}
+
+	// Esc during a drag: the sound goes back to the value kept, which the slider shows again.
+	function cancelled() {
+		if (dragged === null) return;
+		dragged = null;
+		oninput(value);
 	}
 
 	async function type() {
@@ -100,6 +108,7 @@
 	{disabled}
 	oninput={moved}
 	onchange={letGo}
+	use:rangeEscape={cancelled}
 />
 {#if typing !== null}
 	<input

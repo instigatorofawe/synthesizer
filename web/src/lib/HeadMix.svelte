@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { escapeCancels } from '#lib/Drag.ts';
 	import { matches } from '#lib/Shortcuts.ts';
 	import { decibels, faderGain, faderPosition, panText } from '#lib/TimelineEdit.ts';
 
@@ -99,6 +100,17 @@
 		if (!done?.moved) return;
 		onmix(done.what === 'gain' ? { gain: gainOf(done.at) } : { pan: panOf(done.at) }, true);
 	}
+
+	// Esc puts the mix back as it was before the drag, and keeps nothing.
+	const dragging = $derived(held !== null);
+	$effect(() => {
+		if (!dragging) return;
+		return escapeCancels(() => {
+			const was = held;
+			held = null;
+			if (was?.moved) onmix(was.what === 'gain' ? { gain } : { pan }, false);
+		});
+	});
 
 	function reset(what: 'gain' | 'pan') {
 		if (readonly) return;
@@ -242,7 +254,7 @@
 		background: var(--text);
 	}
 	.fader:focus-visible .groove {
-		box-shadow: 0 0 0 1px var(--accent);
+		box-shadow: 0 0 0 2px var(--accent);
 	}
 	.db {
 		flex: none;

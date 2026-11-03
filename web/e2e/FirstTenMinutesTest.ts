@@ -97,7 +97,7 @@ test('a new timeline opens on a track with a built-in patch and a four-bar clip 
 
 	// The keys play the track before it has a note, on its own
 	await expect(keys(page)).toHaveAttribute('title', /^Keys play Track 1, on its own until it has notes\./);
-	await expect(keys(page).getByRole('button', { name: '60', exact: true })).toBeEnabled();
+	await expect(keys(page).getByRole('button', { name: 'C4', exact: true })).toBeEnabled();
 	await page.getByTestId('roll').focus();
 	await page.keyboard.down('a'); // Starts audio, as a key does
 	await expect.poll(() => level(page, 'Master level'), { timeout: 10000 }).toBeGreaterThan(0.005);
@@ -179,7 +179,7 @@ test('M and S in the track heads and the Mixer agree: a mute is saved and undone
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 6000 }).toBeLessThan(0.002);
 	// Pluck plays, as its own scope shows, which is before its mute, and the master hears none of it
 	await expect.poll(() => stripPeak(page, 'track:2'), { timeout: 8000 }).toBeGreaterThan(0.01);
-	expect(await stripPeak(page, 'master')).toBeLessThan(0.002);
+	await expect.poll(() => stripPeak(page, 'master')).toBeLessThan(0.002);
 	await headSolo('Lead').click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);
 	await headMute('Lead').click();
@@ -286,4 +286,61 @@ test('Mod+C, Mod+V and Mod+D copy, paste and duplicate clips in the arrangement,
 		['phrase', 32]
 	]);
 	expect(doc.tracks[1].placements).toEqual([{ clip: 'phrase', tick: 0, repeat: 1 }]);
+});
+
+// The keys play a track with no notes in an image of its own, whose transport runs for its LFOs. The song that takes over
+// once the track has a note comes back as it was left, stopped, rather than inheriting that running transport.
+test('the keys leave the song stopped when it takes over from a track heard on its own', async ({ page }) => {
+	await newSong(page, 'Stays stopped');
+	const state = page.getByTestId('state');
+	await page.getByTestId('roll').focus();
+	await page.keyboard.press('a'); // Starts audio, and plays the track on its own
+	await expect(state).toHaveAttribute('data-live', 'alone', { timeout: 10000 });
+	await expect(state).toHaveAttribute('data-playing', 'true');
+
+	const at = await rollPoint(page, 0, 60);
+	await page.mouse.click(at.x, at.y);
+	await expect(keys(page)).toHaveAttribute('title', /^Keys play Track 1\./, { timeout: 8000 });
+	await page.getByTestId('roll').focus();
+	await page.keyboard.press('a'); // The song's image takes over
+	await expect(state).toHaveAttribute('data-live', 'song', { timeout: 10000 });
+	await expect(state).toHaveAttribute('data-playing', 'false');
+	await expect(page.getByTestId('tick')).toHaveText('0');
+
+	// Play still plays it.
+	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	await expect(state).toHaveAttribute('data-playing', 'true');
+});
+
+// The roll follows the chosen track, so what it and step entry write goes where the keys play. A new track has no clip, and
+// the roll says so and offers one, rather than editing the clip of the track chosen before.
+test("after + Track the roll is the new track's, and its notes go into a clip of its own", async ({ page }) => {
+	await newSong(page, 'Own clip');
+	await page.getByRole('button', { name: 'Add track' }).click();
+	await page.getByRole('combobox', { name: 'Patch for the new track' }).fill('Kick808');
+	await page.keyboard.press('Enter');
+	await expect(page.getByTestId('track-2')).toBeVisible();
+	await expect(page.getByTestId('no-clip')).toHaveText(/^Track 2 has no clip yet\./);
+	await expect(page.getByTestId('roll')).toHaveCount(0);
+
+	// Step entry has nothing to write into, so the keys only sound the track.
+	await page.keyboard.press('r');
+	await page.keyboard.press('a');
+	expect(await noteTicks(page)).toEqual([]);
+
+	await page.getByTestId('no-clip').getByRole('button', { name: 'New clip' }).click();
+	await expect(page.getByTestId('placement-2-0')).toHaveClass(/chosen/);
+	const own = (await timelineDoc(page)).tracks[1].placements[0];
+	expect(own).toEqual({ clip: 'clip-2', tick: 0, repeat: 1 });
+	expect((await timelineDoc(page)).clips.find((c: { id: string }) => c.id === own.clip).length).toBe(4 * BAR);
+	const at = await rollPoint(page, 0, 60);
+	await page.mouse.click(at.x, at.y);
+	await expect(page.getByTestId('note-0')).toBeVisible();
+	expect(await noteTicks(page, own.clip)).toEqual([[0, 60]]);
+	expect(await noteTicks(page)).toEqual([]);
+
+	// Choosing Track 1 again brings its own clip back into the roll.
+	await page.getByTestId('track-1').click();
+	await expect(page.getByRole('tab', { name: 'Notes: clip', exact: true })).toHaveAttribute('aria-selected', 'true');
+	await expect(page.getByTestId('note-0')).toHaveCount(0);
 });

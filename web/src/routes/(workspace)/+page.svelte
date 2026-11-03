@@ -21,6 +21,7 @@
 	import QuickOpen from '#lib/QuickOpen.svelte';
 	import type { Openable } from '#lib/QuickOpen.ts';
 	import ShortcutsSheet from '#lib/ShortcutsSheet.svelte';
+	import type { SideTab } from '#lib/GraphEditor.svelte';
 	import CompileLight from '#lib/CompileLight.svelte';
 	import { Compiler, type Compiled } from '#lib/Compiler.ts';
 	import DocumentMenu from '#lib/DocumentMenu.svelte';
@@ -1151,7 +1152,27 @@
 
 	// What the light lists. Each problem says where it is in words, and its link goes there: a node's opens the Patch view with the
 	// node chosen, and a track's, a clip's or the mix's opens the Song view with it chosen.
-	let nodeAsked = $state.raw<{ node: number } | null>(null);
+	// A node the address names, as a reload or a link left it, is asked for as the patch opens.
+	let nodeAsked = $state.raw<{ node: number } | null>(
+		untrack(() => {
+			const node = Number(address.searchParams.get('node'));
+			return Number.isInteger(node) && address.searchParams.has('node') ? { node } : null;
+		})
+	);
+
+	// What the Patch view shows in its side column, and which node is chosen, go in the address as the Song view's place does:
+	// the JSON tab as `side=json`, and one node chosen as `node`, so a reload lands back on it.
+	let sideTab = $state<SideTab>(untrack(() => (address.searchParams.get('side') === 'json' ? 'json' : 'patch')));
+	$effect(() => {
+		const json = sideTab === 'json';
+		untrack(() => {
+			if (json !== (address.searchParams.get('side') === 'json')) void open({ side: json ? 'json' : null }, true);
+		});
+	});
+	function nodeChosen(node: number | null) {
+		const now = address.searchParams.get('node');
+		if (now !== (node === null ? null : String(node))) void open({ node: node === null ? null : String(node) }, true);
+	}
 
 	const names: Names = {
 		patch: (id) => (songPatches.find((p) => p.id === id) ?? library.find((p) => p.id === id))?.name,
@@ -1375,11 +1396,15 @@
 		selectedTrack = place.track;
 		if (!chosen) return;
 		const giveWay = place.track !== before && (askedPatch !== null || askedPart !== null);
-		void open({ ...placeParams(place), ...(giveWay ? { patch: null, part: null } : {}) }, true);
+		const another = place.track !== before;
+		void open(
+			{ ...placeParams(place), ...(giveWay ? { patch: null, part: null } : {}), ...(another ? { node: null } : {}) },
+			true
+		);
 	}
 
 	function patchOpened(id: string) {
-		void open(recipe ? { part: id, patch: null } : { patch: id, part: null }, false, 'patch');
+		void open(recipe ? { part: id, patch: null, node: null } : { patch: id, part: null, node: null }, false, 'patch');
 	}
 
 	// New patch for this track. The patch is saved at once, as the browser's New patch is, and the library loads again so it's
@@ -1411,6 +1436,7 @@
 	let browserOver = $state(false); // On a narrow one
 	let shortcutsShown = $state(false); // The sheet ? opens
 	let quickOpen = $state(false); // Mod+K's search
+	let keyStrip = $state<HTMLElement | null>(null); // The Patch view's strip, where the keys are drawn while it is open
 
 	// What Mod+K finds: the library's timelines, the examples, and the patches, the library's own before the built-in ones.
 	const openables = $derived.by((): Openable[] => [
@@ -1751,6 +1777,7 @@
 			bind:velocity
 			onhold={holdKeys}
 			onletgo={() => letGo(latched)}
+			stripIn={view === 'patch' ? keyStrip : null}
 		/>
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
 		<span class="grow"></span>
@@ -1858,6 +1885,9 @@
 					onsong={() => void show('song')}
 					{useOn}
 					onuse={useOnTrack}
+					bind:keyStrip
+					bind:tab={sideTab}
+					onchosen={nodeChosen}
 					onname={(name) => patchEdited({ name })}
 					ongraph={(graph) => patchEdited({ graph })}
 					ontext={(text, typing) => patchEdited({ text }, typing ? 'typing' : 'edit')}

@@ -44,6 +44,9 @@
 		onsong,
 		useOn = null,
 		onuse = () => {},
+		keyStrip = $bindable(null),
+		tab = $bindable('patch'),
+		onchosen = () => {},
 		onname,
 		ongraph,
 		ontext,
@@ -84,6 +87,9 @@
 		onsong: () => void; // Back to the Song view
 		useOn?: { id: number; name: string } | null; // The track the Song view chose, if this patch can go on it
 		onuse?: () => void; // Puts this patch on that track, in place of what it plays
+		keyStrip?: HTMLElement | null; // The strip at the foot, while it is open, which the page's keys are drawn into
+		tab?: SideTab; // What the side column shows, kept by the page from one patch to the next, and in the address
+		onchosen?: (node: number | null) => void; // The one node chosen in the graph, for the address
 		onname: (name: string) => void;
 		ongraph: (graph: Graph) => void;
 		ontext: (text: string, typing: boolean) => void; // Typing until the field is left, which undoes as one step
@@ -94,9 +100,6 @@
 		unsaved?: string; // Why a Control's value isn't saved when it is let go, or '' when it is saved into the song
 		onpart: (id: string) => void;
 	} = $props();
-
-	// What the side column shows, kept from one patch to the next, so the JSON stays open while patches are looked through.
-	let tab = $state<SideTab>('patch');
 
 	// A link, so it can open in another tab, that otherwise switches views without leaving the page.
 	function backToSong(event: MouseEvent) {
@@ -124,6 +127,22 @@
 			: `Add ${example.name} to your library, with a copy of this patch in place of the original, to change it there`;
 	});
 	const params = $derived(graph?.params ?? []);
+
+	// The keys, full width at the foot, where a patch being shaped can be played with keys big enough to hit. It stays as it was
+	// left, across patches and visits.
+	const STRIP_KEY = 'modsynth.keystrip';
+	let stripOpen = $state(false);
+	$effect(() => {
+		stripOpen = localStorage.getItem(STRIP_KEY) === 'open';
+	});
+	function toggleStrip() {
+		stripOpen = !stripOpen;
+		localStorage.setItem(STRIP_KEY, stripOpen ? 'open' : 'closed');
+	}
+	let strip = $state<HTMLElement | null>(null);
+	$effect(() => {
+		keyStrip = stripOpen && patch ? strip : null;
+	});
 </script>
 
 <section class="patch" aria-label="Patch editor">
@@ -173,6 +192,15 @@
 				</span>
 			{/if}
 			<span class="grow"></span>
+			<button
+				type="button"
+				class="keysbutton"
+				aria-pressed={stripOpen}
+				title={stripOpen
+					? 'Put the keys back in the top bar'
+					: 'The keys across the foot of the view, bigger and wider, to play the patch while it is shaped'}
+				onclick={toggleStrip}>Keys</button
+			>
 			{#if useOn}
 				<button
 					type="button"
@@ -237,6 +265,7 @@
 						{active}
 						{choose}
 						bind:tab
+						{onchosen}
 						{json}
 						onchange={ongraph}
 						{onprobes}
@@ -273,6 +302,9 @@
 				{/key}
 			{/if}
 		</div>
+		{#if stripOpen}
+			<div class="keystrip" bind:this={strip} data-testid="key-strip"></div>
+		{/if}
 	{/if}
 </section>
 
@@ -362,6 +394,21 @@
 	.parts button[aria-pressed='true'] {
 		border-color: var(--accent);
 		background: #1f6feb33;
+	}
+	.keystrip {
+		flex: none;
+		display: flex;
+		align-items: flex-start;
+		justify-content: center;
+		height: 84px;
+		padding-top: 8px;
+		box-sizing: border-box;
+		border-top: 1px solid var(--line);
+		overflow: hidden;
+	}
+	.keysbutton[aria-pressed='true'] {
+		color: var(--text);
+		border-color: var(--accent);
 	}
 	.body {
 		flex: 1;

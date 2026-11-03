@@ -220,7 +220,7 @@
 	// as a choice. What it was taken to is kept until the next change, which is the next choice.
 	let landed: SongPlace | null = { track: opened.track, clip: opened.clip, tab: opened.tab };
 	$effect(() => {
-		const now: SongPlace = { track: selection.track, clip: clipId, tab };
+		const now: SongPlace = { track: selection.track, clip: clipId, tab, ...(expanded ? { expand: true } : {}) };
 		untrack(() => {
 			const chosen = !landed || now.track !== landed.track || now.clip !== landed.clip || now.tab !== landed.tab;
 			landed = null;
@@ -234,6 +234,7 @@
 		const wanted = asked;
 		untrack(() => {
 			const at = landing(doc, wanted, tabIds);
+			if (!!wanted?.expand !== expanded) expand(!!wanted?.expand);
 			if (at.track === selection.track && at.clip === clipId && at.tab === tab) return;
 			landed = { track: at.track, clip: at.clip, tab: at.tab };
 			if (at.track !== selection.track || at.clip !== clipId) {
@@ -358,7 +359,7 @@
 
 	// The arrangement is as tall as its tracks, and the notes have the rest. Expand gives the notes the whole view, the
 	// arrangement's height and the inspector's width too, until ⤢ or Esc brings them back.
-	let expanded = $state(false);
+	let expanded = $state(untrack(() => !!asked?.expand)); // As the address asks, so a reload comes back to it
 	let peek = $state(false); // The inspector, shown beside expanded notes all the same
 	function expand(on = !expanded) {
 		expanded = on;

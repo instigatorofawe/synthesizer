@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack, type Snippet } from 'svelte';
+	import { tick as settle, untrack, type Snippet } from 'svelte';
 	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import {
@@ -45,9 +45,11 @@
 		type LibraryPatch,
 		type Point
 	} from '#lib/GraphEdit.ts';
+	import { escapeCancels } from '#lib/Drag.ts';
 	import { leavesFields } from '#lib/Fields.ts';
 	import { friendlyName, helpOf, rangeText, shown } from '#lib/NodeHelp.ts';
 	import NodePalette from '#lib/NodePalette.svelte';
+	import { scrubbed, valueText } from '#lib/NodeValues.ts';
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import { label, matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import type { NodesReport } from '#lib/Request.ts';
@@ -67,6 +69,7 @@
 		readonly = false,
 		active = true,
 		choose = null,
+		onchosen = () => {},
 		tab = $bindable('patch'),
 		side,
 		json,
@@ -86,6 +89,7 @@
 		readonly?: boolean; // For looking at: a node can be chosen and probed, and nothing changes
 		active?: boolean; // Whether keys are for this editor, when it shares a page with others
 		choose?: { node: number } | null; // A node to choose and bring into view, asked for from outside, each time a new one
+		onchosen?: (node: number | null) => void; // The one node chosen, or null for none or several, for the address
 		tab?: SideTab; // What the side column shows, kept by the page from one patch to the next
 		side?: Snippet; // Drawn above the inspector
 		json?: Snippet; // The patch's JSON, in the side column's last tab
@@ -104,7 +108,9 @@
 		// The chosen nodes dragged, or their copies with Mod held. Nothing moves until the pointer has gone further than a click.
 		| { kind: 'move'; ids: number[]; client: Point; start: Point; by: Point; moved: boolean }
 		| { kind: 'box'; from: Point; at: Point } // Shift-drag on empty canvas
-		| { kind: 'wire'; from: number; port: string; start: Point; at: Point };
+		| { kind: 'wire'; from: number; port: string; start: Point; at: Point }
+		// A value on a node dragged across, which is shown as it goes and kept as one edit when let go.
+		| { kind: 'scrub'; node: number; input: string; client: number; from: number; value: number; moved: boolean };
 
 	// The node search, open. A node it adds goes at `at` or the nearest free place, and one opened from a wire dropped on empty
 	// canvas arrives wired from that output.
@@ -259,6 +265,7 @@
 	function select(ids: Iterable<number> = [], wire: WireEnd | null = null) {
 		selection = new Set(ids);
 		chosenWire = wire;
+		onchosen(selection.size === 1 ? [...selection][0] : null);
 		const any = selection.size > 0 || wire !== null;
 		if (any && tab === 'patch') tab = 'node';
 		else if (!any && tab === 'node') tab = 'patch';
@@ -328,6 +335,19 @@
 		copying = null;
 	}
 
+	// A press on a value starts a drag across, and a click without one chooses the node and goes to the value's field.
+	function startScrub(event: PointerEvent, node: GraphNode, input: string, value: number) {
+		event.stopPropagation();
+		if (readonly || event.button !== 0) return;
+		svg.focus({ preventScroll: true });
+		gesture = { kind: 'scrub', node: node.id, input, client: event.clientX, from: value, value, moved: false };
+	}
+
+	const scrubbing = $derived(gesture?.kind === 'scrub');
+	$effect(() => {
+		if (scrubbing) return escapeCancels(cancelGesture);
+	});
+
 	function startWire(event: PointerEvent, node: GraphNode, port: string) {
 		event.stopPropagation();
 		if (readonly) return;
@@ -341,6 +361,13 @@
 		if (gesture.kind === 'pan') {
 			view.x = gesture.view.x - (event.clientX - gesture.from.x) / view.scale;
 			view.y = gesture.view.y - (event.clientY - gesture.from.y) / view.scale;
+		} else if (gesture.kind === 'scrub') {
+			const scrub = gesture;
+			const dx = event.clientX - scrub.client;
+			scrub.moved ||= Math.abs(dx) > DRAG;
+			const node = laid.nodes.find((candidate) => candidate.id === scrub.node);
+			const range = node ? helpOf(node.type)?.inputs[scrub.input] : undefined;
+			if (scrub.moved) scrub.value = scrubbed(scrub.from, dx, range, event.shiftKey);
 		} else if (gesture.kind === 'move') {
 			const pointer = toCanvas(event);
 			gesture.moved ||= Math.hypot(event.clientX - gesture.client.x, event.clientY - gesture.client.y) > DRAG;
@@ -351,6 +378,17 @@
 	}
 
 	function pointerUp(event: PointerEvent) {
+		if (gesture?.kind === 'scrub') {
+			const { node, input, value, moved } = gesture;
+			gesture = null;
+			if (moved) {
+				commit(setLiteral(laid, node, input, value));
+				return;
+			}
+			select([node]);
+			void settle().then(() => document.querySelector<HTMLInputElement>(`[aria-label="value of ${input}"]`)?.focus());
+			return;
+		}
 		if (gesture?.kind === 'move') {
 			const { ids, by, moved } = gesture;
 			const base = laid; // With the copies in it, while Mod-drag copies
@@ -920,6 +958,33 @@
 								onpointerup={(event) => finishWire(event, node, input.name)}
 							/>
 							<text class="label" x="11" y={inputY(index) + 4}>{input.name}</text>
+							{#if !edgeInto(laid, node.id, input.name)}
+								{@const own = node.inputs?.[input.name]}
+								{@const dragged =
+									gesture?.kind === 'scrub' && gesture.node === node.id && gesture.input === input.name
+										? gesture.value
+										: null}
+								{@const value = dragged ?? (typeof own === 'number' ? own : input.default)}
+								{@const output = outputsOf(node, catalog, library)[index]}
+								<text
+									class="value"
+									class:own={typeof own === 'number' || dragged !== null}
+									class:readonly
+									x={NODE_WIDTH - 11 - (output ? output.length * 6.2 + 8 : 0)}
+									y={inputY(index) + 4}
+									role="slider"
+									tabindex="-1"
+									aria-label={`${input.name} of ${node.id}`}
+									aria-valuenow={value}
+									data-testid={`value-${node.id}-${input.name}`}
+									onpointerdown={(event) => startScrub(event, node, input.name, value)}
+									>{valueText(value, helpOf(node.type)?.inputs[input.name]?.unit)}<title
+										>{readonly
+											? `${input.name}: ${value}`
+											: `${input.name}: drag across to change it, Shift for finer, or click to type it`}</title
+									></text
+								>
+							{/if}
 						{/each}
 						{#each outputsOf(node, catalog, library) as port, index (port)}
 							<circle
@@ -1516,6 +1581,21 @@
 	}
 	.label.end {
 		text-anchor: end;
+	}
+	/* An input's value, which a drag across changes. One the node sets itself is brighter than the default. */
+	.value {
+		fill: var(--muted);
+		font-size: 11px;
+		text-anchor: end;
+		cursor: ew-resize;
+		opacity: 0.75;
+	}
+	.value.own {
+		fill: #79c0ff;
+		opacity: 1;
+	}
+	.value.readonly {
+		cursor: default;
 	}
 	.message {
 		fill: #f85149;

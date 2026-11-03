@@ -163,6 +163,7 @@ export interface SongPlace {
 	track: number | null;
 	clip: string | null;
 	tab: string | null;
+	expand?: true; // Expand, which gives the notes the whole view
 }
 
 // The place an address names. A track that isn't a whole number names none.
@@ -173,7 +174,8 @@ export function songPlaceOf(search: string): SongPlace {
 	return {
 		track: Number.isInteger(id) ? id : null,
 		clip: params.get('clip') || null,
-		tab: params.get('pane') || null
+		tab: params.get('pane') || null,
+		...(params.get('expand') === '1' ? { expand: true as const } : {})
 	};
 }
 
@@ -182,7 +184,8 @@ export function placeParams(place: SongPlace): Record<string, string | null> {
 	return {
 		track: place.track === null ? null : String(place.track),
 		clip: place.clip,
-		pane: place.tab === null || place.tab === 'notes' ? null : place.tab
+		pane: place.tab === null || place.tab === 'notes' ? null : place.tab,
+		expand: place.expand ? '1' : null
 	};
 }
 
@@ -207,7 +210,7 @@ export const recipeHref = (search: string, name: string, open: string | null) =>
 		'song'
 	);
 export const patchHref = (search: string, id: string) =>
-	withView(withParams(search, { patch: id, part: null }), 'patch');
+	withView(withParams(search, { patch: id, part: null, node: null }), 'patch');
 
 // Where the Song view lands when it is asked for a place, as it opens or as Back and Forward move the address under it: the
 // track, which of its placements is chosen, the clip the roll shows, and the tab. What the song doesn't have is ignored, and

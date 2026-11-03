@@ -44,7 +44,8 @@
 		openRecipe,
 		shownPatch,
 		usersOf,
-		reveal = null
+		reveal = null,
+		onshortcuts
 	}: {
 		search: string; // The page's address now, which every link here changes a part of
 		examples: { name: string; recipes: { name: string; listen_for: string }[] }[];
@@ -68,6 +69,7 @@
 		// patch under the pointer, since an edit changes it, and the rest say what is saved.
 		usersOf?: (id: string) => { name: string }[];
 		reveal?: Section | null; // A list to open and scroll to as the browser opens, when its rail asked for one
+		onshortcuts: () => void; // Opens the sheet of keyboard shortcuts
 	} = $props();
 
 	let filter = $state('');
@@ -377,6 +379,9 @@
 			</details>
 		{/each}
 	</div>
+	<button type="button" class="shortcuts" title="Every key the editor binds (?)" onclick={onshortcuts}
+		>Keyboard shortcuts <kbd>?</kbd></button
+	>
 </nav>
 
 <style>
@@ -388,6 +393,27 @@
 		background: var(--panel);
 		border-right: 1px solid var(--line);
 		font-size: 0.82rem;
+	}
+	.shortcuts {
+		margin: 0;
+		border: 0;
+		border-top: 1px solid var(--line);
+		border-radius: 0;
+		background: transparent;
+		color: var(--muted);
+		text-align: left;
+		padding: 0.4rem 0.6rem;
+		font-size: 0.75rem;
+	}
+	.shortcuts:hover {
+		color: var(--text);
+	}
+	.shortcuts kbd {
+		margin-left: 0.3rem;
+		padding: 0 0.3em;
+		border: 1px solid var(--line);
+		border-radius: 4px;
+		font: inherit;
 	}
 	.filter {
 		margin: 0.5rem;

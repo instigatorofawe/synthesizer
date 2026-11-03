@@ -464,9 +464,9 @@
 		return [
 			{ label: 'Open notes', action: () => open(at) },
 			{ label: 'Loop this clip', action: () => loopThis(at) },
-			{ label: 'Duplicate after', action: () => duplicate(at) },
+			{ label: 'Duplicate after', keys: 'duplicate', action: () => duplicate(at) },
 			{ label: 'Make unique', action: () => unique(at), disabled: uses(opened.clip) < 2 },
-			{ label: 'Remove from track', action: () => remove(at) },
+			{ label: 'Remove from track', keys: 'arrangement.delete', action: () => remove(at) },
 			{ label: 'Delete clip', action: () => deleteClip(at) }
 		];
 	}

@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { ariaKeys, label as keyLabel, type ShortcutId } from '#lib/Shortcuts.ts';
 
 	export interface MenuItem {
 		label: string;
 		action: () => void;
 		disabled?: boolean;
+		keys?: ShortcutId; // The key that does the same, shown at the item's right, as a desktop menu shows it
 	}
 
 	let {
@@ -94,7 +96,10 @@
 			data-index={index}
 			disabled={item.disabled}
 			onclick={() => choose(item)}
-			onpointerenter={(event) => event.currentTarget.focus({ preventScroll: true })}>{item.label}</button
+			aria-keyshortcuts={item.keys ? ariaKeys(item.keys) : undefined}
+			onpointerenter={(event) => event.currentTarget.focus({ preventScroll: true })}
+			><span>{item.label}</span>{#if item.keys}<span class="keys" aria-hidden="true">{keyLabel(item.keys)}</span
+				>{/if}</button
 		>
 	{/each}
 </div>
@@ -114,6 +119,9 @@
 		outline: none;
 	}
 	button {
+		display: flex;
+		justify-content: space-between;
+		gap: 1.5rem;
 		border: 0;
 		border-radius: 4px;
 		background: transparent;
@@ -121,6 +129,9 @@
 		padding: 0.3rem 0.6rem;
 		font-size: 0.8rem;
 		outline: none;
+	}
+	.keys {
+		color: var(--muted);
 	}
 	button:focus-visible,
 	button:focus {

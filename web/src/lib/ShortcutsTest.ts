@@ -7,6 +7,7 @@ import {
 	matches,
 	modHeld,
 	modKey,
+	sheet,
 	typingIn,
 	type Scope,
 	type Shortcut
@@ -169,6 +170,29 @@ describe('naming a binding', () => {
 		expect(label('record', 'Control')).toBe('Shift+R');
 		expect(label('play', 'Control')).toBe('Space');
 		expect(label('roll.earlier', 'Meta')).toBe('←');
+	});
+
+	it('writes a shifted character as itself', () => {
+		expect(label('shortcuts', 'Meta')).toBe('?');
+		expect(label('shortcuts', 'Control')).toBe('?');
+	});
+});
+
+describe('the sheet of shortcuts', () => {
+	it('lists every binding but the piano’s once, under where it works', () => {
+		const groups = sheet('Control');
+		const listed = groups.flatMap((group) => group.rows.flatMap((row) => row.keys)).length;
+		expect(listed).toBe(table.filter((binding) => !binding.piano).length);
+		expect(new Set(groups.map((group) => group.scope)).size).toBe(groups.length);
+		expect(groups[0].name).toBe('Everywhere');
+	});
+
+	it('puts keys that do one thing in one row', () => {
+		const roll = sheet('Control').find((group) => group.scope === 'roll')!;
+		expect(roll.rows.find((row) => row.description === 'Delete the chosen notes')!.keys).toEqual([
+			'Delete',
+			'Backspace'
+		]);
 	});
 });
 

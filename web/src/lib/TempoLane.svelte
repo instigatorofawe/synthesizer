@@ -277,7 +277,7 @@
 				disabled: !canGlide(doc.tempo, index)
 			}
 		];
-		if (!isFirstTempo(doc.tempo, index)) items.push({ label: 'Delete', action: () => remove(index) });
+		if (!isFirstTempo(doc.tempo, index)) items.push({ label: 'Delete', keys: 'tempo.delete', action: () => remove(index) });
 		return items;
 	}
 

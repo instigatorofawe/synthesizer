@@ -2,7 +2,11 @@
 	import { SECTIONS, type Section } from '#lib/Browser.svelte';
 
 	// The browser folded to a strip of icons down the side, one for each of its lists. Choosing one opens the browser there.
-	let { open, onopen }: { open: boolean; onopen: (section: Section) => void } = $props();
+	let {
+		open,
+		onopen,
+		onshortcuts
+	}: { open: boolean; onopen: (section: Section) => void; onshortcuts: () => void } = $props();
 </script>
 
 <div class="rail" role="toolbar" aria-orientation="vertical" aria-label="Library and examples">
@@ -15,6 +19,13 @@
 			onclick={() => onopen(section.id)}><span aria-hidden="true">{section.icon}</span></button
 		>
 	{/each}
+	<button
+		type="button"
+		class="end"
+		aria-label="Keyboard shortcuts"
+		title="Keyboard shortcuts (?)"
+		onclick={onshortcuts}><span aria-hidden="true">?</span></button
+	>
 </div>
 
 <style>
@@ -41,5 +52,9 @@
 	}
 	button:hover {
 		color: var(--text);
+	}
+	.end {
+		margin-top: auto;
+		margin-bottom: 0.4rem;
 	}
 </style>

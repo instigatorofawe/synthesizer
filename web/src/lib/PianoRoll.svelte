@@ -698,13 +698,14 @@
 	const noteItems = (): MenuItem[] => [
 		{
 			label: 'Delete',
+			keys: 'roll.delete',
 			action: () => {
 				const gone = chosen;
 				chosen = new Set();
 				onchange(removeNotes(clip, gone));
 			}
 		},
-		{ label: 'Duplicate', action: duplicate }
+		{ label: 'Duplicate', keys: 'duplicate', action: duplicate }
 	];
 
 	function pressKey(event: PointerEvent, note: number) {

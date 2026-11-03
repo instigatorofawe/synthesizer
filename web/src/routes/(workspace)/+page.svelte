@@ -17,6 +17,7 @@
 	import Browser, { type Section } from '#lib/Browser.svelte';
 	import BrowserRail from '#lib/BrowserRail.svelte';
 	import BundleDialog from '#lib/BundleDialog.svelte';
+	import ShortcutsSheet from '#lib/ShortcutsSheet.svelte';
 	import CompileLight from '#lib/CompileLight.svelte';
 	import { Compiler, type Compiled } from '#lib/Compiler.ts';
 	import DocumentMenu from '#lib/DocumentMenu.svelte';
@@ -1371,6 +1372,7 @@
 	const wide = $derived(windowWidth === undefined || windowWidth >= WIDE);
 	let browserOpen = $state(true); // On a wide screen, as last left
 	let browserOver = $state(false); // On a narrow one
+	let shortcutsShown = $state(false); // The sheet ? opens
 	let reveal = $state<Section | null>(null);
 	const browserShown = $derived(wide ? browserOpen : browserOver);
 	let saveForm: HTMLFormElement;
@@ -1415,6 +1417,9 @@
 		} else if (matches(event, 'escape') && browserOver) {
 			event.preventDefault(); // Esc closes one thing at a time, and the browser over the views is the nearest
 			browserOver = false;
+		} else if (matches(event, 'shortcuts')) {
+			event.preventDefault();
+			shortcutsShown = true;
 		}
 	}
 
@@ -1655,7 +1660,11 @@
 			<div class="side">{@render browser()}</div>
 		{/if}
 		{#if windowWidth === undefined || !(wide && browserOpen)}
-			<BrowserRail open={browserShown} onopen={(section) => toggleBrowser(section)} />
+			<BrowserRail
+				open={browserShown}
+				onopen={(section) => toggleBrowser(section)}
+				onshortcuts={() => (shortcutsShown = true)}
+			/>
 		{/if}
 		{#if !wide && browserOver}
 			<div class="side over">{@render browser()}</div>
@@ -1784,6 +1793,9 @@
 		/>
 	{/key}
 {/if}
+{#if shortcutsShown}
+	<ShortcutsSheet onclose={() => (shortcutsShown = false)} />
+{/if}
 
 {#snippet browser()}
 	<Browser
@@ -1799,6 +1811,7 @@
 		shownPatch={view === 'patch' ? (shown?.patch.id ?? null) : null}
 		usersOf={(id) => usedBy(id, library, data.library.timelines, nowPlaying)}
 		{reveal}
+		onshortcuts={() => (shortcutsShown = true)}
 	/>
 {/snippet}
 

@@ -637,13 +637,14 @@
 	}
 
 	const nodeItems = (): MenuItem[] => [
-		{ label: 'Copy', action: copyChosen },
+		{ label: 'Copy', keys: 'copy', action: copyChosen },
 		...(readonly
 			? []
 			: [
-					{ label: 'Duplicate', action: duplicateChosen },
+					{ label: 'Duplicate', keys: 'duplicate', action: duplicateChosen },
 					{
 						label: deletable.length > 1 ? `Delete ${deletable.length} nodes` : 'Delete',
+						keys: 'graph.delete',
 						disabled: !deletable.length,
 						action: removeChosen
 					}
@@ -653,7 +654,7 @@
 	function wireItems(): MenuItem[] {
 		const snap = wireShown && snapFor(wireShown.to) === wireShown.input ? wireShown : null;
 		return [
-			{ label: 'Delete', action: removeChosen },
+			{ label: 'Delete', keys: 'graph.delete', action: removeChosen },
 			...(snap ? [{ label: 'Put a snap on this wire', action: () => putSnap(snap.to, snap.input) }] : [])
 		];
 	}

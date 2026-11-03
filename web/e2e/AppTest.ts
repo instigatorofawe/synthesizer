@@ -1618,7 +1618,9 @@ const samples = (page: Page) => browser(page).getByRole('list', { name: 'Samples
 
 test('WAV files become an instrument that plays, and its samples stay while it does', async ({ page }) => {
 	await page.goto('/');
-	await page.getByLabel('WAV files').setInputFiles([wavFile('Sine_A3.wav'), wavFile('Sine_A4.wav')]);
+	// Each sample plays once, so it has to outlast the wait for the meters, which on a slow machine comes after a half-second
+	// sample has ended.
+	await page.getByLabel('WAV files').setInputFiles([wavFile('Sine_A3.wav', 3), wavFile('Sine_A4.wav', 3)]);
 	await page.getByLabel('Instrument name').fill('Imported sines');
 	await page.getByRole('button', { name: 'Import' }).click();
 	await page.waitForURL(/patch=/);

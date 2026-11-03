@@ -3,6 +3,7 @@
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
 	import GraphEditor from '#lib/GraphEditor.svelte';
+	import type { Undoable } from '#lib/History.ts';
 	import Keyboard from '#lib/Keyboard.svelte';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
@@ -36,6 +37,7 @@
 		hearing,
 		scopes,
 		active,
+		history,
 		onname,
 		ongraph,
 		ontext,
@@ -68,9 +70,10 @@
 		hearing: Hearing;
 		scopes: { slot: number; label: string; ring: Ring }[];
 		active: boolean;
+		history: Undoable | null; // The patch's undo, which the page keeps while other things are open
 		onname: (name: string) => void;
 		ongraph: (graph: Graph) => void;
-		ontext: (text: string) => void;
+		ontext: (text: string, typing: boolean) => void; // Typing until the field is left, which undoes as one step
 		onprobes: (probes: Probe[]) => void;
 		onnote: (note: number, on: boolean) => void;
 		onparam: (param: Param, value: number) => void;
@@ -158,7 +161,8 @@
 					spellcheck="false"
 					{readonly}
 					value={text}
-					oninput={(e) => ontext(e.currentTarget.value)}></textarea>
+					oninput={(e) => ontext(e.currentTarget.value, true)}
+					onchange={(e) => ontext(e.currentTarget.value, false)}></textarea>
 			{:else if graph}
 				{#key patch.id}
 					<GraphEditor
@@ -174,6 +178,7 @@
 						{maxProbes}
 						{readonly}
 						{active}
+						{history}
 						onchange={ongraph}
 						{onprobes}
 					>

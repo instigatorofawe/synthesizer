@@ -26,11 +26,13 @@
 	const HOLD = 1500; // ms the limiting light stays on after the limiter last turned the song down
 
 	let peak = $state(0);
+	let loudest = $state(0); // Held since Play or since the image playing now began, as the ring keeps it
 	let read = 0;
 	let held = $state(1); // The lowest gain while the light has been on, or 1 while it is off
 	let heldUntil = 0;
 
 	const decibels = (level: number) => (level > 0 ? 20 * Math.log10(level) : -Infinity);
+	const loud = (level: number) => (level > 0 ? `${decibels(level).toFixed(1)} dB` : 'silent');
 	const share = (level: number) => Math.max(0, Math.min(1, (decibels(level) - FLOOR) / (CEILING - FLOOR)));
 
 	$effect(() => {
@@ -53,6 +55,7 @@
 				read = newest;
 			}
 			peak = Math.max(level, peak * FALL < 1e-6 ? 0 : peak * FALL);
+			loudest = ring?.loudest ?? 0;
 			if (held < 1 && performance.now() >= heldUntil) held = 1;
 			frame = requestAnimationFrame(loop);
 		});
@@ -69,9 +72,10 @@
 		aria-valuemin={0}
 		aria-valuemax={1}
 		aria-valuenow={peak}
-		title={ring ? (peak > 0 ? `${decibels(peak).toFixed(1)} dB` : 'silent') : 'No meter until audio starts'}
+		title={ring ? `${loud(peak)}, and loudest since Play ${loud(loudest)}` : 'No meter until audio starts'}
 		data-testid="meter"
 		data-peak={peak}
+		data-loudest={loudest}
 	>
 		<div class="fill" class:hot={peak > 1} style:width="{share(peak) * 100}%"></div>
 		<div class="zero" style:left="{share(1) * 100}%"></div>

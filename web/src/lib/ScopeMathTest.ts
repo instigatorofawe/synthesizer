@@ -29,6 +29,19 @@ describe('Ring', () => {
 		expect(ring.at(20)).toBe(0);
 		expect(ring.at(30)).toBe(1);
 	});
+
+	it('holds the loudest sample until Play marks it or a new image begins', () => {
+		const ring = new Ring(100);
+		ring.push(Float32Array.from([0.1, -0.6, 0.2]), 0, 1);
+		ring.push(new Float32Array(200), 3, 1); // Long past the wrap, the loud sample is held
+		expect(ring.loudest).toBeCloseTo(0.6);
+		ring.mark();
+		expect(ring.loudest).toBe(0);
+		ring.push(Float32Array.from([0.3]), 203, 1);
+		expect(ring.loudest).toBeCloseTo(0.3);
+		ring.push(Float32Array.from([0.05]), 204, 2);
+		expect(ring.loudest).toBeCloseTo(0.05);
+	});
 });
 
 describe('findTrigger', () => {

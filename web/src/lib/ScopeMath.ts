@@ -1,21 +1,43 @@
 // The oscilloscope's logic, separate from drawing so it can be tested.
 
 // Keeps the newest samples of a tap, addressed by absolute sample index.
+//
+// It also holds the loudest sample since Play or since a new image began playing, as a DAW's meter holds its peak: a note
+// shorter than a meter's frame still shows it sounded. A new image starts it again, since a tap may follow another chain then.
 export class Ring {
 	readonly data: Float32Array;
 	private end = 0; // absolute index one past the newest sample
+	private generation: number | null = null;
+	private held = 0;
 
 	constructor(readonly capacity: number) {
 		this.data = new Float32Array(capacity);
 	}
 
-	push(samples: Float32Array, start: number) {
+	push(samples: Float32Array, start: number, generation = 0) {
 		// A jump means blocks were dropped. The gap reads as silence rather than joining two unrelated moments.
 		if (start > this.end) {
 			for (let i = this.end; i < start; ++i) this.data[i % this.capacity] = 0;
 		}
-		for (let i = 0; i < samples.length; ++i) this.data[(start + i) % this.capacity] = samples[i];
+		if (generation !== this.generation) {
+			this.generation = generation;
+			this.held = 0;
+		}
+		for (let i = 0; i < samples.length; ++i) {
+			this.data[(start + i) % this.capacity] = samples[i];
+			this.held = Math.max(this.held, Math.abs(samples[i]));
+		}
 		this.end = start + samples.length;
+	}
+
+	// The loudest sample since `mark` or since the image playing now began.
+	get loudest() {
+		return this.held;
+	}
+
+	// Play starts the loudest again.
+	mark() {
+		this.held = 0;
 	}
 
 	get newest() {

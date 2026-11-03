@@ -347,6 +347,7 @@
 	// done, so what is heard is known to be the newest edit.
 	const asked: Record<Source, number> = { song: 0, alone: 0 };
 	let compiling = $state<Record<Source, boolean>>({ song: false, alone: false });
+	let compiles = $state(0); // Sent to the compiler since the page opened, so a test can tell an edit's compile has started
 	let loading = $state.raw<CompileReport | null>(null);
 	const busy = $derived(compiling.song || compiling.alone || loading !== null);
 	const sourceOf = new WeakMap<CompileReport, Source>();
@@ -491,6 +492,7 @@
 			source === 'song' ? songRequest() : request ? { request } : null;
 		if (!built || built.request === sent[source]) return done();
 		sent[source] = built.request;
+		compiles++;
 		const from = openKey;
 		compiler ??= new Compiler();
 		const result = await compiler.compile(built.request, source);
@@ -611,6 +613,7 @@
 	function play() {
 		use('song', () => {
 			if (engineState && length > 0 && engineState.tick >= length && !engineState.playing) engine.locate(0);
+			for (const ring of rings) ring.mark(); // Meters hold the loudest since Play
 			engine.play();
 		});
 	}
@@ -1121,7 +1124,7 @@
 			// A shared LFO waits for the transport, and a patch on its own has no Play button.
 			if (live === 'alone' && s.generation !== 0 && !s.playing) engine.play();
 		};
-		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start);
+		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start, block.generation);
 		engine.onTargets = (t) => (targets = t);
 		engine.onRejected = (reason) => {
 			rejected = reason;
@@ -1455,13 +1458,15 @@
 	<p class="engine muted">
 		The playhead is at tick <span data-testid="tick">{tick}</span>.
 		{#if engineState}
-			<span data-testid="state" data-playing={engineState.playing}>
+			<span data-testid="state" data-playing={engineState.playing} data-time={engineState.time}>
 				<span data-testid="voices">{engineState.voices}</span> voices sounding, in image
-				<span data-testid="generation">{engineState.generation}</span> since audio started.
+				<span data-testid="generation">{engineState.generation}</span> since audio started, which has rendered
+				{engineState.time.toFixed(1)} s.
 			</span>
 		{:else}
 			Audio starts with Play, a key, or Start audio.
 		{/if}
+		Edits have compiled <span data-testid="compiles">{compiles}</span> times since the page opened.
 	</p>
 {/snippet}
 

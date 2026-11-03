@@ -45,7 +45,8 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			error: 0,
 			loading: false,
 			guardTrips: 0,
-			limited: 1
+			limited: 1,
+			time: 0
 		};
 		this.quanta = 0;
 		this.port.onmessage = (e) => this.receive(e.data);
@@ -199,6 +200,7 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			state.loading = m._ms_loading() !== 0;
 			state.guardTrips = m._ms_guard_trips();
 			state.limited = m._ms_limited();
+			state.time = currentTime; // The audio clock, which moves only as audio is rendered
 			this.port.postMessage(state);
 		}
 		return true;

@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { loudest } from './Engine.ts';
 import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated, as AppTest.ts does: what is typed into it before then is lost.
@@ -336,10 +337,9 @@ test('the keys still sound on the chosen track while they write', async ({ page 
 	await expect(cursor(page)).toHaveAttribute('data-tick', '0');
 	await page.keyboard.down('d'); // E3, which the clip hasn't at its start. It starts audio, as a click on a key does.
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	// A pluck dies away while its key is held, and the meter holds the loudest since the image began.
 	await expect
-		.poll(() => page.getByRole('meter', { name: 'Level of Pluck' }).getAttribute('data-peak').then(Number), {
-			timeout: 8000
-		})
+		.poll(() => loudest(page.getByRole('meter', { name: 'Level of Pluck' })), { timeout: 8000 })
 		.toBeGreaterThan(0.01);
 	await page.keyboard.up('d');
 	await expect(notes(page)).toHaveCount(5);

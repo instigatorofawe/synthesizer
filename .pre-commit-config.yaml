@@ -16,6 +16,7 @@ repos:
     hooks:
       - id: clang-format
         types_or: [c, c++] # By default this also rewrites JSON and JavaScript
+        exclude: ^firmware/NucleoCosts\.hpp$ # tools/Bench.py writes it, and CI checks it is exactly what that gives
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.3

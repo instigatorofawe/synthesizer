@@ -138,6 +138,8 @@ if(MODSYNTH_BUILD_COMPILER AND NOT EMSCRIPTEN)
     target_link_libraries(modsynth_compile PRIVATE modsynth_compiler)
     add_executable(modsynth_render tools/Render.cpp)
     target_link_libraries(modsynth_render PRIVATE modsynth)
+    add_executable(modsynth_work tools/Work.cpp)
+    target_link_libraries(modsynth_work PRIVATE modsynth nlohmann_json::nlohmann_json)
 endif()
 
 if(MODSYNTH_BUILD_TESTS)
@@ -188,6 +190,7 @@ if(MODSYNTH_BUILD_TESTS)
         target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
         target_compile_definitions(${name} PRIVATE MODSYNTH_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/golden"
             MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes"
+            MODSYNTH_PIECES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Pieces"
             MODSYNTH_PROFILES="${CMAKE_CURRENT_SOURCE_DIR}/firmware/Profiles")
         if(EMSCRIPTEN)
             add_test(NAME ${name} COMMAND ${name})
@@ -232,9 +235,16 @@ if(MODSYNTH_BUILD_BENCH)
     FetchContent_MakeAvailable(benchmark)
 
     file(GLOB MODSYNTH_BENCH_SOURCES CONFIGURE_DEPENDS bench/*.cpp)
+    if(NOT MODSYNTH_PARALLEL)
+        list(FILTER MODSYNTH_BENCH_SOURCES EXCLUDE REGEX "ParallelBench\\.cpp$")
+    endif()
     add_executable(modsynth_bench ${MODSYNTH_BENCH_SOURCES})
     target_link_libraries(modsynth_bench PRIVATE modsynth_compiler benchmark::benchmark_main)
-    target_compile_definitions(modsynth_bench PRIVATE MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes")
+    if(MODSYNTH_PARALLEL)
+        target_link_libraries(modsynth_bench PRIVATE modsynth_parallel)
+    endif()
+    target_compile_definitions(modsynth_bench PRIVATE MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes"
+        MODSYNTH_PIECES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Pieces")
 endif()
 
 if(MODSYNTH_INSTALL)

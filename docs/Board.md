@@ -28,6 +28,10 @@ The firmware builds with the same toolchain as the QEMU firmware: `arm-none-eabi
 `Nucleo` uses the scalar backend and `NucleoCmsis` uses CMSIS-DSP. Run one probe tool at a time: two at once wedged the ST-LINK, and only a USB
 reset brought it back.
 
+`-DMODSYNTH_COST_LIMIT=OFF` builds firmware that refuses no Program for what its frames cost, for measuring the cost table below. Its `info`
+says `budget=0`, and `tools/Board.py` then compiles requests without the cost table, so a Program over budget reaches the board and plays late.
+`firmware/Check.sh` fails either build over 112 KB of flash: the scalar one takes 94.8 KB and the CMSIS one 96.7 KB.
+
 ## Talking to it
 
 `tools/Board.py` finds the port by itself, and `uv run` installs pyserial for it. A request is compiled against the board's profile first,
@@ -35,15 +39,15 @@ which needs the Python module: add `--with dist/modsynth-*.whl` after `uv build`
 
 | Command | What it does |
 |---|---|
-| `info` | The build, the room it has, and the image it stores |
+| `info` | The build, the room it has, its budget a frame, and the image it stores with what it could cost a frame |
 | `send IMAGE [--play]` | Sends an image, or compiles a request and sends that |
 | `play`, `stop` | Plays from the start, or stops the transport |
-| `stats` | Cycles per frame while playing, underruns, and the most voices that sounded at once |
+| `stats` | Cycles per frame while playing, what playing a frame out took besides, underruns, and the most voices that sounded at once |
 | `render [--frames N] [--out FILE]` | Renders the stored image away from the DAC, at 48 kHz unless `--rate` says otherwise, and times every frame |
 | `check` | Sends each golden image, renders it, and compares the audio with its mono golden render |
 | `test` | Damages and cuts transfers on purpose, and checks that the board keeps the image it had |
 | `loopback` | Reads PA4 back with the ADC while something plays, and fits it to what the DAC was given |
-| `time PATH...` | Sends each image or request in turn and reports its cycles per frame |
+| `time PATH... [--bench]` | Sends each image or request in turn and reports its cycles per frame, with `--bench` for as many frames as `tools/Bench.py` gives it |
 
 ## Storage
 
@@ -115,13 +119,39 @@ The report's `target` says how much of each it uses.
 | `image_bytes`, `chunks` | The largest image a slot stores, and the chunks its table holds |
 | `opcodes` | The opcodes it runs |
 | `layout` | The sizes and alignments its engine lays memory out with, and each opcode's state size |
+| `cost` | What each kind of work costs a frame in its cycles, and its budget, below |
 
 The rate is 80 MHz over 1,667 timer ticks, which is 47,990.4 Hz. 48 kHz isn't a whole number of ticks. Telling the engine the true rate keeps
 pitch right, and only frame-timed behaviour moves, by 0.02%. The clock is MSI locked to the board's 32.768 kHz crystal.
 
+## The cost limit
+
+A request compiled for the board fails if a Program's dearest frame could take more than its budget, and the board's loader refuses the same
+images, so whatever it plays fits every frame. The dearest frame counts every voice of every track sounding. Section 15 of the design says
+what else it counts and how it was checked. The budget is 51,944 cycles: the 53,344 of a frame at 47,990.4 Hz, less 1,400 for playing the frame
+out, the most `stats` measured with a heavy load. `info` gives the stored image's `need_cycles`.
+
+`firmware/NucleoCosts.hpp` holds both builds' tables, which `tools/Bench.py costs` writes from two sources:
+- `bench/M4.json`, every calibration Program's instructions on QEMU, which CI holds the code to.
+- `firmware/Profiles/Calibration.json`, what each kind of work took a cycle on this board.
+
+A change in the code reprices itself from QEMU. To measure the board's ratios again, after changing what a kernel does to memory or flash:
+
+    tools/Bench.py m4                              # in the firmware container, then copy build/bench back
+    tools/Bench.py baseline
+    cmake -S firmware -B build/board-uncapped ... -DMODSYNTH_COST_LIMIT=OFF   # flash its Nucleo.elf, then
+    uv run --no-project --with dist/modsynth-*.whl --with pyserial tools/Board.py time --bench build/bench/Calibration --json scalar.json
+    # the same with NucleoCmsis.elf into cmsis.json
+    tools/Bench.py calibrate scalar.json cmsis.json --output 1400 --date YYYY-MM-DD
+    tools/Bench.py costs
+
+Then build both firmwares as usual, copy their profiles into `firmware/Profiles`, and time the recipes with the limit on: none may exceed its
+budget.
+
 ## Measured on the board
 
-All of this was measured on one board, on 2026-11-02.
+All of this was measured on one board, on 2026-11-02. Milestone 7 measured the cost table and the cycles below, after its tuning, and Milestone
+5 the rest.
 
 **Golden audio.** `check` renders every frame-32 golden image on the board:
 - **Scalar build:** every sample's bits match the mono golden renders.
@@ -143,29 +173,35 @@ All of this was measured on one board, on 2026-11-02.
 A 21 KB image takes 0.8 s to send.
 
 **Cycles.** These are cycles per 32-sample frame at 48 kHz, with images in flash, 4 wait states, and the ART caches on. Each recipe was
-rendered to its end and its tail. The budget is 53,333 cycles a frame.
+rendered to its end and its tail, with the limit on. The budget is 51,944 cycles a frame.
 
 | Recipes | How they fit |
 |---|---|
-| 53 | Every frame within budget. The heaviest are Trumpet (worst frame 75%), Chorus (74%), LoopedSample (72%), PluckedString (71%), FrenchHorn and SidechainDucking (70%). |
-| Vocoder, DetunedSupersaw, DrumLoop | Within budget on average, at 84%, 87% and 60%. Some frames are over, worst 113%, 114% and 121%. |
-| DrawbarOrgan, PhaseModElectricPiano, AdditiveBell | Over budget on average, at 136%, 117% and 164%. |
-| Reverb, PingPongDelay | Don't load. They need 188 KB and 231 KB of bulk memory, and the board has 64 KB. |
+| 48 | Compile, and every frame within budget on both builds. The dearest are Chorus (worst frame 70%), StereoUnison (64%), PluckedString (63%), WavetableMorph and Phaser (59%). The median takes 22% of the core on average. |
+| AdditiveBell, DetunedSupersaw, DrawbarOrgan, DrumLoop, PhaseModElectricPiano, Vocoder | Refused. They ran over budget in Milestone 5, at 113% to 208% in their worst frame. |
+| FrenchHorn, LoopedSample, PrecutGrainCloud, SidechainDucking, Trumpet | Refused. They ran within budget in Milestone 5, at 25% to 75%, but could exceed it with every voice sounding. |
+| Reverb, PingPongDelay | Refused. They need 188 KB and 231 KB of bulk memory, and the board has 64 KB. |
 
-The 53 are Arpeggio, AudioRateAmplitudeModulation, AutoPan, ChannelAftertouch, ChebyshevWavefold, Chorus, Clap, Compressor,
-CubicSaturation, CurvedEnvelope, Flanger, FormantVowels, FrenchHorn, HaasWidener, HiHat, InsertFilterSweep, KeyboardTrackedFilter, Kick808,
-LegatoPortamento, LoopedSample, LoopingEnvelope, MacroKnob, MonoLead, OneShotSample, ParametricEq, PerVoiceLfo, Phaser, PitchBend,
-PluckedString, PrecutGrainCloud, PwmPad, ResonantSawBass, RingModulation, SampleAndHold, SawLfoFilter, SharedLfo, SidechainDucking, Snare,
-SquareLfoFilter, StepSequencer, StereoUnison, SubOscillator, TempoSyncedLfo, TranceGate, Tremolo, TriangleLfoFilter, Trumpet,
-VelocityFilterAmp, VelocityLayers, VibratoModWheel, VoiceStealing, WavetableMorph and Wind.
+The 48 cost 5.8% fewer cycles than in Milestone 5 at the median, and up to 13% fewer. Their bounds were 1.20 to 2.39 times their worst frames.
+`docs/Benchmarks.md` says how many voices each track of every recipe could have.
 
-- **The median** recipe takes 26% of the core on average.
-- **One voice:** a patch playing a single voice costs 203 to 400 cycles a sample, including the mixer. Section 15's model gave 160 to 200 for
-  the voice alone.
-- **The demo:** 106% on average and 128% in its worst frame, so it doesn't play in real time.
-- **The four pieces:** none fits. Each sends to a stereo reverb that needs 188 KB of bulk memory.
+- **One voice:** a naive saw's voice takes 1,276 cycles a frame on average, 40 a sample, mixer included, against 1,717 before this milestone's tuning. The
+  bound allows 27 of them.
+- **The demo:** refused, at 173% of a frame. It ran at 106% on average and 128% in its worst frame in Milestone 5.
+- **The four pieces:** refused. Each sends to a stereo reverb that needs 188 KB of bulk memory, more than the chip's 128 KB of RAM.
+  - **Without the reverb** they load, but they're too slow. In Milestone 5, over their first 30 s, the share of the core each took on average
+    was:
+    - BachPreludeInC: 164%, with 8 voices at most.
+    - HallOfTheMountainKing: 191%, with 14.
+    - PassionChorale: 195%, with 10.
+    - FurElise: 469%, with 20.
+  - **So a reverb that fits wouldn't be enough.** Their bounds without it are 4 to 20 times the budget.
 
-**Live playback.** The DMA plays one half of its buffer while the main loop fills the other. A half is 16 frames, 10.7 ms. Over 6 s of each:
+**Playing out.** Converting a frame for the DAC and the interrupts during it took 904 cycles a frame with a light Program and 1,338 with a
+heavy one, which is why 1,400 are held back.
+
+**Live playback.** The DMA plays one half of its buffer while the main loop fills the other. A half is 16 frames, 10.7 ms. Over 6 s of each, in
+Milestone 5:
 - LoopedSample and Vocoder never ran late.
 - DrumLoop ran late 4 times and DetunedSupersaw 14 times. Those are stretches of 16 frames that cost more than 16 frame periods.
 
@@ -173,3 +209,6 @@ VelocityFilterAmp, VelocityLayers, VibratoModWheel, VoiceStealing, WavetableMorp
 (PhaseModElectricPiano).
 
 The full tables come from `uv run --no-project --with dist/modsynth-*.whl --with pyserial tools/Board.py time examples/Recipes --json FILE`.
+
+**Calibration.** On the scalar build, steps took 1.36 (Shape) to 2.11 (Math) cycles an instruction, a frame's own work 2.54, and a note start
+4.64. On the CMSIS build, steps took 1.33 (MulS) to 2.23 (Biquad). `docs/Benchmarks.md` has every term's price.

@@ -804,8 +804,9 @@ Reading it:
 | `kMaxGlideSeconds` | 60 | one glide |
 
 These bound validation and sizing. The engine computes what a Program needs in 64 bits on every target, and the largest total these
-limits allow cannot wrap. They do not bound what a frame costs: an image can pass all of them and still be too much for a device, which
-is what the per-op cost limit in the design is for.
+limits allow cannot wrap. They do not bound what a frame costs: an image can pass all of them and still be too much for a device. A device
+refuses that image by its own cost table, which its profile carries, as section 10 of `docs/Design.md` says. That is the device's check and not
+the format's, so the same image still loads on an engine with no table.
 
 ## 10. Golden images
 

@@ -15,7 +15,7 @@ namespace modsynth_bench {
 
 using namespace modsynth;
 
-enum class Recording : u8 { None, MonoI16, StereoI16, MonoF32 };
+enum class Recording : u8 { None, MonoI16, StereoI16, MonoF32, StereoF32 };
 
 struct KernelCase {
     const char* name;
@@ -25,9 +25,12 @@ struct KernelCase {
     u8 audio = 0;      // Which Either inputs are buffers, by bit. The rest read `in`.
     int moving = -1;   // An input that changes every frame, as a modulated one does
     float to = 0.0f;   // and the value it alternates with
+    u8 wobble = 0;     // Scalar inputs, by bit, that each move by half their value every frame
+    u8 square = 0;     // Buffer inputs, by bit, that hold -1 and 1 in turn rather than noise
     u32 stage = 0;     // The stage an Env is held in
     Recording recording = Recording::None;
-    u32 rows = 1;  // How many recordings a Sample3 plays at once: two for a velocity crossfade
+    u32 rows = 1;     // How many recordings a Sample3 plays at once: two for a velocity crossfade
+    u32 written = 0;  // How much of its delay line has been written, each frame, or 0 for all of it
 };
 
 inline constexpr u8 kLowPass = static_cast<u8>(BiquadMode::LowPass);
@@ -44,8 +47,12 @@ inline constexpr KernelCase kKernelCases[] = {
     {.name = "Pulse, naive", .op = Op::Pulse, .mode = kNaive, .in = {440.0f, 0.5f}},
     {.name = "Pulse, 110 Hz", .op = Op::Pulse, .in = {110.0f, 0.5f}},
     {.name = "Pulse, 4186 Hz", .op = Op::Pulse, .in = {4186.0f, 0.5f}},
+    // At half the rate every sample is beside a jump, which is the most a band-limited wave pays.
+    {.name = "Saw, Nyquist", .op = Op::Saw, .in = {24000.0f}},
+    {.name = "Pulse, Nyquist", .op = Op::Pulse, .in = {24000.0f, 0.5f}},
     {.name = "Triangle", .op = Op::Triangle, .in = {440.0f}},
     {.name = "Tone", .op = Op::Tone, .in = {440.0f}},
+    {.name = "Tone, at 0 Hz", .op = Op::Tone},  // It has no step to hold, so it works one out again every frame
     {.name = "Biquad, still", .op = Op::Biquad, .mode = kLowPass, .in = {0.0f, 1200.0f, 0.7f}},
     {.name = "Biquad, moving",
      .op = Op::Biquad,
@@ -53,20 +60,96 @@ inline constexpr KernelCase kKernelCases[] = {
      .in = {0.0f, 1200.0f, 0.7f},
      .moving = 1,
      .to = 1300.0f},
+    {.name = "Biquad, high pass, moving",
+     .op = Op::Biquad,
+     .mode = static_cast<u8>(BiquadMode::HighPass),
+     .in = {0.0f, 1200.0f, 0.7f},
+     .moving = 1,
+     .to = 1300.0f},
+    {.name = "Biquad, band pass, moving",
+     .op = Op::Biquad,
+     .mode = static_cast<u8>(BiquadMode::BandPass),
+     .in = {0.0f, 1200.0f, 0.7f},
+     .moving = 1,
+     .to = 1300.0f},
     {.name = "Env, attack", .op = Op::Env, .in = {1.0f, 1.0f, 0.2f, 1.0f}, .stage = 1},
     {.name = "Env, decay", .op = Op::Env, .in = {1.0f, 1.0f, 0.2f, 1.0f}, .stage = 2},
     {.name = "Env, sustain", .op = Op::Env, .in = {1.0f, 1.0f, 0.2f, 1.0f}, .stage = 3},
     {.name = "Env, release", .op = Op::Env, .in = {1.0f, 1.0f, 0.2f, 1.0f}, .stage = 4},
+    {.name = "Env, decay, moving", .op = Op::Env, .in = {1.0f, 1.0f, 0.2f, 1.0f}, .wobble = 0b1011, .stage = 2},
     {.name = "Sample, mono i16", .op = Op::Sample, .in = {1.19f}, .recording = Recording::MonoI16},
     {.name = "Sample, mono f32", .op = Op::Sample, .in = {1.19f}, .recording = Recording::MonoF32},
     {.name = "Sample, stereo i16", .op = Op::Sample, .in = {1.19f}, .recording = Recording::StereoI16},
+    {.name = "Sample, stereo f32", .op = Op::Sample, .in = {1.19f}, .recording = Recording::StereoF32},
+    {.name = "Sample, mono f32, moving",
+     .op = Op::Sample,
+     .in = {1.19f},
+     .wobble = 0b1,
+     .recording = Recording::MonoF32},
     {.name = "Sample2, mono i16", .op = Op::Sample2, .in = {64.0f, 0.0f}, .recording = Recording::MonoI16},
     {.name = "Sample2, stereo i16", .op = Op::Sample2, .in = {64.0f, 0.0f}, .recording = Recording::StereoI16},
+    {.name = "Sample2, stereo i16, moving",
+     .op = Op::Sample2,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::StereoI16},
+    {.name = "Sample2, stereo i16, reverse, moving",
+     .op = Op::Sample2,
+     .mode = kSampleReverse,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::StereoI16},
+    {.name = "Sample2, stereo i16, tail, moving",
+     .op = Op::Sample2,
+     .mode = kSampleTail,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::StereoI16},
+    {.name = "Sample2, mono f32, moving",
+     .op = Op::Sample2,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::MonoF32},
     {.name = "Sample3, mono i16", .op = Op::Sample3, .in = {64.0f, 0.0f}, .recording = Recording::MonoI16},
+    {.name = "Sample3, stereo i16, moving",
+     .op = Op::Sample3,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::StereoI16},
+    {.name = "Sample3, stereo i16, reverse, moving",
+     .op = Op::Sample3,
+     .mode = kSampleReverse,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::StereoI16},
+    {.name = "Sample3, mono f32, moving",
+     .op = Op::Sample3,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::MonoF32},
     {.name = "Sample3, crossfade, mono i16",
      .op = Op::Sample3,
      .in = {64.0f, 0.0f},
      .recording = Recording::MonoI16,
+     .rows = 2},
+    {.name = "Sample3, crossfade, stereo i16, moving",
+     .op = Op::Sample3,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::StereoI16,
+     .rows = 2},
+    {.name = "Sample3, crossfade, stereo i16, reverse, moving",
+     .op = Op::Sample3,
+     .mode = kSampleReverse,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::StereoI16,
+     .rows = 2},
+    {.name = "Sample3, crossfade, mono f32, moving",
+     .op = Op::Sample3,
+     .in = {64.0f, 0.0f},
+     .wobble = 0b01,
+     .recording = Recording::MonoF32,
      .rows = 2},
     {.name = "Mul", .op = Op::Mul},
     {.name = "MulS", .op = Op::MulS, .in = {0.0f, 0.5f}},
@@ -78,7 +161,12 @@ inline constexpr KernelCase kKernelCases[] = {
     {.name = "DelayRead, feedback", .op = Op::DelayRead, .mode = kReadBeforeWrite, .in = {0.05f}},
     {.name = "Comb", .op = Op::Comb, .in = {0.0f, 0.05f, 0.8f, 0.2f}},
     {.name = "Allpass", .op = Op::Allpass, .in = {0.0f, 0.05f, 0.5f}},
+    // A line still filling, as one is in a note's first frames: half the frame reads silence and half the line.
+    {.name = "Comb, filling", .op = Op::Comb, .in = {0.0f, 0.05f, 0.8f, 0.2f}, .written = 2400 - 16},
+    {.name = "Allpass, filling", .op = Op::Allpass, .in = {0.0f, 0.05f, 0.5f}, .written = 2400 - 16},
+    {.name = "DelayRead, filling", .op = Op::DelayRead, .in = {0.05f}, .written = 2400 + 16},
     {.name = "Follow", .op = Op::Follow, .in = {0.0f, 0.1f}},
+    {.name = "Follow, moving", .op = Op::Follow, .in = {0.0f, 0.1f}, .wobble = 0b10},
     {.name = "KMul", .op = Op::KMul, .in = {2.0f, 3.0f}},
     {.name = "KAdd", .op = Op::KAdd, .in = {2.0f, 3.0f}},
     {.name = "KMtoF, still", .op = Op::KMtoF, .in = {69.0f}},
@@ -103,6 +191,13 @@ inline constexpr KernelCase kKernelCases[] = {
      .mode = wave(OscModMode::Saw),
      .in = {4186.0f},
      .audio = 0b0100},
+    // A rising edge on sync every other sample, which has a sine read its wave three times a sample there.
+    {.name = "OscMod, sine, sync every other sample",
+     .op = Op::OscMod,
+     .mode = wave(OscModMode::Sine),
+     .in = {440.0f, 0, 0, 0.2f},
+     .audio = 0b0110,
+     .square = 0b0100},
     {.name = "OscMod, pulse, 4186 Hz", .op = Op::OscMod, .mode = wave(OscModMode::Pulse), .in = {4186.0f, 0, 0, 0.5f}},
     {.name = "OscMod, saw, naive", .op = Op::OscMod, .mode = wave(OscModMode::NaiveSaw), .in = {440.0f}},
     {.name = "OscMod, pulse, naive",
@@ -138,7 +233,9 @@ class KernelRig {
    public:
     using K = Kernels<C, B>;
 
-    void begin(const KernelCase& k) {
+    // With `warm`, the first frames run before anything is measured, since a step's first frame of a note does work
+    // the rest don't, and that is measured on its own.
+    void begin(const KernelCase& k, bool warm = true) {
         *this = KernelRig{};
         case_ = &k;
         std::memcpy(constants_, k.in, sizeof(constants_));
@@ -147,6 +244,10 @@ class KernelRig {
             random = random * 1664525u + 1013904223u;
             x = static_cast<float>(random >> 8) * 1.1920929e-7f - 1.0f;
         }
+        for (u32 i = 0; i < 4; ++i) {
+            if (!(k.square >> i & 1)) continue;
+            for (u32 n = 0; n < N; ++n) buffers_[(kFirstInput + i) * N + n] = n % 2 == 0 ? -1.0f : 1.0f;
+        }
         for (u32 i = 0; i < kTable; ++i) table_[i] = sin_turns(static_cast<float>(i) / static_cast<float>(kTable));
         table_[kTable] = table_[0];
         for (u32 i = 0; i < 2 * (kRecording + 1); ++i) {
@@ -154,16 +255,19 @@ class KernelRig {
             floats_[i] = table_[i % kTable];
         }
         bind(op_signature(k.op));
+        if (!warm) return;
         for (u32 f = 0; f < kWarmup; ++f)
             frame();  // A one-off cost, such as a sampler choosing its zone, isn't what's measured
     }
 
     void frame() {
         const KernelCase& k = *case_;
-        if (k.moving >= 0) {
-            constants_[k.moving] = odd_ ? k.in[k.moving] : k.to;
-            odd_ = !odd_;
+        if (k.moving >= 0) constants_[k.moving] = odd_ ? k.in[k.moving] : k.to;
+        for (u32 i = 0; k.wobble != 0 && i < 4; ++i) {
+            if (k.wobble >> i & 1) constants_[i] = odd_ ? k.in[i] : k.in[i] * 1.5f;
         }
+        odd_ = !odd_;
+        if (k.written != 0) line_.written = k.written;
         if (k.op == Op::Env) {
             auto& st = *reinterpret_cast<typename K::EnvState*>(state_);
             st.stage = k.stage;
@@ -198,14 +302,15 @@ class KernelRig {
                                 : DecodedOperand{static_cast<u16>(Bank::Const), i};
         }
         const auto asset = [&]() {
-            const bool f32 = k.recording == Recording::MonoF32;
+            const bool f32 = k.recording == Recording::MonoF32 || k.recording == Recording::StereoF32;
             return BoundAsset{
                 .data = f32 ? reinterpret_cast<const std::byte*>(floats_) : reinterpret_cast<const std::byte*>(whole_),
                 .native_rate = 48000.0f,
                 .frames = kRecording,
                 .loop_start = 0,
                 .loop_end = kRecording,
-                .channels = static_cast<u8>(k.recording == Recording::StereoI16 ? 2 : 1),
+                .channels =
+                    static_cast<u8>(k.recording == Recording::StereoI16 || k.recording == Recording::StereoF32 ? 2 : 1),
                 .encoding = static_cast<u8>(f32 ? AssetEncoding::F32 : AssetEncoding::I16)};
         };
         if (k.op == Op::Osc || k.op == Op::Shape) resources_[0].table = {table_, kTable, 32 - 11};

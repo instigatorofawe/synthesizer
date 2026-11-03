@@ -89,6 +89,8 @@ add_firmware(StereoCmsis128 2 cmsis 128)
 # The NUCLEO-L476RG: mono, since the DAC has one free channel. tools/Board.py talks to it. Each image slot is this big,
 # and slot A ends bank 1, so what is left of bank 1 below it holds the firmware.
 set(MODSYNTH_SLOT_KB 384)
+# Off builds firmware that refuses no Program for what its frames cost, for measuring the cost table on the board.
+option(MODSYNTH_COST_LIMIT "Refuse on the board a Program whose frame could take longer than a frame" ON)
 math(EXPR MODSYNTH_SLOT_A "0x08080000 - ${MODSYNTH_SLOT_KB} * 1024" OUTPUT_FORMAT HEXADECIMAL)
 foreach(build "Nucleo scalar" "NucleoCmsis cmsis")
     separate_arguments(build)
@@ -99,6 +101,9 @@ foreach(build "Nucleo scalar" "NucleoCmsis cmsis")
     target_compile_definitions(${name} PRIVATE STM32L476xx MODSYNTH_FRAME=32 MODSYNTH_SLOT_KB=${MODSYNTH_SLOT_KB}
         MODSYNTH_BULK_KB=64)
     target_link_options(${name} PRIVATE -Wl,--defsym=__slot_a=${MODSYNTH_SLOT_A})
+    if(NOT MODSYNTH_COST_LIMIT)
+        target_compile_definitions(${name} PRIVATE MODSYNTH_UNCAPPED)
+    endif()
     target_include_directories(${name} SYSTEM PRIVATE ${cmsis_device_l4_SOURCE_DIR}/Include
         ${cmsis_core_SOURCE_DIR}/CMSIS/Core/Include)
     # The profile the compiler checks requests against. Check.sh compares it with the one in firmware/Profiles.
@@ -112,7 +117,7 @@ endforeach()
 # Instruction counts for tools/Bench.py, which compiles the recipes these link. On the mps2-an386 as they need the room.
 set(MODSYNTH_BENCH_RECIPES "" CACHE FILEPATH "The list of recipes tools/Bench.py wrote")
 if(MODSYNTH_BENCH_RECIPES)
-    foreach(build "BenchStereo 2 scalar" "BenchMono 1 scalar" "BenchCmsis 2 cmsis")
+    foreach(build "BenchStereo 2 scalar" "BenchMono 1 scalar" "BenchCmsis 2 cmsis" "BenchMonoCmsis 1 cmsis")
         separate_arguments(build)
         list(GET build 0 name)
         list(GET build 1 channels)

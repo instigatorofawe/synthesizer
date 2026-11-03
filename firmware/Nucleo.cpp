@@ -12,6 +12,8 @@
 
 #include <modsynth/Modsynth.hpp>
 #include <modsynth/Profile.hpp>
+
+#include "NucleoCosts.hpp"
 #ifdef MODSYNTH_CMSIS
 #include <modsynth/CmsisBackend.hpp>
 #endif
@@ -21,12 +23,21 @@ using namespace modsynth;
 #ifdef MODSYNTH_CMSIS
 using Dsp = CmsisBackend;
 constexpr const char* kBackend = "cmsis";
+constexpr modsynth::Costs kLimit = kNucleoCmsisCosts;
 #else
 using Dsp = ScalarBackend;
 constexpr const char* kBackend = "scalar";
+constexpr modsynth::Costs kLimit = kNucleoCosts;
 #endif
 
 namespace {
+
+// A build for measuring what Programs cost, which is how the cost table is made, refuses none of them.
+#ifdef MODSYNTH_UNCAPPED
+constexpr modsynth::Costs kCosts{};
+#else
+constexpr modsynth::Costs kCosts = kLimit;
+#endif
 
 // Clocks and rates -------------------------------------------------------------------------------------------------
 
@@ -75,6 +86,7 @@ constexpr ProfileText kProfileText = write_profile<Engine>({
     .bulk = sizeof g_bulk,
     .image_bytes = kCapacity,
     .chunks = std::size(g_refs),
+    .cost = kCosts.budget != 0 ? &kCosts : nullptr,
 });
 [[gnu::section(".profile"), gnu::used]] constexpr auto kProfile = kProfileText.text;
 
@@ -358,17 +370,25 @@ void render_frame(Timing& timing) {
     timing.add(cycles() - start);
 }
 
+u64 g_output_cycles = 0, g_output_frames = 0;  // what filling the DAC's buffer took besides rendering
+
 void fill(u32 half) {
     u16* dst = g_dac + half * kHalfSamples;
+    const u32 start = cycles();
+    u64 rendering = 0;
     for (u32 f = 0; f < kHalfFrames; ++f) {
         if (g_engine) {
+            const u64 before = g_play_timing.total;
             render_frame(g_play_timing);
+            rendering += g_play_timing.total - before;
             g_peak_voices = std::max(g_peak_voices, g_engine->active_voices());
         } else {
             std::fill(g_out, g_out + N, 0.0f);
         }
         for (u32 i = 0; i < N; ++i) dst[f * N + i] = to_dac(g_out[i]);
     }
+    g_output_cycles += cycles() - start - rendering;
+    g_output_frames += kHalfFrames;
 }
 
 void led(bool on) { GPIOA->BSRR = on ? GPIO_BSRR_BS5 : GPIO_BSRR_BR5; }
@@ -480,6 +500,7 @@ void capture() {
 int g_active = -1;  // the slot that is committed and loaded, or -1
 u32 g_sequence = 0;
 MemorySizes g_need{};
+u64 g_cycles = 0;  // the most a frame of the loaded Program can cost
 
 // Builds an engine from nothing and loads an image into it. On failure, `why` says what went wrong.
 bool load_image(const std::byte* image, u32 size, float rate, Text& why) {
@@ -499,6 +520,12 @@ bool load_image(const std::byte* image, u32 size, float rate, Text& why) {
     }
     const u64 program = loader.program_hash(0);
     g_need = Engine::bytes_required(g_table, program, rate);
+    g_cycles = Engine::frame_cost(g_table, program, rate, kCosts);
+    // A Program that could take longer than a frame would play late, so it doesn't play at all.
+    if (kCosts.budget != 0 && g_cycles > kCosts.budget) {
+        why.add("a frame could take ").add(g_cycles).add(" cycles, and this board has ").add(kCosts.budget);
+        return false;
+    }
     auto* engine = new (g_engine_storage) Engine({std::span(g_fast), std::span(g_bulk), rate});
     engine->bind(g_table, program);
     while (engine->pump(1u << 16)) {
@@ -670,13 +697,13 @@ void info() {
     t.pair("board", "NUCLEO-L476RG").pair("backend", kBackend).pair("frame", N).pair("channels", 1);
     t.pair("core_hz", kCoreHz).pair("rate_millihertz", static_cast<u64>(kPlayRate * 1000.0f));
     t.pair("fast", sizeof g_fast).pair("bulk", sizeof g_bulk).pair("chunks", std::size(g_refs));
-    t.pair("slot_capacity", kCapacity).pair("revision", kFormatRevision);
+    t.pair("slot_capacity", kCapacity).pair("revision", kFormatRevision).pair("budget", kCosts.budget);
     t.pair("slot", g_active < 0 ? "none" : g_active == 0 ? "A" : "B");
     if (g_active >= 0) {
         SlotHeader h;
         (void)read_slot(static_cast<u32>(g_active), h);
         t.pair("sequence", h.sequence).pair("image", h.size).pair("need_fast", g_need.fast);
-        t.pair("need_bulk", g_need.bulk);
+        t.pair("need_bulk", g_need.bulk).pair("need_cycles", g_cycles);
     }
     send_text('i', t.data);
 }
@@ -687,6 +714,7 @@ void stats() {
     t.pair("underruns", g_underruns).pair("serial_errors", g_serial_errors).pair("peak_voices", g_peak_voices);
     t.pair("playing", g_engine && g_engine->playing() ? 1 : 0);
     t.pair("guard_trips", g_engine ? g_engine->guard_trips() : 0);
+    t.pair("output", g_output_frames ? g_output_cycles / g_output_frames : 0);
     send_text('i', t.data);
 }
 
@@ -695,6 +723,7 @@ void play() {
     g_engine->send({.kind = EventKind::Locate, .tick = 0});
     g_engine->send({.kind = EventKind::Play});
     g_play_timing = {};
+    g_output_cycles = g_output_frames = 0;
     g_underruns = 0;
     g_peak_voices = 0;
     start_audio();

@@ -79,19 +79,24 @@ jobs:
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
 
-  # The same headers cross-compiled for Cortex-M4, run on QEMU's L475, and compared with a native render.
+  # The same headers cross-compiled for Cortex-M4, run on QEMU's L475, and compared with a native render. Then every
+  # instruction count is held to bench/M4.json, which came from this Debian release's toolchain, so a count that moved
+  # moved because the code did.
   firmware:
     runs-on: ubuntu-latest
+    container: python:3.14-trixie
     steps:
-      - uses: actions/checkout@v7
       - run: >-
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib qemu-system-arm ninja-build
+          apt-get update && apt-get install -y --no-install-recommends
+          gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib qemu-system-arm ninja-build cmake g++
+          git
+      - uses: actions/checkout@v7
       - run: firmware/Check.sh
         env:
           FUZZ_SECONDS: 60
           FUZZ_RANDOM: ${{ github.run_id }}
       - run: tools/Bench.py m4
+      - run: tools/Bench.py check
 
   # Coverage-guided, with sanitizers, from the golden images. Each run takes a new random seed, and prints it, so CI explores
   # further every time and a failure prints a recipe that replays anywhere.

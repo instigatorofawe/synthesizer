@@ -1,4 +1,4 @@
-# modsynth design, revision 24
+# modsynth design, revision 25
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -968,6 +968,24 @@ clip as a clicked note does. The rules are pure functions over a clip and a curs
 which lets them write into a track the image leaves out for having no notes yet. C and V step the velocity of new notes, clicked or
 stepped, by 10, and Vel beside Draw shows it.
 
+Recording writes what the keys play while the song plays, as Live and Logic do with quantizing on. ● in the top bar, or Shift+R in the
+Song view, starts a take on the chosen track. With the song stopped, a bar is counted in with a click on each beat, and then the song
+plays from the playhead, or with a loop on from the loop's start. With it playing, the take starts at once. Each note is written as its
+key comes up: its start at the nearest line of Snap, its length in whole Snap steps and never less than one, at the Vel velocity. It goes
+into the clip placed where it was played, back through the placement's transpose and velocity. In a repeat or round a loop that is the
+same clip, so each pass adds to it, and a note at the start and pitch of one already there replaces it. One that snaps to a loop's end
+goes at its start, where the take goes on from. Past the end of the clip it was writing into, the take grows that clip as a clicked note
+would, and anywhere else it starts a clip of whole bars in the gap. ● again stops recording and lets the song play on, and Stop or Space
+stops both. A take is one step to undo. The rules are pure functions in `Recording.ts`.
+
+The timing is the worklet's, so the engine doesn't change. The page sends each key with when it went down on the page's clock, turned
+into the audio clock's time of the sound that was coming out then. The worklet keeps where the song was for each of the last 512 render
+quanta and stamps the key with the tick being heard, so neither the output's latency nor the key's way to the audio thread moves a note.
+It also counts how far the song has gone, through a loop's wrap, so a note held round one keeps its length. It plays the count-in and the
+click itself, mixed in after the taps, so no meter shows the click and Export WAV never has it, and it lets a take play on past the end of
+the song, since the clip grows. While a take runs the song's image keeps every track, as the keys' own image does, so a track with no notes
+yet plays in the song from its first one. The take waits for that image before it counts in.
+
 New timeline makes a song that sounds at once, as FL Studio's and Live's templates do (`Template.ts`): a track playing a
 built-in electric piano, Für Elise's, and an empty four-bar clip at bar 1, chosen and open in the roll around middle C. It is
 an ordinary timeline, saved as it is made, which undoes and compiles as any other. An electric piano is what Logic and
@@ -1364,6 +1382,30 @@ here that the user hasn't weighed in on:
     duplicate past a clip's end grows it.
 - **Tests:** a meter's hold starts again at Play and when a new image begins, since a tap may follow another chain then. The audio
   clock is the AudioContext's own.
+
+**Built for the UX sprint, wave 3** (revision 25), as section 19 describes. This wave builds recording with snap on Shift+R, the last of
+the sprint's first two stages. Choices made here that the user hasn't weighed in on:
+- **Starting:**
+  - A take starts at the playhead, or with a loop on at the loop's start, so its first pass is a whole one. The count-in is one bar at the
+    tempo there. With the song playing there is none, and the take starts where the song is.
+  - A key pressed in the count-in is written where the song would have been, so a pickup lands before the start. One that would land
+    before the song's start is left out, unless it snaps to it.
+  - The take snaps to the Snap and writes at the Vel it started with. It turns step entry off.
+- **Where notes go:**
+  - Into the clip under the note's snapped start. A note held over the clip's end keeps its length, as a stepped one does.
+  - Only the clip the take wrote into last grows, and only one placed once with its whole length playing, where growing runs into
+    nothing. Otherwise the take starts a clip after it. A new clip is named as a drawn one is.
+  - The take writes into its own track. Choosing another track while it runs plays that track and records nothing from it.
+  - Only the top bar's keys and the computer keyboard record, not the roll's key column.
+- **Stopping:** ● during a take stops recording and leaves the song playing, as Live's and Logic's punch out. With the song playing,
+  ● punches in. Stop and Space stop both. Notes still held when a take stops end there.
+- **The click** plays only while a take runs, with no switch of its own and no metronome for Play. It is a 30 ms tone at about -12 dBFS,
+  1760 Hz on a bar's first beat and 1320 Hz on the others.
+- **The image:** while a take runs, the song's image keeps every track and slot (the compiler's `live`, as for the keys' own image), so
+  a take begins with a compile. Its button blinks until that image is playing. A song that doesn't compile can't be recorded into.
+  Once the take is done the image goes back to leaving out tracks with no notes, so what is heard is again what Export WAV writes.
+- **Tests:** the engine's state carries the take's phase, the beats of the count-in left and a count of clicks, which the e2e tests wait
+  on.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

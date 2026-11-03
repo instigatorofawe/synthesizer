@@ -8,6 +8,7 @@
 		LOAD_ERRORS,
 		tapTargets,
 		type EngineState,
+		type PlayedKey,
 		type Probe,
 		type SongControls,
 		type TapTarget
@@ -33,13 +34,16 @@
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
+	import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
 	import {
+		BEATS_PER_BAR,
 		mixWrites,
 		patchUses,
 		position,
 		replacePatch,
 		settlingWrites,
 		soloed,
+		tempoAt,
 		trackKey,
 		type PatchUse
 	} from '#lib/TimelineEdit.ts';
@@ -420,8 +424,10 @@
 			: { patches: library, assets };
 		const timeline = checked.success ? soloed(timelineParsed.value as Timeline, solo) : timelineParsed.value;
 		const programs = [{ id: saved.id, name: timelineName, timeline: timeline as Timeline }];
+		// While a take runs the image keeps every track, as the keys' own image does, so a track recorded into from nothing
+		// plays in the song from its first note.
 		return {
-			request: buildRequest(reached.patches, reached.assets, programs),
+			request: buildRequest(reached.patches, reached.assets, programs, { live: keepTracks }),
 			doc: checked.success ? soloed(checked.data, solo) : undefined
 		};
 	}
@@ -502,6 +508,10 @@
 			if (built.doc) compiledFrom.set(result.report, built.doc);
 			song = result;
 			if (result.report.ok) goodSong = result;
+			else if (take && takePhase === 'arming') {
+				take = null;
+				say("The song doesn't compile, so it can't be recorded into. The light says what's wrong.");
+			}
 		} else {
 			alone = result;
 			if (result.report.ok) goodAlone = result;
@@ -520,7 +530,9 @@
 			const first = shownSong === '';
 			shownSong = key;
 			if (first) return;
-			song = goodSong = null;
+			if (take) endTake();
+			take = null;
+			song = goodSong = liveSong = null;
 			sent.song = '';
 			songTick = 0;
 			solo = new Set();
@@ -564,7 +576,7 @@
 	// What each image is made of. Reading it here is what runs these again when any of it changes, and an image whose request
 	// hasn't changed isn't compiled again.
 	$effect(() => {
-		void [recipe, saved, timelineText, timelineName, library, assets, fetchingAssets, solo];
+		void [recipe, saved, timelineText, timelineName, library, assets, fetchingAssets, solo, keepTracks];
 		schedule('song');
 	});
 	$effect(() => {
@@ -622,7 +634,10 @@
 
 	// Stop, and pressed again once stopped, back to the start, as most DAWs do. A laptop may have no Home key.
 	function stop() {
-		if (songPlaying) engine.stop();
+		if (take) {
+			endTake();
+			engine.stop();
+		} else if (songPlaying) engine.stop();
 		else toStart();
 	}
 
@@ -686,6 +701,7 @@
 	const keysWhere = $derived.by(() => {
 		if (view === 'song') {
 			const name = chosenName || `track ${selectedTrack}`;
+			if (take && take.track === selectedTrack) return `Keys play ${name}, and the take records them.`;
 			if (chosenIndex !== null) return `Keys play ${name}.`;
 			if (aloneTrack) return `Keys play ${name}, on its own until it has notes.`;
 			if (selectedTrack === null) return 'Choose a track for the keys to play.';
@@ -698,28 +714,29 @@
 	});
 
 	// Where each key held down went, so it is let go there though the view or the chosen track changed meanwhile.
-	const sounding = new Map<number, { source: Source; track: number }>();
+	const sounding = new Map<number, { source: Source; track: number; stamped: boolean }>();
 
 	// While step entry is on, the keys in the Song view also write into the clip in the roll, which they can do on a track
 	// that is silent because it has no notes yet.
 	let songEditor = $state<ReturnType<typeof TimelineEditor>>();
 	let stepWriting = $state(false);
 
-	function keyNote(note: number, on: boolean) {
+	function keyNote(note: number, on: boolean, at?: number) {
 		// What is written doesn't change what is heard. A key let go goes to step entry whatever the view, since it may have
-		// started a chord there, which waits for it.
-		if (!on || (view === 'song' && stepWriting)) songEditor?.stepKey(note, on);
-		soundNote(note, on);
+		// started a chord there, which waits for it. While a take runs, the take writes what is played instead.
+		if (!on || (view === 'song' && stepWriting && !take)) songEditor?.stepKey(note, on);
+		soundNote(note, on, at);
 	}
 
 	// Plays a note where the view on screen is heard, which is all the roll's audition of a track the image leaves out asks
 	// for: it mustn't reach step entry, which would write it.
-	function soundNote(note: number, on: boolean) {
+	function soundNote(note: number, on: boolean, at?: number) {
 		if (!on) {
 			const held = sounding.get(note);
 			sounding.delete(note);
-			// A note whose image has since given way to another went with it.
-			if (held && want === held.source) use(held.source, () => engine.noteOff(held.track, note));
+			// A note whose image has since given way to another went with it. One a take heard go down, it hears come up.
+			const stamp = held?.stamped ? (at ?? performance.now()) : undefined;
+			if (held && want === held.source) use(held.source, () => engine.noteOff(held.track, note, stamp));
 			return;
 		}
 		const heard = hears;
@@ -736,8 +753,142 @@
 						? { source: 'alone', track: 0 }
 						: null;
 		if (!to) return;
-		sounding.set(note, to);
-		use(to.source, () => engine.noteOn(to.track, note));
+		// A take records the keys that play its track, from the count-in on, and stamps them with when they were pressed.
+		const stamped = at !== undefined && takePhase === 'started' && to.source === 'song' && to.track === takeIndex;
+		sounding.set(note, { ...to, stamped });
+		use(to.source, () => engine.noteOn(to.track, note, 100, stamped ? at : undefined));
+	}
+
+	// ----------------------------------------------------------------------------------------------------------- recording
+
+	// Record, or Shift+R, records with snap, as Live and Logic do: a bar is counted in with a click unless the song is playing
+	// already, and then what the keys play into the chosen track is written as it is played, each note's start and length snapped
+	// to the roll's Snap, at the Vel velocity. Pressed again it stops recording and the song plays on, and Stop or Space stops
+	// both. A take is one undo step. The rules are Recording.ts's, and the timing the worklet's, which stamps each key with where
+	// the song was when what was playing then was heard, so latency moves nothing.
+	type Taking = { track: number; key: string; grid: number; velocity: number; write: Take; held: Map<number, Stamp> };
+	let take = $state.raw<Taking | null>(null);
+	let takePhase = $state<'arming' | 'started' | 'ending'>('arming');
+	let shownClip: string | null = null; // The clip the take last wrote into, which the roll shows
+	let liveSong = $state.raw<CompileReport | null>(null); // The song's image that is playing, once one is
+	const keepTracks = $derived(take !== null);
+	const takeIndex = $derived(
+		take ? (goodSong?.report.programs[0]?.tracks.find((t) => t.id === take!.track)?.index ?? null) : null
+	);
+	const takeTrack = $derived(timelineDoc?.tracks.find((t) => t.id === selectedTrack));
+	const recordWhy = $derived.by(() => {
+		if (recipe)
+			return "An example can't be recorded into. Add it to the library from its ▾ menu to record into a copy.";
+		if (view !== 'song') return 'Recording writes into the chosen track, in the Song view.';
+		if (!saved || !timelineDoc) return 'Open a timeline to record into.';
+		if (!takeTrack) return 'Choose a track to record into.';
+		if (!takeTrack.slots.length) return 'This track has no patch to play.';
+		return '';
+	});
+	const recordState = $derived.by(() => {
+		if (!take) return 'off';
+		if (takePhase === 'arming') return 'arming';
+		const now = engineState?.recording ?? 0;
+		return now === 1 ? 'counting' : now === 2 ? 'recording' : 'arming';
+	});
+	const recordTitle = $derived.by(() => {
+		const key = label('record');
+		if (recordState === 'counting') return `Counting in. Record (${key}) again, Stop or Space stops.`;
+		if (recordState === 'recording')
+			return `Recording. Record (${key}) again stops recording, and Stop or Space stops both.`;
+		if (recordWhy && !take) return `Record (${key}). ${recordWhy}`;
+		return (
+			`Record (${key}): a bar counted in, then what the keys play is written into the chosen track, snapped to ` +
+			'Snap at the Vel velocity. A loop records round it, each pass adding to the clip.'
+		);
+	});
+
+	function record() {
+		if (take) return endTake();
+		if (recordWhy || !saved || selectedTrack === null) return;
+		const settings = songEditor?.takeSettings() ?? { grid: ppq / 4, velocity: 100 };
+		const key = draftKey('timeline', saved.id);
+		history.end(key); // A take is a step of its own
+		shownClip = null;
+		takePhase = 'arming';
+		take = { track: selectedTrack, key, ...settings, write: newTake(selectedTrack), held: new Map() };
+		use('song');
+	}
+
+	// The take starts once an image that plays its track is playing: at once for a track with notes, and for one without,
+	// once the image that keeps every track has compiled.
+	$effect(() => {
+		const ready =
+			take !== null &&
+			takePhase === 'arming' &&
+			live === 'song' &&
+			!!liveSong?.programs[0]?.tracks.some((t) => t.id === take!.track);
+		if (ready) untrack(beginTake);
+	});
+
+	function beginTake() {
+		if (!take || !songDoc) return;
+		const doc = songDoc;
+		takePhase = 'started';
+		songEditor?.stopStepping();
+		if (engineState?.playing) {
+			engine.record(doc.ppq, BEATS_PER_BAR, 0, engineState.tick);
+			return;
+		}
+		// With a loop on, the take starts at its start, so the first pass is a whole one.
+		const start = looping ? (loop ?? wholeSong(doc)).start : tick;
+		if (start !== engineState?.tick) engine.locate(start);
+		for (const ring of rings) ring.mark(); // Meters hold the loudest since the take began, as they do since Play
+		engine.record(doc.ppq, BEATS_PER_BAR, tempoAt(doc.tempo, start), start);
+	}
+
+	// Recording stops. The worklet says where the song was when it did, for the notes still held, and then the take is done.
+	function endTake() {
+		if (!take) return;
+		if (takePhase === 'arming') {
+			take = null;
+			return;
+		}
+		if (takePhase === 'started') engine.stopRecording();
+		takePhase = 'ending';
+	}
+
+	function takeEnded(at: Stamp) {
+		const ending = take;
+		if (!ending) return;
+		for (const [note, on] of ending.held) writeTaken(ending, note, on, at);
+		history.end(ending.key);
+		take = null;
+	}
+
+	function keyStamped(key: PlayedKey) {
+		const t = take;
+		if (!t || takePhase === 'arming') return;
+		if (key.on) {
+			t.held.set(key.note, { tick: key.tick, elapsed: key.elapsed });
+			return;
+		}
+		const on = t.held.get(key.note);
+		if (!on) return;
+		t.held.delete(key.note);
+		writeTaken(t, key.note, on, key);
+	}
+
+	// A note played, snapped and written where the take is: one edit of a run, which undoes in one step with the take's others.
+	function writeTaken(t: Taking, note: number, on: Stamp, off: Stamp) {
+		if (!saved || !timelineDoc || draftKey('timeline', saved.id) !== t.key) return;
+		const round = looping ? (loop ?? wholeSong(timelineDoc)) : null;
+		const snapped = snapPlayed({ note, vel: t.velocity, on, off }, t.grid, round);
+		if (!snapped) return;
+		const done = recordNote(timelineDoc, t.write, snapped);
+		if (!done) return;
+		t.write = done.take;
+		timelineEdited({ text: JSON.stringify(done.doc, null, 1) }, 'typing');
+		if (done.clip !== shownClip) {
+			shownClip = done.clip;
+			const clip = done.clip;
+			void rendered().then(() => songEditor?.reveal({ track: t.track, clip }));
+		}
 	}
 
 	function patchParam(param: Param, value: number) {
@@ -1092,8 +1243,12 @@
 		if (matches(event, 'play')) {
 			event.preventDefault(); // Or a button with focus is pressed, and the roll scrolls
 			if (event.repeat) return;
-			if (songPlaying) engine.stop();
+			if (take) stop();
+			else if (songPlaying) engine.stop();
 			else if (songDoc) play();
+		} else if (view === 'song' && matches(event, 'record')) {
+			event.preventDefault();
+			if (!event.repeat) record();
 		} else if (matches(event, 'start')) {
 			event.preventDefault();
 			toStart();
@@ -1130,9 +1285,12 @@
 			rejected = reason;
 			loading = null;
 		};
+		engine.onPlayed = keyStamped;
+		engine.onTakeEnd = takeEnded;
 		engine.onLive = (report) => {
 			if (report === loading) loading = null;
 			live = sourceOf.get(report) ?? null;
+			if (live === 'song') liveSong = report;
 			if (live === 'song') settle(report);
 			if (live === want) {
 				const ready = waiting;
@@ -1203,6 +1361,20 @@
 				title="Loop, over what the strip under the arrangement's bar numbers shows"
 				><span aria-hidden="true">⟲</span></button
 			>
+			<button
+				type="button"
+				class="icon record"
+				aria-label="Record"
+				aria-pressed={take !== null}
+				data-testid="record"
+				data-state={recordState}
+				onclick={record}
+				disabled={!take && recordWhy !== ''}
+				title={recordTitle}
+				>{#if recordState === 'counting'}<span class="count">{engineState?.countIn}</span>{:else}<span
+						aria-hidden="true">●</span
+					>{/if}</button
+			>
 		</div>
 		<input
 			class="field position"
@@ -1267,7 +1439,13 @@
 				onclick={() => undoable?.redo()}><span aria-hidden="true">↷</span></button
 			>
 		</div>
-		<Keyboard disabled={!keysPlay && !stepWriting} writing={stepWriting} where={keysWhere} onnote={keyNote} />
+		<Keyboard
+			disabled={!keysPlay && !stepWriting}
+			writing={stepWriting && !take}
+			recording={recordState === 'counting' || recordState === 'recording'}
+			where={keysWhere}
+			onnote={keyNote}
+		/>
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
 		<span class="grow"></span>
 		<CompileLight {busy} {problems} size={imageSize} details={engineDetails} />
@@ -1458,7 +1636,13 @@
 	<p class="engine muted">
 		The playhead is at tick <span data-testid="tick">{tick}</span>.
 		{#if engineState}
-			<span data-testid="state" data-playing={engineState.playing} data-time={engineState.time}>
+			<span
+				data-testid="state"
+				data-playing={engineState.playing}
+				data-time={engineState.time}
+				data-recording={engineState.recording}
+				data-clicks={engineState.clicks}
+			>
 				<span data-testid="voices">{engineState.voices}</span> voices sounding, in image
 				<span data-testid="generation">{engineState.generation}</span> since audio started, which has rendered
 				{engineState.time.toFixed(1)} s.
@@ -1539,6 +1723,37 @@
 		color: var(--text);
 		background: #1f6feb33;
 		border-color: var(--accent);
+	}
+	/* Record is red, and while a take runs it is lit, with the beats left while a bar is counted in. */
+	.record {
+		color: #f85149;
+		min-width: 1.9rem;
+	}
+	.record:disabled {
+		color: var(--muted);
+	}
+	.icon.record[aria-pressed='true'] {
+		color: #fff;
+		background: #da3633;
+		border-color: #f85149;
+	}
+	.record[data-state='arming'],
+	.record[data-state='counting'] {
+		animation: blink 0.5s steps(2, jump-none) infinite alternate;
+	}
+	.record .count {
+		font-size: 0.85rem;
+		font-variant-numeric: tabular-nums;
+	}
+	@keyframes blink {
+		to {
+			background: #da363366;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.record[data-state] {
+			animation: none;
+		}
 	}
 	/* The position and the tempo read as a display does, and are typed into as fields. */
 	.field {

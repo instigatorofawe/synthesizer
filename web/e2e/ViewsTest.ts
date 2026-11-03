@@ -29,9 +29,10 @@ const shows = (page: Page, view: 'song' | 'patch') =>
 	expect(page.getByTestId(`view-${view}`)).toHaveAttribute('aria-selected', 'true');
 const notesTab = (page: Page) =>
 	page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: /^Notes/ });
+// A track's meter is in its head, in the Song view, which is still there while the Patch view is on screen.
 const level = (page: Page, track: string) =>
 	page
-		.getByRole('meter', { name: `Level of ${track}` })
+		.getByRole('meter', { name: `Level of ${track}`, includeHidden: true })
 		.getAttribute('data-peak')
 		.then(Number);
 
@@ -65,6 +66,7 @@ test('the tabs and ` switch views, and a field keeps its `', async ({ page }) =>
 	await expect(page).not.toHaveURL(/view=/);
 
 	const name = page.getByLabel('Timeline name', { exact: true });
+	await name.press('End');
 	await name.press('Backquote');
 	await expect(name).toHaveValue('Song`');
 	await shows(page, 'song');
@@ -222,9 +224,10 @@ test('below 1400 px the browser is a rail, and opens over the page until it is u
 });
 
 test('the piano roll has room in the Song view', async ({ page }) => {
+	// The roll was 100 px or so when the patch editor shared the page.
 	await page.goto('/?timeline=ballad');
-	expect((await rollView(page)).height).toBeGreaterThan(300); // 102 px when the patch editor shared the page
+	await expect.poll(async () => (await rollView(page)).height).toBeGreaterThan(300);
 	// Two tracks, and a lane under the notes
 	await page.goto('/?timeline=song');
-	expect((await rollView(page)).height).toBeGreaterThan(250);
+	await expect.poll(async () => (await rollView(page)).height).toBeGreaterThan(250);
 });

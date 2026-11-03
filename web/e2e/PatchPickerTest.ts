@@ -192,6 +192,8 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	// The image with the note is the one playing. An image that arrives after Play has passed tick 0 never starts the note.
+	await expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	const level = page.getByRole('meter', { name: 'Level of Track 1' });
 	await expect.poll(async () => Number(await level.getAttribute('data-peak')), { timeout: 8000 }).toBeGreaterThan(0.01);

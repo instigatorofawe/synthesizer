@@ -2,12 +2,14 @@
 	import { onMount, untrack, type Snippet } from 'svelte';
 	import Arrangement, { type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
+	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
 	import Splitter from '#lib/Splitter.svelte';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
+	import { matches } from '#lib/Shortcuts.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -55,6 +57,7 @@
 		targets,
 		rings,
 		engine,
+		history = null,
 		readonly = false,
 		active = true,
 		tabs = [],
@@ -72,6 +75,7 @@
 		targets: TapTarget[];
 		rings: Ring[];
 		engine: SongControls;
+		history?: Undoable | null; // The timeline's undo, which the page keeps while other things are open
 		readonly?: boolean;
 		active?: boolean; // Whether keys are for this editor, when it shares a page with others
 		tabs?: { id: string; label: string; content: Snippet }[]; // More views of the document, after the notes and the mixer
@@ -101,10 +105,8 @@
 	let dragged = $state<number | null>(null); // The arrangement's height, once someone has dragged it
 	// Until then it fits its tracks, up to a size that leaves room for the notes.
 	const height = $derived(dragged ?? Math.min(270, 34 + Math.max(doc.tracks.length, 1) * 60 + 20));
-	let past: Timeline[] = [];
-	let future: Timeline[] = [];
-	let canUndo = $state(false);
-	let canRedo = $state(false);
+	const canUndo = $derived(history?.canUndo ?? false);
+	const canRedo = $derived(history?.canRedo ?? false);
 
 	const track = $derived(doc.tracks.find((t) => t.id === selection.track));
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
@@ -132,32 +134,13 @@
 
 	const number = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
 
+	// The page records each edit in the timeline's history, which outlasts this editor, as opening another timeline ends it.
 	function commit(next: Timeline) {
-		if (next === doc) return;
-		past.push(doc);
-		future = [];
-		canUndo = true;
-		canRedo = false;
-		onchange(next);
+		if (next !== doc) onchange(next);
 	}
 
-	function undo() {
-		const last = past.pop();
-		if (!last) return;
-		future.push(doc);
-		canUndo = past.length > 0;
-		canRedo = true;
-		onchange(last);
-	}
-
-	function redo() {
-		const next = future.pop();
-		if (!next) return;
-		past.push(doc);
-		canUndo = true;
-		canRedo = future.length > 0;
-		onchange(next);
-	}
+	const undo = () => history?.undo();
+	const redo = () => history?.redo();
 
 	// The page shows the chosen track's patch, so it hears about every choice of track.
 	let told = false;
@@ -285,14 +268,12 @@
 		if (targets.length && looping && loop) engine.setLoop(loop.start, loop.end);
 	});
 
+	// Undo and Redo are the page's keys, since they act on whichever panel is in use.
 	function keydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
 		if (readonly || !active || target.closest('input, textarea, select')) return;
-		if ((event.metaKey || event.ctrlKey) && event.key === 'z') {
-			event.preventDefault();
-			if (event.shiftKey) redo();
-			else undo();
-		} else if ((event.key === 'Delete' || event.key === 'Backspace') && !target.closest('[data-testid="roll"]')) {
+		const deleting = matches(event, 'arrangement.delete') || matches(event, 'arrangement.backspace');
+		if (deleting && !target.closest('[data-testid="roll"]')) {
 			if (selection.placement === null) return;
 			event.preventDefault();
 			deletePlacement();

@@ -38,6 +38,8 @@
 	import { friendlyName, helpOf, rangeText, shown } from '#lib/NodeHelp.ts';
 	import NodePalette from '#lib/NodePalette.svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
+	import type { Undoable } from '#lib/History.ts';
+	import { matches, modHeld, typingIn } from '#lib/Shortcuts.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 
@@ -54,6 +56,7 @@
 		maxProbes,
 		readonly = false,
 		active = true,
+		history = null,
 		side,
 		onchange,
 		onprobes
@@ -70,6 +73,7 @@
 		maxProbes: number;
 		readonly?: boolean; // For looking at: a node can be chosen and probed, and nothing changes
 		active?: boolean; // Whether keys are for this editor, when it shares a page with others
+		history?: Undoable | null; // The patch's undo, which the page keeps, and which its keys act on
 		side?: Snippet; // Drawn above the inspector
 		onchange: (graph: Graph) => void;
 		onprobes: (probes: Probe[]) => void;
@@ -110,10 +114,8 @@
 	let gesture = $state<Gesture | null>(null);
 	let palette = $state<Palette | null>(null);
 	let hover: { x: number; y: number } | null = null; // The pointer over the canvas, where N opens the search
-	let past: Graph[] = [];
-	let future: Graph[] = [];
-	let canUndo = $state(false);
-	let canRedo = $state(false);
+	const canUndo = $derived(history?.canUndo ?? false);
+	const canRedo = $derived(history?.canRedo ?? false);
 
 	const heightOf = (node: GraphNode) => nodeHeight(node, catalog, library);
 	const sizeOf = (node: GraphNode) => ({ width: NODE_WIDTH, height: heightOf(node) });
@@ -133,31 +135,10 @@
 		palette?.wire ? types.filter((type) => inputsOf(fresh(type), catalog, library).length > 0) : types
 	);
 
-	function commit(next: Graph) {
-		past.push(placed(graph, heightOf));
-		future = [];
-		canUndo = true;
-		canRedo = false;
-		onchange(next);
-	}
-
-	function undo() {
-		const last = past.pop();
-		if (!last) return;
-		future.push(placed(graph, heightOf));
-		canUndo = past.length > 0;
-		canRedo = true;
-		onchange(last);
-	}
-
-	function redo() {
-		const next = future.pop();
-		if (!next) return;
-		past.push(placed(graph, heightOf));
-		canUndo = true;
-		canRedo = future.length > 0;
-		onchange(next);
-	}
+	// The page records each edit, so its history outlasts this editor.
+	const commit = (next: Graph) => onchange(next);
+	const undo = () => history?.undo();
+	const redo = () => history?.redo();
 
 	const positionOf = (node: GraphNode): Point =>
 		gesture?.kind === 'move' && gesture.id === node.id ? gesture.at : { x: node.x as number, y: node.y as number };
@@ -291,7 +272,7 @@
 	function wheel(event: WheelEvent) {
 		event.preventDefault();
 		const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.height : 1;
-		if (event.ctrlKey || event.metaKey) {
+		if (event.ctrlKey || modHeld(event)) {
 			const delta = Math.max(-50, Math.min(50, event.deltaY * unit));
 			zoomAt(toCanvas(event), 2 ** (-delta / 150));
 			return;
@@ -418,26 +399,20 @@
 
 	// N and the full stop go by where the key is, as the piano keys do, and take no modifier, which leaves them to the browser.
 	function keydown(event: KeyboardEvent) {
-		const target = event.target as HTMLElement;
-		if (!active || target.closest('input, textarea, select, [contenteditable]')) return;
-		const bare = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
-		if (event.key === 'Escape' && gesture) {
+		if (!active || typingIn(event.target)) return;
+		if (matches(event, 'escape') && gesture) {
 			gesture = null;
-		} else if (bare && event.code === 'Period') {
+		} else if (matches(event, 'fit')) {
 			event.preventDefault();
 			fit();
 		} else if (readonly) {
 			return;
-		} else if (bare && event.code === 'KeyN') {
+		} else if (matches(event, 'node-search')) {
 			event.preventDefault();
 			openPalette(hover);
-		} else if ((event.key === 'Delete' || event.key === 'Backspace') && selected !== null) {
+		} else if ((matches(event, 'graph.delete') || matches(event, 'graph.backspace')) && selected !== null) {
 			event.preventDefault();
 			removeSelected();
-		} else if ((event.metaKey || event.ctrlKey) && event.key === 'z') {
-			event.preventDefault();
-			if (event.shiftKey) redo();
-			else undo();
 		}
 	}
 

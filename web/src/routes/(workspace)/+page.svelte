@@ -1361,7 +1361,7 @@
 		The playhead is at tick <span data-testid="tick">{tick}</span>.
 		{#if engineState}
 			<span data-testid="state" data-playing={engineState.playing}>
-				The engine plays <span data-testid="voices">{engineState.voices}</span> voices, and image
+				<span data-testid="voices">{engineState.voices}</span> voices sounding, in image
 				<span data-testid="generation">{engineState.generation}</span> since audio started.
 			</span>
 		{:else}

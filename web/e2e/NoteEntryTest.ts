@@ -206,6 +206,7 @@ test('Mod-drag copies a placement, and its menu makes it unique and takes it awa
 	await page.getByTestId('placement-1-1').locator('rect').first().click({ button: 'right' });
 	await expect(menu.getByRole('menuitem')).toHaveText([
 		'Open notes',
+		'Loop this clip',
 		'Duplicate after',
 		'Make unique',
 		'Remove from track',

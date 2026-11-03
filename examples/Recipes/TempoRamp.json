@@ -1,0 +1,398 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "triangle"
+     },
+     {
+      "id": 4,
+      "type": "mul",
+      "inputs": {
+       "b": 3.0
+      }
+     },
+     {
+      "id": 5,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 6,
+      "type": "mul",
+      "inputs": {
+       "b": 0.18
+      }
+     },
+     {
+      "id": 7,
+      "type": "add"
+     },
+     {
+      "id": 8,
+      "type": "env",
+      "inputs": {
+       "attack": 0.002,
+       "decay": 0.25,
+       "sustain": 0.0,
+       "release": 0.08
+      }
+     },
+     {
+      "id": 9,
+      "type": "mul",
+      "inputs": {
+       "b": 0.6
+      }
+     },
+     {
+      "id": 10,
+      "type": "mul"
+     },
+     {
+      "id": 11,
+      "type": "mul"
+     },
+     {
+      "id": 12,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 2,
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "freq"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "to": 10,
+      "input": "a"
+     },
+     {
+      "from": 9,
+      "to": 10,
+      "input": "b"
+     },
+     {
+      "from": 7,
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "to": 11,
+      "input": "b"
+     },
+     {
+      "from": 11,
+      "to": 12,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 84,
+      "ramp": true
+     },
+     {
+      "tick": 3840,
+      "bpm": 168
+     },
+     {
+      "tick": 5760,
+      "bpm": 168,
+      "ramp": true
+     },
+     {
+      "tick": 7680,
+      "bpm": 66
+     }
+    ],
+    "clips": [
+     {
+      "id": "arp",
+      "length": 8160,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 57,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 240,
+        "note": 60,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 480,
+        "note": 64,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 720,
+        "note": 69,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 960,
+        "note": 69,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 1200,
+        "note": 72,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 1440,
+        "note": 76,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 1680,
+        "note": 81,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 1920,
+        "note": 53,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 2160,
+        "note": 57,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 2400,
+        "note": 60,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 2640,
+        "note": 65,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 2880,
+        "note": 65,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 3120,
+        "note": 69,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 3360,
+        "note": 72,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 3600,
+        "note": 77,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 3840,
+        "note": 55,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 4080,
+        "note": 59,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 4320,
+        "note": 62,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 4560,
+        "note": 67,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 4800,
+        "note": 67,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 5040,
+        "note": 71,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 5280,
+        "note": 74,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 5520,
+        "note": 79,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 5760,
+        "note": 52,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 6000,
+        "note": 56,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 6240,
+        "note": 59,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 6480,
+        "note": 64,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 6720,
+        "note": 64,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 6960,
+        "note": 68,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 7200,
+        "note": 71,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 7440,
+        "note": 76,
+        "vel": 80,
+        "dur": 200
+       },
+       {
+        "tick": 7680,
+        "note": 57,
+        "vel": 100,
+        "dur": 480
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 4,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "arp",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 1.321
+    }
+   }
+  }
+ ]
+}

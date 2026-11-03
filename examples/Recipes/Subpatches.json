@@ -1,0 +1,488 @@
+{
+ "patches": {
+  "voice": {
+   "name": "voice",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "mul",
+      "inputs": {
+       "b": 1.0
+      }
+     },
+     {
+      "id": 4,
+      "type": "subpatch",
+      "patch": "pair",
+      "inputs": {
+       "spread": 0.0045
+      }
+     },
+     {
+      "id": 5,
+      "type": "mul",
+      "inputs": {
+       "b": 1.0
+      }
+     },
+     {
+      "id": 6,
+      "type": "mul",
+      "inputs": {
+       "b": 2.0
+      }
+     },
+     {
+      "id": 7,
+      "type": "subpatch",
+      "patch": "pair",
+      "inputs": {
+       "spread": 0.0065
+      }
+     },
+     {
+      "id": 8,
+      "type": "mul",
+      "inputs": {
+       "b": 0.45
+      }
+     },
+     {
+      "id": 9,
+      "type": "add"
+     },
+     {
+      "id": 10,
+      "type": "mul",
+      "inputs": {
+       "b": 0.5
+      }
+     },
+     {
+      "id": 11,
+      "type": "subpatch",
+      "patch": "pair",
+      "inputs": {
+       "spread": 0.0035
+      }
+     },
+     {
+      "id": 12,
+      "type": "mul",
+      "inputs": {
+       "b": 0.6
+      }
+     },
+     {
+      "id": 13,
+      "type": "add"
+     },
+     {
+      "id": 14,
+      "type": "biquad",
+      "mode": "lowpass",
+      "inputs": {
+       "cutoff": 2400.0,
+       "q": 0.7
+      }
+     },
+     {
+      "id": 15,
+      "type": "env",
+      "inputs": {
+       "attack": 0.35,
+       "decay": 0.4,
+       "sustain": 0.8,
+       "release": 0.45
+      }
+     },
+     {
+      "id": 16,
+      "type": "mul",
+      "inputs": {
+       "b": 0.32
+      }
+     },
+     {
+      "id": 17,
+      "type": "mul"
+     },
+     {
+      "id": 18,
+      "type": "mul"
+     },
+     {
+      "id": 19,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "freq"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 2,
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "freq"
+     },
+     {
+      "from": 7,
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "to": 9,
+      "input": "a"
+     },
+     {
+      "from": 8,
+      "to": 9,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "to": 10,
+      "input": "a"
+     },
+     {
+      "from": 10,
+      "to": 11,
+      "input": "freq"
+     },
+     {
+      "from": 11,
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 9,
+      "to": 13,
+      "input": "a"
+     },
+     {
+      "from": 12,
+      "to": 13,
+      "input": "b"
+     },
+     {
+      "from": 13,
+      "to": 14,
+      "input": "in"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 16,
+      "input": "a"
+     },
+     {
+      "from": 15,
+      "to": 17,
+      "input": "a"
+     },
+     {
+      "from": 16,
+      "to": 17,
+      "input": "b"
+     },
+     {
+      "from": 14,
+      "to": 18,
+      "input": "a"
+     },
+     {
+      "from": 17,
+      "to": 18,
+      "input": "b"
+     },
+     {
+      "from": 18,
+      "to": 19,
+      "input": "l"
+     }
+    ]
+   }
+  },
+  "pair": {
+   "name": "pair",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "inlet",
+      "name": "freq",
+      "default": 220.0
+     },
+     {
+      "id": 2,
+      "type": "inlet",
+      "name": "spread",
+      "default": 0.004
+     },
+     {
+      "id": 3,
+      "type": "add",
+      "inputs": {
+       "b": 1.0
+      }
+     },
+     {
+      "id": 4,
+      "type": "mul"
+     },
+     {
+      "id": 5,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 6,
+      "type": "mul",
+      "inputs": {
+       "b": -1.0
+      }
+     },
+     {
+      "id": 7,
+      "type": "add",
+      "inputs": {
+       "b": 1.0
+      }
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "osc",
+      "wave": "saw"
+     },
+     {
+      "id": 10,
+      "type": "add"
+     },
+     {
+      "id": 11,
+      "type": "mul",
+      "inputs": {
+       "b": 0.5
+      }
+     },
+     {
+      "id": 12,
+      "type": "outlet",
+      "name": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 2,
+      "to": 3,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "to": 4,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "to": 4,
+      "input": "b"
+     },
+     {
+      "from": 4,
+      "to": 5,
+      "input": "freq"
+     },
+     {
+      "from": 2,
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 1,
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 7,
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 8,
+      "to": 9,
+      "input": "freq"
+     },
+     {
+      "from": 5,
+      "to": 10,
+      "input": "a"
+     },
+     {
+      "from": 9,
+      "to": 10,
+      "input": "b"
+     },
+     {
+      "from": 10,
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 11,
+      "to": 12,
+      "input": "in"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 100
+     }
+    ],
+    "clips": [
+     {
+      "id": "chords",
+      "length": 5760,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 57,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 0,
+        "note": 60,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 0,
+        "note": 64,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 1920,
+        "note": 53,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 1920,
+        "note": 57,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 1920,
+        "note": 60,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 1920,
+        "note": 65,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 3840,
+        "note": 55,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 3840,
+        "note": 59,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 3840,
+        "note": 62,
+        "vel": 90,
+        "dur": 1680
+       },
+       {
+        "tick": 3840,
+        "note": 67,
+        "vel": 90,
+        "dur": 1680
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 8,
+      "slots": [
+       "voice"
+      ],
+      "placements": [
+       {
+        "clip": "chords",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.9925
+    }
+   }
+  }
+ ]
+}

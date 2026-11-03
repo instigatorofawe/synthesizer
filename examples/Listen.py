@@ -19,8 +19,8 @@ Turn your volume down before the first run.
     uv run examples/Listen.py --list          # the recipes, and what to listen for
     uv run examples/Listen.py Kick808 Reverb  # any recipes or oscillators, by name
     uv run examples/Listen.py --group drums   # one group of recipes
-    uv run examples/Listen.py --recipes       # all of them, about 4 minutes
-    uv run examples/Listen.py --group pieces  # the pieces, about 9 minutes
+    uv run examples/Listen.py --recipes       # all of them, about 5 minutes
+    uv run examples/Listen.py --group pieces  # the pieces, about 13 minutes
 
 It renders through the Python binding, which uv builds from this checkout on the first run.
 """

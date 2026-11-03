@@ -565,7 +565,7 @@ RAM limits reverb before CPU does. Voice state is about 270 bytes per voice, but
 the memory (open 32). A line's full scale is ±1, as an i16 recording's is, and it holds anything past that there, so an author keeps a line
 below it. The demo's reverb runs its combs up to about twice full scale: on i16 lines as it stands it differs from its f32 sound by up to 22 dB below its peak, and with
 its input halved and its output doubled 70.6 dB below its peak [measured]. Each further halving costs about 6 dB. The pieces keep their stereo f32 reverb, since
-they don't fit an L476's core either.
+they don't fit an L476's core either, but for the Invention, written for the board in a mono room of f32 lines, 33 KB.
 
 ## 16. Testing without a board
 
@@ -631,8 +631,9 @@ moved more than 1% from them, if `firmware/NucleoCosts.hpp` isn't what they and 
 takes more instructions than its bound. A count depends on the compiler too, so that job runs in Debian trixie, whose arm-none-eabi-gcc
 14.2.1 wrote the baseline, and a change meant to move counts runs `tools/Bench.py m4` there and then `tools/Bench.py baseline`.
 
-The pieces stay out of the QEMU bench (open 31). Their full renders would take 9 minutes against 3.8 for every recipe, and the bound already
-says they don't fit the board: without their reverb, 4 to 20 times a frame's budget [board]. `bench/ParallelBench.cpp` times their first 20
+The pieces stay out of the QEMU bench (open 31). Their full renders would take 13 minutes against 5.2 for every recipe, and the bound already
+says which fit the board: the first four, without their reverb, take 4 to 20 times a frame's budget [board], The Entertainer 7.4 times, and
+the Invention fits, room and all. `bench/ParallelBench.cpp` times their first 20
 seconds on a host, section 18.
 
 **The size gate.** `firmware/Check.sh` fails a board firmware over 112 KB of flash, with 16 KB left before its 128 KB runs into slot A. The
@@ -879,18 +880,20 @@ guards, "used by", the timelines an edit affects and exports treat them as they 
 - A change goes to a copy. Duplicate makes an ordinary patch with the same graph, named "*name* copy", which names the same recordings rather than copying them. When the timeline open below plays the built-in, the copy takes its place
   there, as an unsaved edit, so a change is heard where it plays. A copy compiles to the same bytes, because a patch's bytes depend only on its graph, section 20, and a test holds three examples to that, played entirely by copies.
 - An example with one patch names its built-in after itself, as `builtin-Kick808`, and one with several adds the part, as `builtin-PassionChorale-horn`, named "PassionChorale Horn". A graph several examples share is one built-in,
-  named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 61 recipes and 4 pieces make 107 built-ins from 111
-  patches, and 24 recordings from 25 [measured].
+  named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 74 recipes and 6 pieces make 136 built-ins from 140
+  patches, and 29 recordings from 30 [measured].
 - A built-in follows what ships, as any shared patch follows its latest graph: a version that changes an example changes every timeline playing that built-in, and its editor says which. One that no longer ships goes, unless something
   uses it, and then it stays as it was, still read-only.
 - Every page carries the built-ins' graphs, which took the demo library's data from 32 KB to 223 KB [measured], but their recordings only once a saved timeline or one of the library's own patches uses them. A built-in opened, or put in an edit, before then fetches its recordings from
   `/assets` by id, and nothing compiles until they have arrived. So a library that uses no built-in loads the same samples it did before there were any. Together they hold about 480 KB.
 
-**Pieces.** `examples/Pieces` holds four public-domain pieces arranged for the engine, two to three minutes each, and the browser lists them
+**Pieces.** `examples/Pieces` holds six public-domain pieces arranged for the engine, one to three minutes each, and the browser lists them
 first among the examples. In every other way they are recipes. `MakePieces.py` writes them from the Mutopia Project's public-domain
 editions: the notes are the score's, and the instruments, rubato, dynamics, pedalling and mix are a performance written in code. They sit
-outside `examples/Recipes` because the benchmarks render every recipe in full, three times over on QEMU, and the pieces are 9 minutes of
-music against 3.8 for all 61 recipes. Writing them tested what a timeline can say, and what it couldn't is in section 24, opens 26 to 31.
+outside `examples/Recipes` because the benchmarks render every recipe in full, three times over on QEMU, and the pieces are 13 minutes of
+music against 5.2 for all 74 recipes. Writing the first four tested what a timeline can say, and what it couldn't is in section 24, opens 26 to 31.
+Bach's Invention No. 8 is written for the board: a naive pulse for one hand and a triangle for the other, a voice each, in a mono room, with its
+closing slowdown written into where its last notes fall, since a tempo change would cut frames in two. Its bound is 61% of the board's frame.
 
 ## 20. Choosing what goes into an image
 
@@ -1042,7 +1045,7 @@ CI runs each target for a short time on a new seed. That is a smoke test, and th
 Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in section 5, 5 and 6 in section 6, 7 in section 7 and 8 in section 9. Opens
 17 and 18 went with the target rule, so there is no per-tier golden contract and no patch form chosen by target. In revision 20 the user closed
 the embedded opens as they were recommended: 19 and 20 in section 10, 21 in section 9, 25 in section 15, 31 in section 17 and 33 in section 10.
-They decided 24, 26 and 32 too, and chose the direction for open 9, below.
+They decided 24, 26 and 32 too, and chose the direction for open 9, below. Open 24 is built, as the embedded recipes below.
 
 **Agreed, not built.**
 
@@ -1052,7 +1055,6 @@ They decided 24, 26 and 32 too, and chose the direction for open 9, below.
   image on the desktop first, at the target's rate and frame size, and fails if any sample's magnitude passes full scale, so a device never
   needs a limiter of its own. Desktop and browser playback and WAV export pass through a limiter in the host, after the engine, at full scale.
   Neither changes the engine, and the NaN guards stay on every target.
-- **Recipes for embedded** (open 24): a set the L476 accepts with room to spare, using the cheapest ops, as their own group in the browser.
 - **Time signatures and pickups** (open 26), which the user wants. The editor draws every timeline in 4/4 from tick 0, so Für Elise, in 3/8
   after an eighth's pickup, is in its third bar where the ruler shows bar 2. The plan is a meter map and a pickup in the timeline document,
   which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change.
@@ -1091,6 +1093,26 @@ Program whose dearest frame, with every voice sounding, could overrun its budget
   only to measure the ratios again.
 - **The gates:** counts may move 1% from the baseline before CI fails, and a board firmware 112 KB of flash.
 - **The scope:** the worklet sends the same message objects every time, rather than new ones.
+
+**Built for more examples**, as section 19 describes. The user asked for more recipes and pieces, and for recipes that the board plays with its
+cheapest steps, which closed open 24. There are 13 new recipes: HardSync, TwoOperatorFm, RoundRobin, ReleaseSamples, ReverseSwell, Subpatches,
+AutoWah, TempoRamp and ClipVariations each show a technique the first 61 didn't, and ChipTune, LeanDrumKit, SmallRoom and TapeEcho are the
+embedded group. There are also two new pieces, Bach's Invention No. 8 and Joplin's The Entertainer. Choices made there that the user hasn't
+weighed in on:
+- **Headroom:** the embedded recipes and the Invention compile for the board at 44% to 65% of a frame by the compiler's bound. For every Program the
+  board has played, that bound was 1.20 to 2.39 times its worst frame, section 15. None of the new examples has been measured on the board yet.
+- **One voice, no play mode:** a track with one voice takes it from the last note for the next, as a mono play mode would. But the bound counts a
+  play mode's held notes for every piece of every frame, so ChipTune needed 130% of a frame with mono tracks and needs 65% without them.
+- **A slowdown in the notes:** a tempo change can cut a frame in two, and the bound charges every track and voice for each piece, 6% of the
+  Invention's frame. So its last two bars slow down through where their notes fall, and its tempo map is one change.
+- **A reverb the board holds, from today's steps:** SmallRoom and the Invention use a mono room of four combs and two allpasses, whose lines are only
+  as long as their delays, 33 KB in all. Open 32's i16 lines, built in the same revision, would take half that. They keep f32 lines, which their counts and timings were taken with. TapeEcho's repeats are one comb, 36 KB, a feedback delay
+  through a lowpass in one step.
+- **The Entertainer's form:** C plays once, the time that leads on, so the piece lasts three minutes. The repeat of B is an octave up, as marked.
+- **Groups:** the embedded recipes are a group of their own, and TempoRamp and ClipVariations start an "arrangement" group, for what a timeline does
+  rather than a patch.
+- **Recordings made in code:** RoundRobin, ReleaseSamples and ReverseSwell carry recordings synthesized when they were written, mono i16 at 22.05 or
+  24 kHz, from 5 KB to 50 KB an image.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

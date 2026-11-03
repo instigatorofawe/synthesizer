@@ -156,6 +156,11 @@ test('a track, a clip and the Mixer tab chosen are in the address, and a reload 
 test('Back goes to the view before, not through every track and tab chosen since', async ({ page }) => {
 	await page.goto('/?timeline=song');
 	await chosen(page, 1);
+	// Nothing here, Back and Forward included, is anything the server loads
+	const loads: string[] = [];
+	page.on('request', (request) => {
+		if (request.url().includes('__data.json')) loads.push(request.url());
+	});
 	await openView(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Stereo lead');
 	await openView(page, 'song');
@@ -186,6 +191,7 @@ test('Back goes to the view before, not through every track and tab chosen since
 	await expect(songTab(page, /^Notes/)).toHaveAttribute('aria-selected', 'true');
 	await expect(songTab(page, /^Notes/)).toHaveText('Notes: lead-a');
 	await chosen(page, 1);
+	expect(loads).toEqual([]);
 });
 
 test('an old link still opens, and what an address names that the song has not got is passed over', async ({
@@ -213,4 +219,21 @@ test('an old link still opens, and what an address names that the song has not g
 	await page.goto('/?timeline=song&clip=never-placed&pane=json');
 	await expect(songTab(page, 'JSON')).toHaveAttribute('aria-selected', 'true');
 	await expect(songTab(page, /^Notes/)).toHaveText('Notes: never-placed');
+});
+
+test("a patch's tooltip in the browser counts the song's unsaved edits", async ({ page }) => {
+	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
+	await page.goto('/?timeline=song');
+	const square = browser(page).getByRole('link', { name: /^Square/ });
+	await expect(square).toHaveAttribute('title', 'Not used by a timeline');
+
+	// Lead plays it instead, unsaved
+	await songTab(page, 'JSON').click();
+	const json = page.getByLabel('Timeline JSON');
+	const doc = JSON.parse(await json.inputValue());
+	doc.tracks[0].slots = ['unused'];
+	await json.fill(JSON.stringify(doc, null, 1));
+	await expect(page.getByTestId('unsaved')).toBeVisible();
+	await square.hover();
+	await expect(square).toHaveAttribute('title', 'Used by Song');
 });

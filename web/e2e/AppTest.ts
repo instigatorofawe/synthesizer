@@ -1631,7 +1631,7 @@ test('WAV files become an instrument that plays, and its samples stay while it d
 	await page.goto('/');
 	// Import asks for the files, sends them as they are chosen, and names the instrument after the first
 	const chooser = page.waitForEvent('filechooser');
-	await page.getByRole('button', { name: 'Import WAV files' }).click();
+	await page.getByRole('button', { name: 'Import samples' }).click();
 	await (await chooser).setFiles([wavFile('Sine_A3.wav'), wavFile('Sine_A4.wav')]);
 	await page.waitForURL(/patch=/);
 	const id = shownPatchId(page);

@@ -1696,6 +1696,7 @@
 		openTimeline={saved?.id ?? null}
 		openRecipe={recipe?.entry.name ?? null}
 		shownPatch={view === 'patch' ? (shown?.patch.id ?? null) : null}
+		usersOf={(id) => usedBy(id, library, data.library.timelines, nowPlaying)}
 		{reveal}
 	/>
 {/snippet}

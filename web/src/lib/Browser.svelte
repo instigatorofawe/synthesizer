@@ -14,7 +14,8 @@
 	// What each list is for.
 	const SAMPLES =
 		"WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like Piano_C4.wav says which key it was recorded at.";
-	const BUILTINS = "Every example's patches, for any timeline to play. They can't be changed, but a copy of one can.";
+	const BUILTINS =
+		"Every example's patches, for any timeline to play. They can't be changed: Edit a copy makes one that can.";
 	const BUNDLES = 'Several timelines compiled into one image, for a device to choose between.';
 	const EXAMPLES =
 		'Short pieces that ship with the app. Each plays as it is, its patches are built in, and adding one to the library copies its timeline to change.';
@@ -42,6 +43,7 @@
 		openTimeline,
 		openRecipe,
 		shownPatch,
+		usersOf,
 		reveal = null
 	}: {
 		search: string; // The page's address now, which every link here changes a part of
@@ -62,11 +64,18 @@
 		openTimeline: string | null;
 		openRecipe: string | null;
 		shownPatch: string | null;
+		// The timelines a patch is used by with unsaved edits counted, which a patch's tooltip says. It is asked only of the
+		// patch under the pointer, since an edit changes it, and the rest say what is saved.
+		usersOf?: (id: string) => { name: string }[];
 		reveal?: Section | null; // A list to open and scroll to as the browser opens, when its rail asked for one
 	} = $props();
 
 	let filter = $state('');
 	let scroller: HTMLDivElement;
+	let pointing = $state<string | null>(null); // The patch under the pointer
+
+	const usedWords = (users: { name: string }[]) =>
+		users.length ? `Used by ${users.map((u) => u.name).join(', ')}` : 'Not used by a timeline';
 
 	// The list whose name field is open, from the + in its heading. It takes focus as it opens, Enter makes the thing, and Esc
 	// or leaving it empty closes it.
@@ -125,12 +134,28 @@
 
 	const matches = (name: string) => !filter.trim() || name.toLowerCase().includes(filter.trim().toLowerCase());
 
-	// Another song has its own tracks and clips, so the place in this one stays behind.
+	// Another song has its own tracks and clips, so the place in this one stays behind. The song open goes back to where it is.
 	const inSong = $derived(withView(withoutPlace(search), 'song'));
 	const timelineHref = (id: string) =>
-		withView(withParams(withoutPlace(search), { timeline: id, recipe: null, patch: null, part: null }), 'song');
+		withView(
+			withParams(id === openTimeline ? search : withoutPlace(search), {
+				timeline: id,
+				recipe: null,
+				patch: null,
+				part: null
+			}),
+			'song'
+		);
 	const recipeHref = (name: string) =>
-		withView(withParams(withoutPlace(search), { recipe: name, timeline: null, patch: null, part: null }), 'song');
+		withView(
+			withParams(name === openRecipe ? search : withoutPlace(search), {
+				recipe: name,
+				timeline: null,
+				patch: null,
+				part: null
+			}),
+			'song'
+		);
 	const patchHref = (id: string) => withView(withParams(search, { patch: id, part: null }), 'patch');
 	const bundleHref = (id: string) => withParams(search, { bundle: id });
 
@@ -160,7 +185,9 @@
 		<a
 			href={patchHref(patch.id)}
 			aria-current={patch.id === shownPatch ? 'true' : undefined}
-			title={patch.users.length ? `Used by ${patch.users.map((u) => u.name).join(', ')}` : 'Not used by a timeline'}
+			title={usedWords(pointing === patch.id && usersOf ? usersOf(patch.id) : patch.users)}
+			onpointerenter={() => (pointing = patch.id)}
+			onpointerleave={() => (pointing = null)}
 		>
 			{patch.name}{@render unsaved(draftKey('patch', patch.id))}
 			{#if isInsert(patch.graph)}<span class="tag">insert</span>{/if}
@@ -256,7 +283,7 @@
 				<button
 					type="button"
 					class="tool"
-					aria-label="Import WAV files"
+					aria-label="Import samples"
 					title="Import WAV files as one instrument"
 					onclick={() => files?.click()}>+</button
 				>

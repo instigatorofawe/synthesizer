@@ -1425,10 +1425,12 @@
 		stroke-width: 1.6;
 		pointer-events: none;
 	}
+	/* As wide on screen at any zoom, so a wire zoomed out is as easy to hit */
 	.hit {
 		fill: none;
 		stroke: transparent;
-		stroke-width: 14;
+		stroke-width: 12px;
+		vector-effect: non-scaling-stroke;
 		pointer-events: stroke;
 		cursor: pointer;
 	}

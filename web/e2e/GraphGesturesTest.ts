@@ -48,8 +48,10 @@ async function anotherPatch(page: Page, name: string) {
 	await expect(graph(page)).toBeVisible();
 }
 
-async function openPatch(page: Page, name: string) {
-	await browser(page).getByRole('link', { name, exact: true }).click();
+async function openPatch(page: Page, name: string | RegExp) {
+	await browser(page)
+		.getByRole('link', typeof name === 'string' ? { name, exact: true } : { name })
+		.click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue(name);
 }
 
@@ -280,6 +282,35 @@ test('nodes copied from one patch paste into another with fresh ids, and it comp
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await expect(page.getByTestId('node-7')).toHaveAttribute('data-dead', 'false');
 	await expect(page.getByTestId('node-5')).toHaveAttribute('data-dead', 'false');
+});
+
+test('a built-in can be chosen in and copied from, and nothing changes it', async ({ page }) => {
+	await page.goto('/?patch=builtin-Arpeggio&view=patch');
+	await expect(nodes(page)).toHaveCount(7);
+	await graph(page).focus();
+	await page.keyboard.press('ControlOrMeta+a');
+	await expect(graph(page).locator('g.node.chosen')).toHaveCount(7);
+	await expect(side(page).getByRole('heading', { name: '7 nodes' })).toBeVisible();
+	await expect(side(page).getByRole('button', { name: /^Delete/ })).toHaveCount(0);
+	await page.keyboard.press('Delete');
+	await page.keyboard.press('ControlOrMeta+d');
+	await title(page, 1).click({ button: 'right' });
+	const menu = page.getByRole('menu', { name: '7 nodes' });
+	await expect(menu.getByRole('menuitem')).toHaveText(['Copy']);
+	await menu.getByRole('menuitem', { name: 'Copy' }).click();
+	await expect(nodes(page)).toHaveCount(7);
+	await expect(graph(page).locator('g.node.chosen')).toHaveCount(7);
+
+	// Into a patch of the library's own, which has an out node, so the built-in's isn't pasted.
+	await openPatch(page, /^Square/);
+	await expect(nodes(page)).toHaveCount(4);
+	await graph(page).focus();
+	await page.keyboard.press('ControlOrMeta+v');
+	await expect(nodes(page)).toHaveCount(10);
+	await expect(graph(page).locator('g.node.chosen')).toHaveCount(6);
+	await expect(graph(page).locator('g.node.chosen', { hasText: 'Output' })).toHaveCount(0);
+	await settled(page);
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 });
 
 test('Mod+D duplicates beside what is chosen, and Mod-drag leaves the node and moves a copy', async ({ page }) => {

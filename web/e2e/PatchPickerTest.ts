@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated, as AppTest's do.
 const test = base.extend({
@@ -175,6 +176,7 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved'); // The timeline. The patch is saved as it's made.
 
 	// A clip with a note, and the new patch plays it.
+	await openView(page, 'song');
 	const row = (await page.getByTestId('row-1').boundingBox())!;
 	await page.mouse.dblclick(row.x + 10, row.y + 20);
 	await expect(page.getByTestId('roll')).toBeVisible();
@@ -191,6 +193,7 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	await expect.poll(async () => Number(await level.getAttribute('data-peak')), { timeout: 8000 }).toBeGreaterThan(0.01);
 
 	// Its edits wait with the timeline's, and Save writes both.
+	await openView(page, 'patch');
 	await page.getByLabel('Patch name', { exact: true }).fill('Made for the track');
 	await expect(page.getByTestId('unsaved')).toHaveText('2 unsaved');
 	await expect(headPatch(page, 1)).toHaveText('Made for the track');
@@ -200,6 +203,7 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 	await expect(headPatch(page, 1)).toHaveText('Made for the track');
 
 	// From a slot, a new patch is named after what was typed.
+	await openView(page, 'song');
 	const slot = page.getByRole('combobox', { name: 'Patch slot 1' });
 	await slot.click();
 	await page.keyboard.type('Bass made here');

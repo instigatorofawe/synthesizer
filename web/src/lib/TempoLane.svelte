@@ -229,6 +229,10 @@
 			event.preventDefault();
 			event.stopPropagation();
 			if (!readonly && chosen !== null && !gesture) commit(nudgeTempo(doc, chosen, nudge[1]));
+		} else if (matches(event, 'menu')) {
+			event.preventDefault();
+			event.stopPropagation();
+			menuAtChosen();
 		} else if (matches(event, 'escape')) {
 			if (gesture) {
 				const previewed = gesture.kind === 'point' && (gesture.added || gesture.moved);
@@ -253,7 +257,11 @@
 	// The menu key and Shift+F10 open the chosen change's menu, at its point.
 	function laneMenu(event: MouseEvent) {
 		event.preventDefault();
-		if (readonly || !open || chosen === null || event.clientX !== 0 || event.clientY !== 0) return;
+		if (event.clientX === 0 && event.clientY === 0) menuAtChosen();
+	}
+
+	function menuAtChosen() {
+		if (readonly || !open || chosen === null) return;
 		const point = svg.querySelector(`[data-testid="tempo-point-${chosen}"]`)?.getBoundingClientRect();
 		if (point) menu = { x: point.left, y: point.bottom, index: chosen };
 	}

@@ -105,10 +105,13 @@ describe('where keys are heard', () => {
 	});
 
 	it('is the patch on its own when no track in the image plays it', () => {
-		expect(hearing(doc, program, patch('c'), 3, true)).toEqual({ kind: 'alone' });
-		expect(hearing(doc, program, patch('z'), null, true)).toEqual({ kind: 'alone' });
-		expect(hearing(null, null, patch('a'), null, true)).toEqual({ kind: 'alone' });
-		expect(hearing(doc, null, patch('a'), null, true)).toEqual({ kind: 'alone' }); // Nothing has compiled yet
+		expect(hearing(doc, program, patch('z'), null, true)).toEqual({ kind: 'alone', track: null });
+		expect(hearing(null, null, patch('a'), null, true)).toEqual({ kind: 'alone', track: null });
+		expect(hearing(doc, null, patch('a'), null, true)).toEqual({ kind: 'alone', track: null }); // Nothing has compiled yet
+	});
+
+	it('names the track that plays it, while that track has no notes', () => {
+		expect(hearing(doc, program, patch('c'), 3, true)).toEqual({ kind: 'alone', track: 'Empty' });
 	});
 
 	it('is nowhere for an insert, or for what can only be heard in a song that leaves it out', () => {

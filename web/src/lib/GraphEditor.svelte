@@ -44,6 +44,7 @@
 		type LibraryPatch,
 		type Point
 	} from '#lib/GraphEdit.ts';
+	import { leavesFields } from '#lib/Fields.ts';
 	import { friendlyName, helpOf, rangeText, shown } from '#lib/NodeHelp.ts';
 	import NodePalette from '#lib/NodePalette.svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
@@ -974,7 +975,7 @@
 			{/if}
 		</div>
 
-		<aside class="inspector">
+		<aside class="inspector" use:leavesFields>
 			<div class="tabs" role="tablist" aria-label="Side column">
 				<button type="button" role="tab" aria-selected={tab === 'node'} onclick={() => (tab = 'node')}
 					>{wireShown ? 'Wire' : picked.length > 1 ? 'Nodes' : 'Node'}</button
@@ -1301,7 +1302,7 @@
 										<input
 											type={name === 'name' ? 'text' : 'number'}
 											step="any"
-											aria-label={`param ${param.id} ${name}`}
+											aria-label={`${param.name || `param ${param.id}`} ${name}`}
 											value={field(param[name])}
 											onchange={(e) =>
 												changeParam(index, {

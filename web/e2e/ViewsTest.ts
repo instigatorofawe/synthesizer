@@ -84,6 +84,30 @@ test('the top bar fits a 1280 px screen, long names and all', async ({ page }) =
 	await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeInViewport({ ratio: 1 });
 	await expect(page.getByRole('button', { name: '72', exact: true })).toBeInViewport({ ratio: 1 });
 	await expect(page.getByTestId('view-patch')).toHaveAttribute('title', /A patch with a name just as long/);
+	// Each tab still says which song and which patch, in eight characters or more.
+	for (const tab of ['song', 'patch']) expect(await shownCharacters(page, tab)).toBeGreaterThanOrEqual(8);
+});
+
+// Roughly how many of a tab's name's characters show, by the share of its width that does.
+const shownCharacters = (page: Page, tab: string) =>
+	page
+		.getByTestId(`view-${tab}`)
+		.locator('.name')
+		.evaluate((e) => Math.floor((e.textContent!.length * e.clientWidth) / e.scrollWidth));
+
+test('at 1280 px, with audio not started and an edit unsaved, the tabs show the demo song and its patch whole', async ({
+	page
+}) => {
+	await page.goto('/?timeline=song');
+	await page.getByRole('button', { name: 'Mute' }).first().click();
+	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
+	await expect(page.getByRole('button', { name: 'Start audio' })).toBeVisible();
+	for (const tab of ['song', 'patch']) {
+		const name = page.getByTestId(`view-${tab}`).locator('.name');
+		expect(await name.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+	}
+	await expect(page.getByTestId('view-song').locator('.name')).toHaveText('Song');
+	await expect(page.getByTestId('view-patch').locator('.name')).toHaveText('Stereo lead');
 });
 
 test('a clip opens its patch, and the song comes back on the same clip, as it was left', async ({ page }) => {

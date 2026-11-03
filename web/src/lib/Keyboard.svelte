@@ -2,6 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { on } from 'svelte/events';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { leavesFields } from '#lib/Fields.ts';
 	import { baseAfter, belongsElsewhere, keyFor, noteForKey } from '#lib/KeyboardKeys.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { clampVelocity } from '#lib/StepEntry.ts';
@@ -151,6 +152,7 @@
 </div>
 <label
 	class="velocity"
+	use:leavesFields
 	title={`How hard the keys play, and new notes are written, from 1 to 127. It is the roll's Vel. ${label('softer')} and ${label('louder')} step it by 10.`}
 >
 	<span>Vel</span>

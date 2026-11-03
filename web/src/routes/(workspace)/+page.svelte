@@ -411,6 +411,7 @@
 	let live = $state<Source | null>(null); // Which the image now playing is, once one is
 	let waiting: (() => void)[] = []; // Sent when what is wanted goes live
 	let songTick = $state(0); // Where the song was when a patch on its own took over
+	let songRan = false; // Whether it was playing then: a patch on its own runs the transport, which the song mustn't inherit
 
 	let compiler: Compiler | undefined;
 	let rendering = $state<number | null>(null); // How far a WAV export has got
@@ -609,6 +610,7 @@
 			song = goodSong = liveSong = null;
 			sent.song = '';
 			songTick = 0;
+			songRan = false;
 			solo = new Set();
 			loop = null;
 			looping = false;
@@ -661,8 +663,12 @@
 	// Makes `source` the image playing, then sends `then` once it is.
 	function use(source: Source, then?: () => void) {
 		if (want !== source) {
+			if (want === 'song') songRan = live === 'song' && !!engineState?.playing;
 			if (live === 'song' && engineState) songTick = engineState.tick;
 			want = source;
+			// The image swaps under a running transport, and what played on its own ran it only for its LFOs. Stopped first,
+			// the song comes back as it was left. That image may already be on its way out, so `live` can't say it was there.
+			if (source === 'song' && !songRan && engineState?.playing) engine.stop();
 			waiting = source === 'song' ? [() => engine.locate(songTick)] : [];
 			const good = source === 'song' ? goodSong : goodAlone;
 			if (started && good) load(good);
@@ -1459,7 +1465,7 @@
 		engine.onState = (s) => {
 			engineState = s;
 			// A shared LFO waits for the transport, and a patch on its own has no Play button.
-			if (live === 'alone' && s.generation !== 0 && !s.playing) engine.play();
+			if (live === 'alone' && want === 'alone' && s.generation !== 0 && !s.playing) engine.play();
 		};
 		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start, block.generation);
 		engine.onTargets = (t) => (targets = t);
@@ -1636,7 +1642,9 @@
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
 		<span class="grow"></span>
 		<CompileLight {busy} {problems} size={imageSize} details={engineDetails} />
-		{#if dirty.size}<span class="muted unsaved" data-testid="unsaved">{dirty.size} unsaved</span>{/if}
+		{#if dirty.size}<span class="muted unsaved" data-testid="unsaved" title={`${dirty.size} unsaved. Save keeps them.`}
+				>{dirty.size}<span class="word"> unsaved</span></span
+			>{/if}
 		<form method="POST" action={actionOn(search, 'save')} use:enhance={saving} bind:this={saveForm}>
 			<button disabled={!dirty.size} title={`Save every unsaved patch and timeline (${label('save')})`}>Save</button>
 		</form>
@@ -1835,6 +1843,7 @@
 			<span
 				data-testid="state"
 				data-playing={engineState.playing}
+				data-live={live ?? ''}
 				data-time={engineState.time}
 				data-recording={engineState.recording}
 				data-clicks={engineState.clicks}
@@ -1897,7 +1906,7 @@
 		flex: none;
 	}
 	.topbar > :global(.views) {
-		flex: 0 1 auto;
+		flex: 0 0.05 auto; /* Last to give way */
 	}
 	.topbar button {
 		padding: 0.2rem 0.6rem;
@@ -1976,8 +1985,23 @@
 	.glide {
 		color: var(--accent);
 	}
+	/* The tabs name what is open, so at a laptop's width the master meter narrows, the gaps close up and the unsaved count
+	   drops its word before they give way: see ViewTabs for how far they go. */
 	.master {
-		width: 80px;
+		flex: 0 4 80px;
+		min-width: 2rem;
+	}
+	@media (max-width: 1399px) {
+		.topbar {
+			gap: 0.3rem;
+		}
+		.unsaved .word {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+		}
 	}
 	.grow {
 		flex: 1 1 0;

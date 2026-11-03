@@ -49,6 +49,8 @@ export const SHORTCUTS = [
 	{ id: 'browser', code: 'KeyB', scope: 'everywhere', description: 'Fold or unfold the browser' },
 	{ id: 'inspector', code: 'KeyI', scope: 'everywhere', description: 'Fold or unfold the inspector' },
 	{ id: 'fit', code: 'Period', scope: 'everywhere', description: 'Fit the view to what is in it' },
+	// Browsers open a menu for Shift+F10 on some systems and not on others, a Mac's among them, so the editor opens its own.
+	{ id: 'menu', code: 'F10', shift: true, scope: 'everywhere', description: 'Open the menu of what has focus' },
 
 	// What is chosen, in whichever editor is in use.
 	{ id: 'select-all', code: 'KeyA', mod: true, scope: 'everywhere', description: 'Choose everything' },

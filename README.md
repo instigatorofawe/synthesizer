@@ -58,6 +58,7 @@ the GIL, so engines on separate threads render at once.
     pnpm wasm      # copies the wasm build into the app
     pnpm build
     pnpm start     # http://127.0.0.1:5321
+    pnpm e2e       # the browser tests, on a server of their own at 5331, or E2E_PORT
 
 The editor is laid out like a DAW, as two views under one top bar: Song, the arrangement with the notes of the chosen clip
 below it, and Patch, a patch's graph at full height. The top bar holds the transport and a loop button, the position and the tempo

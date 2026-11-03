@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick as settle } from 'svelte';
 	import {
 		barOf,
 		copiedSpan,
@@ -22,9 +22,11 @@
 	} from '#lib/TimelineEdit.ts';
 	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import { escapeCancels } from '#lib/Drag.ts';
 	import { followScroll } from '#lib/Follow.ts';
 	import HeadMix from '#lib/HeadMix.svelte';
 	import Meter from '#lib/Meter.svelte';
+	import { anchored, wheelAction } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
@@ -84,6 +86,7 @@
 		onexpand = () => {},
 		ontempo = () => {},
 		onmix = () => {},
+		onzoom = () => {},
 		actions
 	}: {
 		id?: string; // Which timeline this is, for what the arrangement keeps about it between visits: which song lanes are open
@@ -115,6 +118,7 @@
 		onexpand?: (at: { track: number; placement: number }) => void; // A double-click on a clip, which opens its notes in the whole view
 		ontempo?: (tempo: Tempo[] | null) => void; // The tempo while the Tempo lane is dragged, and null once the drag is over
 		onmix?: (track: number, change: { gain?: number; pan?: number }, done: boolean) => void; // A head's fader or pan
+		onzoom?: (by: number) => void; // Mod with the wheel, or a pinch: bars this many times as wide
 		actions?: PlacementActions;
 	} = $props();
 
@@ -397,6 +401,12 @@
 		onloop(loop, !looping);
 	}
 
+	// Esc cancels a drag, of a clip, its repeats, a new clip or the loop, and what the pointer then lets go of is nothing.
+	const dragging = $derived(gesture !== null);
+	$effect(() => {
+		if (dragging) return escapeCancels(() => (gesture = null));
+	});
+
 	// A press on an empty row chooses its track, and dragging across it draws a clip, whole bars long.
 	function rowPressed(event: PointerEvent) {
 		const at = canvas(event);
@@ -416,19 +426,32 @@
 	function blockMenu(event: MouseEvent, block: Block) {
 		event.preventDefault();
 		event.stopPropagation();
+		const keyed = event.clientX === 0 && event.clientY === 0;
+		openBlockMenu(block, event.currentTarget as Element, keyed ? null : { x: event.clientX, y: event.clientY });
+	}
+
+	// The menu key and Shift+F10 open it at the clip rather than at a pointer.
+	function openBlockMenu(block: Block, on: Element, at: { x: number; y: number } | null) {
 		gesture = null;
 		onselect({ track: block.track.id, placement: block.index });
 		if (readonly || !actions) return;
-		// The menu key and Shift+F10 open it at the clip rather than at a pointer.
-		const box = (event.currentTarget as Element).getBoundingClientRect();
-		const keyed = event.clientX === 0 && event.clientY === 0;
+		const box = on.getBoundingClientRect();
 		menu = {
-			x: keyed ? box.left : event.clientX,
-			y: keyed ? box.bottom : event.clientY,
+			x: at?.x ?? box.left,
+			y: at?.y ?? box.bottom,
 			track: block.track.id,
 			placement: block.index,
 			clip: block.name
 		};
+	}
+
+	function blockKeys(event: KeyboardEvent, block: Block) {
+		if (event.key === 'Enter') onselect({ track: block.track.id, placement: block.index });
+		else if (matches(event, 'menu')) {
+			event.preventDefault();
+			event.stopPropagation();
+			openBlockMenu(block, event.currentTarget as Element, null);
+		}
 	}
 
 	const uses = (clip: string) => doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clip).length;
@@ -489,6 +512,19 @@
 		}
 	}
 
+	// Mod with the wheel, or a pinch, zooms across, keeping what is under the pointer there, as the roll does. Anything else
+	// scrolls, as it would anywhere.
+	async function wheel(event: WheelEvent) {
+		const action = wheelAction(event, modKey(), view.clientHeight);
+		if (action.kind !== 'zoom' && action.kind !== 'rows') return;
+		event.preventDefault();
+		const before = barWidth;
+		const at = event.clientX - view.getBoundingClientRect().left;
+		onzoom(action.by);
+		await settle();
+		if (barWidth !== before) view.scrollLeft = anchored(view.scrollLeft, at, barWidth / before, heads.offsetWidth);
+	}
+
 	// While the song plays, the view keeps the playhead in sight. Where it was last is all this keeps, so it isn't state.
 	let followed: number | null = null;
 	$effect(() => {
@@ -519,7 +555,7 @@
 
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} onkeydown={keydown} />
 
-<div class="arrangement" bind:this={view} data-testid="arrangement-view">
+<div class="arrangement" bind:this={view} data-testid="arrangement-view" onwheel={wheel}>
 	<div class="heads" bind:this={heads} style:padding-top="{TOP}px">
 		<!-- The song layer's heads. ▸ or a double-click on a folded lane unfolds it, and ▾ folds it again. -->
 		<div class="layer" role="group" aria-label="Song lanes" style:height="{layer}px">
@@ -715,9 +751,7 @@
 						onpointerdown={(event) => startMove(event, block)}
 						ondblclick={() => onexpand({ track: block.track.id, placement: block.index })}
 						oncontextmenu={(event) => blockMenu(event, block)}
-						onkeydown={(event) => {
-							if (event.key === 'Enter') onselect({ track: block.track.id, placement: block.index });
-						}}
+						onkeydown={(event) => blockKeys(event, block)}
 					/>
 					<path class="join" d={joins(block)} />
 					<path class="sketch" d={sketch(block)} />

@@ -3,6 +3,7 @@
 	import { on } from 'svelte/events';
 	import Arrangement, { type Loop, type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
+	import { leavesFields } from '#lib/Fields.ts';
 	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
 	import type { ExampleGroup } from '#lib/PatchGroups.ts';
@@ -60,6 +61,7 @@
 		type Clip,
 		type PatchLike
 	} from '#lib/TimelineEdit.ts';
+	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import { landing, type SongPlace } from '#lib/Workspace.ts';
 
 	let {
@@ -156,9 +158,12 @@
 	const track = $derived(doc.tracks.find((t) => t.id === selection.track));
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
 	const clip = $derived(doc.clips.find((c) => c.id === clipId));
-	// A clip can be placed on several tracks. What it moves and what it plays are worked out for the one it was opened from.
+	// A clip can be placed on several tracks. What it moves and what it plays are worked out for the one it was opened from,
+	// or for the chosen track, which the roll follows.
 	const home = $derived(
-		placed?.clip === clipId ? track : doc.tracks.find((t) => t.placements.some((p) => p.clip === clipId))
+		placed?.clip === clipId || track?.placements.some((p) => p.clip === clipId)
+			? track
+			: doc.tracks.find((t) => t.placements.some((p) => p.clip === clipId))
 	);
 	const reported = $derived(program?.tracks.find((t) => t.id === home?.id));
 	const uses = $derived(doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clipId).length);
@@ -167,6 +172,8 @@
 	const used = $derived(doc.tracks.flatMap((t) => t.slots));
 	const newPatchAction = $derived(onnewpatch && !readonly ? 'New patch for this track' : '');
 	const choices = $derived(laneChoices(doc, home?.id ?? null, patches));
+	// A track with no notes in any clip is left out of the image, so it never plays.
+	const silent = $derived(!!home && !home.placements.some((p) => doc.clips.find((c) => c.id === p.clip)?.notes.length));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
 	const badClips = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).clip ?? [])));
 
@@ -235,6 +242,26 @@
 			tab = at.tab;
 		});
 	});
+
+	// The roll shows a clip on the chosen track, so what a click or step entry writes goes to the track the keys play. A track
+	// chosen that doesn't hold the clip shown brings its own first clip into the roll, or none, and the roll offers it one.
+	let followed = untrack(() => selection.track);
+	$effect(() => {
+		const id = selection.track;
+		untrack(() => {
+			if (id === followed) return;
+			followed = id;
+			const chosen = doc.tracks.find((t) => t.id === id);
+			if (!chosen || chosen.placements.some((p) => p.clip === clipId)) return;
+			clipId = chosen.placements[0]?.clip ?? null;
+		});
+	});
+
+	// The roll's New clip, for a track with none: as long as a new song's, at the bar the playhead is in.
+	function firstClip(id: number) {
+		const bar = ticksPerBar(doc);
+		newClip(id, Math.floor(tick / bar) * bar, TEMPLATE_BARS * bar);
+	}
 
 	function select(next: Selection) {
 		selection = next;
@@ -305,6 +332,19 @@
 		if (home.track === null) return openPatch(newTrack(id), id);
 		if (putPatch(home.track, home.index, id)) await openPatch(home.track, id); // Unless the track went meanwhile
 	}
+
+	// The arrangement's zoom, by its − and +, or Mod with the wheel over it.
+	function zoomBars(by: number) {
+		barWidth = Math.max(24, Math.min(800, barWidth * by));
+	}
+
+	// The toolbar's hint, which the toolbar cuts short at a laptop's width, and so its title too.
+	const songHint = $derived(
+		'Click the numbers to move the playhead.' +
+			(readonly
+				? ''
+				: ` Drag across a row for a new clip, or double-click it for a bar. Drag a clip's right edge to repeat it, hold ${mod} to copy it, and right-click it for more.`)
+	);
 
 	function newClip(id: number, at: number, length = ticksPerBar(doc)) {
 		const added = addClip(doc, length);
@@ -573,6 +613,7 @@
 <svelte:window onkeydown={keydown} />
 
 <section
+	use:leavesFields
 	class="timeline"
 	class:expanded
 	class:inspecting={inspecting === true}
@@ -625,14 +666,19 @@
 				{#each grids(doc.ppq) as choice (choice.label)}<option value={choice.ticks}>{choice.label}</option>{/each}
 			</select>
 		</label>
-		<button type="button" onclick={() => (barWidth = Math.max(24, barWidth / 1.5))} aria-label="Zoom out">−</button>
-		<button type="button" onclick={() => (barWidth = Math.min(800, barWidth * 1.5))} aria-label="Zoom in">+</button>
-		<span class="muted hint">
-			Click the numbers to move the playhead.
-			{#if !readonly}Drag across a row for a new clip, or double-click it for a bar. Drag a clip's right edge to repeat
-				it, hold
-				{mod} to copy it, and right-click it for more.{/if}
-		</span>
+		<button
+			type="button"
+			onclick={() => zoomBars(1 / 1.5)}
+			aria-label="Zoom out"
+			title={`Zoom out. ${mod} with the wheel, or a pinch, zooms where the pointer is.`}>−</button
+		>
+		<button
+			type="button"
+			onclick={() => zoomBars(1.5)}
+			aria-label="Zoom in"
+			title={`Zoom in. ${mod} with the wheel, or a pinch, zooms where the pointer is.`}>+</button
+		>
+		<span class="muted hint" title={songHint}>{songHint}</span>
 	</div>
 
 	<!-- The arrangement and the inspector take their places in the editor's grid: see `.top` below. -->
@@ -668,6 +714,7 @@
 			onexpand={expandClip}
 			{ontempo}
 			onmix={mixed}
+			onzoom={zoomBars}
 		/>
 
 		<aside class="inspector" id="inspector">
@@ -1060,6 +1107,7 @@
 							{grid}
 							slots={home?.slots ?? []}
 							{choices}
+							{silent}
 							{playhead}
 							{playing}
 							canAudition={reported !== undefined || auditionByKeys}
@@ -1080,6 +1128,13 @@
 							{onsay}
 						/>
 					{/key}
+				{:else if track && !track.placements.length && !readonly}
+					{@const owner = track}
+					<p class="muted empty" data-testid="no-clip">
+						{trackName(owner)} has no clip yet.
+						<button type="button" onclick={() => firstClip(owner.id)}>New clip</button>
+						makes one of {TEMPLATE_BARS} bars at the playhead, or drag across its row for one of your own length.
+					</p>
 				{:else}
 					<p class="muted empty">
 						{readonly

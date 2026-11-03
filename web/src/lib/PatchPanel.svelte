@@ -105,7 +105,9 @@
 		hearing.kind === 'song'
 			? `Keys play it on ${hearing.name}, in the song.`
 			: hearing.kind === 'alone'
-				? 'No track plays it, so keys play it on its own.'
+				? hearing.track
+					? `${hearing.track} has no notes yet, so keys play it on its own.`
+					: 'No track plays it, so keys play it on its own.'
 				: hearing.why
 	);
 	const playable = $derived(hearing.kind !== 'none');

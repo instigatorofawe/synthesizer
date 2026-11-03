@@ -56,6 +56,7 @@
 
 	const HEIGHT = 64;
 	const PAD = 6;
+	const POINT_REACH = 8; // Pixels above or below a point within which a click on the lane meant that point
 	const SHAPE_NAMES: Record<Shape, string> = { step: 'Step', line: 'Line', exp: 'Exp' };
 
 	let svg: SVGSVGElement;
@@ -124,11 +125,14 @@
 		chosen = null;
 		if (readonly || secondary(event)) return;
 		const { tick, value, past } = pointer(event);
-		if (past) return;
+		// A click that can't add a point says why, rather than doing nothing.
+		if (past) return onsay("That's past the clip's end. Lengthen the clip for a point there.");
 		const there = points.find((point) => point.tick === tick);
 		if (there) {
 			chosen = there.index;
 			held = { from: there.index, index: there.index, base: clip, clip };
+			if (Math.abs(event.clientY - svg.getBoundingClientRect().top - yOf(there.value)) > POINT_REACH)
+				onsay('A point is at that step already, so it is chosen. A finer Snap puts one beside it.');
 			return;
 		}
 		const added = addLanePoint(clip, lane, tick, value, start);

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
+	import { rangeEscape } from '#lib/Drag.ts';
 	import ParamSlider from '#lib/ParamSlider.svelte';
 	import { unitOf } from '#lib/ParamValues.ts';
 	import type { ProgramReport } from '#lib/Request.ts';
@@ -172,6 +173,7 @@
 			aria-valuetext={decibels(gain)}
 			oninput={(e) => live(setChain(doc, key, { gain: at(e) }), key)}
 			onchange={(e) => onchange(setChain(doc, key, { gain: at(e) }))}
+			use:rangeEscape={() => live(doc, key)}
 		/>
 	</label>
 {/snippet}
@@ -292,6 +294,7 @@
 			aria-label={`Pan for ${label}`}
 			oninput={(e) => live(setChain(doc, key, { pan: number(e) }), key)}
 			onchange={(e) => onchange(setChain(doc, key, { pan: number(e) }))}
+			use:rangeEscape={() => live(doc, key)}
 		/>
 	</div>
 	<label class="line">
@@ -319,6 +322,7 @@
 				aria-label={`Send from ${label} to ${send.bus}`}
 				oninput={(e) => live(setSend(doc, key, index, { gain: number(e) }), key)}
 				onchange={(e) => onchange(setSend(doc, key, index, { gain: number(e) }))}
+				use:rangeEscape={() => live(doc, key)}
 			/>
 			<button
 				type="button"

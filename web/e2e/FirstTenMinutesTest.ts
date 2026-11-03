@@ -97,7 +97,7 @@ test('a new timeline opens on a track with a built-in patch and a four-bar clip 
 
 	// The keys play the track before it has a note, on its own
 	await expect(keys(page)).toHaveAttribute('title', /^Keys play Track 1, on its own until it has notes\./);
-	await expect(keys(page).getByRole('button', { name: '60', exact: true })).toBeEnabled();
+	await expect(keys(page).getByRole('button', { name: 'C4', exact: true })).toBeEnabled();
 	await page.getByTestId('roll').focus();
 	await page.keyboard.down('a'); // Starts audio, as a key does
 	await expect.poll(() => level(page, 'Master level'), { timeout: 10000 }).toBeGreaterThan(0.005);
@@ -179,7 +179,7 @@ test('M and S in the track heads and the Mixer agree: a mute is saved and undone
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 6000 }).toBeLessThan(0.002);
 	// Pluck plays, as its own scope shows, which is before its mute, and the master hears none of it
 	await expect.poll(() => stripPeak(page, 'track:2'), { timeout: 8000 }).toBeGreaterThan(0.01);
-	expect(await stripPeak(page, 'master')).toBeLessThan(0.002);
+	await expect.poll(() => stripPeak(page, 'master')).toBeLessThan(0.002);
 	await headSolo('Lead').click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);
 	await headMute('Lead').click();

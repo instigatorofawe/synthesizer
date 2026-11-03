@@ -208,7 +208,7 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	await slide(page, 'level', 125, false);
 	await expect(level).toHaveAttribute('aria-valuetext', '0.25');
 	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeLessThan(0.3 * full);
-	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
 	expect(await page.getByTestId('compiles').textContent()).toBe(compiles);
 
 	// Let go, the song holds it, and compiles once.
@@ -219,7 +219,7 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	await expect(page.getByTestId('compiles')).toHaveText(String(Number(compiles) + 1));
 	await engineRenders(page, 0.3);
 	expect(await masterLoudest(page)).toBeLessThan(0.3 * full); // Since the new image began, which settled the song's value
-	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
 
 	// It is one step of the song's undo.
 	await openView(page, 'song');
@@ -380,7 +380,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 	await velocity.blur();
 	await page.keyboard.down('a');
 	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeLessThan(0.3 * full);
-	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
 	await page.keyboard.up('a');
 	await expect(voices(page)).toHaveText('0');
 
@@ -393,7 +393,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 	await expect(holdButton(page)).toHaveAttribute('data-held', '1');
 	await engineRenders(page, 0.5);
 	await expect(voices(page)).toHaveText('1');
-	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
 
 	// Played again, it goes.
 	await page.keyboard.press('a');

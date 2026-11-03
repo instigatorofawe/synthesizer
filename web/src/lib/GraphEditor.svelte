@@ -1192,7 +1192,8 @@
 											value={chosen[option.name] ?? ''}
 											onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, false)}
 										>
-											<option value="">default</option>
+											<!-- The compiler's table lists an option's default first, which the node's title names too. -->
+											<option value="">default ({option.choices[0]})</option>
 											{#each option.choices as choice (choice)}<option value={choice}>{choice}</option>{/each}
 										</select>
 									{:else if option.name === 'patch'}

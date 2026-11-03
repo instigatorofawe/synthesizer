@@ -1643,7 +1643,7 @@
 		<span class="grow"></span>
 		<CompileLight {busy} {problems} size={imageSize} details={engineDetails} />
 		{#if dirty.size}<span class="muted unsaved" data-testid="unsaved" title={`${dirty.size} unsaved. Save keeps them.`}
-				>{dirty.size}<span class="word"> unsaved</span></span
+				>{dirty.size} <span class="word">unsaved</span></span
 			>{/if}
 		<form method="POST" action={actionOn(search, 'save')} use:enhance={saving} bind:this={saveForm}>
 			<button disabled={!dirty.size} title={`Save every unsaved patch and timeline (${label('save')})`}>Save</button>

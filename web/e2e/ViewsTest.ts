@@ -82,7 +82,7 @@ test('the top bar fits a 1280 px screen, long names and all', async ({ page }) =
 	expect(await fits()).toBe(true);
 	await expect(page.getByRole('button', { name: 'Start audio' })).toBeInViewport({ ratio: 1 });
 	await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeInViewport({ ratio: 1 });
-	await expect(page.getByRole('button', { name: '72', exact: true })).toBeInViewport({ ratio: 1 });
+	await expect(page.getByRole('button', { name: 'C5', exact: true })).toBeInViewport({ ratio: 1 });
 	await expect(page.getByTestId('view-patch')).toHaveAttribute('title', /A patch with a name just as long/);
 	// Each tab still says which song and which patch, in eight characters or more.
 	for (const tab of ['song', 'patch']) expect(await shownCharacters(page, tab)).toBeGreaterThanOrEqual(8);

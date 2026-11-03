@@ -138,7 +138,7 @@
 			class:down={held.has(note)}
 			class:latched={latched.has(note) && !held.has(note)}
 			style:left="{isBlackKey(note) ? left(note) : whites.indexOf(note) * WHITE}px"
-			aria-label={String(note)}
+			aria-label={noteName(note)}
 			aria-keyshortcuts={keyFor(note, base) || undefined}
 			title={keyFor(note, base) ? `${noteName(note)} (${keyFor(note, base)})` : noteName(note)}
 			{disabled}

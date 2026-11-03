@@ -527,7 +527,7 @@ test('a patch no track plays is heard on its own, and Play brings the song back'
 	await page.locator('g.node:has(text:has-text("osc"))').first().locator('rect.title').click();
 	await page.getByRole('button', { name: 'Probe out' }).click();
 	await expect(page.getByTestId('probe-waiting')).toContainText('shows once the patch plays');
-	const key = page.getByRole('button', { name: '60', exact: true });
+	const key = page.getByRole('button', { name: 'C4', exact: true });
 	await key.dispatchEvent('pointerdown');
 	await expect(page.getByTestId('playing-alone')).toBeVisible();
 	await expect(page.getByTestId('probe-waiting')).toHaveCount(0);
@@ -546,7 +546,7 @@ test('a patch a track plays is heard in the song, through that track', async ({ 
 	await page.goto('/?timeline=song');
 	await openView(page, 'patch');
 	await expect(page.getByTestId('hearing')).toContainText('Keys play it on Lead, in the song');
-	const key = page.getByRole('button', { name: '67', exact: true });
+	const key = page.getByRole('button', { name: 'G4', exact: true });
 	await key.dispatchEvent('pointerdown'); // Starts audio as well
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	// The track's meter is in the Song view, out of sight
@@ -758,7 +758,7 @@ test('a probe scopes a node inside a voice', async ({ page }) => {
 	await page.getByRole('button', { name: 'Probe out' }).click();
 	const label = page.locator('span').filter({ hasText: new RegExp(`^${id} osc\\.out$`) });
 	await expect(label).toBeVisible();
-	const key = page.getByRole('button', { name: '60', exact: true });
+	const key = page.getByRole('button', { name: 'C4', exact: true });
 	await key.dispatchEvent('pointerdown');
 	await expect
 		.poll(async () => (await patchPeaks(page)).filter((p) => p > 0.5).length, { timeout: 8000 })
@@ -853,7 +853,7 @@ test('a built-in patch with a recording plays on its own, though nothing in the 
 }) => {
 	await page.goto('/?timeline=song&patch=builtin-LoopedSample');
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'alone');
-	const key = page.getByRole('button', { name: '60', exact: true });
+	const key = page.getByRole('button', { name: 'C4', exact: true });
 	await key.dispatchEvent('pointerdown');
 	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true', { timeout: 10000 });
 	await expect.poll(async () => Math.max(0, ...(await patchPeaks(page))), { timeout: 8000 }).toBeGreaterThan(0.05);
@@ -1652,7 +1652,7 @@ test('WAV files become an instrument that plays, and its samples stay while it d
 	await expect(await graphJson(page)).toHaveValue(/"root": 60/);
 	await graphView(page);
 
-	const key = page.getByRole('button', { name: '60', exact: true });
+	const key = page.getByRole('button', { name: 'C4', exact: true });
 	await key.dispatchEvent('pointerdown'); // Starts audio, with the instrument on its own since no track plays it
 	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true', { timeout: 10000 });
 	// Each sample plays once, for half a second, so the meter's hold shows it whenever it is read.

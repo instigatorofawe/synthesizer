@@ -122,8 +122,13 @@ export const SHORTCUTS = [
 	{ id: 'head.down', code: 'ArrowDown', scope: 'head', description: 'The fader down a step, or the pan a step left' },
 	{ id: 'head.left', code: 'ArrowLeft', scope: 'head', description: 'The fader down a step, or the pan a step left' },
 
-	{ id: 'graph.delete', code: 'Delete', scope: 'graph', description: 'Delete the chosen node' },
-	{ id: 'graph.backspace', code: 'Backspace', scope: 'graph', description: 'Delete the chosen node' }
+	{ id: 'graph.delete', code: 'Delete', scope: 'graph', description: 'Delete the chosen nodes, or the chosen wire' },
+	{
+		id: 'graph.backspace',
+		code: 'Backspace',
+		scope: 'graph',
+		description: 'Delete the chosen nodes, or the chosen wire'
+	}
 ] as const satisfies readonly Shortcut[];
 
 export type ShortcutId = (typeof SHORTCUTS)[number]['id'];

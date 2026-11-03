@@ -1,21 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import {
 	addNode,
+	boundsOf,
 	connect,
+	copyNodes,
 	detailOf,
 	disconnect,
 	edgeInto,
 	freeSpot,
 	insertSnap,
 	inputsOf,
+	isPort,
 	layout,
 	moveNode,
+	moveNodes,
 	nodeOfError,
+	nodesTouching,
 	outputsOf,
 	parseCurve,
+	pasteNodes,
 	placed,
 	rateErrorInput,
 	removeNode,
+	removeNodes,
 	setLiteral,
 	setOption,
 	tidy,
@@ -490,5 +497,194 @@ describe('probe targets', () => {
 	it('stops at the last tap slot', () => {
 		const many = Array.from({ length: 8 }, () => probe(3));
 		expect(probeTargets(nodes, many, 2).map((t) => t.slot)).toEqual([2, 3, 4, 5, 6, 7]);
+	});
+});
+
+describe('choosing several nodes, and moving or deleting them', () => {
+	const tall = () => 50;
+	const laid = graph(
+		[
+			{ id: 1, type: 'note', x: 0, y: 0 },
+			{ id: 2, type: 'osc', x: 200, y: 0 },
+			{ id: 3, type: 'out', x: 400, y: 100 }
+		],
+		[
+			{ from: 1, port: 'pitch', to: 2, input: 'freq' },
+			{ from: 2, to: 3, input: 'l' }
+		]
+	);
+
+	it('chooses the nodes a box touches, however little of each', () => {
+		expect(nodesTouching(laid, { x: 140, y: 40, width: 70, height: 5 }, tall)).toEqual([1, 2]);
+		expect(nodesTouching(laid, { x: 160, y: 60, width: 30, height: 30 }, tall)).toEqual([]);
+		expect(nodesTouching(laid, { x: -1000, y: -1000, width: 3000, height: 3000 }, tall)).toEqual([1, 2, 3]);
+	});
+
+	it('measures the box round some nodes', () => {
+		expect(boundsOf(laid.nodes, tall)).toEqual({ x: 0, y: 0, width: 550, height: 150 });
+		expect(boundsOf(laid.nodes.slice(1, 2), tall)).toEqual({ x: 200, y: 0, width: 150, height: 50 });
+	});
+
+	it('moves several by the same amount, and no others', () => {
+		const moved = moveNodes(laid, [1, 3], 10, -5);
+		expect(moved.nodes.map((node) => [node.x, node.y])).toEqual([
+			[10, -5],
+			[200, 0],
+			[410, 95]
+		]);
+		expect(moved.edges).toBe(laid.edges);
+	});
+
+	it('takes several away, with every wire to or from them', () => {
+		const next = removeNodes(laid, [2, 3]);
+		expect(next.nodes.map((node) => node.id)).toEqual([1]);
+		expect(next.edges).toEqual([]);
+		expect(removeNodes(laid, [])).toEqual(laid);
+	});
+
+	it('knows what a patch is played and wired through', () => {
+		const types = ['note', 'in', 'out', 'inlet', 'outlet', 'osc', 'subpatch', 'param'] as GraphNode['type'][];
+		expect(types.filter((type) => isPort({ id: 1, type }))).toEqual(['note', 'in', 'out', 'inlet', 'outlet']);
+	});
+});
+
+describe('copying and pasting nodes', () => {
+	const params: Graph['params'] = [
+		{ id: 1, name: 'cutoff', scope: 'track', min: 80, max: 12000, default: 900, smooth_ms: 10 },
+		{ id: 2, name: 'detune', scope: 'track', min: 0, max: 1, default: 0.1, smooth_ms: 10 }
+	];
+	const source: Graph = {
+		params,
+		nodes: [
+			{ id: 1, type: 'note', x: 0, y: 0 },
+			{ id: 2, type: 'mtof', x: 190, y: 0 },
+			{ id: 3, type: 'osc', wave: 'saw', x: 380, y: 0, inputs: { width: 0.3 } },
+			{ id: 4, type: 'param', param: 1, x: 380, y: 120 },
+			{ id: 5, type: 'biquad', x: 570, y: 0 },
+			{ id: 6, type: 'subpatch', patch: 'pair', x: 570, y: 200, inputs: { depth: 0.5 } },
+			{ id: 7, type: 'out', x: 760, y: 0 }
+		],
+		edges: [
+			{ from: 1, port: 'pitch', to: 2, input: 'in' },
+			{ from: 2, port: 'out', to: 3, input: 'freq' },
+			{ from: 3, port: 'out', to: 5, input: 'in' },
+			{ from: 4, port: 'out', to: 5, input: 'cutoff' },
+			{ from: 5, port: 'out', to: 7, input: 'l' },
+			{ from: 6, port: 'l', to: 7, input: 'r' }
+		]
+	};
+	const pasted = (into: Graph, ids: number[]) => into.nodes.filter((node) => ids.includes(node.id));
+
+	it('copies the nodes chosen, the wires between them, and the parameters they read', () => {
+		const copied = copyNodes(source, [3, 4, 5], 'lead')!;
+		expect(copied.from).toBe('lead');
+		expect(copied.nodes.map((node) => node.id)).toEqual([3, 4, 5]);
+		expect(copied.edges).toEqual([
+			{ from: 3, port: 'out', to: 5, input: 'in' },
+			{ from: 4, port: 'out', to: 5, input: 'cutoff' }
+		]);
+		expect(copied.params).toEqual([params[0]]);
+		expect(copyNodes(source, [], 'lead')).toBeNull();
+		expect(copyNodes(source, [99], 'lead')).toBeNull();
+	});
+
+	it('keeps a copy apart from the graph it came from', () => {
+		const copied = copyNodes(source, [3], 'lead')!;
+		(copied.nodes[0].inputs as Record<string, number>).width = 0.9;
+		expect(source.nodes[2].inputs).toEqual({ width: 0.3 });
+	});
+
+	it('gives pasted nodes fresh ids that clash with none, however often they are pasted', () => {
+		const copied = copyNodes(source, [2, 3], 'lead')!;
+		const once = pasteNodes(source, copied, 'lead', { x: 0, y: 200 });
+		expect(once.ids).toEqual([8, 9]);
+		const twice = pasteNodes(once.graph, copied, 'lead', { x: 0, y: 400 });
+		expect(twice.ids).toEqual([10, 11]);
+		const ids = twice.graph.nodes.map((node) => node.id);
+		expect(new Set(ids).size).toBe(ids.length);
+		expect(twice.graph.nodes.slice(0, source.nodes.length)).toEqual(source.nodes);
+		expect(twice.graph.edges.slice(0, source.edges.length)).toEqual(source.edges);
+	});
+
+	it('keeps the wires between them, renumbered, and moves them by the offset', () => {
+		const { graph: next, ids } = pasteNodes(source, copyNodes(source, [2, 3], 'lead')!, 'lead', { x: 10, y: 200 });
+		expect(next.edges.slice(source.edges.length)).toEqual([{ from: 8, port: 'out', to: 9, input: 'freq' }]);
+		expect(pasted(next, ids)).toEqual([
+			{ id: 8, type: 'mtof', x: 200, y: 200 },
+			{ id: 9, type: 'osc', wave: 'saw', x: 390, y: 200, inputs: { width: 0.3 } }
+		]);
+	});
+
+	it('drops a wire from a node that was not copied, which leaves the input its own value', () => {
+		const { graph: next, ids } = pasteNodes(source, copyNodes(source, [3], 'lead')!, 'lead', { x: 0, y: 0 });
+		expect(next.edges).toEqual(source.edges);
+		expect(edgeInto(next, ids[0], 'freq')).toBeUndefined();
+		expect(pasted(next, ids)[0].inputs).toEqual({ width: 0.3 });
+	});
+
+	it('copies a subpatch whole, naming the same patch, with its typed-in values', () => {
+		const { graph: next, ids } = pasteNodes(EMPTY_GRAPH, copyNodes(source, [6], 'lead')!, 'pad', { x: 0, y: 0 });
+		expect(pasted(next, ids)).toEqual([
+			{ id: 7, type: 'subpatch', patch: 'pair', x: 570, y: 200, inputs: { depth: 0.5 } }
+		]);
+	});
+
+	it('keeps a param node reading its parameter, in the patch it came from', () => {
+		const { graph: next, ids } = pasteNodes(source, copyNodes(source, [4], 'lead')!, 'lead', { x: 0, y: 0 });
+		expect(pasted(next, ids)[0].param).toBe(1);
+		expect(next.params).toEqual(params);
+	});
+
+	it('has a param node read the parameter of the same name in another patch, whatever its id there', () => {
+		const other = {
+			...EMPTY_GRAPH,
+			params: [
+				{ ...params[1], id: 1 },
+				{ ...params[0], id: 5, min: 20 }
+			]
+		};
+		const { graph: next, ids } = pasteNodes(other, copyNodes(source, [4], 'lead')!, 'pad', { x: 0, y: 0 });
+		expect(pasted(next, ids)[0].param).toBe(5);
+		expect(next.params).toEqual(other.params);
+	});
+
+	it('brings the parameter along to a patch with none of that name, under its own id if that is free', () => {
+		const copied = copyNodes(source, [4], 'lead')!;
+		const into = pasteNodes(EMPTY_GRAPH, copied, 'pad', { x: 0, y: 0 });
+		expect(into.graph.params).toEqual([params[0]]);
+		expect(pasted(into.graph, into.ids)[0].param).toBe(1);
+
+		const taken = { ...EMPTY_GRAPH, params: [{ ...params[1], id: 1 }] };
+		const moved = pasteNodes(taken, copied, 'pad', { x: 0, y: 0 });
+		expect(moved.graph.params).toEqual([taken.params[0], { ...params[0], id: 2 }]);
+		expect(pasted(moved.graph, moved.ids)[0].param).toBe(2);
+	});
+
+	it('leaves out a second out node, and its wires', () => {
+		const copied = copyNodes(source, [5, 7], 'lead')!;
+		const into = pasteNodes(source, copied, 'lead', { x: 0, y: 300 });
+		expect(pasted(into.graph, into.ids).map((node) => node.type)).toEqual(['biquad']);
+		expect(into.graph.edges).toEqual(source.edges);
+		const alone = pasteNodes(graph([{ id: 1, type: 'note' }]), copied, 'pad', { x: 0, y: 0 });
+		expect(pasted(alone.graph, alone.ids).map((node) => node.type)).toEqual(['biquad', 'out']);
+		expect(alone.graph.edges).toEqual([{ from: 2, port: 'out', to: 3, input: 'l' }]);
+	});
+
+	it('makes a graph the compiler takes, pasted into another patch and wired in', async () => {
+		const compile = async (g: Graph) => {
+			const timeline = timelineSchema.parse({
+				clips: [{ id: 'c', length: 960, notes: [{ tick: 0, note: 60, dur: 480 }] }],
+				tracks: [{ id: 1, slots: ['p'], placements: [{ clip: 'c', tick: 0 }] }]
+			});
+			const request = buildRequest([{ id: 'p', name: 'P', graph: g }], [], [{ id: 't', name: 'T', timeline }]);
+			return (await compileRequest(request)).report;
+		};
+		// A filter with its cutoff on a parameter, from the lead into a new patch, between its mul and its out.
+		const { graph: next, ids } = pasteNodes(EMPTY_GRAPH, copyNodes(source, [4, 5], 'lead')!, 'p', { x: 0, y: 0 });
+		const [, filter] = ids;
+		const wired = connect(connect(next, 5, 'out', filter, 'in'), filter, 'out', 6, 'l');
+		const report = await compile(wired);
+		expect(report.errors).toBeUndefined();
+		expect(report.ok).toBe(true);
 	});
 });

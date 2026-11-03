@@ -68,7 +68,7 @@ test('the compile light says what is wrong, and each problem goes where it is', 
 
 	// A wire into an input the filter doesn't have
 	await openView(page, 'patch');
-	await page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'JSON' }).click();
+	await page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name: 'JSON' }).click();
 	const graph = page.getByLabel('Graph JSON');
 	const parsed = JSON.parse(await graph.inputValue()) as { edges: { from: number; to: number; input: string }[] };
 	parsed.edges.find((edge) => edge.to === 13 && edge.input === 'cutoff')!.input = 'nope';

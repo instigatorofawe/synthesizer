@@ -8,12 +8,14 @@
 	import type { ExampleGroup } from '#lib/PatchGroups.ts';
 	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
+	import UnitField from '#lib/UnitField.svelte';
+	import { barLength, barLengths, readLength, readPosition } from '#lib/Units.ts';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import { ZOOM_KEY, dropGone, gone, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
-	import { clampVelocity, stepVelocity, type Cursor } from '#lib/StepEntry.ts';
+	import { clampVelocity, type Cursor } from '#lib/StepEntry.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -30,6 +32,7 @@
 		mixWrites,
 		noteValue,
 		place,
+		position,
 		placementIndex,
 		placementSpan,
 		placeOfError,
@@ -57,6 +60,7 @@
 		type Clip,
 		type PatchLike
 	} from '#lib/TimelineEdit.ts';
+	import { landing, type SongPlace } from '#lib/Workspace.ts';
 
 	let {
 		id = '',
@@ -78,14 +82,18 @@
 		heading,
 		examples = [],
 		solo = new Set(),
+		asked = null,
 		onchange,
 		onloop = () => {},
-		ontrack = () => {},
+		onplace = () => {},
 		onopen = () => {},
 		onnewpatch,
 		onwriting = () => {},
 		onsolo = () => {},
-		onkey
+		ontempo = () => {},
+		onkey,
+		onsay = () => {},
+		velocity = $bindable(100)
 	}: {
 		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
 		doc: Timeline;
@@ -106,32 +114,32 @@
 		heading?: Snippet; // At the start of the toolbar
 		examples?: ExampleGroup[]; // How the browser groups the examples, which the patch pickers group built-in patches by
 		solo?: ReadonlySet<number>; // The tracks soloed, which the page keeps, since it is no part of the document
+		asked?: SongPlace | null; // Where the address asks the editor to be, as it opens and again when Back or Forward move it
 		onchange: (doc: Timeline) => void;
 		onloop?: (loop: Loop | null, on: boolean) => void; // A loop set or changed here, and whether it is on
-		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
+		// The chosen track, clip and tab, as the editor opens and whenever one changes. A place it was asked for isn't chosen.
+		onplace?: (place: SongPlace, chosen: boolean) => void;
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
+		ontempo?: (tempo: Timeline['tempo'] | null) => void; // The tempo while the Tempo lane is dragged, then null
 		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, once audio has started
+		onsay?: (text: string) => void; // Says why something typed into a field was refused, where the page says such things
+		velocity?: number; // The velocity of new notes, clicked or stepped, which is the keys' too, so the page keeps it
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
 	const PRIORITIES = ['last', 'high', 'low'] as const;
 
-	function opening(): Selection {
-		const first = doc.tracks.find((track) => track.placements.length);
-		return first ? { track: first.id, placement: 0 } : { track: doc.tracks[0]?.id ?? null, placement: null };
-	}
-
-	let selection = $state<Selection>(untrack(opening));
-	let clipId = $state<string | null>(
-		untrack(() => doc.tracks.find((t) => t.id === selection.track)?.placements[selection.placement ?? -1]?.clip ?? null)
-	);
+	// The editor opens where the address says, or else on the first track with a clip, on its notes.
+	const tabIds = $derived(['notes', 'mixer', ...tabs.map((extra) => extra.id)]);
+	const opened = untrack(() => landing(doc, asked, tabIds));
+	let selection = $state<Selection>({ track: opened.track, placement: opened.placement });
+	let clipId = $state<string | null>(opened.clip);
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
-	let velocity = $state(100); // The velocity of new notes, clicked or stepped, which C and V step
 	// Step entry, which R or the Step toggle turns on and Esc leaves. It outlasts a change of clip, and its cursor is kept for
 	// each clip, so coming back to one carries on where it left off.
 	let stepping = $state(false);
@@ -143,7 +151,7 @@
 		return [...lengths, { label: noteValue(draw, doc.ppq), ticks: draw }].sort((a, b) => a.ticks - b.ticks);
 	});
 	let barWidth = $state(96);
-	let tab = $state('notes');
+	let tab = $state(opened.tab);
 
 	const track = $derived(doc.tracks.find((t) => t.id === selection.track));
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
@@ -199,13 +207,32 @@
 	// The roll's "Clip is now N bars · Undo" takes back the growing. The top bar has the Undo and Redo for everything else.
 	const undo = () => history?.undo();
 
-	// The page shows the chosen track's patch, so it hears about every choice of track.
-	let told = false;
+	// The page puts the chosen track, clip and tab in the address, and shows the chosen track's patch in the Patch view, so it
+	// hears of every change. Where the editor opened, or where the address took it, the address says already, so it isn't told
+	// as a choice. What it was taken to is kept until the next change, which is the next choice.
+	let landed: SongPlace | null = { track: opened.track, clip: opened.clip, tab: opened.tab };
 	$effect(() => {
-		const id = selection.track;
+		const now: SongPlace = { track: selection.track, clip: clipId, tab };
 		untrack(() => {
-			ontrack(id, !told);
-			told = true;
+			const chosen = !landed || now.track !== landed.track || now.clip !== landed.clip || now.tab !== landed.tab;
+			landed = null;
+			onplace(now, chosen);
+		});
+	});
+
+	// Back or Forward moved the address, and it asks for a place: the editor goes there, as it did when it opened. A place that is
+	// where the editor is already changes nothing, so a placement chosen among several of one clip stays chosen.
+	$effect(() => {
+		const wanted = asked;
+		untrack(() => {
+			const at = landing(doc, wanted, tabIds);
+			if (at.track === selection.track && at.clip === clipId && at.tab === tab) return;
+			landed = { track: at.track, clip: at.clip, tab: at.tab };
+			if (at.track !== selection.track || at.clip !== clipId) {
+				selection = { track: at.track, placement: at.placement };
+				clipId = at.clip;
+			}
+			tab = at.tab;
 		});
 	});
 
@@ -397,6 +424,16 @@
 		commit(next);
 	}
 
+	// A track head's fader or pan, as the Mixer's: the mix registers follow a drag, and the song takes the value let go of,
+	// which is one step of its undo.
+	function mixed(id: number, change: { gain?: number; pan?: number }, done: boolean) {
+		if (readonly) return;
+		const next = setTrack(doc, id, change);
+		const writes = program ? mixWrites(soloed(next, solo), program, trackKey(id)) : [];
+		for (const { register, value } of writes) engine.setMix(register, value);
+		if (done) commit(next);
+	}
+
 	function deleteTrack() {
 		if (selection.track === null) return;
 		commit(removeTrack(doc, selection.track));
@@ -485,7 +522,7 @@
 	}
 
 	// R turns step entry on or off, wherever focus is but a field or a dialog. From another tab it opens the notes to write
-	// in, and with no clip there is nothing to write into. C and V step the velocity of new notes.
+	// in, and with no clip there is nothing to write into. C and V, which step the velocity of new notes, are the page's.
 	function noteKeys(event: KeyboardEvent) {
 		const target = event.target as Element | null;
 		if (readonly || !active || typingIn(target) || target?.closest?.('dialog')) return;
@@ -494,9 +531,6 @@
 			if (event.repeat || !clip) return;
 			stepping = tab !== 'notes' || !stepping;
 			tab = 'notes';
-		} else if (matches(event, 'softer') || matches(event, 'louder')) {
-			event.preventDefault();
-			velocity = stepVelocity(velocity, matches(event, 'louder') ? 1 : -1);
 		}
 	}
 
@@ -604,6 +638,7 @@
 	<!-- The arrangement and the inspector take their places in the editor's grid: see `.top` below. -->
 	<div class="top">
 		<Arrangement
+			{id}
 			{doc}
 			{selection}
 			{barWidth}
@@ -631,6 +666,8 @@
 			onlocate={locate}
 			{onloop}
 			onexpand={expandClip}
+			{ontempo}
+			onmix={mixed}
 		/>
 
 		<aside class="inspector" id="inspector">
@@ -648,9 +685,14 @@
 			<fieldset disabled={readonly}>
 				<details>
 					<summary>Tempo, {doc.tempo[0]?.bpm} BPM</summary>
+					<p class="muted lanenote">The Tempo lane, above the tracks, draws these and is dragged.</p>
 					{#each doc.tempo as change, index (index)}
 						<div class="line">
-							<span class="muted">bar {barOf(change.tick, doc.ppq)}</span>
+							<span class="muted"
+								>{change.tick % ticksPerBar(doc)
+									? position(change.tick, doc.ppq)
+									: `bar ${barOf(change.tick, doc.ppq)}`}</span
+							>
 							<input
 								type="number"
 								min="1"
@@ -833,29 +875,34 @@
 							onchange={(e) => rename(e.currentTarget.value)}
 						/></label
 					>
-					<label
-						>length <input
-							type="number"
-							min="1"
-							aria-label="Clip length"
+					<label title="How long the clip is, in bars, as a note value such as 1/2, or in ticks"
+						>length <UnitField
+							label="Clip length"
 							value={clip.length}
-							onchange={(e) => commit(setClip(doc, clip.id, { ...clip, length: number(e) }))}
+							format={(length) => barLength(length, doc.ppq)}
+							read={readLength(doc.ppq)}
+							choices={barLengths(doc.ppq)}
+							onvalue={(length) => commit(setClip(doc, clip.id, { ...clip, length }))}
+							{onsay}
+							width="9.5rem"
 						/></label
 					>
 					{#if placed && selection.track !== null && selection.placement !== null}
 						{@const at = { track: selection.track, index: selection.placement }}
-						<label>
+						<label title="Where it starts in the song, as bar.beat.tick, or a bar">
 							starts
-							<input
-								type="number"
-								min="0"
-								aria-label="Clip start"
+							<UnitField
+								label="Clip start"
 								value={placed.tick}
-								onchange={(e) => {
-									const next = setPlacement(doc, at.track, at.index, { tick: number(e) });
+								format={(tick) => position(tick, doc.ppq)}
+								read={readPosition(doc.ppq)}
+								onvalue={(tick) => {
+									const next = setPlacement(doc, at.track, at.index, { tick });
 									commit(next);
-									selection = { track: at.track, placement: placementIndex(next, at.track, placed.clip, number(e)) };
+									selection = { track: at.track, placement: placementIndex(next, at.track, placed.clip, tick) };
 								}}
+								{onsay}
+								width="8rem"
 							/>
 						</label>
 						<label
@@ -869,24 +916,27 @@
 						>
 						{@const window = windowOf(doc, placed)}
 						<div class="placement" role="group" aria-label="What this placement plays">
-							<label title="Plays the clip from this tick of it"
-								>from <input
-									type="number"
-									min="0"
-									max={clip.length - 1}
-									aria-label="Window start"
+							<label title="Plays the clip from here in it, as bar.beat.tick from the clip's start"
+								>from <UnitField
+									label="Window start"
 									value={window.start}
-									onchange={(e) =>
-										commit(setPlacement(doc, at.track, at.index, { start: number(e), length: undefined }))}
+									format={(tick) => position(tick, doc.ppq)}
+									read={readPosition(doc.ppq, clip.length)}
+									onvalue={(start) => commit(setPlacement(doc, at.track, at.index, { start, length: undefined }))}
+									{onsay}
+									width="8rem"
 								/></label
 							>
-							<label title="For this many ticks, each repeat"
-								>for <input
-									type="number"
-									min="1"
-									aria-label="Window length"
+							<label title="For this long, each repeat, in bars, as a note value or in ticks"
+								>for <UnitField
+									label="Window length"
 									value={window.length}
-									onchange={(e) => commit(setPlacement(doc, at.track, at.index, { length: number(e) }))}
+									format={(length) => barLength(length, doc.ppq)}
+									read={readLength(doc.ppq)}
+									choices={barLengths(doc.ppq)}
+									onvalue={(length) => commit(setPlacement(doc, at.track, at.index, { length }))}
+									{onsay}
+									width="9.5rem"
 								/></label
 							>
 							<label
@@ -917,12 +967,15 @@
 						</p>{/if}
 					{#each clip.play as change, index (index)}
 						<div class="change">
-							<input
-								type="number"
-								min="0"
-								aria-label={`Play change ${index + 1} tick`}
+							<UnitField
+								label={`Play change ${index + 1} tick`}
+								title="Where in the clip it changes, as bar.beat.tick from the clip's start"
 								value={change.tick}
-								onchange={(e) => clipChanged(setPlayChange(clip, index, { tick: number(e) }))}
+								format={(tick) => position(tick, doc.ppq)}
+								read={readPosition(doc.ppq, clip.length)}
+								onvalue={(tick) => clipChanged(setPlayChange(clip, index, { tick }))}
+								{onsay}
+								width="5.5rem"
 							/>
 							<select
 								aria-label={`Play change ${index + 1} mode`}
@@ -1024,6 +1077,7 @@
 							onaudition={audition}
 							onundo={undo}
 							onview={(view, zoomed) => clip && viewed(clip.id, view, zoomed)}
+							{onsay}
 						/>
 					{/key}
 				{:else}
@@ -1292,6 +1346,10 @@
 		font-size: 0.78rem;
 		box-sizing: border-box;
 	}
+	.lanenote {
+		margin: 0.2rem 0 0.35rem;
+		font-size: 0.72rem;
+	}
 	.ramp {
 		display: flex;
 		align-items: center;
@@ -1312,7 +1370,7 @@
 		gap: 0.2rem;
 		margin-bottom: 0.2rem;
 	}
-	.change input,
+	.change :global(input.unit),
 	.change select {
 		width: auto;
 		flex: 1;

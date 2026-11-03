@@ -28,6 +28,7 @@
 	import Meter from '#lib/Meter.svelte';
 	import { friendlyName } from '#lib/NodeHelp.ts';
 	import PatchPanel from '#lib/PatchPanel.svelte';
+	import { setSongValue, songValue } from '#lib/ParamValues.ts';
 	import { placeOf, placeWords, sizeOf, type Names, type Problem } from '#lib/Problems.ts';
 	import ReportPanel from '#lib/ReportPanel.svelte';
 	import { buildRequest, missingAssets, reachable, type AssetEntry, type CompileReport } from '#lib/Request.ts';
@@ -35,6 +36,7 @@
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
+	import { stepVelocity } from '#lib/StepEntry.ts';
 	import {
 		BEATS_PER_BAR,
 		mixWrites,
@@ -49,6 +51,7 @@
 	} from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
 	import { gliding, parseBpm, parsePosition, shownTempo, tempoTyped, tempoWords, wholeSong } from '#lib/Transport.ts';
+	import { playedBy, playedOn, usedBy } from '#lib/UsedBy.ts';
 	import ViewTabs from '#lib/ViewTabs.svelte';
 	import {
 		actionOn,
@@ -57,13 +60,17 @@
 		graphError,
 		hearing,
 		isInsert,
+		landing,
 		parseGraph,
+		placeParams,
+		songPlaceOf,
 		trackAlone,
 		viewOf,
 		withDrafts,
 		withParams,
 		withView,
 		type Draft,
+		type SongPlace,
 		type View
 	} from '#lib/Workspace.ts';
 
@@ -118,8 +125,11 @@
 	const songName = $derived(recipe?.entry.name ?? timelineName);
 	const songPatches = $derived(recipe ? recipe.patches : library);
 
-	// The Patch view shows the patch asked for, and otherwise the chosen track's.
-	let selectedTrack = $state<number | null>(null);
+	// The Patch view shows the patch asked for, and otherwise the chosen track's, which the address names until the Song view
+	// says which it chose, so a page drawn by the server shows the patch it will show once it runs.
+	let selectedTrack = $state<number | null>(
+		untrack(() => (songDoc ? landing(songDoc, songPlaceOf(search), []).track : null))
+	);
 	const askedPatch = $derived(address.searchParams.get('patch'));
 	const askedPart = $derived(address.searchParams.get('part'));
 	const trackSlot = $derived.by(() => {
@@ -143,10 +153,34 @@
 		shown && !shown.example ? data.library.patches.find((p) => p.id === shown.patch.id) : undefined
 	);
 	const shownBuiltin = $derived(savedPatch?.builtin ?? false);
-	// What Duplicate copies: the patch on screen, or for an example's patch, the built-in one it is in every library as.
+	// What Edit a copy or Duplicate copies: the patch on screen, or for an example's patch, the built-in one it is in every
+	// library as.
 	const duplicateId = $derived(
 		!shown ? null : shown.example ? (recipe?.builtins[shown.patch.id] ?? null) : savedPatch ? savedPatch.id : null
 	);
+	// Edit a copy puts the copy where the original plays. For an example's patch, or a built-in one the example plays, that is
+	// the example's copy in the library, which comes with the patch's copy if it isn't there yet.
+	const copyInto = $derived(
+		recipe && duplicateId && (shown?.example || Object.values(recipe.builtins).includes(duplicateId))
+			? { name: recipe.entry.name, inLibrary: recipe.inLibrary !== null }
+			: null
+	);
+	// What each timeline with unsaved edits plays now: the open one as drawn, and another as its text says, or as saved while
+	// that text isn't a timeline. The Patch view's "used by" counts them so, which agrees with what the keys play.
+	const draftPlays = new WeakMap<Draft, string[] | null>();
+	const nowPlaying = $derived.by(() => {
+		const now = new Map<string, { name: string; patches: string[] }>();
+		for (const draft of Object.values(drafts)) {
+			if (draft.kind !== 'timeline') continue;
+			const drawn = saved?.id === draft.id ? timelineDoc : null;
+			if (!drawn && !draftPlays.has(draft)) draftPlays.set(draft, playedBy(draft.text));
+			const patches = drawn ? referencedPatches(drawn) : draftPlays.get(draft);
+			const listed = data.library.timelines.find((t) => t.id === draft.id);
+			now.set(draft.id, { name: draft.name, patches: patches ?? listed?.patches ?? [] });
+		}
+		return now;
+	});
+	const shownUsers = $derived(savedPatch ? usedBy(savedPatch.id, library, data.library.timelines, nowPlaying) : []);
 	const savedPatchText = $derived(savedPatch ? JSON.stringify(savedPatch.graph, null, 1) : '');
 	const patchDraft = $derived(savedPatch ? drafts[draftKey('patch', savedPatch.id)] : undefined);
 	const patchName = $derived(shown?.patch.name ?? '');
@@ -255,21 +289,61 @@
 		};
 	};
 
-	// A copy of a built-in patch takes its place in the open timeline, as an unsaved edit, so that changing it is heard where
-	// it plays. Either way the copy is what the Patch view shows next.
+	// Edit a copy, and Duplicate. A copy of a built-in patch takes its place on every track and insert of the open timeline that
+	// played it, as an unsaved edit, so changing it is heard where it plays and Undo in the Song view takes it back. From an
+	// example, which can't change, that timeline is the example's copy in the library, which opens in the Song view on the track
+	// the keys played the original on. Either way the copy is what the Patch view shows next.
 	const duplicating: SubmitFunction = () => {
+		const preferred = selectedTrack; // The track chosen, which the keys play the patch on if it plays it
 		return async ({ result, update }) => {
-			await update({ reset: false });
-			if (result.type !== 'success') return;
-			const made = result.data?.duplicated as { from: string; to: string } | undefined;
+			const made =
+				result.type === 'success'
+					? (result.data?.duplicated as { from: string; to: string; timeline?: string | null } | undefined)
+					: undefined;
+			if (!made?.timeline) await update({ reset: false });
 			if (!made) return;
-			const original = data.library.patches.find((p) => p.id === made.from);
-			if (original?.builtin && saved && timelineDoc && referencedPatches(timelineDoc).includes(made.from)) {
-				timelineEdited({ text: JSON.stringify(replacePatch(timelineDoc, made.from, made.to), null, 1) });
+			if (made.timeline) {
+				await copyInLibrary(made.from, made.to, made.timeline, preferred);
+				return;
 			}
+			const original = data.library.patches.find((p) => p.id === made.from);
+			if (original?.builtin && saved && timelineDoc) swapIn(made.from, made.to);
 			void open({ patch: made.to, part: null }, false, 'patch');
 		};
 	};
+
+	// Puts a copy in place of the original in the open timeline, as one edit. Says whether it played the original at all.
+	function swapIn(from: string, to: string): boolean {
+		if (!timelineDoc || !referencedPatches(timelineDoc).includes(from)) return false;
+		timelineEdited({ text: JSON.stringify(replacePatch(timelineDoc, from, to), null, 1) });
+		return true;
+	}
+
+	// An example's patch copied: the example's copy in the library opens, with the patch's copy in place of the original, on
+	// the track the keys played it on, and the Patch view shows the copy. The library loads again, so the copy, the timeline
+	// and the copy's recordings are all there before anything compiles.
+	async function copyInLibrary(from: string, to: string, timeline: string, preferred: number | null) {
+		const opening = withParams(search, { timeline, recipe: null, part: null, patch: null });
+		await goto(withView(opening, 'patch'), { refreshAll: true });
+		await rendered();
+		if (saved?.id !== timeline || !timelineDoc) return;
+		const track = playedOn(timelineDoc, from, preferred);
+		if (!swapIn(from, to)) {
+			const original = data.library.patches.find((p) => p.id === from)?.name ?? from;
+			const listed = data.library.timelines.filter((t) => t.id === timeline);
+			say(
+				usedBy(from, library, listed, nowPlaying).length
+					? `The copy is on no track: ${timelineName} plays ${original} only inside another patch.`
+					: `The copy is on no track: ${timelineName} no longer plays ${original}.`
+			);
+		}
+		// Choosing a track shows its patch in the Patch view, so the copy is asked for once the track is chosen.
+		if (track !== null) {
+			songEditor?.reveal({ track, clip: timelineDoc.tracks.find((t) => t.id === track)?.placements[0]?.clip });
+			await rendered();
+		}
+		await open({ patch: to, part: null }, true, 'patch');
+	}
 
 	// ------------------------------------------------------------------------------------------------------- recordings
 
@@ -721,16 +795,59 @@
 	let songEditor = $state<ReturnType<typeof TimelineEditor>>();
 	let stepWriting = $state(false);
 
+	// The velocity the keys play at, which is the roll's Vel, the velocity of new notes: so what is heard is what step entry and
+	// a take write, and C and V step it in either view. It outlasts the song it was set in, as the keys do.
+	let velocity = $state(100);
+
+	// Hold latches what the keys play: a key let go keeps sounding until it is played again, Esc, or Hold is turned off, which
+	// lets go of everything. It is only what is heard. Step entry still hears each key come up as it does, and a key a take
+	// records isn't latched, so the take writes how long it was down and what plays back is what was heard.
+	let hold = $state(false);
+	let latched = $state.raw<ReadonlySet<number>>(new Set());
+	const freeing = new Set<number>(); // Keys down to let go of a note they held, whose coming up is nothing more
+
 	function keyNote(note: number, on: boolean, at?: number) {
 		// What is written doesn't change what is heard. A key let go goes to step entry whatever the view, since it may have
 		// started a chord there, which waits for it. While a take runs, the take writes what is played instead.
 		if (!on || (view === 'song' && stepWriting && !take)) songEditor?.stepKey(note, on);
-		soundNote(note, on, at);
+		if (on && latched.has(note)) {
+			letGo([note], at);
+			// While a take records, a key played again sounds and is written as any other key is.
+			if (!take || takePhase !== 'started') {
+				freeing.add(note);
+				return;
+			}
+		}
+		if (!on && freeing.delete(note)) return;
+		const held = sounding.get(note);
+		if (!on && hold && held && !held.stamped) {
+			latched = new Set([...latched, note]);
+			return;
+		}
+		soundNote(note, on, at, velocity);
 	}
+
+	function letGo(notes: Iterable<number>, at?: number) {
+		const going = new Set(notes);
+		if (!going.size) return;
+		latched = new Set([...latched].filter((note) => !going.has(note)));
+		for (const note of going) soundNote(note, false, at);
+	}
+
+	function holdKeys(on: boolean) {
+		hold = on;
+		if (!on) letGo(latched);
+	}
+
+	// A held note goes with the image it was playing in, once another takes over.
+	$effect(() => {
+		const now = want;
+		untrack(() => letGo([...latched].filter((note) => sounding.get(note)?.source !== now)));
+	});
 
 	// Plays a note where the view on screen is heard, which is all the roll's audition of a track the image leaves out asks
 	// for: it mustn't reach step entry, which would write it.
-	function soundNote(note: number, on: boolean, at?: number) {
+	function soundNote(note: number, on: boolean, at?: number, vel = 100) {
 		if (!on) {
 			const held = sounding.get(note);
 			sounding.delete(note);
@@ -756,7 +873,7 @@
 		// A take records the keys that play its track, from the count-in on, and stamps them with when they were pressed.
 		const stamped = at !== undefined && takePhase === 'started' && to.source === 'song' && to.track === takeIndex;
 		sounding.set(note, { ...to, stamped });
-		use(to.source, () => engine.noteOn(to.track, note, 100, stamped ? at : undefined));
+		use(to.source, () => engine.noteOn(to.track, note, vel, stamped ? at : undefined));
 	}
 
 	// ----------------------------------------------------------------------------------------------------------- recording
@@ -891,9 +1008,40 @@
 		}
 	}
 
-	function patchParam(param: Param, value: number) {
+	// A Control moves the sound where the Patch view's patch is heard, as it is dragged. Let go on a track of a song that can
+	// change, the value is the track's, saved with the song as a mixer knob's is: one step of the song's undo, and one compile,
+	// whose settling then plays what the song holds. Heard alone, or in an example, it moves the sound and saves nothing.
+	const controlsSave = $derived(hears.kind === 'song' && saved !== null && !recipe && timelineDoc !== null);
+	const controlValues = $derived.by(() => {
+		const values: Record<string, number> = {};
+		if (hears.kind !== 'song' || !songDoc || !shown) return values;
+		for (const param of shown.patch.graph.params) {
+			const value = songValue(songDoc, hears.id, param);
+			if (value !== undefined) values[String(param.id)] = value;
+		}
+		return values;
+	});
+	const controlsUnsaved = $derived.by(() => {
+		if (controlsSave) return '';
+		const keep = patchHistory ? ' Make default keeps it in the patch, for every song.' : '';
+		if (recipe && hears.kind === 'song')
+			return "An example's song can't be changed, so this moves the sound and saves nothing.";
+		return `No track plays this patch, so this moves the sound and saves nothing.${keep}`;
+	});
+
+	function patchParam(param: Param, value: number, done = false) {
 		if (hears.kind === 'song' && live === 'song') engine.setParam(hears.track, param.id, value);
 		else if (hears.kind === 'alone' && live === 'alone') engine.setParam(0, param.id, value);
+		if (done && controlsSave && hears.kind === 'song' && timelineDoc) {
+			timelineEdited({ text: JSON.stringify(setSongValue(timelineDoc, hears.id, param, value), null, 1) });
+		}
+	}
+
+	// A track's own value taken away, so the patch's default plays there again, heard at once and settled by the compile.
+	function patchParamReset(param: Param) {
+		if (!controlsSave || hears.kind !== 'song' || !timelineDoc) return;
+		if (live === 'song') engine.setParam(hears.track, param.id, param.default);
+		timelineEdited({ text: JSON.stringify(setSongValue(timelineDoc, hears.id, param, undefined), null, 1) });
 	}
 
 	// ------------------------------------------------------------------------------------------------------ probes, scopes
@@ -1104,9 +1252,12 @@
 	let typedPosition = $state<string | null>(null);
 	let typedTempo = $state<string | null>(null);
 	const positionText = $derived(typedPosition ?? position(tick, ppq));
-	const tempoText = $derived(typedTempo ?? (songDoc ? String(shownTempo(songDoc.tempo, tick, false)) : ''));
-	const tempoTitle = $derived(songDoc ? tempoWords(songDoc.tempo, tick, ppq) : 'The tempo, once a song is open');
-	const glide = $derived(songDoc ? gliding(songDoc.tempo, tick) : null);
+	// While the Tempo lane is dragged, the field follows the drag, and the song compiles once it is let go.
+	let draggedTempo = $state.raw<Timeline['tempo'] | null>(null);
+	const heardTempo = $derived(draggedTempo ?? songDoc?.tempo);
+	const tempoText = $derived(typedTempo ?? (heardTempo ? String(shownTempo(heardTempo, tick, false)) : ''));
+	const tempoTitle = $derived(heardTempo ? tempoWords(heardTempo, tick, ppq) : 'The tempo, once a song is open');
+	const glide = $derived(heardTempo ? gliding(heardTempo, tick) : null);
 
 	// Enter or leaving the field sends what was typed, and Esc puts back what was there.
 	function fieldKeys(event: KeyboardEvent & { currentTarget: HTMLInputElement }, cancel: () => void) {
@@ -1139,20 +1290,48 @@
 	}
 
 	// Changes what the address says, and with it what the page shows. None of it is anything the server loads, so this moves
-	// the address without a navigation, which would also move focus. A change of view is a step Back can undo.
-	function open(change: Record<string, string | null>, replace = false, next: View = view) {
-		return goto(withView(withParams(search, change), next), { shallow: true, replace });
+	// the address without a navigation, which would also move focus. A change of view is a step Back can undo, and a change
+	// of what the Song view has chosen replaces the step it's on. Each change waits for the one before, and starts from the
+	// address that one left, so a choice and a change of view made together both arrive. The view is the one on screen
+	// then, unless the change names one.
+	let moving: Promise<unknown> = Promise.resolve();
+	function open(change: Record<string, string | null>, replace = false, next?: View) {
+		const moved = moving.then(() => {
+			const to = withView(withParams(search, change), next ?? view);
+			if (to !== withParams(search, {})) return goto(to, { shallow: true, replace });
+		});
+		moving = moved.catch(() => {});
+		return moved;
 	}
 
 	async function show(next: View) {
 		if (next !== view) await open({}, false, next);
 	}
 
-	// Choosing a track makes its patch the one the Patch view shows, so a patch asked for by name gives way. The track an editor
-	// opens on doesn't count.
-	function trackChosen(id: number | null, first: boolean) {
-		selectedTrack = id;
-		if (!first && (askedPatch !== null || askedPart !== null)) void open({ patch: null, part: null }, true);
+	// Where the address asks the Song view to be. The editor goes there as it opens, and again whenever Back or Forward move
+	// the address under it, read from the address bar, which the router catches up with later. The page's own changes to the
+	// address say where the editor is already, so they ask nothing of it.
+	let traversed = $state(0);
+	const askedPlace = $derived.by(() => {
+		void openKey;
+		void traversed;
+		return untrack(() => songPlaceOf(typeof location === 'undefined' ? search : location.search));
+	});
+	onMount(() => {
+		const popped = () => (traversed += 1);
+		addEventListener('popstate', popped);
+		return () => removeEventListener('popstate', popped);
+	});
+
+	// What the Song view chooses goes in the address, so a reload or a link lands on it, in place of the step it's on, so Back
+	// goes to the view before rather than through every click. Choosing a track makes its patch the one the Patch view shows,
+	// so a patch asked for by name gives way. Where the editor opens, or where the address takes it, isn't a choice.
+	function placeChosen(place: SongPlace, chosen: boolean) {
+		const before = selectedTrack;
+		selectedTrack = place.track;
+		if (!chosen) return;
+		const giveWay = place.track !== before && (askedPatch !== null || askedPart !== null);
+		void open({ ...placeParams(place), ...(giveWay ? { patch: null, part: null } : {}) }, true);
 	}
 
 	function patchOpened(id: string) {
@@ -1252,6 +1431,9 @@
 		} else if (matches(event, 'start')) {
 			event.preventDefault();
 			toStart();
+		} else if (matches(event, 'softer') || matches(event, 'louder')) {
+			event.preventDefault(); // C and V step the velocity the keys play and new notes take, in either view
+			velocity = stepVelocity(velocity, matches(event, 'louder') ? 1 : -1);
 		} else if (undoable && (matches(event, 'undo') || matches(event, 'redo'))) {
 			event.preventDefault();
 			if (matches(event, 'undo')) undoable.undo();
@@ -1445,6 +1627,11 @@
 			recording={recordState === 'counting' || recordState === 'recording'}
 			where={keysWhere}
 			onnote={keyNote}
+			{hold}
+			{latched}
+			bind:velocity
+			onhold={holdKeys}
+			onletgo={() => letGo(latched)}
 		/>
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
 		<span class="grow"></span>
@@ -1496,12 +1683,16 @@
 							examples={data.examples}
 							{solo}
 							onchange={(next) => timelineEdited({ text: JSON.stringify(next, null, 1) })}
-							ontrack={trackChosen}
+							asked={askedPlace}
+							onplace={placeChosen}
 							onopen={patchOpened}
 							onnewpatch={newPatchForTrack}
 							onwriting={(writing) => (stepWriting = writing)}
 							onsolo={toggleSolo}
+							ontempo={(tempo) => (draggedTempo = tempo)}
 							onkey={(note, on) => started && soundNote(note, on)}
+							onsay={say}
+							bind:velocity
 						/>
 					{/key}
 				{:else}
@@ -1522,7 +1713,8 @@
 					duplicate={duplicateId}
 					{duplicating}
 					dirty={patchDraft !== undefined}
-					users={savedPatch?.users ?? []}
+					users={shownUsers}
+					example={copyInto}
 					parts={recipe && shown?.example ? recipe.patches : []}
 					use={exampleUse}
 					{search}
@@ -1545,6 +1737,9 @@
 					choose={nodeAsked}
 					onprobes={(next) => (probes = next)}
 					onparam={patchParam}
+					onreset={patchParamReset}
+					values={controlValues}
+					unsaved={controlsUnsaved}
 					onpart={(id) => void open({ part: id, patch: null }, false, 'patch')}
 				/>
 			</div>
@@ -1594,6 +1789,7 @@
 		openTimeline={saved?.id ?? null}
 		openRecipe={recipe?.entry.name ?? null}
 		shownPatch={view === 'patch' ? (shown?.patch.id ?? null) : null}
+		usersOf={(id) => usedBy(id, library, data.library.timelines, nowPlaying)}
 		{reveal}
 	/>
 {/snippet}
@@ -1842,7 +2038,7 @@
 		min-height: 0;
 	}
 	.body.pinned {
-		grid-template-columns: 250px minmax(0, 1fr);
+		grid-template-columns: 220px minmax(0, 1fr);
 	}
 	.body.unmeasured > :global(.rail) {
 		display: none;
@@ -1868,7 +2064,7 @@
 		top: 0;
 		bottom: 0;
 		left: 32px;
-		width: 250px;
+		width: 220px;
 		z-index: 20;
 		box-shadow: 6px 0 18px #0009;
 	}

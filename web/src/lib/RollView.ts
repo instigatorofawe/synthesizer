@@ -58,13 +58,15 @@ export function anchored(scroll: number, at: number, ratio: number, margin = 0):
 	return Math.max(0, (scroll + at - margin) * ratio + margin - at);
 }
 
-// The view that fits the clip's notes into the roll's `width` and `height`: across, from the start of the bar the first note
-// is in to the end of the bar the last one ends in, and down, the notes' pitches with two rows to spare above and below. A
-// clip with no notes fits its length, and the two octaves around middle C.
+// The view that fits the clip's notes across the roll's `width`, from the start of the bar the first note is in to the end of
+// the bar the last one ends in, and scrolls their pitches into the middle of its `height`. The rows keep the height `row`
+// they have, which only Mod+Shift with the wheel changes, so Fit never makes them taller or shorter, and the zoom buttons,
+// which zoom across, take back all that Fit did. A clip with no notes fits its length, around middle C.
 export function fitRoll(
 	clip: Pick<Clip, 'notes' | 'length'>,
 	ppq: number,
-	size: { width: number; height: number }
+	size: { width: number; height: number },
+	row: number
 ): Required<RollView> {
 	const bar = ppq * BEATS_PER_BAR;
 	const notes = clip.notes;
@@ -73,9 +75,8 @@ export function fitRoll(
 	const span = Math.max(last - first, bar);
 	const beat = clampBeat(size.width / (span / ppq));
 
-	const low = notes.length ? Math.min(...notes.map((n) => n.note)) - 2 : 48;
-	const high = notes.length ? Math.max(...notes.map((n) => n.note)) + 2 : 72;
-	const row = Math.max(ROWS.least, Math.min(ROWS.most, Math.floor(size.height / (high - low + 1))));
+	const low = notes.length ? Math.min(...notes.map((n) => n.note)) : 60;
+	const high = notes.length ? Math.max(...notes.map((n) => n.note)) : 60;
 	const middle = (127 - (low + high) / 2) * row + row / 2;
 	return { beat, row, left: (first / ppq) * beat, top: Math.max(0, middle - size.height / 2) };
 }

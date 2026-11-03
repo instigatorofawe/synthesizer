@@ -68,7 +68,7 @@ test('the compile light says what is wrong, and each problem goes where it is', 
 
 	// A wire into an input the filter doesn't have
 	await openView(page, 'patch');
-	await page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'JSON' }).click();
+	await page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name: 'JSON' }).click();
 	const graph = page.getByLabel('Graph JSON');
 	const parsed = JSON.parse(await graph.inputValue()) as { edges: { from: number; to: number; input: string }[] };
 	parsed.edges.find((edge) => edge.to === 13 && edge.input === 'cutoff')!.input = 'nope';
@@ -161,6 +161,7 @@ test("the Song tab's menu holds what is done to the song as a whole", async ({ p
 	expect((await download).suggestedFilename()).toBe('Ballad.msimg');
 
 	// Delete timeline, on one made for it
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill('Short lived');
 	await page.getByLabel('New timeline name').press('Enter');
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Short lived');

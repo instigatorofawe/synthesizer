@@ -43,6 +43,7 @@ async function written(page: Page) {
 async function stepClip(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill(name);
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
@@ -224,14 +225,14 @@ test('a step past the end grows the clip as a clicked note does, or offers to le
 	await page.keyboard.press('a');
 	await page.keyboard.press('s');
 	await expect(cursor(page)).toHaveAttribute('data-tick', String(BAR));
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('1 bar');
 	await page.keyboard.press('d');
 	await expect(page.getByTestId('clip-grown')).toContainText('Clip is now 2 bars');
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(2 * BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('2 bars');
 	expect((await written(page)).at(-1)).toEqual([BAR, C + 4, 960, 100]);
 
 	await page.keyboard.press('Backspace');
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('1 bar');
 	await expect(notes(page)).toHaveCount(2);
 	await expect(cursor(page)).toHaveAttribute('data-tick', String(BAR));
 
@@ -246,12 +247,12 @@ test('a step past the end grows the clip as a clicked note does, or offers to le
 	const offer = page.getByTestId('lengthen-offer');
 	await expect(offer).toContainText('would run it into the next clip');
 	await expect(notes(page)).toHaveCount(2);
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('1 bar');
 	await expect(cursor(page)).toHaveAttribute('data-tick', String(BAR));
 
 	await offer.getByRole('button', { name: 'Lengthen to 2 bars' }).click();
 	await expect(notes(page)).toHaveCount(3);
-	await expect(page.getByLabel('Clip length')).toHaveValue(String(2 * BAR));
+	await expect(page.getByLabel('Clip length')).toHaveValue('2 bars');
 	await expect(cursor(page)).toHaveAttribute('data-tick', String(BAR + 960));
 });
 

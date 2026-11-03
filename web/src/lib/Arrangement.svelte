@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import {
 		barOf,
 		copiedSpan,
@@ -16,15 +17,20 @@
 		windowOf,
 		type Clip,
 		type PatchLike,
+		type Tempo,
 		type Track
 	} from '#lib/TimelineEdit.ts';
 	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { followScroll } from '#lib/Follow.ts';
+	import HeadMix from '#lib/HeadMix.svelte';
 	import Meter from '#lib/Meter.svelte';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { LANES_KEY, SONG_LANES, keepOpen, keptOpen, laneHeight, layerHeight } from '#lib/SongLayer.ts';
+	import TempoLane from '#lib/TempoLane.svelte';
+	import { bpmText, tempoRange } from '#lib/TempoLane.ts';
 	import { wholeSong } from '#lib/Transport.ts';
 
 	export interface Selection {
@@ -49,6 +55,7 @@
 	}
 
 	let {
+		id = '',
 		doc,
 		selection,
 		barWidth,
@@ -75,8 +82,11 @@
 		onlocate,
 		onloop,
 		onexpand = () => {},
+		ontempo = () => {},
+		onmix = () => {},
 		actions
 	}: {
+		id?: string; // Which timeline this is, for what the arrangement keeps about it between visits: which song lanes are open
 		doc: Timeline;
 		selection: Selection;
 		barWidth: number;
@@ -103,6 +113,8 @@
 		onlocate: (tick: number) => void;
 		onloop: (loop: Loop | null, on: boolean) => void; // A loop drawn, moved or stretched on the strip, or turned on or off
 		onexpand?: (at: { track: number; placement: number }) => void; // A double-click on a clip, which opens its notes in the whole view
+		ontempo?: (tempo: Tempo[] | null) => void; // The tempo while the Tempo lane is dragged, and null once the drag is over
+		onmix?: (track: number, change: { gain?: number; pan?: number }, done: boolean) => void; // A head's fader or pan
 		actions?: PlacementActions;
 	} = $props();
 
@@ -141,7 +153,12 @@
 	const perTick = $derived(barWidth / ticksPerBar(doc));
 	const bars = $derived(Math.min(MOST_BARS_DRAWN, Math.max(16, Math.ceil(songLength(doc) / ticksPerBar(doc)) + 8)));
 	const width = $derived(bars * barWidth);
-	const height = $derived(TOP + Math.max(doc.tracks.length, 1) * ROW);
+	// The song layer sits between the loop strip and the first track, with a lane for each thing that belongs to the whole song
+	// rather than to one track. Which of its lanes are unfolded is the editor's, kept for each timeline.
+	let unfolded = $state<ReadonlySet<string>>(new Set());
+	const layer = $derived(layerHeight(unfolded));
+	const tracksTop = $derived(TOP + layer);
+	const height = $derived(tracksTop + Math.max(doc.tracks.length, 1) * ROW);
 	const ticksAt = (x: number) => x / perTick;
 
 	function canvas(event: { clientX: number; clientY: number }) {
@@ -153,7 +170,21 @@
 	const patchName = (id: string) => patches.find((patch) => patch.id === id)?.name ?? id;
 	const trackName = (track: Track) => track.name || `Track ${track.id}`;
 
-	const rowAt = (y: number) => Math.min(doc.tracks.length - 1, Math.max(0, Math.floor((y - TOP) / ROW)));
+	const rowAt = (y: number) => Math.min(doc.tracks.length - 1, Math.max(0, Math.floor((y - tracksTop) / ROW)));
+
+	onMount(() => {
+		if (id) unfolded = keptOpen(localStorage.getItem(LANES_KEY), id);
+	});
+
+	function fold(lane: string, open = !unfolded.has(lane)) {
+		const next = new Set(unfolded);
+		if (open) next.add(lane);
+		else next.delete(lane);
+		unfolded = next;
+		if (id) localStorage.setItem(LANES_KEY, keepOpen(localStorage.getItem(LANES_KEY), id, next));
+	}
+
+	const tempoScale = $derived(tempoRange(doc.tempo));
 
 	interface Block {
 		key: string;
@@ -490,6 +521,29 @@
 
 <div class="arrangement" bind:this={view} data-testid="arrangement-view">
 	<div class="heads" bind:this={heads} style:padding-top="{TOP}px">
+		<!-- The song layer's heads. ▸ or a double-click on a folded lane unfolds it, and ▾ folds it again. -->
+		<div class="layer" role="group" aria-label="Song lanes" style:height="{layer}px">
+			{#each SONG_LANES as lane (lane.id)}
+				{@const open = unfolded.has(lane.id)}
+				<div class="lanehead" class:open style:height="{laneHeight(open)}px" data-testid={`lane-head-${lane.id}`}>
+					<button
+						type="button"
+						class="fold"
+						aria-expanded={open}
+						aria-label={`${lane.name} lane`}
+						title={open ? `Fold the ${lane.name} lane` : `Unfold the ${lane.name} lane`}
+						onclick={() => fold(lane.id)}><span aria-hidden="true">{open ? '▾' : '▸'}</span> {lane.name}</button
+					>
+					{#if open && lane.id === 'tempo'}
+						<!-- The lane's scale, the BPM at its top and at its foot. -->
+						<span class="scale" aria-hidden="true">
+							<span>{bpmText(tempoScale.high)}</span>
+							<span>{bpmText(tempoScale.low)}</span>
+						</span>
+					{/if}
+				</div>
+			{/each}
+		</div>
 		{#each doc.tracks as track (track.id)}
 			{@const names = track.slots.map(patchName)}
 			{@const soloed = solo.has(track.id)}
@@ -561,6 +615,15 @@
 						>
 					{/if}
 				</div>
+				<!-- The track's volume and pan, which are the Mixer's, so either one moves the other. -->
+				<HeadMix
+					id={track.id}
+					gain={track.gain}
+					pan={track.pan}
+					label={trackName(track)}
+					{readonly}
+					onmix={(change, done) => onmix(track.id, change, done)}
+				/>
 				<Meter ring={meter(track.id)} label={`Level of ${trackName(track)}`} />
 			</div>
 		{:else}
@@ -570,6 +633,8 @@
 
 	<div class="scroller">
 		<svg bind:this={svg} {width} {height} role="application" aria-label="Arrangement" data-testid="arrangement">
+			<!-- Under the song layer's lanes, which draw over the bars and take the pointer there. -->
+			<rect class="songlayer" y={TOP} {width} height={layer} />
 			<rect
 				class="ruler"
 				{width}
@@ -610,7 +675,7 @@
 					class="row"
 					class:odd={row % 2 === 1}
 					class:chosen={selection.track === track.id}
-					y={TOP + row * ROW}
+					y={tracksTop + row * ROW}
 					{width}
 					height={ROW}
 					role="presentation"
@@ -634,7 +699,7 @@
 					class:ghost={block.ghost}
 					class:chosen={selection.track === block.track.id && selection.placement === block.index}
 					class:problem={badClips.has(block.name) || !block.clip}
-					transform={`translate(${block.tick * perTick} ${TOP + block.row * ROW + 4})`}
+					transform={`translate(${block.tick * perTick} ${tracksTop + block.row * ROW + 4})`}
 					data-testid={`placement-${block.track.id}-${block.index}`}
 					data-tick={block.tick}
 					data-repeat={block.repeat}
@@ -674,7 +739,7 @@
 			{/each}
 
 			{#if drawing && gesture?.kind === 'draw'}
-				<g class="drawn" transform={`translate(${drawing.tick * perTick} ${TOP + gesture.row * ROW + 4})`}>
+				<g class="drawn" transform={`translate(${drawing.tick * perTick} ${tracksTop + gesture.row * ROW + 4})`}>
 					<rect width={drawing.length * perTick} height={BLOCK} rx="3" data-testid="drawn-clip" />
 					<text x="5" y="12">{noteValue(drawing.length, doc.ppq)}</text>
 				</g>
@@ -682,6 +747,18 @@
 
 			<line class="playhead" x1={tick * perTick} x2={tick * perTick} y1={0} y2={height} data-testid="playhead" />
 		</svg>
+		<TempoLane
+			{doc}
+			y={TOP}
+			{width}
+			{perTick}
+			{grid}
+			open={unfolded.has('tempo')}
+			{readonly}
+			onchange={(next) => onchange(next)}
+			onpreview={ontempo}
+			onunfold={() => fold('tempo', true)}
+		/>
 	</div>
 </div>
 
@@ -824,6 +901,9 @@
 	.head :global(.meter) {
 		margin-left: 0.6rem;
 	}
+	.head :global(.mix) {
+		margin: 0 0 2px 0.6rem;
+	}
 	.head.chosen {
 		background: #1a212b;
 		box-shadow: inset 3px 0 0 var(--accent);
@@ -842,7 +922,49 @@
 		font-size: 0.8rem;
 	}
 	.scroller {
+		position: relative;
 		min-width: 0;
+	}
+	/* The song layer's heads, over the tracks' and set apart from them. */
+	.layer {
+		background: #11161d;
+	}
+	.lanehead {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		box-sizing: border-box;
+		padding: 0 0.4rem 0 0.25rem;
+	}
+	.lanehead .fold {
+		margin: 0;
+		padding: 0 0.2rem;
+		border: 0;
+		border-radius: 3px;
+		background: transparent;
+		color: var(--muted);
+		font-size: 0.68rem;
+		line-height: 17px;
+		text-align: left;
+		white-space: nowrap;
+	}
+	.lanehead .fold:hover {
+		color: var(--text);
+		background: #ffffff14;
+	}
+	.scale {
+		display: flex;
+		flex-direction: column;
+		justify-content: space-between;
+		align-self: stretch;
+		padding: 3px 0;
+		font-size: 0.6rem;
+		font-variant-numeric: tabular-nums;
+		color: var(--muted);
+		text-align: right;
+	}
+	.songlayer {
+		fill: #11161d;
 	}
 	svg {
 		display: block;

@@ -58,13 +58,15 @@ async function timelineJson(page: Page) {
 	return page.getByLabel('Timeline JSON');
 }
 
+// The patch's JSON is a tab of the graph's side column, beside the graph.
 async function graphJson(page: Page) {
-	await page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'JSON' }).click();
+	await page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name: 'JSON' }).click();
 	return page.getByLabel('Graph JSON');
 }
 
+// Back from the JSON to the side column's Patch tab, where the scopes are.
 const graphView = (page: Page) =>
-	page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'Graph' }).click();
+	page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name: 'Patch' }).click();
 
 const peaksIn = (scope: ReturnType<Page['getByRole']>, held = false) =>
 	scope
@@ -447,6 +449,7 @@ test('choosing a track shows its patch, and the browser shows another', async ({
 	// A patch the address names stays, whatever track a timeline opens on, as when one is made while it is shown.
 	await page.goto('/?timeline=song&patch=unused');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Square, in the library but on no timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill('Beside a patch');
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== 'song');
@@ -644,6 +647,7 @@ test('the old addresses open the same things', async ({ page }) => {
 
 async function newPatch(page: Page, name: string) {
 	await page.goto('/');
+	await page.getByRole('button', { name: 'New patch', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New patch name').fill(name);
 	await page.getByLabel('New patch name').press('Enter');
 	await page.waitForURL(/patch=/);
@@ -870,7 +874,7 @@ test('a track can play a built-in patch, and a duplicate of it takes its place t
 	await page.getByRole('button', { name: 'Open patch slot 1' }).click();
 	await expect(page).toHaveURL(/patch=builtin-OneShotSample/);
 	await expect(page.getByTestId('used-by')).toContainText('Borrowed');
-	await page.getByRole('button', { name: 'Duplicate to edit' }).click();
+	await page.getByRole('button', { name: 'Edit a copy' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('OneShotSample copy');
 	const copy = shownPatchId(page);
 	expect(copy).not.toContain('builtin');
@@ -941,6 +945,7 @@ test('a probe in a recipe reads the voice of the patch on screen', async ({ page
 async function newTimeline(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill(name);
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
@@ -1187,9 +1192,11 @@ test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[1]?.ramp).toBe(480);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
+	// The point is where its ramp ends, which starts at the point before, so moving it lengthens the ramp.
 	const point = (await page.getByTestId('lane-0-point-1').boundingBox())!;
 	await press(page, { x: point.x + 5, y: point.y + 5 }, { x: point.x + 5 + 96, y: lane.y + lane.height - 4 });
-	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[1].tick).toBe(960);
+	await expect(page.getByTestId('lane-0-point-1')).toHaveAttribute('data-tick', '960');
+	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[1]).toMatchObject({ tick: 0, ramp: 960 });
 
 	// A fader lane at zero: the track still sounds at its own scope, which is before the fader, and the master goes quiet.
 	await page.getByLabel('Add a lane').selectOption({ label: 'Fader' });
@@ -1316,7 +1323,7 @@ test('a placement plays a window of its clip, transposed and softer', async ({ p
 	for (const [label, value] of [
 		['Transpose', '12'],
 		['Velocity scale', '0.5'],
-		['Window start', '480']
+		['Window start', '1.2'] // A position in the clip, its second beat
 	]) {
 		await page.getByLabel(label, { exact: true }).fill(value);
 		await page.getByLabel(label, { exact: true }).blur();
@@ -1626,12 +1633,13 @@ const samples = (page: Page) => browser(page).getByRole('list', { name: 'Samples
 
 test('WAV files become an instrument that plays, and its samples stay while it does', async ({ page }) => {
 	await page.goto('/');
-	await page.getByLabel('WAV files').setInputFiles([wavFile('Sine_A3.wav'), wavFile('Sine_A4.wav')]);
-	await page.getByLabel('Instrument name').fill('Imported sines');
-	await page.getByRole('button', { name: 'Import' }).click();
+	// Import asks for the files, sends them as they are chosen, and names the instrument after the first
+	const chooser = page.waitForEvent('filechooser');
+	await page.getByRole('button', { name: 'Import samples' }).click();
+	await (await chooser).setFiles([wavFile('Sine_A3.wav'), wavFile('Sine_A4.wav')]);
 	await page.waitForURL(/patch=/);
 	const id = shownPatchId(page);
-	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Imported sines');
+	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Sine_A3');
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
 	await page.getByRole('button', { name: 'sample 2' }).click();
@@ -1654,7 +1662,7 @@ test('WAV files become an instrument that plays, and its samples stay while it d
 	await page.goto('/');
 	await expect(samples(page).getByText('Sine_A3')).toBeVisible();
 	await page.getByRole('button', { name: 'Delete Sine_A3' }).click();
-	await expect(page.getByText('used by Imported sines')).toBeVisible();
+	await expect(page.getByText('used by Sine_A3')).toBeVisible();
 	await expect(samples(page).getByText('Sine_A3')).toBeVisible();
 
 	await page.goto(`/?patch=${id}`);
@@ -1672,7 +1680,6 @@ test('a file that is not audio is refused and leaves nothing behind', async ({ p
 			wavFile('Good.wav'),
 			{ name: 'Notes.wav', mimeType: 'audio/wav', buffer: Buffer.from('these are not samples') }
 		]);
-	await page.getByRole('button', { name: 'Import' }).click();
 	await expect(page.getByText("Notes.wav can't be imported: it is not a WAV file")).toBeVisible();
 	await expect(samples(page).getByText('Good', { exact: true })).toHaveCount(0);
 });
@@ -1686,9 +1693,7 @@ test('an image too large for the engine says so instead of going quiet', async (
 		['Big two', 330]
 	] as const) {
 		await page.goto('/');
-		await page.getByLabel('WAV files').setInputFiles([wavFile(`${name}.wav`, 90, frequency)]);
-		await page.getByLabel('Instrument name').fill(name);
-		await page.getByRole('button', { name: 'Import' }).click();
+		await page.getByLabel('WAV files').setInputFiles([wavFile(`${name}.wav`, 90, frequency)]); // Named after the file
 		await page.waitForURL(/patch=/);
 		ids.push(shownPatchId(page));
 	}

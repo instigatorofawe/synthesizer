@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
+	import ParamSlider from '#lib/ParamSlider.svelte';
+	import { unitOf } from '#lib/ParamValues.ts';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Param, Timeline } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
@@ -73,6 +75,12 @@
 		...doc.tracks.map((track) => ({ key: trackKey(track.id), name: track.name || `Track ${track.id}` })),
 		...doc.buses.map((bus) => ({ key: busKey(bus.id), name: bus.id }))
 	]);
+
+	// The unit of what a parameter drives, in the first of these patches that declares it.
+	function unitIn(ids: string[], param: Param): string {
+		const graph = ids.map((id) => patchOf(id)?.graph).find((g) => g?.params.some((p) => p.id === param.id));
+		return graph ? unitOf(graph, param.id) : '';
+	}
 
 	function trackParams(track: Track): Param[] {
 		const seen = new Map<number, Param>();
@@ -222,19 +230,18 @@
 				</label>
 			{/if}
 			{#each patch?.graph.params ?? [] as param (param.id)}
-				<label class="line">
+				<div class="line">
 					<span>{param.name || `param ${param.id}`}</span>
-					<input
-						type="range"
-						min={param.min}
-						max={param.max}
-						step={(param.max - param.min) / 500}
+					<ParamSlider
+						{param}
 						value={insert.params?.[String(param.id)] ?? param.default}
-						oninput={(e) => liveInsert(insert, param, number(e))}
-						onchange={(e) =>
-							onchange(setInsert(doc, key, index, { params: { ...insert.params, [String(param.id)]: number(e) } }))}
+						unit={unitIn([insert.patch], param)}
+						label={param.name || `param ${param.id}`}
+						oninput={(value) => liveInsert(insert, param, value)}
+						onchange={(value) =>
+							onchange(setInsert(doc, key, index, { params: { ...insert.params, [String(param.id)]: value } }))}
 					/>
-				</label>
+				</div>
 			{/each}
 		</div>
 	{/each}
@@ -369,19 +376,17 @@
 				{@render inserts(key, label, track.inserts)}
 				{#if trackParams(track).length}<h5>Parameters</h5>{/if}
 				{#each trackParams(track) as param (param.id)}
-					<label class="line">
+					<div class="line">
 						<span>{param.name || `param ${param.id}`}</span>
-						<input
-							class="grow"
-							type="range"
-							min={param.min}
-							max={param.max}
-							step={(param.max - param.min) / 500}
+						<ParamSlider
+							{param}
 							value={track.params[String(param.id)] ?? param.default}
-							oninput={(e) => liveParam(track, param, number(e))}
-							onchange={(e) => onchange(setTrackParam(doc, track.id, param.id, number(e)))}
+							unit={unitIn(track.slots, param)}
+							label={param.name || `param ${param.id}`}
+							oninput={(value) => liveParam(track, param, value)}
+							onchange={(value) => onchange(setTrackParam(doc, track.id, param.id, value))}
 						/>
-					</label>
+					</div>
 				{/each}
 			</fieldset>
 		</section>
@@ -411,19 +416,20 @@
 			{@render inserts(MASTER, 'Master', doc.master.inserts)}
 			{#if globals.length}<h5>Globals</h5>{/if}
 			{#each globals as param (param.id)}
-				<label class="line">
+				<div class="line">
 					<span>{param.name || `param ${param.id}`}</span>
-					<input
-						class="grow"
-						type="range"
-						min={param.min}
-						max={param.max}
-						step={(param.max - param.min) / 500}
+					<ParamSlider
+						{param}
 						value={doc.globals[String(param.id)] ?? param.default}
-						oninput={(e) => liveGlobal(param, number(e))}
-						onchange={(e) => onchange(setGlobal(doc, param.id, number(e)))}
+						unit={unitIn(
+							doc.tracks.flatMap((track) => track.slots),
+							param
+						)}
+						label={param.name || `param ${param.id}`}
+						oninput={(value) => liveGlobal(param, value)}
+						onchange={(value) => onchange(setGlobal(doc, param.id, value))}
 					/>
-				</label>
+				</div>
 			{/each}
 		</fieldset>
 	</section>

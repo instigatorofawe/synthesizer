@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
-	import { actionOn, stay, withParams } from '#lib/Workspace.ts';
+	import { actionOn, stay, withoutPlace, withParams } from '#lib/Workspace.ts';
 
 	// The Song tab's ▾: what is done to the song as a whole, which is rare, so it stays out of the toolbars. A saved timeline is
 	// renamed, exported and deleted from here, and an example added to the library. The actions that the server does are forms,
@@ -92,9 +92,10 @@
 		<form method="POST" action={actionOn(search, 'exportTimeline')} use:enhance={stay} bind:this={exportForm}>
 			<input type="hidden" name="id" value={timeline.id} />
 		</form>
+		<!-- The song that opens instead has tracks and clips of its own, so the deleted one's place doesn't go with it. -->
 		<form method="POST" action={actionOn(search, 'deleteTimeline')} use:enhance={stay} bind:this={deleteForm}>
 			<input type="hidden" name="id" value={timeline.id} />
-			<input type="hidden" name="back" value={search} />
+			<input type="hidden" name="back" value={withoutPlace(search)} />
 		</form>
 	{/if}
 	{#if example && !example.inLibrary}

@@ -153,6 +153,67 @@ export function withView(search: string, view: View): string {
 	return withParams(search, { view: view === 'song' && !params.has('patch') && !params.has('part') ? null : view });
 }
 
+// Where the Song view is: the chosen track, the clip the roll shows, and the tab, Notes, Mixer or another. The address holds it,
+// as `track`, `clip` and `pane`, so a reload or a link lands there. Null is a part the address doesn't say. None of it is
+// anything the server loads, so the page moves it without a round trip.
+export interface SongPlace {
+	track: number | null;
+	clip: string | null;
+	tab: string | null;
+}
+
+// The place an address names. A track that isn't a whole number names none.
+export function songPlaceOf(search: string): SongPlace {
+	const params = new URLSearchParams(search);
+	const track = params.get('track')?.trim() || null;
+	const id = track === null ? NaN : Number(track);
+	return {
+		track: Number.isInteger(id) ? id : null,
+		clip: params.get('clip') || null,
+		tab: params.get('pane') || null
+	};
+}
+
+// The address's parameters for a place, for `withParams`. A song opens on its notes, so the address doesn't say Notes.
+export function placeParams(place: SongPlace): Record<string, string | null> {
+	return {
+		track: place.track === null ? null : String(place.track),
+		clip: place.clip,
+		pane: place.tab === null || place.tab === 'notes' ? null : place.tab
+	};
+}
+
+// The address without a place, for opening another song, whose tracks and clips aren't this one's.
+export const withoutPlace = (search: string) => withParams(search, placeParams({ track: null, clip: null, tab: null }));
+
+// Where the Song view lands when it is asked for a place, as it opens or as Back and Forward move the address under it: the
+// track, which of its placements is chosen, the clip the roll shows, and the tab. What the song doesn't have is ignored, and
+// the editor's own choice stands in: a clip asked for alone is chosen where it is first placed, a track alone on its first
+// placement, and with neither, the first track with a clip, on its notes.
+export interface Landing {
+	track: number | null;
+	placement: number | null;
+	clip: string | null;
+	tab: string;
+}
+
+export function landing(doc: Timeline, asked: SongPlace | null, tabs: readonly string[]): Landing {
+	const tab = asked?.tab && tabs.includes(asked.tab) ? asked.tab : 'notes';
+	const clip = doc.clips.some((c) => c.id === asked?.clip) ? (asked?.clip ?? null) : null;
+	const own = doc.tracks.find((t) => t.placements.length) ?? doc.tracks[0];
+	const track =
+		doc.tracks.find((t) => t.id === asked?.track) ??
+		(clip === null ? undefined : doc.tracks.find((t) => t.placements.some((p) => p.clip === clip))) ??
+		own;
+	if (!track) return { track: null, placement: null, clip, tab };
+	if (clip === null) {
+		const first = track.placements[0];
+		return { track: track.id, placement: first ? 0 : null, clip: first?.clip ?? null, tab };
+	}
+	const index = track.placements.findIndex((p) => p.clip === clip);
+	return { track: track.id, placement: index >= 0 ? index : null, clip, tab };
+}
+
 // A form action on this page, sent from where the page is, so the page stays where it is when it comes back.
 export function actionOn(search: string, name: string): string {
 	const params = new URLSearchParams(search);

@@ -30,12 +30,14 @@ const state = (page: Page) => page.getByTestId('state');
 const tickShown = async (page: Page) => Number(await page.getByTestId('tick').textContent());
 const nodes = (page: Page) => page.getByTestId('graph').locator('g.node');
 
-async function patchView(page: Page, name: 'Graph' | 'JSON') {
-	await page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name }).click();
+// The side column's tabs: the patch's parameters, or its JSON beside the graph.
+async function patchView(page: Page, name: 'Patch' | 'JSON') {
+	await page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name }).click();
 }
 
 async function newPatch(page: Page, name: string) {
 	await page.goto('/');
+	await page.getByRole('button', { name: 'New patch', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New patch name').fill(name);
 	await page.getByLabel('New patch name').press('Enter');
 	await page.waitForURL(/patch=/);
@@ -140,7 +142,7 @@ test("a patch's undo outlasts opening another patch, its JSON and a save", async
 	await expect(page.getByTestId('node-4')).toHaveCount(0);
 
 	await patchView(page, 'JSON');
-	await patchView(page, 'Graph');
+	await patchView(page, 'Patch');
 	await undo.click();
 	await expect(page.getByTestId('node-4')).toBeVisible();
 
@@ -172,7 +174,7 @@ test('an edit typed into the JSON is undone as one step, from the graph or the J
 	await json.fill(edited);
 	await json.pressSequentially('   '); // More keystrokes, in the same visit to the field
 	const typed = await json.inputValue();
-	await patchView(page, 'Graph');
+	await patchView(page, 'Patch');
 	await expect(nodes(page)).toHaveCount(count - 1);
 
 	await page.keyboard.press('ControlOrMeta+z');

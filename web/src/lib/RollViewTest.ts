@@ -101,44 +101,50 @@ describe('fitting the roll to the notes', () => {
 	const bar = 4 * ppq;
 	const note = (tick: number, pitch: number, dur = ppq) => ({ tick, note: pitch, dur, vel: 100 });
 
-	it('fits the bars the notes are in across the roll, and their pitches down it', () => {
+	it('fits the bars the notes are in across the roll, and keeps the rows as tall as they were', () => {
 		const clip = { length: 4 * bar, notes: [note(0, 60), note(bar + ppq, 67), note(2 * bar - ppq, 64)] };
-		const view = fitRoll(clip, ppq, { width: 800, height: 600 });
+		const view = fitRoll(clip, ppq, { width: 800, height: 600 }, 12);
 		expect(view.beat).toBe(100); // Two bars, eight beats, in 800 px
 		expect(view.left).toBe(0);
-		expect(view.row).toBe(ROWS.most); // 58 to 69 would be 50 px rows
-		expect(fitRoll(clip, ppq, { width: 800, height: 240 }).row).toBe(20);
+		expect(view.row).toBe(12);
+		expect(fitRoll(clip, ppq, { width: 800, height: 240 }, 20).row).toBe(20);
 	});
 
 	it('scrolls to the first bar with a note, and centres the notes', () => {
 		const clip = { length: 8 * bar, notes: [note(2 * bar + 10, 40), note(3 * bar, 80, bar)] };
-		const view = fitRoll(clip, ppq, { width: 1200, height: 360 });
+		const view = fitRoll(clip, ppq, { width: 1200, height: 360 }, 8);
 		expect(view.beat).toBe(1200 / 8); // Bars 3 and 4
 		expect(view.left).toBe(8 * view.beat); // Bar 3 starts eight beats in
-		expect(view.row).toBe(Math.floor(360 / 45)); // 38 to 82
-		const middle = (127 - 60) * view.row + view.row / 2;
+		expect(view.row).toBe(8);
+		const middle = (127 - 60) * 8 + 8 / 2; // Between 40 and 80
 		expect(view.top).toBe(middle - 180);
 	});
 
 	it('fits an empty clip by its length, around middle C', () => {
-		const view = fitRoll({ length: 2 * bar, notes: [] }, ppq, { width: 640, height: 500 });
+		const view = fitRoll({ length: 2 * bar, notes: [] }, ppq, { width: 640, height: 500 }, 20);
 		expect(view.beat).toBe(80);
 		expect(view.left).toBe(0);
-		expect(view.row).toBe(20); // C3 to C5
+		expect(view.row).toBe(20);
 		expect(view.top).toBe((127 - 60) * 20 + 10 - 250);
 	});
 
-	it('keeps to the sizes a roll can be read at', () => {
-		const long = fitRoll({ length: 400 * bar, notes: [note(0, 0), note(399 * bar, 127)] }, ppq, {
-			width: 600,
-			height: 300
-		});
+	it('keeps to the widths a roll can be read at, and never scrolls above the top', () => {
+		const long = fitRoll(
+			{ length: 400 * bar, notes: [note(0, 120), note(399 * bar, 127)] },
+			ppq,
+			{
+				width: 600,
+				height: 300
+			},
+			12
+		);
 		expect(long.beat).toBe(BEAT.least);
-		expect(long.row).toBe(ROWS.least);
-		expect(long.top).toBe((127 - 63.5) * ROWS.least + ROWS.least / 2 - 150);
-		const short = fitRoll({ length: ppq, notes: [note(0, 60, 10)] }, ppq, { width: 1200, height: 900 });
+		expect(long.top).toBe(0);
+		const short = fitRoll({ length: ppq, notes: [note(0, 60, 10)] }, ppq, { width: 1200, height: 900 }, 12);
 		expect(short.beat).toBe(1200 / 4); // A bar at least
-		expect(fitRoll({ length: ppq, notes: [note(0, 60, 10)] }, ppq, { width: 6000, height: 900 }).beat).toBe(BEAT.most);
+		expect(fitRoll({ length: ppq, notes: [note(0, 60, 10)] }, ppq, { width: 6000, height: 900 }, 12).beat).toBe(
+			BEAT.most
+		);
 		expect(clampBeat(1e6)).toBe(BEAT.most);
 		expect(clampRow(1.2)).toBe(ROWS.least);
 	});

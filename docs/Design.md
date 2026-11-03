@@ -1,4 +1,4 @@
-# modsynth design, revision 25
+# modsynth design, revision 26
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -846,6 +846,9 @@ to.
   Back goes to the view before.
 - A browser down the side holds the library and the examples, and a timeline in it opens in Song and a patch in Patch. B
   folds it to a rail of icons. Below 1400 px wide it is always the rail, and opens over the page rather than pushing it aside.
+  It is 220 px wide, and what each list is for is behind a ? in its heading, which an empty list shows of itself, so with the
+  examples shut it fits a laptop's height. A + in a heading opens a field for a new timeline, patch or bundle, which Enter
+  makes and Esc closes, and the Samples + asks for WAV files and imports them as they are chosen.
 - In Song the arrangement is as tall as its ruler and tracks, up to about a third of the window, past which it scrolls, and the
   notes have the rest, so the roll's room doesn't depend on a splitter dragged for another song. Expand, ⤢ at the right of the
   tabs or a double-click on a clip, gives the notes the whole view, and ⤢ again or Esc brings the arrangement back. Esc closes
@@ -854,7 +857,8 @@ to.
   starts folded, as the browser does, and each side of 1400 remembers what it was left as, so opening it on a laptop leaves a
   wide screen alone.
 - The roll scrolls as a page does, and Shift with the wheel scrolls it sideways. Mod with the wheel, or a pinch, zooms it where
-  the pointer is, and Mod and Shift with the wheel make its rows taller or shorter. `.` or Fit fits it to the clip's notes. Each
+  the pointer is, and Mod and Shift with the wheel make its rows taller or shorter. `.` or Fit fits the clip's bars across it
+  and scrolls its notes into the middle, leaving the rows' height alone, so the zoom buttons take back all it did. Each
   clip keeps its zoom and its rows' height across a reload, in localStorage under the timeline and the clip, and its scroll
   while the page is open, so a clip comes back as it was left. None of it is in the document, which the compiler would refuse.
 - The address says what is open: `?timeline=` or `?recipe=` for the song, `?patch=` or `?part=` for the patch the Patch view
@@ -863,6 +867,11 @@ to.
   load reruns for the parameters it reads, so choosing a patch or a view costs no round trip, and the library, which carries
   every sample in use, loads only when an action changes it. A fresh visit opens the timeline saved last, and the old
   addresses redirect to the same views.
+- The address also says where the Song view is, as `track`, `clip` and `pane`, so
+  `?timeline=song&track=2&clip=pluck-a&pane=mixer` opens on Pluck, with its clip in the roll, on the Mixer tab, after a
+  reload or in a new tab. The server reads none of them either. A choice replaces the step of the browser's history it is
+  on, so Back goes to the view before rather than through every click, and Back or Forward put the Song view where that step
+  says. What the song hasn't got is passed over for the editor's own choice: the first track with a clip, on its notes.
 
 - Edits to any number of patches and timelines are kept as drafts while other things are opened, and Save writes them all
   in one transaction, patches first, so a timeline is never saved against a patch edit that was refused. Each draft names
@@ -873,6 +882,13 @@ to.
   one picker filters as it is typed in, and lists what the song already plays, then the library's own patches, then the built-ins grouped
   as the browser groups the examples. Its last entry, New patch for this track, saves a new patch at once, the same sine and envelope the
   browser's New patch makes, and puts it on the track as an unsaved edit before opening it.
+- The Patch view's Controls move the sound where the patch is heard. On a track of a song that can change, a Control is the track's
+  value, as the mixer's knob for it is: it starts at what the track holds, or the patch's default, and let go, it is saved with the
+  song, as one step of the song's undo and one compile, even when it equals the default, so it is plain what the song holds. Without
+  that, the compile after a drag put the saved value back while the slider stayed where it was left. ↺ or its right-click menu takes
+  the track's value away, so the default plays again, and Make default writes the value into the patch, for every song, as one step
+  of the patch's undo, which leaves the track's own value as it is. Heard alone, or in an example, a Control moves the sound, saves
+  nothing, and says so.
 - One engine plays one image: the song, compiled from the drafts, or the Patch view's patch on its own. A patch a track plays
   is heard in the song, through that track's mix and inserts, so a patch edit is heard in context as it is made. A voice no
   track plays is compiled on its own as above, and its keys switch the engine to it. Play, a locate, or a note from the
@@ -911,6 +927,11 @@ to.
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
   piano, and a field being typed in or a key with a modifier keeps its own meaning, though a button or a slider with focus doesn't. A key
   let go while the page is in the background lets go of its note.
+- The keys play at the velocity in the field beside them, which is the roll's Vel, so what is heard is what step entry and a take
+  write, and C and V step it in either view. Hold, on their other side, latches what they play, from the computer keyboard or the
+  mouse: a key let go keeps sounding until it is played again, Esc, or Hold is turned off, which lets go of everything. It is the
+  page's and changes only what is heard. Step entry still writes as each key comes up, and a key a take records isn't latched, so
+  the take writes how long it was down.
 - The position and the tempo in the top bar are fields. A position typed as the ghost note reads, bar.beat.tick, or as a bar, moves
   the playhead. A tempo typed changes the tempo change in effect at the playhead and no other, so a song with several reads as each
   part of it plays, and the inspector lists them all. Inside a ramp the field shows how far the glide has got, and typed into, it
@@ -930,6 +951,7 @@ to.
 changes no hash. It takes its node table from the compiler's catalog, the table the compiler reads, so the two can't disagree. The compiler's report carries the debug sidecar
 from section 13, which colours wires by rate, dims nodes that compiled away and places probes. An error's `where` names its node, and an error inside a subpatch lands on
 the subpatch. The compiler stops at the first error, so an editor shows one at a time. The JSON stays on the page, and text that doesn't parse leaves the last drawing alone.
+It is a tab of the side column, beside Node and Patch, so the graph stays on screen while it is open and draws what is typed as it is typed.
 
 - A node shows a name a person looks for, such as Filter, over the compiler's, biquad. Those names, a group, a line on what each node does, other words
   for it and each input's unit and range are a table in the web app, `NodeHelp.ts`, which a test holds to the catalog in both directions. A range is the
@@ -942,6 +964,15 @@ the subpatch. The compiler stops at the first error, so an editor shows one at a
   the nearest place that covers no other node, and one from a wire arrives wired to its first input. Tidy lays the graph out again as one edit.
 - A rate error offers to put a snap on its wire, as one edit, and never puts one in unasked, since section 5 leaves that choice to the patch's author.
   A node that compiled away says why where the graph shows it, which is when none of its wires lead to the out node.
+- A wire is clicked on a wide stroke that can't be seen, under the one that can. Chosen, the side column says what it joins and what its input goes back
+  to without it, and Delete takes it away. Shift-drag on empty canvas draws a box that chooses what it touches, Shift-click adds a node or takes it away,
+  and Mod+A chooses them all. Several move as one edit and are deleted as one, which leaves the note node and the patch's ports, since a track, an insert
+  or another patch is wired through them. One chosen on its own can still be deleted, as an insert drops its note node.
+- Mod+C copies the chosen nodes and the wires between them into the page's clipboard, so they paste into any patch. A wire from a node left behind
+  isn't copied, since what it comes from doesn't come along. A paste goes at the pointer or beside what was copied, at the nearest place that covers no
+  node, with ids above every id the patch has (`pasteNodes`). A patch has one out node, so a second isn't pasted. A param node reads the parameter it
+  read in its own patch, a parameter of the same name in another, or else a copy of its own, added to the patch, since an id names a parameter only in
+  its own patch. Mod+D duplicates, and Mod-drag leaves the nodes where they were and drags copies.
 
 **The timeline editor.** Arrangement, piano roll, lanes and mixer are views of one document, which stays on the page as JSON. Every edit is a pure function from a document to a document, so undo is a list of
 old ones, and as in the graph editor these decide little about what is legal: overlapping clips can be drawn, and the compiler says what is wrong and marks the track. What an edit does take care of is references, so
@@ -957,6 +988,22 @@ end grows the clip to the bar that holds it, which says so with an Undo. Here th
 would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
 four bars past the end, so there is room to do it.
 
+The fields read as music while the document holds ticks and MIDI numbers (`Units.ts`). A position reads as bar.beat.tick, as the ghost does,
+counted from the clip's start inside a clip, as the roll's ruler is, and from the song's for a placement. A pitch reads as a name and a
+length as a note value, a clip's and a window's in bars. Each takes what a musician would type: a bar or bar.beat, `E4`, `F#3`, `Bb2` or a
+MIDI number, `3/16`, a dotted `1/8.` or `2 bars`. A bare number in a length is ticks, so a length no note value names can still be had,
+and a bare number in a position is a bar, as in the top bar. What isn't one is refused with a message that says what to type, and the field
+goes back to what it held. Velocity stems run from each note's start to its end, as tall and as deeply shaded as it is loud, so a chord's
+overlap and still read apart. A click on a stem sets its note, or every chosen note, and a drag across the strip paints: each note whose
+start it passes takes the velocity the drag had there, and the drag is one edit.
+
+A lane's points are joined by lines, as DAW breakpoints are. The compiler starts a point's ramp at the point's own tick and ramps from
+wherever the lane is then, so a point is drawn where its ramp ends, and a line from the point before is a ramp that starts at that
+point. A click after another point adds one joined to it, and each point is a step, a line or an exp curve into it, set in its fields or its
+right-click menu. Moving or removing a point keeps the lines either side of it joined, and a ramp shorter than its gap holds and then
+ramps, as it always has. The lane draws what the compiler plays, which `lanePoints` and `laneCurve` in `TimelineEdit.ts` work out as the
+compiler does, so a document from before reads as it plays: most of the examples' ramps already start at the point before.
+
 Step entry writes notes from the keyboard with the song stopped, and is the way to write them without a mouse. R, or the Step toggle at the
 right of the roll's tabs, turns it on, and a line in the roll marks where the next step goes: where it was last in that clip, or else the
 clip's start, and a click moves it to the nearest line of the grid. The piano keys write notes there as long as the Draw length, so every start
@@ -965,8 +1012,8 @@ of them is let go, and the cursor then moves past it. → with keys held makes t
 takes the last step back, or with none behind the cursor moves it back and deletes nothing. While step entry is on, → and Backspace are its
 own rather than the roll's or the arrangement's, and Esc leaves it once nothing nearer is left to close. A step past the clip's end grows the
 clip as a clicked note does. The rules are pure functions over a clip and a cursor, in `StepEntry.ts`. The keys reach them through the page,
-which lets them write into a track the image leaves out for having no notes yet. C and V step the velocity of new notes, clicked or
-stepped, by 10, and Vel beside Draw shows it.
+which lets them write into a track the image leaves out for having no notes yet. C and V step the velocity of new notes, clicked,
+stepped or played, by 10, and Vel beside Draw and beside the keys shows it.
 
 Recording writes what the keys play while the song plays, as Live and Logic do with quantizing on. ● in the top bar, or Shift+R in the
 Song view, starts a take on the chosen track. With the song stopped, a bar is counted in with a click on each beat, and then the song
@@ -994,7 +1041,7 @@ four-note chord on it peaks near -5 dBFS, short of the limiter [measured].
 
 Mod+C, Mod+V and Mod+D copy, paste and duplicate the chosen notes while the roll has focus, and the chosen clip in the
 arrangement otherwise, but not in a field. Outside a field Mod+D is always taken in the Song view, so the browser never
-bookmarks the page for it. The clipboard is the page's own (`Clipboard.ts`), with notes and a clip kept apart, and it lasts
+bookmarks the page for it. The clipboard is the page's own (`Clipboard.ts`), with notes, a clip and a graph's nodes kept apart, and it lasts
 as long as the page does, so a copy reaches another clip or timeline, and can come from an example. A paste lands straight
 after what was copied, in the clip or on the track it came from, and the next paste straight after that one, so pasting
 again lays copies end to end as Mod+D does. Anywhere else it lands where it was copied from. The playhead would be the other
@@ -1004,7 +1051,7 @@ it was copied, and otherwise a copy of it under a name of its own. Notes a paste
 clip, as a note placed there does.
 
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
-a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
+a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A parameter's slider says its value, rounded as the inspector rounds and with the unit of the input it drives, and a double-click or Enter on the value types one. Over a range above zero whose ends are 100 times apart or more, such as a cutoff's, its travel is logarithmic (`Taper.ts`), so 900 Hz of 80 Hz to 12 kHz sits near the middle rather than at 7%. A fader keeps its own law. A compile error's `where` marks its track and clip. A fader's travel is cubic in
 gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. What the page plays and Export WAV writes pass through a limiter after the
 engine, at full scale, and a light on the master meter says when it is limiting, with how much in its tooltip, section 24. It holds
 for a moment after the last time, as a clip light does, since the limiter comes and goes many times a second. Every meter and scope
@@ -1023,6 +1070,27 @@ image holds, can't bring a track back, and it is written to the mix registers at
 Export WAV writes what is heard, so with a solo it writes only the soloed tracks, as a DAW's bounce does, and that makes a
 stem. Export saved version compiles the saved document, which has none.
 
+Each track head also has a small volume fader, with its level in dB, and a pan knob, so the mix's most used controls are in sight
+without the Mixer tab. They are the track's own `gain` and `pan`, the Mixer's fader and pan, so either moves the other: live through
+the mix registers while dragged, and one step of undo when let go. The fader has the Mixer's cubic travel. A drag moves a control on
+from where it is rather than jumping to the pointer, so a click changes nothing, Shift drags a tenth as fast, the arrow keys step one
+with focus, and a double-click resets it to 0 dB or the centre. The head stays 150 px wide, so the arrangement fits 1280 px with the
+inspector open.
+
+Between the loop strip and the first track is the song layer, lanes for what belongs to the whole song rather than to one track
+(`SongLayer.ts`). Its one lane is Tempo, a second view of the same list of changes as the inspector's, which stays for typing exact
+values. Folded, as it starts, it is a row 18 px tall with a flag at each change reading its BPM, and a slope from a change that glides
+to the next one, so the song's tempo reads with no clicks. ▸ in its head, or a double-click on it, unfolds it to 72 px: a curve of BPM
+over the song, steps where a change holds and lines where it glides, scaled to the song's tempos with room above and below, and the
+playhead and the bar lines pass through it. A click on empty lane adds a change on the Snap grid at the tempo playing there, and
+dragging before letting go sets its tempo. A point drags up and down for its tempo, to a whole BPM or with Shift a tenth, and sideways
+on the grid, never past its neighbours, and the first moves only up and down. A click on the line from a change, or the change's menu,
+switches it between holding until the next change and gliding to it. ↑ and ↓ nudge the chosen change by 1 BPM, or 10 with Shift, and
+Delete takes it away, except the first. Each gesture is one step of undo, and as with a fader the song compiles when a drag is let go,
+while the curve and the top bar's tempo follow it. An example's lane can be unfolded and read, not changed. Which lanes are unfolded is
+the editor's, kept in localStorage for each timeline, never in the document. Time signatures, open 26, and markers would each be a lane
+here once the format has a field for them. The rules are pure functions in `TempoLane.ts`.
+
 Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the song's image. `live` keeps unused tracks, so it could pass a document
 that an export refuses, and an editor that previews one thing and exports another is worse than a silent key. So the keys play such a track on its own instead.
 
@@ -1031,7 +1099,7 @@ A file's sampler chunk gives its root and loop, and failing that a name like `Pi
 only their levels say which is which. A bad file refuses the whole import, and one larger than an image can hold is refused there rather than failing on load. An asset can't be deleted while a patch names it.
 
 **Recipes.** `examples/Recipes` ships with the app as the read-only examples in the editor's browser, where any of them plays as it is and shows how it is made, in the same editors with nothing that changes anything: its arrangement, notes, lanes, mix and each patch's graph, which
-a probe can look inside. Its patches are already in the library, as built-in patches, so adding one copies only its timeline, as `recipe-<name>`, which plays them, and Duplicate on any of them makes a copy that can change. Adding one
+a probe can look inside. Its patches are already in the library, as built-in patches, so adding one copies only its timeline, as `recipe-<name>`, which plays them, and Edit a copy on any of them makes a copy that can change. Adding one
 twice changes nothing, so an edited copy survives. A library that added examples before keeps the copies of their patches it made then, as ordinary rows. A test holds every example to compiling to the same bytes from the library as from its file,
 which is what shows the schema dropped nothing.
 
@@ -1040,8 +1108,12 @@ guards, "used by", the timelines an edit affects and exports treat them as they 
 
 - Only the server writes them. At startup it makes them what `examples/` holds, in one transaction, and it refuses a save or a delete of one however it is asked. So nothing done in the app reaches what ships, and a row changed some other
   way is put back at the next start. The browser lists them apart from the library's own patches, and leaves their recordings out of its samples.
-- A change goes to a copy. Duplicate makes an ordinary patch with the same graph, named "*name* copy", which names the same recordings rather than copying them. When the open timeline plays the built-in, the copy takes its place
-  there, as an unsaved edit, so a change is heard where it plays. A copy compiles to the same bytes, because a patch's bytes depend only on its graph, section 20, and a test holds three examples to that, played entirely by copies.
+- A change goes to a copy. Edit a copy, in the header of a patch that can't change, makes an ordinary patch with the same graph, named "*name* copy", or "*name* copy 2" and on while that is taken, which names the same recordings rather
+  than copying them. The copy takes the original's place on every track and insert of the timeline it is heard in, as an unsaved edit, so a change is heard where it plays and Undo in the Song view takes it back. On an example, which
+  can't change either, that timeline is the example's copy in the library: one action adds it, or finds the one there, and copies the patch, and the page opens it in the Song view, on the track the keys played the original on,
+  with the copy in the Patch view. A built-in heard on its own is only copied. A copy compiles to the same bytes, because a patch's bytes depend only on its graph, section 20, and a test holds three examples to that, played entirely by copies.
+- The Patch view's header says which timelines use the patch, or which a save of it changes, counting the unsaved edits, so it agrees with where the keys play it: a timeline with a draft counts as the draft has it, and a patch reaches
+  a timeline through any patch that expands it, as the graphs are now. The library lists each timeline with the patches it plays as saved, for the rest.
 - An example with one patch names its built-in after itself, as `builtin-Kick808`, and one with several adds the part, as `builtin-PassionChorale-horn`, named "PassionChorale Horn". A graph several examples share is one built-in,
   named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 74 recipes and 6 pieces make 136 built-ins from 140
   patches, and 29 recordings from 30 [measured].
@@ -1359,7 +1431,9 @@ here that the user hasn't weighed in on:
   - The inspector is remembered on each side of 1400 px.
   - A zoom chosen by hand is kept across a reload, for the last 200 clips, and the scroll while the page is open. Zoom runs from 8 to
     400 px a beat and rows from 6 to 32 px, and a wheel notch zooms by 2^(1/3).
-  - Fit fits the bars the notes are in, and their pitches with two rows to spare, or a clip with no notes from its length and C3 to C5.
+  - Fit fits the bars the notes are in, or a clip with no notes from its length, and centres the notes' pitches, or middle C. It
+    keeps the rows' height: at first it set it too, to the pitches with two rows to spare, and nothing but Mod+Shift with the
+    wheel could set it back.
 - **The transport and the compile light:**
   - Problems with compiling or with what plays go in the light's list, and what an action did goes in a short message. "Saved." shows
     for 4 s, and a refusal stays until its ×. Warnings make the light amber, and the limiting light holds 1.5 s.
@@ -1406,6 +1480,69 @@ the sprint's first two stages. Choices made here that the user hasn't weighed in
   Once the take is done the image goes back to leaving out tracks with no notes, so what is heard is again what Export WAV writes.
 - **Tests:** the engine's state carries the take's phase, the beats of the count-in left and a count of clicks, which the e2e tests wait
   on.
+
+**Built for the UX sprint, wave 4** (revision 26), as section 19 describes. This wave builds the plan's last stage: musical units and
+lanes, controls and keys, graph gestures, built-ins, and the browser and address. It also builds a song layer with a Tempo lane and
+volume and pan in the track heads, which the user asked for during the wave: "Consider having tempo as another layer on the timeline
+(that perhaps can be expanded out as needed). Maybe a few other things can live there as well. Ideally we have graphical
+representations of the most commonly used controls". And Fit in the roll keeps the rows' height, after the user found that "the fit
+button also vertically zooms, which can't be undone". Choices made here that the user hasn't weighed in on:
+- **Units:**
+  - A bare number in a position field is a bar, as in the top bar, and in a length field it is ticks.
+  - Lengths over a bar read as `noteValue` has them (`5/4`) for a note or a ramp, and in bars and a note value (`1 bar + 1/4`) for a
+    clip or a window. A trailing dot dots a note value. Triplets aren't named, and still read in ticks.
+  - Typing a note's length sets the Draw length, as resizing one does.
+  - Refusals go to the page's message line for 4 s.
+- **Velocity stems:** a drag paints once it has moved 4 px sideways, and every note whose start it passes is painted, chosen or not. A
+  stem's shade is its opacity, 0.12 to 0.62.
+- **Lane points:**
+  - A point is drawn where its ramp ends, so a ramped point's `tick` in the document is where the ramp starts.
+  - A lane's first point is a step. A point clicked onto an exp curve takes the curve, and anywhere else a new point is a line.
+- **Controls:**
+  - Make default keeps the track's own value, now equal to the default, so it changes one document and one Undo takes it back. ↺
+    takes the track's value away, so the track follows the patch's default again.
+  - In the Patch view, Undo acts on the patch, so a Control's value, which is the song's, is undone from the Song view.
+  - Heard on several tracks, a Control is the chosen track's. A global parameter's writes the song's `globals`.
+  - A value is a button that reads as text: Enter or a double-click types a number, and ↺ resets. Sliders have 500 steps.
+  - Controls show over the side column's Node and Patch tabs, not JSON, and only where the patch can be heard.
+- **Keys:**
+  - The keys play at the roll's Vel, one number for the page that outlasts opening another song. C and V step it by 10, and ↑ and ↓ in
+    its field by 1.
+  - Hold has no key, since H is a piano key. A key a take records is never latched, and step entry still writes at key-up.
+  - At 1280 px with Start audio still showing, Hold and Vel take about 100 px from the view tabs, so long names are cut short sooner.
+- **The graph:**
+  - Delete removes any node chosen alone, the note node and ports included, as before, since an insert drops its note node. With several
+    chosen it leaves the note node and the ports, and says so.
+  - Wires from outside a copy are dropped, even for Mod+D within one patch.
+  - A paste goes at the pointer, or just below and right of the originals, at the nearest place covering no node.
+  - The side column's tab follows the choice, except JSON, which stays until another tab is clicked. JSON's column is 360 px wide.
+  - A double-click on a wire opens the node search there.
+  - A subpatch or sampler copied from an example keeps the example's names, and the compiler says so on the node.
+- **Built-ins:**
+  - *Edit a copy* saves the example's library copy and the patch's copy at once. Putting the copy in place of the original is an unsaved
+    edit, so Undo takes it back and the action never writes under a draft.
+  - The track chosen is the one the keys played the original on, else the first that plays it.
+  - Copies are numbered as a file manager numbers them.
+- **The browser:**
+  - Each section's help is behind a ?, and shows on its own when the list is empty.
+  - The + and ? sit inside their section, after its name.
+  - A name field closes once it's empty and left.
+  - Import sends the files at once, named after the first.
+- **The address:**
+  - The tab's key is `pane`, and Notes goes unsaid.
+  - The place a song opens on isn't written into the address until something is chosen.
+  - A choice from the compile light, or a take writing into a new clip, moves the address too.
+  - The open song's own link in the browser keeps its place, and another song's drops it.
+- **The Tempo lane:**
+  - A drag sets whole BPM, and a tenth with Shift. A click with no drag adds at the tempo playing there.
+  - The lane's range holds during a drag and refits on release.
+  - It is 18 px folded and 72 px unfolded. The fold is kept per lane and timeline in localStorage, and every lane starts folded.
+  - It is purple, so it isn't taken for a clip's automation.
+  - Its menu says "Glide to the next tempo" and "Hold until the next change", not the lane points' Step and Line, since a tempo ramp
+    runs from a change to the next.
+- **Track heads:** volume and pan both fit at the heads' 150 px. They drag from where they are, not to the pointer, so a click changes
+  nothing. Silence reads "-∞".
+- **Fit:** it fits across, and scrolls the notes' pitches into the middle at the rows' height as it was.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

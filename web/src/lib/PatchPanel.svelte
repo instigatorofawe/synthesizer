@@ -1,17 +1,18 @@
 <script lang="ts">
 	import { enhance, type SubmitFunction } from '$app/forms';
-	import { untrack } from 'svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
-	import GraphEditor from '#lib/GraphEditor.svelte';
+	import GraphEditor, { type SideTab } from '#lib/GraphEditor.svelte';
+	import PatchControls from '#lib/PatchControls.svelte';
+	import { withDefault } from '#lib/ParamValues.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { actionOn, stay, withView, type Hearing } from '#lib/Workspace.ts';
 
-	// The Patch view: one patch, drawn as a graph or shown as JSON, with scopes on what it makes. A trail back to the song
-	// heads it, through the track the patch is heard on.
+	// The Patch view: one patch, drawn as a graph, with what is chosen in it, its parameters or its JSON beside it, and scopes on
+	// what it makes. A trail back to the song heads it, through the track the patch is heard on.
 	let {
 		patch,
 		name,
@@ -21,6 +22,7 @@
 		builtin,
 		duplicate,
 		duplicating,
+		example = null,
 		dirty,
 		users,
 		parts,
@@ -45,6 +47,9 @@
 		ontext,
 		onprobes,
 		onparam,
+		onreset = () => {},
+		values = {},
+		unsaved = '',
 		onpart
 	}: {
 		patch: { id: string } | null;
@@ -55,8 +60,9 @@
 		builtin: boolean; // One of the library's built-in patches, which can't be changed
 		duplicate: string | null; // The library patch Duplicate copies, which for an example's patch is its built-in one
 		duplicating: SubmitFunction;
+		example?: { name: string; inLibrary: boolean } | null; // The example whose copy in the library Edit a copy goes into
 		dirty: boolean;
-		users: { id: string; name: string }[]; // Timelines a saved edit changes
+		users: { id: string; name: string }[]; // Timelines an edit changes, as they are now, unsaved edits included
 		parts: { id: string; name: string }[]; // An example's patches, to choose between
 		use: string; // What an example does with this patch
 		search: string;
@@ -78,16 +84,15 @@
 		ongraph: (graph: Graph) => void;
 		ontext: (text: string, typing: boolean) => void; // Typing until the field is left, which undoes as one step
 		onprobes: (probes: Probe[]) => void;
-		onparam: (param: Param, value: number) => void;
+		onparam: (param: Param, value: number, done: boolean) => void; // A Control dragged, or let go
+		onreset?: (param: Param) => void; // A Control's value taken off the track, so the patch's default plays
+		values?: Record<string, number>; // What the song holds for the patch's parameters, on the track it is heard on
+		unsaved?: string; // Why a Control's value isn't saved when it is let go, or '' when it is saved into the song
 		onpart: (id: string) => void;
 	} = $props();
 
-	let view = $state<'graph' | 'json'>('graph');
-
-	// A node asked for is in the graph, so that is what shows.
-	$effect(() => {
-		if (choose) untrack(() => (view = 'graph'));
-	});
+	// What the side column shows, kept from one patch to the next, so the JSON stays open while patches are looked through.
+	let tab = $state<SideTab>('patch');
 
 	// A link, so it can open in another tab, that otherwise switches views without leaving the page.
 	function backToSong(event: MouseEvent) {
@@ -104,6 +109,14 @@
 				: hearing.why
 	);
 	const playable = $derived(hearing.kind !== 'none');
+	const copyTitle = $derived.by(() => {
+		if (!readonly) return 'Make a copy of this patch, as it is saved';
+		if (!example)
+			return 'Copy this patch into your library to change it. The song open plays the copy where it played this.';
+		return example.inLibrary
+			? `Copy this patch into your library's ${example.name}, in place of the original, to change it there`
+			: `Add ${example.name} to your library, with a copy of this patch in place of the original, to change it there`;
+	});
 	const params = $derived(graph?.params ?? []);
 </script>
 
@@ -154,17 +167,16 @@
 				</span>
 			{/if}
 			<span class="grow"></span>
-			<div class="views" role="tablist" aria-label="Patch views">
-				<button type="button" role="tab" aria-selected={view === 'graph'} onclick={() => (view = 'graph')}>Graph</button
-				>
-				<button type="button" role="tab" aria-selected={view === 'json'} onclick={() => (view = 'json')}>JSON</button>
-			</div>
+			<!-- A patch that can't be changed is changed by Edit a copy, which puts the copy where the original plays. -->
 			{#if duplicate}
-				<form method="POST" action={actionOn(search, 'duplicatePatch')} use:enhance={duplicating}>
+				<form
+					method="POST"
+					action={actionOn(search, readonly ? 'editCopy' : 'duplicatePatch')}
+					use:enhance={duplicating}
+				>
 					<input type="hidden" name="id" value={duplicate} />
-					<button class="duplicate" title="Make a copy of this patch, as it is saved, that can be changed"
-						>{readonly ? 'Duplicate to edit' : 'Duplicate'}</button
-					>
+					{#if readonly && example}<input type="hidden" name="recipe" value={example.name} />{/if}
+					<button class="duplicate" title={copyTitle}>{readonly ? 'Edit a copy' : 'Duplicate'}</button>
 				</form>
 			{/if}
 			{#if !readonly}
@@ -179,17 +191,22 @@
 		{/if}
 	</header>
 
+	<!-- The JSON is a tab in the graph's side column, with the graph beside it, and what is typed there is drawn as it is typed. -->
+	{#snippet json()}
+		<textarea
+			aria-label="Graph JSON"
+			spellcheck="false"
+			{readonly}
+			value={text}
+			oninput={(e) => ontext(e.currentTarget.value, true)}
+			onchange={(e) => ontext(e.currentTarget.value, false)}></textarea>
+	{/snippet}
+
 	{#if patch}
 		<div class="body">
-			{#if view === 'json'}
-				<textarea
-					aria-label="Graph JSON"
-					spellcheck="false"
-					{readonly}
-					value={text}
-					oninput={(e) => ontext(e.currentTarget.value, true)}
-					onchange={(e) => ontext(e.currentTarget.value, false)}></textarea>
-			{:else if graph}
+			{#if !graph}
+				{@render json()}
+			{:else}
 				{#key patch.id}
 					<GraphEditor
 						{graph}
@@ -205,6 +222,8 @@
 						{readonly}
 						{active}
 						{choose}
+						bind:tab
+						{json}
 						onchange={ongraph}
 						{onprobes}
 					>
@@ -223,21 +242,17 @@
 								</p>
 							{/each}
 							{#if params.length && playable}
-								<h4>Controls</h4>
-								{#each params as param (param.id)}
-									<label class="control">
-										<span>{param.name || `param ${param.id}`}</span>
-										<input
-											type="range"
-											min={param.min}
-											max={param.max}
-											step={(param.max - param.min) / 500}
-											value={param.default}
-											aria-label={`Control ${param.name || param.id}`}
-											oninput={(e) => onparam(param, Number(e.currentTarget.value))}
-										/>
-									</label>
-								{/each}
+								<PatchControls
+									id={patch.id}
+									{graph}
+									{hearing}
+									{values}
+									{unsaved}
+									editable={!readonly}
+									{onparam}
+									{onreset}
+									ondefault={(param, value) => ongraph(withDefault(graph, param.id, value))}
+								/>
 							{/if}
 						{/snippet}
 					</GraphEditor>
@@ -325,7 +340,6 @@
 		flex-wrap: wrap;
 	}
 	.parts button,
-	.views button,
 	.duplicate,
 	.delete {
 		padding: 0.1rem 0.5rem;
@@ -334,23 +348,6 @@
 	.parts button[aria-pressed='true'] {
 		border-color: var(--accent);
 		background: #1f6feb33;
-	}
-	.views {
-		display: flex;
-	}
-	.views button {
-		border-radius: 0;
-	}
-	.views button:first-child {
-		border-radius: 5px 0 0 5px;
-	}
-	.views button:last-child {
-		border-radius: 0 5px 5px 0;
-		border-left: 0;
-	}
-	.views button[aria-selected='true'] {
-		background: #1f6feb33;
-		border-color: var(--accent);
 	}
 	.body {
 		flex: 1;
@@ -362,6 +359,7 @@
 		flex: 1;
 		min-height: 0;
 		resize: none;
+		font-size: 0.72rem;
 	}
 	.heard {
 		font-size: 0.75rem;
@@ -376,28 +374,5 @@
 	}
 	.waiting span {
 		color: var(--text);
-	}
-	.control {
-		display: flex;
-		align-items: center;
-		gap: 0.3rem;
-		margin-bottom: 0.2rem;
-	}
-	.control span {
-		flex: 0 0 5rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-size: 0.75rem;
-	}
-	.control input {
-		flex: 1;
-		min-width: 0;
-		width: auto;
-	}
-	h4 {
-		margin: 0.6rem 0 0.2rem;
-		font-size: 0.78rem;
-		color: var(--muted);
 	}
 </style>

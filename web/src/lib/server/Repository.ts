@@ -377,20 +377,32 @@ export function copyName(name: string, taken: ReadonlySet<string>): string {
 	for (let n = 2; ; ++n) if (!taken.has(`${base} copy ${n}`)) return `${base} copy ${n}`;
 }
 
+// A name for a new patch: the one asked for, or while that is taken, it numbered from 2, as "Lead 2". A name that ends in a
+// number counts on from it, rather than growing "Lead 2 2".
+export function freeName(name: string, taken: ReadonlySet<string>): string {
+	if (!taken.has(name)) return name;
+	const base = name.replace(/ \d+$/, '') || name;
+	for (let n = 2; ; ++n) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
+}
+
+// Every patch's name, which a new one's is kept apart from.
+export function patchNames(db: Db): Set<string> {
+	return new Set(
+		db
+			.select({ name: patches.name })
+			.from(patches)
+			.all()
+			.map((patch) => patch.name)
+	);
+}
+
 // An ordinary patch with another's graph, which is how a built-in one is changed, under a name no other patch has. Its
 // recordings are shared rather than copied, as two patches naming one asset always share it.
 export function duplicatePatch(db: Db, id: string): string {
 	return db.transaction((tx) => {
 		const t = tx as unknown as Db;
 		const row = getPatch(t, id);
-		const taken = new Set(
-			t
-				.select({ name: patches.name })
-				.from(patches)
-				.all()
-				.map((other) => other.name)
-		);
-		return createPatch(t, copyName(row.name, taken), row.graph as Graph);
+		return createPatch(t, copyName(row.name, patchNames(t)), row.graph as Graph);
 	});
 }
 

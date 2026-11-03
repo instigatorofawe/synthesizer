@@ -10,7 +10,9 @@
 		pastePlacement,
 		place,
 		placementIndex,
+		removeTrack,
 		setPlacement,
+		setTrack,
 		snapTick,
 		songLength,
 		ticksPerBar,
@@ -31,6 +33,7 @@
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import { LANES_KEY, SONG_LANES, keepOpen, keptOpen, laneHeight, layerHeight } from '#lib/SongLayer.ts';
+	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import TempoLane from '#lib/TempoLane.svelte';
 	import { bpmText, tempoRange } from '#lib/TempoLane.ts';
 	import { wholeSong } from '#lib/Transport.ts';
@@ -423,6 +426,98 @@
 		gesture?.kind === 'draw' && gesture.drawn ? drawnClip(doc, gesture.track, gesture.from, gesture.to) : null
 	);
 
+	// A track head's menu, and an empty row's: what is done to the track, and a clip made or pasted where the row was pressed.
+	// They are the clip's menu's neighbours, so one is open at a time.
+	let other = $state.raw<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+	let renaming = $state<number | null>(null); // The track whose name is being typed in its head
+
+	function headItems(track: Track): MenuItem[] {
+		const bar = ticksPerBar(doc);
+		const soloItem = { label: solo.has(track.id) ? 'Unsolo' : 'Solo', action: () => onsolo(track.id) };
+		if (readonly) return [soloItem];
+		return [
+			{ label: 'Rename…', action: () => (renaming = track.id) },
+			{
+				label: 'New clip at the playhead',
+				action: () => onnew(track.id, Math.floor(tick / bar) * bar, TEMPLATE_BARS * bar)
+			},
+			{ label: track.mute ? 'Unmute' : 'Mute', action: () => onmute(track.id) },
+			soloItem,
+			{
+				label: 'Delete track',
+				action: () => {
+					onselect({ track: null, placement: null });
+					onchange(removeTrack(doc, track.id));
+				}
+			}
+		];
+	}
+
+	function openHeadMenu(track: Track, on: Element, at: { x: number; y: number } | null) {
+		gesture = null;
+		menu = null;
+		onselect({ track: track.id, placement: null });
+		const box = on.getBoundingClientRect();
+		other = {
+			x: at?.x ?? box.left,
+			y: at?.y ?? box.bottom,
+			label: `Track ${trackName(track)}`,
+			items: headItems(track)
+		};
+	}
+
+	function headMenu(event: MouseEvent, track: Track) {
+		if ((event.target as Element).closest('input, .mix')) return; // A field's own menu, and the fader's
+		event.preventDefault();
+		const keyed = event.clientX === 0 && event.clientY === 0;
+		openHeadMenu(track, event.currentTarget as Element, keyed ? null : { x: event.clientX, y: event.clientY });
+	}
+
+	function headKeys(event: KeyboardEvent, track: Track) {
+		if (!matches(event, 'menu')) return;
+		event.preventDefault();
+		event.stopPropagation();
+		openHeadMenu(track, event.currentTarget as Element, null);
+	}
+
+	function rowMenu(event: MouseEvent) {
+		event.preventDefault();
+		gesture = null;
+		menu = null;
+		const at = canvas(event);
+		const track = doc.tracks[rowAt(at.y)];
+		if (!track || readonly) return;
+		const tick = Math.floor(ticksAt(at.x) / grid) * grid;
+		const copied = clipboard.placement;
+		const items: MenuItem[] = [{ label: 'New clip here', action: () => onnew(track.id, tick) }];
+		if (copied) {
+			items.push({
+				label: 'Paste here',
+				keys: 'paste',
+				action: () => {
+					const pasted = pastePlacement(doc, track.id, tick, copied.what);
+					if (pasted.index < 0) return;
+					copied.pasted = { to: track.id, at: tick };
+					const chosen = { track: track.id, placement: pasted.index };
+					onchange(pasted.doc, chosen);
+					onselect(chosen);
+				}
+			});
+		}
+		other = { x: event.clientX, y: event.clientY, label: `Row of ${trackName(track)}`, items };
+	}
+
+	function renamed(track: Track, name: string) {
+		renaming = null;
+		if (name.trim() !== track.name) onchange(setTrack(doc, track.id, { name: name.trim() }));
+	}
+
+	// The field takes focus and its text is chosen, so typing replaces the name.
+	function chooseText(input: HTMLInputElement) {
+		input.focus();
+		input.select();
+	}
+
 	function blockMenu(event: MouseEvent, block: Block) {
 		event.preventDefault();
 		event.stopPropagation();
@@ -433,6 +528,7 @@
 	// The menu key and Shift+F10 open it at the clip rather than at a pointer.
 	function openBlockMenu(block: Block, on: Element, at: { x: number; y: number } | null) {
 		gesture = null;
+		other = null;
 		onselect({ track: block.track.id, placement: block.index });
 		if (readonly || !actions) return;
 		const box = on.getBoundingClientRect();
@@ -586,23 +682,50 @@
 		{#each doc.tracks as track (track.id)}
 			{@const names = track.slots.map(patchName)}
 			{@const soloed = solo.has(track.id)}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="head"
 				class:chosen={selection.track === track.id}
 				class:silent={track.mute || (soloing && !soloed)}
 				style:height="{ROW}px"
+				oncontextmenu={(event) => headMenu(event, track)}
 			>
 				<div class="namerow">
-					<button
-						type="button"
-						class="select"
-						class:problem={badTracks.has(track.id)}
-						data-testid={`track-${track.id}`}
-						aria-pressed={selection.track === track.id}
-						onclick={() => onselect({ track: track.id, placement: null })}
-					>
-						<span class="title">{trackName(track)}</span>
-					</button>
+					{#if renaming === track.id}
+						<input
+							class="rename"
+							aria-label="Rename the track"
+							value={track.name || trackName(track)}
+							use:chooseText
+							onkeydown={(event) => {
+								if (event.key === 'Enter') renamed(track, event.currentTarget.value);
+								else if (matches(event, 'escape')) {
+									event.preventDefault();
+									event.stopPropagation();
+									renaming = null;
+								}
+							}}
+							onblur={(event) => {
+								if (renaming === track.id) renamed(track, event.currentTarget.value);
+							}}
+						/>
+					{:else}
+						<button
+							type="button"
+							class="select"
+							class:problem={badTracks.has(track.id)}
+							data-testid={`track-${track.id}`}
+							aria-pressed={selection.track === track.id}
+							title="Right-click or Shift+F10 for its menu: rename, a new clip, delete"
+							onclick={() => onselect({ track: track.id, placement: null })}
+							onkeydown={(event) => headKeys(event, track)}
+							ondblclick={() => {
+								if (!readonly) renaming = track.id;
+							}}
+						>
+							<span class="title">{trackName(track)}</span>
+						</button>
+					{/if}
 					<!-- Mute is the track's own, saved with the song as the Mixer's is. Solo is the editor's, and isn't saved. -->
 					<div class="toggles" role="group" aria-label={`Mute and solo ${trackName(track)}`}>
 						<button
@@ -754,6 +877,7 @@
 					data-testid={`row-${track.id}`}
 					onpointerdown={rowPressed}
 					ondblclick={rowDoubled}
+					oncontextmenu={rowMenu}
 				/>
 			{/each}
 
@@ -817,6 +941,9 @@
 	</div>
 </div>
 
+{#if other}
+	<ContextMenu x={other.x} y={other.y} label={other.label} items={other.items} onclose={() => (other = null)} />
+{/if}
 {#if menu}
 	<ContextMenu
 		x={menu.x}
@@ -882,6 +1009,13 @@
 		flex-direction: column;
 		justify-content: flex-end;
 		padding: 0 0.3rem 0 0.6rem;
+		font-size: 0.8rem;
+	}
+	.rename {
+		flex: 1;
+		min-width: 0;
+		margin: 0 0.3rem 0.1rem 0.4rem;
+		padding: 0.05rem 0.25rem;
 		font-size: 0.8rem;
 	}
 	.toggles {

@@ -851,7 +851,9 @@ export function lanesOf(clip: Clip): Lane[] {
 
 export interface LaneChoice {
 	key: string;
-	label: string;
+	label: string; // What the lane is called where it is drawn, on its own
+	group: string; // What it belongs to, which the list of choices groups them under: a patch, an insert, or the mix
+	name: string; // What it is called within its group
 	param?: number;
 	target?: LaneTarget;
 	min: number;
@@ -867,7 +869,17 @@ const paramsOf = (patch: PatchLike | undefined): Param[] => patch?.graph.params 
 function mixChoices(doc: Timeline, track: Track | undefined): LaneChoice[] {
 	const choices: LaneChoice[] = [];
 	const add = (label: string, target: LaneTarget, min: number, max: number, start: number) =>
-		choices.push({ key: laneKey(undefined, target), label, target, min, max, start, reaches: true });
+		choices.push({
+			key: laneKey(undefined, target),
+			label,
+			group: 'Mix',
+			name: label,
+			target,
+			min,
+			max,
+			start,
+			reaches: true
+		});
 	if (track) {
 		add('Fader', { mix: 'fader', track: track.id }, 0, 2, track.gain);
 		add('Pan', { mix: 'pan', track: track.id }, -1, 1, track.pan);
@@ -890,12 +902,16 @@ export function laneChoices(doc: Timeline, trackId: number | null, patches: Patc
 	const seen = new Set<number>();
 	const choices: LaneChoice[] = [];
 	for (const slot of track?.slots ?? []) {
-		for (const param of paramsOf(patches.find((p) => p.id === slot))) {
+		const patch = patches.find((p) => p.id === slot);
+		for (const param of paramsOf(patch)) {
 			if (seen.has(param.id)) continue;
 			seen.add(param.id);
+			const name = param.name || `Param ${param.id}`;
 			choices.push({
 				key: laneKey(param.id, undefined),
-				label: param.name || `Param ${param.id}`,
+				label: name,
+				group: patch?.name ?? slot,
+				name,
 				param: param.id,
 				min: param.min,
 				max: param.max,
@@ -905,14 +921,19 @@ export function laneChoices(doc: Timeline, trackId: number | null, patches: Patc
 		}
 	}
 	for (const chain of eachChain(doc)) {
+		const on =
+			'slots' in chain ? chain.name || `Track ${chain.id}` : 'id' in chain ? `bus ${chain.id}` : 'the master';
 		for (const insert of chain.inserts) {
 			if (insert.id === undefined) continue;
 			const patch = patches.find((p) => p.id === insert.patch);
 			for (const param of paramsOf(patch)) {
 				const target = { insert: insert.id };
+				const name = param.name || `Param ${param.id}`;
 				choices.push({
 					key: laneKey(param.id, target),
-					label: `${patch?.name ?? insert.patch} ${param.name || param.id}`,
+					label: `${patch?.name ?? insert.patch} ${name}`,
+					group: `${patch?.name ?? insert.patch} on ${on}`,
+					name,
 					param: param.id,
 					target,
 					min: param.min,

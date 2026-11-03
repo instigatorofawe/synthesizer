@@ -4,6 +4,8 @@ import {
 	bundlesWithMembers,
 	Conflict,
 	copyName,
+	freeName,
+	patchNames,
 	createAsset,
 	createBundle,
 	createPatch,
@@ -337,6 +339,21 @@ describe('exports from saved rows', () => {
 		expect(thin.image.length).toBeLessThan(full.image.length / 2);
 		expect(thin.report.chunks.length).toBe(full.report.chunks.length);
 		expect(thin.report.chunks.filter((c) => c.present).map((c) => c.kind)).toEqual(['program']);
+	});
+});
+
+describe('a new patch’s name', () => {
+	it('is the one asked for, or numbered while that is taken', () => {
+		expect(freeName('Lead', new Set())).toBe('Lead');
+		expect(freeName('Lead', new Set(['Lead']))).toBe('Lead 2');
+		expect(freeName('Lead', new Set(['Lead', 'Lead 2']))).toBe('Lead 3');
+		expect(freeName('Lead 2', new Set(['Lead', 'Lead 2']))).toBe('Lead 3');
+		expect(freeName('Mix 1', new Set(['Mix 1']))).toBe('Mix 2');
+	});
+
+	it('is kept apart from every patch in the library', () => {
+		createPatch(db, 'Bass', EMPTY_GRAPH);
+		expect(freeName('Bass', patchNames(db))).toBe('Bass 2');
 	});
 });
 

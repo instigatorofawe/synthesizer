@@ -46,7 +46,9 @@
 		mixWrites,
 		patchUses,
 		position,
+		addSlot,
 		replacePatch,
+		setSlot,
 		settlingWrites,
 		soloed,
 		tempoAt,
@@ -315,6 +317,25 @@
 			void open({ patch: made.to, part: null }, false, 'patch');
 		};
 	};
+
+	// Use on track: the patch the Patch view shows, put on the track the Song view chose, in place of what it plays, as one
+	// edit. Only a library timeline can be changed, and an insert has no notes to play, so neither is offered.
+	const useOn = $derived.by(() => {
+		if (!saved || !timelineDoc || selectedTrack === null || !shown || shown.example) return null;
+		const track = timelineDoc.tracks.find((t) => t.id === selectedTrack);
+		if (!track || track.slots[0] === shown.patch.id) return null;
+		if (isInsert(shown.patch.graph)) return null;
+		return { id: track.id, name: track.name || `Track ${track.id}` };
+	});
+
+	function useOnTrack() {
+		if (!useOn || !timelineDoc || !shown) return;
+		const track = timelineDoc.tracks.find((t) => t.id === useOn.id);
+		const next = track?.slots.length
+			? setSlot(timelineDoc, useOn.id, 0, shown.patch.id)
+			: addSlot(timelineDoc, useOn.id, shown.patch.id);
+		timelineEdited({ text: JSON.stringify(next, null, 1) });
+	}
 
 	// Puts a copy in place of the original in the open timeline, as one edit. Says whether it played the original at all.
 	function swapIn(from: string, to: string): boolean {
@@ -1801,6 +1822,8 @@
 					active={view === 'patch'}
 					song={songName}
 					onsong={() => void show('song')}
+					{useOn}
+					onuse={useOnTrack}
 					onname={(name) => patchEdited({ name })}
 					ongraph={(graph) => patchEdited({ graph })}
 					ontext={(text, typing) => patchEdited({ text }, typing ? 'typing' : 'edit')}

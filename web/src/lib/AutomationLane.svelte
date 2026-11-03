@@ -65,6 +65,22 @@
 	// new point is in `base` but not yet in the document, until it is let go.
 	let held = $state.raw<{ from: number; index: number; base: Clip; clip: Clip } | null>(null);
 	let menu = $state.raw<{ x: number; y: number; index: number } | null>(null);
+	// Where a click would add a point, under the pointer, and what it would be: as the roll's ghost note says what a click adds.
+	let ghost = $state.raw<{ tick: number; value: number } | null>(null);
+
+	function hover(event: PointerEvent) {
+		if (readonly || held || event.target !== event.currentTarget) return void (ghost = null);
+		const { tick, value, past } = pointer(event);
+		ghost = past || points.some((point) => point.tick === tick) ? null : { tick, value };
+	}
+
+	const valueText = (value: number) => String(Number(value.toPrecision(3)));
+
+	// The ghost's words, kept inside the lane at either end.
+	const ghostText = $derived(ghost ? `${valueText(ghost.value)} · ${position(ghost.tick, ppq)}` : '');
+	const ghostX = $derived(
+		ghost ? Math.min(Math.max(0, ghost.tick * perTick + 8), Math.max(0, width - ghostText.length * 6.2)) : 0
+	);
 
 	// The lane as it is while a point is dragged, the new one too, and its points where the lane gets to them.
 	const shown = $derived(held ? (lanesOf(held.clip).find((l) => l.key === lane.key) ?? lane) : lane);
@@ -275,8 +291,23 @@
 	onkeydown={keydown}
 	oncontextmenu={(event) => event.preventDefault()}
 >
-	<rect class="ground" {width} height={HEIGHT} role="presentation" ondblclick={doubled} onpointerdown={pressGround} />
+	<rect
+		class="ground"
+		{width}
+		height={HEIGHT}
+		role="presentation"
+		ondblclick={doubled}
+		onpointerdown={pressGround}
+		onpointermove={hover}
+		onpointerleave={() => (ghost = null)}
+	/>
 	<polyline class="curve" points={polyline} data-testid={`${testid}-curve`} />
+	{#if ghost && !held}
+		<g class="ghost" data-testid={`${testid}-ghost`} data-tick={ghost.tick} data-value={ghost.value}>
+			<circle cx={ghost.tick * perTick} cy={yOf(ghost.value)} r="5" />
+			<text x={ghostX} y={yOf(ghost.value) < HEIGHT / 2 ? yOf(ghost.value) + 14 : yOf(ghost.value) - 7}>{ghostText}</text>
+		</g>
+	{/if}
 	{#each points as point (point.index)}
 		<circle
 			class="point"
@@ -308,6 +339,22 @@
 {/if}
 
 <style>
+	.ghost {
+		pointer-events: none;
+	}
+	.ghost circle {
+		fill: none;
+		stroke: var(--accent);
+		stroke-dasharray: 2 2;
+		opacity: 0.8;
+	}
+	.ghost text {
+		fill: var(--muted);
+		font-size: 10px;
+		paint-order: stroke;
+		stroke: #0d1117;
+		stroke-width: 3px;
+	}
 	.head {
 		display: flex;
 		gap: 0.5rem;

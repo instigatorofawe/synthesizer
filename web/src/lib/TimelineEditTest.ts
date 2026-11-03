@@ -558,6 +558,20 @@ describe('lanes', () => {
 		]);
 	});
 
+	it('are grouped under what they belong to, and named within it', () => {
+		const choices = laneChoices(song(), 1, patches);
+		expect(choices.map((c) => [c.group, c.name])).toEqual([
+			['Lead', 'cutoff'],
+			[expect.stringMatching(/^Verb on /), 'mix'],
+			['Mix', 'Fader'],
+			['Mix', 'Pan'],
+			['Mix', 'Send to room'],
+			['Mix', 'room fader'],
+			['Mix', 'room pan'],
+			['Mix', 'Master fader']
+		]);
+	});
+
 	it('say which reach past their track, which the compiler refuses on a track that never plays', () => {
 		const reaching = laneChoices(song(), 1, patches)
 			.filter((c) => c.reaches)

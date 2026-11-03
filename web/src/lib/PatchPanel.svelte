@@ -42,6 +42,8 @@
 		choose = null,
 		song,
 		onsong,
+		useOn = null,
+		onuse = () => {},
 		onname,
 		ongraph,
 		ontext,
@@ -80,6 +82,8 @@
 		choose?: { node: number } | null; // A node to choose, from the compile light's link to a problem, which shows the graph
 		song: string; // The open timeline's or example's name
 		onsong: () => void; // Back to the Song view
+		useOn?: { id: number; name: string } | null; // The track the Song view chose, if this patch can go on it
+		onuse?: () => void; // Puts this patch on that track, in place of what it plays
 		onname: (name: string) => void;
 		ongraph: (graph: Graph) => void;
 		ontext: (text: string, typing: boolean) => void; // Typing until the field is left, which undoes as one step
@@ -169,6 +173,14 @@
 				</span>
 			{/if}
 			<span class="grow"></span>
+			{#if useOn}
+				<button
+					type="button"
+					class="use"
+					title={`Put this patch on ${useOn.name}, the track chosen in the song, in place of what it plays. Undo takes it back.`}
+					onclick={onuse}>Use on {useOn.name}</button
+				>
+			{/if}
 			<!-- A patch that can't be changed is changed by Edit a copy, which puts the copy where the original plays. -->
 			{#if duplicate}
 				<form

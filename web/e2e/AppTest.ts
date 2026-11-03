@@ -1225,7 +1225,7 @@ test('an insert lane compiles, and a fader and a pan lane on one track both move
 	await tab(page, 'Mixer');
 	await page.getByLabel('Add an insert to Track 1').selectOption('reverb');
 	await tab(page, 'Notes');
-	await page.getByLabel('Add a lane').selectOption({ label: 'Room room' });
+	await page.getByLabel('Add a lane').selectOption({ label: 'room' }); // The reverb insert's room, under its patch "on Track 1"
 	await expect(page.getByTestId('lane-0')).toBeVisible();
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[0].target).toEqual({ insert: 1 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);

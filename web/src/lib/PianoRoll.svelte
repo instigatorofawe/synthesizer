@@ -134,7 +134,8 @@
 	let chosen = $state.raw(new Set<number>());
 	let gesture = $state.raw<Gesture | null>(null);
 	let ghost = $state.raw<{ tick: number; note: number } | null>(null); // The empty cell under the pointer
-	let menu = $state.raw<{ x: number; y: number } | null>(null);
+	// The chosen notes' menu, or with `ground` the roll's own, for a right-click where there is no note.
+	let menu = $state.raw<{ x: number; y: number; ground?: true } | null>(null);
 	let notice = $state<string | null>(null); // Said after a clip grows, with an Undo beside it
 	// A note that would have grown the clip into the next, clicked or from step entry
 	let offer = $state.raw<{ note: Note; length: number; step?: true } | null>(null);
@@ -160,6 +161,8 @@
 	const beats = $derived(Math.ceil(widthTicks / ppq));
 	const lanes = $derived(lanesOf(clip));
 	const free = $derived(choices.filter((choice) => !lanes.some((lane) => lane.key === choice.key)));
+	// The choices under what each belongs to, in the order they come: the track's patch, inserts, then the mix.
+	const laneGroups = $derived([...Map.groupBy(free, (choice) => choice.group)]);
 	const one = $derived(chosen.size ? clip.notes[[...chosen][0]] : undefined);
 	const heldKeys = new Set<number>();
 
@@ -709,9 +712,21 @@
 	// Shift+F10 or the menu key opens the chosen notes' menu, at the first of them.
 	function rollMenu(event: MouseEvent) {
 		event.preventDefault();
-		if (event.target === roll) menuAtChosen();
-		else gesture = null;
+		if (event.target === roll) return menuAtChosen();
+		gesture = null;
+		menu = { x: event.clientX, y: event.clientY, ground: true };
 	}
+
+	const groundItems = (): MenuItem[] => [
+		...(readonly ? [] : [{ label: 'Paste', keys: 'paste' as const, action: paste, disabled: !clipboard.notes }]),
+		{
+			label: 'Choose all',
+			keys: 'select-all',
+			action: () => (chosen = new Set(clip.notes.keys())),
+			disabled: !clip.notes.length
+		},
+		{ label: 'Fit', keys: 'fit', action: () => void fit() }
+	];
 
 	function menuAtChosen() {
 		gesture = null;
@@ -1122,6 +1137,7 @@
 								width={Math.max(note.dur * perTick, 3)}
 								height={rowHeight - 2}
 								rx="2"
+								style:fill-opacity={0.45 + (0.55 * note.vel) / 127}
 								role="presentation"
 								onpointerdown={(event) => pressNote(event, index, 'move')}
 								oncontextmenu={(event) => noteMenu(event, index)}
@@ -1233,8 +1249,8 @@
 	<ContextMenu
 		x={menu.x}
 		y={menu.y}
-		label={chosen.size > 1 ? `${chosen.size} notes` : 'Note'}
-		items={noteItems()}
+		label={menu.ground ? 'Piano roll' : chosen.size > 1 ? `${chosen.size} notes` : 'Note'}
+		items={menu.ground ? groundItems() : noteItems()}
 		onclose={() => (menu = null)}
 	/>
 {/if}
@@ -1265,10 +1281,21 @@
 						role="presentation"
 						data-testid={`velocity-${index}`}
 						data-vel={note.vel}
-					/>
+						><title>{`Velocity ${note.vel}`}</title></rect
+					>
 					<rect class="cap" {x} y={VELOCITY - height} width={across} height="2" />
 				</g>
 			{/each}
+			{#if gesture?.kind === 'velocity'}
+				<!-- What the drag sets, beside the pointer, as a fader says its level while it moves. -->
+				{@const value = velocityAt(gesture.at.y)}
+				<text
+					class="velreadout"
+					x={Math.min(gesture.at.x + 8, Math.max(0, width - 24))}
+					y={Math.max(11, Math.min(VELOCITY - 3, gesture.at.y - 4))}
+					data-testid="velocity-readout">{value}</text
+				>
+			{/if}
 		</svg>
 		{#each lanes as lane, index (lane.key)}
 			{@const about = describeLane(lane, choices)}
@@ -1304,9 +1331,13 @@
 			}}
 		>
 			<option value="">Add a lane…</option>
-			{#each free as choice (choice.key)}
-				{@const waits = silent && !!choice.reaches}
-				<option value={choice.key} disabled={waits}>{choice.label}{waits ? ' (after a note)' : ''}</option>
+			{#each laneGroups as [group, list] (group)}
+				<optgroup label={group}>
+					{#each list as choice (choice.key)}
+						{@const waits = silent && !!choice.reaches}
+						<option value={choice.key} disabled={waits}>{choice.name}{waits ? ' (after a note)' : ''}</option>
+					{/each}
+				</optgroup>
 			{/each}
 		</select>
 		{#if silent && free.some((choice) => choice.reaches)}
@@ -1473,6 +1504,14 @@
 	}
 	.note.chosen .body {
 		fill: #f0883e;
+	}
+	.velreadout {
+		fill: var(--text);
+		font-size: 11px;
+		pointer-events: none;
+		paint-order: stroke;
+		stroke: #0d1117;
+		stroke-width: 3px;
 	}
 	.edge {
 		fill: transparent;

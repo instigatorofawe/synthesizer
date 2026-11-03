@@ -11,6 +11,8 @@ import {
 	createBundle,
 	createPatch,
 	createTimeline,
+	freeName,
+	patchNames,
 	deleteAsset,
 	deleteBundle,
 	deletePatch,
@@ -135,7 +137,7 @@ export const actions = {
 		const form = await request.formData();
 		const name = field(form, 'name');
 		if (!name) return fail(400, { message: 'a patch needs a name' });
-		const id = createPatch(db(), name, EMPTY_GRAPH);
+		const id = createPatch(db(), freeName(name, patchNames(db())), EMPTY_GRAPH); // "Lead 2" if there is a Lead
 		if (form.has('back')) redirect(303, back(form, { patch: id, part: null }));
 		return { created: id };
 	},

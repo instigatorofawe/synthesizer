@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test as base, type Page } from '@playwright/test';
+import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated: what is typed into it before then is lost, and a slow machine shows it.
 const test = base.extend({
@@ -15,6 +16,10 @@ const test = base.extend({
 		await use(page);
 	}
 });
+
+// Below 1400 px the browser folds to a rail and opens over the page, and these tests use it as it sits beside the page.
+// ViewsTest has the narrower screen.
+test.use({ viewport: { width: 1440, height: 900 } });
 
 // Leaving with unsaved edits asks first, and a test that leaves means to.
 test.beforeEach(({ page }) => {
@@ -61,7 +66,8 @@ const graphView = (page: Page) =>
 const peaksIn = (scope: ReturnType<Page['getByRole']>) =>
 	scope.getByTestId('peak').evaluateAll((list) => list.map((e) => Number(e.getAttribute('data-peak'))));
 const mixerPeaks = (page: Page) => peaksIn(page.getByRole('tabpanel'));
-const patchPeaks = (page: Page) => peaksIn(patchEditor(page));
+// The patch's scopes go on watching while the Song view is on screen and the Patch view is out of sight.
+const patchPeaks = (page: Page) => peaksIn(page.getByRole('region', { name: 'Patch editor', includeHidden: true }));
 
 // Every edit has compiled, and the image made from the last one is playing.
 const settled = (page: Page) =>
@@ -94,13 +100,14 @@ test('the seeded library lists patches, timelines and a bundle', async ({ page }
 	await expect(browser(page).getByRole('link', { name: 'Demo set' })).toBeVisible();
 });
 
-test('a fresh visit opens the timeline saved last, with its patch above', async ({ page }) => {
+test('a fresh visit opens the timeline saved last, with its patch a view away', async ({ page }) => {
 	await page.goto('/');
 	await expect(page).toHaveURL(/\?timeline=ballad/);
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Ballad');
+	await expect(page.getByTestId('arrangement')).toBeVisible();
+	await openView(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Stereo lead');
 	await expect(page.getByTestId('graph')).toBeVisible();
-	await expect(page.getByTestId('arrangement')).toBeVisible();
 });
 
 test('a timeline plays in an AudioWorklet and the scopes see every bus', async ({ page }) => {
@@ -412,6 +419,7 @@ test('edits to a timeline and its patches save together', async ({ page }) => {
 	await expect(browser(page).getByRole('link', { name: 'Pluck, edited' })).toBeVisible();
 	await expect(browser(page).getByRole('link', { name: 'Stereo lead' })).toBeVisible();
 
+	await openView(page, 'song');
 	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad');
 	await browser(page).getByRole('link', { name: 'Pluck, edited' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Pluck, edited');
@@ -429,6 +437,7 @@ test('choosing a track shows its patch, and the browser shows another', async ({
 	await browser(page).getByRole('link', { name: 'Room' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Room');
 	await expect(page.getByTestId('hearing')).toContainText('An insert has no keys');
+	await openView(page, 'song');
 	await page.getByTestId('track-1').click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Stereo lead');
 	await expect(page).not.toHaveURL(/patch=/);
@@ -445,24 +454,34 @@ test('choosing a track shows its patch, and the browser shows another', async ({
 	await expect(page).toHaveURL(/patch=unused/);
 });
 
-test('keys go to the panel used last', async ({ page }) => {
+test("keys and the top bar's Undo go to the view on screen", async ({ page }) => {
 	await page.goto('/?timeline=song');
-	const nodes = patchEditor(page).locator('g.node');
-	const count = await nodes.count();
-	const osc = page.locator('g.node:has(text:has-text("osc"))').first().locator('rect.title');
-	await osc.click(); // Chosen in the graph, which mustn't take the Delete meant for the timeline
 	await page.getByTestId('placement-1-0').locator('rect').first().click();
+	await openView(page, 'patch');
+	const nodes = page.getByTestId('graph').locator('g.node'); // Counted in either view
+	const count = await nodes.count();
+	// Chosen in the graph, which mustn't take the Delete meant for the song once the song is on screen
+	await page.locator('g.node:has(text:has-text("osc"))').first().locator('rect.title').click();
+	await page.keyboard.press('Backquote');
+	await expect(page.getByTestId('view-song')).toHaveAttribute('aria-selected', 'true');
 	await page.keyboard.press('Delete');
 	await expect(page.getByTestId('placement-1-0')).toHaveCount(0);
 	await expect(nodes).toHaveCount(count);
-	await osc.click();
-	await page.keyboard.press('ControlOrMeta+z'); // Nothing to undo in the graph, and the timeline's edit stays
+	await page.keyboard.press('Backquote');
+	await page.keyboard.press('ControlOrMeta+z'); // Nothing to undo in the graph, and the song's edit stays
 	await expect(page.getByTestId('placement-1-0')).toHaveCount(0);
 	await page.keyboard.press('Delete');
 	await expect(nodes).toHaveCount(count - 1);
-	await timelineEditor(page).getByRole('button', { name: 'Undo' }).click();
+
+	const undo = page.getByRole('group', { name: 'Undo and redo' }).getByRole('button', { name: 'Undo' });
+	await openView(page, 'song');
+	await undo.click();
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(nodes).toHaveCount(count - 1);
+	await openView(page, 'patch');
+	await undo.click();
+	await expect(nodes).toHaveCount(count);
+	await expect(page.getByTestId('placement-1-0')).toHaveCount(1);
 });
 
 test('the browser folds away and stays that way', async ({ page }) => {
@@ -485,18 +504,6 @@ test('the browser filters everything by name', async ({ page }) => {
 	await expect(browser(page).getByRole('link', { name: 'Kick808' })).toHaveCount(2);
 	await expect(browser(page).getByTestId('builtins').getByRole('link', { name: 'Kick808' })).toBeVisible();
 	await expect(browser(page).getByRole('link', { name: 'Stereo lead' })).toHaveCount(0);
-});
-
-test('the patch editor is resized from the bar under it', async ({ page }) => {
-	await page.goto('/?timeline=song');
-	const graph = page.getByTestId('graph');
-	const before = (await graph.boundingBox())!.height;
-	const bar = page.getByRole('separator', { name: 'Resize the patch editor' });
-	await bar.focus();
-	await page.keyboard.press('Shift+ArrowDown');
-	await expect.poll(async () => (await graph.boundingBox())!.height).toBeGreaterThan(before + 40);
-	await bar.dblclick();
-	await expect.poll(async () => Math.round((await graph.boundingBox())!.height)).toBe(Math.round(before));
 });
 
 test('a patch in use cannot be deleted, and says what an edit would change', async ({ page }) => {
@@ -532,12 +539,16 @@ test('a patch no track plays is heard on its own, and Play brings the song back'
 
 test('a patch a track plays is heard in the song, through that track', async ({ page }) => {
 	await page.goto('/?timeline=song');
+	await openView(page, 'patch');
 	await expect(page.getByTestId('hearing')).toContainText('Keys play it on Lead, in the song');
 	const key = page.getByRole('button', { name: '67', exact: true });
 	await key.dispatchEvent('pointerdown'); // Starts audio as well
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	// The track's meter is in the Song view, out of sight
 	await expect
-		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
+		.poll(() =>
+			page.getByRole('meter', { name: 'Level of Lead', includeHidden: true }).getAttribute('data-peak').then(Number)
+		)
 		.toBeGreaterThan(0.01);
 	await key.dispatchEvent('pointerup');
 	await expect(page.getByTestId('playing-alone')).toHaveCount(0);
@@ -545,14 +556,18 @@ test('a patch a track plays is heard in the song, through that track', async ({ 
 
 test('the computer keyboard plays the patch, Z and X move its octave, and a field keeps its keys', async ({ page }) => {
 	await page.goto('/?timeline=song');
+	await openView(page, 'patch');
 	await expect(page.getByTestId('hearing')).toContainText('Keys play it on Lead, in the song');
 	const key = (note: number) => page.getByRole('button', { name: String(note), exact: true });
 	await expect(key(48)).toHaveAttribute('aria-keyshortcuts', 'A');
 	await page.keyboard.down('g'); // G, a fifth above the lowest C, which starts audio as a click on a key does
 	await expect(key(55)).toHaveClass(/down/);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	// The track's meter is in the Song view, out of sight
 	await expect
-		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
+		.poll(() =>
+			page.getByRole('meter', { name: 'Level of Lead', includeHidden: true }).getAttribute('data-peak').then(Number)
+		)
 		.toBeGreaterThan(0.01);
 	await page.keyboard.press('x'); // An octave up while G is held, and letting go still lets go of the G it started
 	await expect(key(72)).toBeVisible();
@@ -635,6 +650,12 @@ async function newPatch(page: Page, name: string) {
 
 const shownPatchId = (page: Page) => new URL(page.url()).searchParams.get('patch')!;
 
+// Far enough that all of a new patch is on the canvas.
+async function zoomGraphOut(page: Page) {
+	await patchEditor(page).getByRole('button', { name: 'Zoom the graph out' }).click();
+	await patchEditor(page).getByRole('button', { name: 'Zoom the graph out' }).click();
+}
+
 async function drag(page: Page, from: string, to: string) {
 	const start = await page.getByTestId(from).boundingBox();
 	const end = await page.getByTestId(to).boundingBox();
@@ -666,8 +687,9 @@ test('a wire drawn by hand compiles, and an error lands on its node until it is 
 test('a node added from the toolbar is set up from the inspector', async ({ page }) => {
 	await newPatch(page, 'Built from parts');
 	const editor = patchEditor(page);
-	await editor.getByLabel('Node type').selectOption('math');
-	await editor.getByRole('button', { name: 'Add node' }).click();
+	await editor.getByRole('button', { name: '+ Node' }).click();
+	await editor.getByRole('combobox', { name: 'Search nodes' }).fill('math');
+	await page.keyboard.press('Enter');
 	await expect(page.getByTestId('node-7')).toHaveAttribute('data-dead', 'true');
 	await editor.getByLabel('mode', { exact: true }).selectOption('clip');
 	await expect(page.getByTestId('in-7-c')).toBeAttached();
@@ -681,6 +703,7 @@ test('a node added from the toolbar is set up from the inspector', async ({ page
 
 test('a moved node stays where it was put', async ({ page }) => {
 	await newPatch(page, 'Rearranged');
+	await zoomGraphOut(page); // Text is never drawn too small to read, so the out node is off the canvas until then
 	const before = await page.getByTestId('node-6').getAttribute('transform');
 	const box = await page.getByRole('button', { name: 'out 6' }).boundingBox();
 	await page.mouse.move(box!.x + 40, box!.y + 8);
@@ -699,9 +722,11 @@ test('a patch uses another as a subpatch, and it plays', async ({ page }) => {
 	await newPatch(page, 'Part');
 	const part = shownPatchId(page);
 	await newPatch(page, 'Whole');
+	await zoomGraphOut(page);
 	const editor = patchEditor(page);
-	await editor.getByLabel('Node type').selectOption('subpatch');
-	await editor.getByRole('button', { name: 'Add node' }).click();
+	await editor.getByRole('button', { name: '+ Node' }).click();
+	await editor.getByRole('combobox', { name: 'Search nodes' }).fill('subpatch');
+	await page.keyboard.press('Enter');
 	await editor.getByLabel('patch', { exact: true }).selectOption(part);
 	await expect(page.getByTestId('out-7-l')).toBeAttached();
 	await drag(page, 'out-7-l', 'in-6-r');
@@ -775,7 +800,7 @@ test('a recipe added to the library is an ordinary timeline that plays the built
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveValue('builtin-PluckedString');
+	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveAttribute('data-patch', 'builtin-PluckedString');
 
 	await page.goto('/?patch=builtin-PluckedString');
 	await expect(page.locator('path.wire.audio').first()).toBeAttached();
@@ -804,7 +829,7 @@ test("every example's patches are in the library from the start, and can't be ch
 	await expect(patchEditor(page).getByText('built in', { exact: true })).toBeVisible();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Delete patch' })).toHaveCount(0);
-	await expect(page.getByRole('button', { name: 'Add node' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: '+ Node' })).toHaveCount(0);
 	await expect(await graphJson(page)).not.toBeEditable();
 	await expect(
 		browser(page)
@@ -829,7 +854,7 @@ test('a built-in patch with a recording plays on its own, though nothing in the 
 
 test('a track can play a built-in patch, and a duplicate of it takes its place to be changed', async ({ page }) => {
 	await trackWithClip(page, 'Borrowed');
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption('builtin-OneShotSample');
+	await choosePatch(page, 'builtin-OneShotSample', 1);
 	await addNoteAt(page, 0, 60);
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
@@ -837,14 +862,14 @@ test('a track can play a built-in patch, and a duplicate of it takes its place t
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
-	await page.getByRole('button', { name: 'Edit patch slot 1' }).click();
+	await page.getByRole('button', { name: 'Open patch slot 1' }).click();
 	await expect(page).toHaveURL(/patch=builtin-OneShotSample/);
 	await expect(page.getByTestId('used-by')).toContainText('Borrowed');
 	await page.getByRole('button', { name: 'Duplicate to edit' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('OneShotSample copy');
 	const copy = shownPatchId(page);
 	expect(copy).not.toContain('builtin');
-	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveValue(copy);
+	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveAttribute('data-patch', copy);
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 	await page.getByLabel('Patch name', { exact: true }).fill('My piano');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -858,15 +883,17 @@ test('a track can play a built-in patch, and a duplicate of it takes its place t
 
 test('a recipe shows the patch it is made of, with nothing to change', async ({ page }) => {
 	await page.goto('/?recipe=Kick808');
+	await openView(page, 'patch');
 	await expect(page.getByTestId('graph')).toBeVisible();
 	await expect(page.locator('path.wire.audio').first()).toBeAttached();
 	await expect(page.locator('path.wire.control').first()).toBeAttached();
 	await expect(page.getByTestId('patch-use')).toContainText('the voice of track 1');
-	await expect(page.getByRole('button', { name: 'Add node' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: '+ Node' })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Delete patch' })).toHaveCount(0);
 
 	const node = page.locator('g.node:has(text:has-text("osc"))').first();
-	await node.locator('rect.title').click();
+	await node.locator('rect.title').focus(); // From the keyboard, which reaches a node off the canvas
+	await page.keyboard.press('Enter');
 	await expect(patchEditor(page).locator('aside.inspector select').first()).toBeDisabled();
 	await expect(page.getByRole('button', { name: 'Delete node' })).toHaveCount(0);
 
@@ -878,6 +905,7 @@ test('a recipe shows the patch it is made of, with nothing to change', async ({ 
 
 test('a recipe with several patches shows each, and says what it does', async ({ page }) => {
 	await page.goto('/?recipe=SidechainDucking');
+	await openView(page, 'patch');
 	const buttons = page.getByRole('group', { name: 'Patches in this recipe' }).getByRole('button');
 	await expect(buttons).not.toHaveCount(0);
 	const count = await buttons.count();
@@ -895,6 +923,7 @@ test('a recipe with several patches shows each, and says what it does', async ({
 
 test('a probe in a recipe reads the voice of the patch on screen', async ({ page }) => {
 	await page.goto('/?recipe=Kick808');
+	await openView(page, 'patch');
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	const node = page.locator('g.node:has(text:has-text("env"))').first();
 	await node.locator('rect.title').click();
@@ -936,10 +965,21 @@ async function centre(page: Page, id: string) {
 	return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+// Chooses a patch by its id in the patch picker that is open, or in a slot's, which a click opens.
+async function choosePatch(page: Page, id: string, slot?: number) {
+	if (slot) await page.getByLabel(`Patch slot ${slot}`, { exact: true }).click();
+	await page.getByRole('listbox', { name: 'Patches' }).locator(`[data-patch="${id}"]`).click();
+}
+
+// A track asks which patch it plays as it is added.
+async function addTrack(page: Page, patch: string) {
+	await page.getByRole('button', { name: 'Add track' }).click();
+	await choosePatch(page, patch);
+}
+
 async function trackWithClip(page: Page, name: string) {
 	await newTimeline(page, name);
-	await page.getByRole('button', { name: 'Add track' }).click();
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption('lead');
+	await addTrack(page, 'lead');
 	const row = (await page.getByTestId('row-1').boundingBox())!;
 	await page.mouse.dblclick(row.x + 10, row.y + 20);
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
@@ -1026,7 +1066,7 @@ test('notes are moved, stretched, chosen and removed by hand', async ({ page }) 
 	await expect(note).toHaveAttribute('data-note', '56');
 	await page.keyboard.press('ArrowRight');
 	await expect(note).toHaveAttribute('data-tick', '1440');
-	await page.keyboard.press('Control+z');
+	await page.keyboard.press('ControlOrMeta+z');
 	await expect(note).toHaveAttribute('data-tick', '960');
 
 	// A band takes both, and they move as one.
@@ -1041,14 +1081,14 @@ test('notes are moved, stretched, chosen and removed by hand', async ({ page }) 
 
 	await page.keyboard.press('Delete');
 	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(0);
-	await page.keyboard.press('Control+z');
+	await page.keyboard.press('ControlOrMeta+z');
 	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(2);
 	const doc = await timelineDoc(page);
 	expect(doc.clips[0].notes).toHaveLength(2);
 	expect(doc.tracks[0].placements).toHaveLength(1); // Delete in the roll is about notes
 });
 
-test('velocity is dragged, and a double-click takes a note away', async ({ page }) => {
+test('velocity is dragged, and a double-click on a note leaves it there', async ({ page }) => {
 	await trackWithClip(page, 'Velocity');
 	await addNoteAt(page, 480, 60);
 	const bar = (await page.getByTestId('velocity-0').boundingBox())!;
@@ -1057,14 +1097,15 @@ test('velocity is dragged, and a double-click takes a note away', async ({ page 
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-vel', /^6[34]$/);
 	const { x, y } = await centre(page, 'note-0');
 	await page.mouse.dblclick(x - 20, y);
+	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(1);
+	await page.keyboard.press('Delete');
 	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(0);
 });
 
 test('a clip is moved, repeated and copied in the arrangement, and an overlap lands on its track', async ({ page }) => {
 	await trackWithClip(page, 'Arranged');
 	await addNoteAt(page, 0, 60);
-	await page.getByRole('button', { name: 'Add track' }).click();
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption('pluck');
+	await addTrack(page, 'pluck');
 	const block = page.getByTestId('placement-1-0');
 	const barPixels = 96;
 
@@ -1077,11 +1118,11 @@ test('a clip is moved, repeated and copied in the arrangement, and an overlap la
 	await press(page, edge, { x: edge.x + barPixels, y: edge.y });
 	await expect(block).toHaveAttribute('data-repeat', '2');
 
-	// Alt copies a placement, on another track, of the same clip.
+	// Mod copies a placement, on another track, of the same clip.
 	const moved = await centre(page, 'placement-1-0');
-	await page.keyboard.down('Alt');
+	await page.keyboard.down('ControlOrMeta');
 	await press(page, { x: moved.x - 20, y: moved.y }, { x: moved.x - 20 + barPixels, y: moved.y + 60 });
-	await page.keyboard.up('Alt');
+	await page.keyboard.up('ControlOrMeta');
 	await expect(page.getByTestId('placement-2-0')).toHaveAttribute('data-repeat', '2');
 	await expect(page.getByTestId('clip-uses')).toContainText('Placed 2 times');
 
@@ -1399,7 +1440,7 @@ test('insert and global sliders are heard as they move, and stay where they are 
 	const voice = await savedPatch(page, 'Tone', tone);
 	const insert = await savedPatch(page, 'Trim', trim);
 	await trackWithClip(page, 'Sliders');
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption(voice);
+	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
 	await page.mouse.dblclick(x, y);
 	await page.getByLabel('Note length').fill('1900');
@@ -1445,7 +1486,7 @@ test('insert and global sliders are heard as they move, and stay where they are 
 test('a value edited in the JSON is what plays, over what a swap would carry', async ({ page }) => {
 	const voice = await savedPatch(page, 'Tone two', { ...tone, params: [{ ...tone.params[0], scope: 'track' }] });
 	await trackWithClip(page, 'Edited values');
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption(voice);
+	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
 	await page.mouse.dblclick(x, y);
 	await page.getByLabel('Note length').fill('1900');
@@ -1470,6 +1511,7 @@ test('a value edited in the JSON is what plays, over what a swap would carry', a
 test('a patch edit is heard in the song as it is made', async ({ page }) => {
 	await startPlaying(page, 'ballad');
 	await expect(page.getByTestId('voices')).toHaveText('3');
+	await openView(page, 'patch');
 	const graph = await graphJson(page);
 	// Silence the voice by unwiring its output, which the compiler refuses, so the old sound plays on and the node says why.
 	const text = await graph.inputValue();
@@ -1513,7 +1555,7 @@ test('a recipe shows its notes and mix, and none of it can be changed', async ({
 	await expect(page.getByLabel('Fader for Master')).toBeDisabled();
 	await tab(page, 'Notes');
 	await expect(page.getByRole('button', { name: 'Add track' })).toHaveCount(0);
-	await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0);
+	await expect(timelineEditor(page).getByRole('button', { name: 'Undo' })).toHaveCount(0);
 	await expect(page.getByTestId('repeat-1-0')).toHaveCount(0);
 
 	const row = (await page.getByTestId('row-1').boundingBox())!;
@@ -1576,7 +1618,9 @@ const samples = (page: Page) => browser(page).getByRole('list', { name: 'Samples
 
 test('WAV files become an instrument that plays, and its samples stay while it does', async ({ page }) => {
 	await page.goto('/');
-	await page.getByLabel('WAV files').setInputFiles([wavFile('Sine_A3.wav'), wavFile('Sine_A4.wav')]);
+	// Each sample plays once, so it has to outlast the wait for the meters, which on a slow machine comes after a half-second
+	// sample has ended.
+	await page.getByLabel('WAV files').setInputFiles([wavFile('Sine_A3.wav', 3), wavFile('Sine_A4.wav', 3)]);
 	await page.getByLabel('Instrument name').fill('Imported sines');
 	await page.getByRole('button', { name: 'Import' }).click();
 	await page.waitForURL(/patch=/);
@@ -1642,10 +1686,9 @@ test('an image too large for the engine says so instead of going quiet', async (
 		ids.push(shownPatchId(page));
 	}
 	await trackWithClip(page, 'Too large');
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption(ids[0]);
+	await choosePatch(page, ids[0], 1);
 	await addNoteAt(page, 0, 60);
-	await page.getByRole('button', { name: 'Add track' }).click();
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption(ids[1]);
+	await addTrack(page, ids[1]);
 	const row = (await page.getByTestId('row-2').boundingBox())!;
 	await page.mouse.dblclick(row.x + 10, row.y + 20);
 	await expect(page.getByTestId('placement-2-0')).toBeVisible();
@@ -1657,8 +1700,10 @@ test('an image too large for the engine says so instead of going quiet', async (
 test("a probe stops when another patch is chosen, even one that can't be probed", async ({ page }) => {
 	await page.goto('/?recipe=SidechainDucking');
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
+	await openView(page, 'patch');
 	await page.getByRole('group', { name: 'Patches in this recipe' }).getByRole('button', { name: 'pad' }).click();
-	await page.locator('g.node:has(text:has-text("env"))').first().locator('rect.title').click();
+	await page.locator('g.node:has(text:has-text("env"))').first().locator('rect.title').focus(); // Off the canvas
+	await page.keyboard.press('Enter');
 	await page.getByRole('button', { name: 'Probe out' }).click();
 	const label = page.locator('span').filter({ hasText: /env\.out$/ });
 	await expect(label).toBeVisible();
@@ -1672,7 +1717,7 @@ test('a clip repeated as far as a document allows leaves the page working', asyn
 	const editor = await timelineJson(page);
 	await editor.fill((await editor.inputValue()).replace('"repeat": 1', '"repeat": 100000'));
 	await expect(page.getByTestId('placement-1-0')).toHaveAttribute('data-repeat', '100000', { timeout: 8000 });
-	await page.getByRole('button', { name: 'Add track' }).click();
+	await addTrack(page, 'lead');
 	await expect(page.getByTestId('row-2')).toBeAttached();
 });
 

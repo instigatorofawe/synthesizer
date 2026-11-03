@@ -1,24 +1,32 @@
 <script lang="ts">
-	import { onMount, untrack, type Snippet } from 'svelte';
-	import Arrangement, { type Selection } from '#lib/Arrangement.svelte';
+	import { onMount, tick as settle, untrack, type Snippet } from 'svelte';
+	import { on } from 'svelte/events';
+	import Arrangement, { type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
+	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
+	import type { ExampleGroup } from '#lib/PatchGroups.ts';
+	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
 	import Splitter from '#lib/Splitter.svelte';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
+	import { matches, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import {
 		addClip,
 		addPlayChange,
 		addSlot,
 		addTempo,
 		addTrack,
-		byOwner,
 		barOf,
+		canGrow,
+		drawLengths,
+		duplicatePlacement,
 		grids,
 		laneChoices,
 		makeUnique,
+		noteValue,
 		place,
 		placementIndex,
 		placeOfError,
@@ -39,6 +47,7 @@
 		setTrack,
 		snapTick,
 		songLength,
+		stepLength,
 		windowOf,
 		ticksPerBar,
 		type Clip,
@@ -55,13 +64,16 @@
 		targets,
 		rings,
 		engine,
+		history = null,
 		readonly = false,
 		active = true,
 		tabs = [],
 		heading,
+		examples = [],
 		onchange,
 		ontrack = () => {},
-		onopen = () => {}
+		onopen = () => {},
+		onnewpatch
 	}: {
 		doc: Timeline;
 		patches: PatchLike[];
@@ -72,13 +84,16 @@
 		targets: TapTarget[];
 		rings: Ring[];
 		engine: SongControls;
+		history?: Undoable | null; // The timeline's undo, which the page keeps while other things are open
 		readonly?: boolean;
-		active?: boolean; // Whether keys are for this editor, when it shares a page with others
+		active?: boolean; // Whether keys are for this editor, which they are while its view is on screen
 		tabs?: { id: string; label: string; content: Snippet }[]; // More views of the document, after the notes and the mixer
 		heading?: Snippet; // At the start of the toolbar
+		examples?: ExampleGroup[]; // How the browser groups the examples, which the patch pickers group built-in patches by
 		onchange: (doc: Timeline) => void;
 		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
-		onopen?: (patch: string) => void; // Someone asked to edit a patch this timeline uses
+		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
+		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -94,6 +109,13 @@
 		untrack(() => doc.tracks.find((t) => t.id === selection.track)?.placements[selection.placement ?? -1]?.clip ?? null)
 	);
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
+	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
+	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
+	const drawChoices = $derived.by(() => {
+		const lengths = drawLengths(doc.ppq);
+		if (lengths.some((length) => length.ticks === draw)) return lengths;
+		return [...lengths, { label: noteValue(draw, doc.ppq), ticks: draw }].sort((a, b) => a.ticks - b.ticks);
+	});
 	let barWidth = $state(96);
 	let loop = $state<{ start: number; end: number } | null>(null);
 	let looping = $state(false);
@@ -101,10 +123,8 @@
 	let dragged = $state<number | null>(null); // The arrangement's height, once someone has dragged it
 	// Until then it fits its tracks, up to a size that leaves room for the notes.
 	const height = $derived(dragged ?? Math.min(270, 34 + Math.max(doc.tracks.length, 1) * 60 + 20));
-	let past: Timeline[] = [];
-	let future: Timeline[] = [];
-	let canUndo = $state(false);
-	let canRedo = $state(false);
+	const canUndo = $derived(history?.canUndo ?? false);
+	const canRedo = $derived(history?.canRedo ?? false);
 
 	const track = $derived(doc.tracks.find((t) => t.id === selection.track));
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
@@ -115,9 +135,10 @@
 	);
 	const reported = $derived(program?.tracks.find((t) => t.id === home?.id));
 	const uses = $derived(doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clipId).length);
-	const voicePatches = $derived(
-		byOwner(patches.filter((patch) => !patch.graph.nodes.some((node) => node.type === 'in')))
-	);
+	// A slot plays a voice, so the pickers leave out inserts. What the song already plays comes first in them.
+	const voices = $derived(patches.filter((patch) => !patch.graph.nodes.some((node) => node.type === 'in')));
+	const used = $derived(doc.tracks.flatMap((t) => t.slots));
+	const newPatchAction = $derived(onnewpatch && !readonly ? 'New patch for this track' : '');
 	const choices = $derived(laneChoices(doc, home?.id ?? null, patches));
 	const length = $derived(program?.length_ticks ?? songLength(doc));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
@@ -132,32 +153,13 @@
 
 	const number = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
 
+	// The page records each edit in the timeline's history, which outlasts this editor, as opening another timeline ends it.
 	function commit(next: Timeline) {
-		if (next === doc) return;
-		past.push(doc);
-		future = [];
-		canUndo = true;
-		canRedo = false;
-		onchange(next);
+		if (next !== doc) onchange(next);
 	}
 
-	function undo() {
-		const last = past.pop();
-		if (!last) return;
-		future.push(doc);
-		canUndo = past.length > 0;
-		canRedo = true;
-		onchange(last);
-	}
-
-	function redo() {
-		const next = future.pop();
-		if (!next) return;
-		past.push(doc);
-		canUndo = true;
-		canRedo = future.length > 0;
-		onchange(next);
-	}
+	const undo = () => history?.undo();
+	const redo = () => history?.redo();
 
 	// The page shows the chosen track's patch, so it hears about every choice of track.
 	let told = false;
@@ -182,14 +184,65 @@
 		if (moved) selection = moved;
 	}
 
-	function newTrack() {
-		const added = addTrack(doc, (voicePatches.own[0] ?? voicePatches.builtin[0])?.id);
-		commit(added.doc);
-		selection = { track: added.id, placement: null };
+	// A track plays a patch, so + Track asks which, and a track head's ▾ changes it. One picker is open at a time, below the
+	// button that opened it.
+	type Picking = { kind: 'add'; anchor: HTMLElement } | { kind: 'head'; track: number; anchor: HTMLElement };
+	let picking = $state.raw<Picking | null>(null);
+
+	// The picker takes focus, so a press on the button that opened it mustn't: then a second click closes it.
+	function toggle(next: Picking) {
+		const same =
+			picking?.kind === next.kind && (picking.kind === 'add' || (next.kind === 'head' && picking.track === next.track));
+		picking = same ? null : next;
 	}
 
-	function newClip(id: number, at: number) {
-		const added = addClip(doc, ticksPerBar(doc));
+	const trackName = (track: { id: number; name: string }) => track.name || `Track ${track.id}`;
+
+	function newTrack(patch: string) {
+		const added = addTrack(doc, patch);
+		commit(added.doc);
+		selection = { track: added.id, placement: null };
+		return added.id;
+	}
+
+	// A patch in slot `index`, or in a new slot past the last.
+	function putPatch(id: number, index: number, patch: string) {
+		const track = doc.tracks.find((t) => t.id === id);
+		if (!track) return false;
+		commit(index < track.slots.length ? setSlot(doc, id, index, patch) : addSlot(doc, id, patch));
+		if (selection.track !== id) selection = { track: id, placement: null };
+		return true;
+	}
+
+	function picked(target: Picking, patch: string) {
+		picking = null;
+		if (target.kind === 'add') newTrack(patch);
+		else putPatch(target.track, 0, patch);
+	}
+
+	// The page shows a patch when it is opened and the chosen track's patch when a track is chosen, so the track is chosen and
+	// the page has heard about it before the patch is opened.
+	async function openPatch(track: number, patch: string) {
+		if (selection.track !== track) selection = { track, placement: null };
+		await settle();
+		onopen(patch);
+	}
+
+	// New patch for this track: a patch made from the default, on the track, or on a new one, and then opened. It is named
+	// after what was typed in the picker, or after its track.
+	async function newPatchFor(home: { track: number | null; index: number }, typed: string) {
+		picking = null;
+		if (!onnewpatch) return;
+		const track = doc.tracks.find((t) => t.id === home.track);
+		const next = Math.max(0, ...doc.tracks.map((t) => t.id)) + 1;
+		const id = await onnewpatch(typed || `${track ? trackName(track) : `Track ${next}`} patch`);
+		if (!id) return;
+		if (home.track === null) return openPatch(newTrack(id), id);
+		if (putPatch(home.track, home.index, id)) await openPatch(home.track, id); // Unless the track went meanwhile
+	}
+
+	function newClip(id: number, at: number, length = ticksPerBar(doc)) {
+		const added = addClip(doc, length);
 		const next = place(added.doc, id, added.id, at);
 		commit(next);
 		selection = { track: id, placement: placementIndex(next, id, added.id, at) };
@@ -254,6 +307,44 @@
 
 	const clipChanged = (next: Clip) => commit(setClip(doc, next.id, next));
 
+	// What a clip's menu in the arrangement does, each to the placement it was opened on.
+	const placementActions: PlacementActions = {
+		open: (at) => select(at),
+		duplicate: (at) => {
+			const copied = duplicatePlacement(doc, at.track, at.placement);
+			select(at);
+			commit(copied.doc);
+			selection = { track: at.track, placement: copied.index };
+		},
+		unique: (at) => {
+			select(at);
+			unique();
+		},
+		remove: (at) => {
+			select(at);
+			deletePlacement();
+		},
+		delete: (at) => {
+			select(at);
+			deleteClip();
+		}
+	};
+
+	// [ and ] step the Draw length. They go by where the keys are, as the piano keys do, and a field keeps them. They have
+	// their own listener, so the editor's `keydown` stays as it is.
+	function stepDraw(event: KeyboardEvent) {
+		if (readonly || !active || typingIn(event.target)) return;
+		const by = matches(event, 'draw-shorter') ? -1 : matches(event, 'draw-longer') ? 1 : 0;
+		if (!by) return;
+		event.preventDefault();
+		draw = stepLength(draw, doc.ppq, by);
+	}
+
+	onMount(() => {
+		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
+		return on(window, 'keydown', stepDraw);
+	});
+
 	function audition(note: number, on: boolean) {
 		if (reported?.index === undefined) return;
 		if (on) engine.noteOn(reported.index, note);
@@ -285,14 +376,12 @@
 		if (targets.length && looping && loop) engine.setLoop(loop.start, loop.end);
 	});
 
+	// Undo and Redo are the page's keys, since they act on whichever panel is in use.
 	function keydown(event: KeyboardEvent) {
 		const target = event.target as HTMLElement;
 		if (readonly || !active || target.closest('input, textarea, select')) return;
-		if ((event.metaKey || event.ctrlKey) && event.key === 'z') {
-			event.preventDefault();
-			if (event.shiftKey) redo();
-			else undo();
-		} else if ((event.key === 'Delete' || event.key === 'Backspace') && !target.closest('[data-testid="roll"]')) {
+		const deleting = matches(event, 'arrangement.delete') || matches(event, 'arrangement.backspace');
+		if (deleting && !target.closest('[data-testid="roll"]')) {
 			if (selection.placement === null) return;
 			event.preventDefault();
 			deletePlacement();
@@ -306,9 +395,27 @@
 	<div class="toolbar">
 		{@render heading?.()}
 		{#if !readonly}
-			<button type="button" onclick={newTrack}>Add track</button>
+			<button
+				type="button"
+				aria-label="Add track"
+				aria-haspopup="listbox"
+				aria-expanded={picking?.kind === 'add'}
+				title="Add a track, and choose its patch"
+				onmousedown={(event) => event.preventDefault()}
+				onclick={(event) => toggle({ kind: 'add', anchor: event.currentTarget })}>+ Track</button
+			>
 			<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
 			<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
+		{/if}
+		{#if !readonly}
+			<label
+				title="How long a clicked note is. [ and ] step it, and it follows the last note added, resized or chosen."
+			>
+				Draw
+				<select aria-label="Draw length" bind:value={draw}>
+					{#each drawChoices as choice (choice.ticks)}<option value={choice.ticks}>{choice.label}</option>{/each}
+				</select>
+			</label>
 		{/if}
 		<label>
 			Snap
@@ -321,7 +428,9 @@
 		<button type="button" onclick={toggleLoop} aria-pressed={looping}>Loop {looping ? 'on' : 'off'}</button>
 		<span class="muted hint">
 			Click the numbers to move the playhead, and drag under them for a loop.
-			{#if !readonly}Double-click a row for a new clip. Drag a clip's right edge to repeat it, and hold alt to copy it.{/if}
+			{#if !readonly}Drag across a row for a new clip, or double-click it for a bar. Drag a clip's right edge to repeat
+				it, hold
+				{mod} to copy it, and right-click it for more.{/if}
 		</span>
 	</div>
 
@@ -338,9 +447,14 @@
 			{badTracks}
 			{badClips}
 			meter={ringOf}
+			{patches}
+			picking={picking?.kind === 'head' ? picking.track : null}
+			onpick={(track, anchor) => toggle({ kind: 'head', track, anchor })}
+			onopen={(track, patch) => void openPatch(track, patch)}
 			onselect={select}
 			onchange={arranged}
 			onnew={newClip}
+			actions={placementActions}
 			onlocate={locate}
 			onloop={setLoop}
 		/>
@@ -423,22 +537,23 @@
 					{/if}
 					{#each track.slots as slot, index (index)}
 						<div class="line">
-							<select
-								aria-label={`Patch slot ${index + 1}`}
+							<PatchPicker
+								label={`Patch slot ${index + 1}`}
 								value={slot}
-								onchange={(e) => commit(setSlot(doc, track.id, index, e.currentTarget.value))}
-							>
-								{@render voiceChoices()}
-								{#if ![...voicePatches.own, ...voicePatches.builtin].some((patch) => patch.id === slot)}<option
-										value={slot}>{slot}</option
-									>{/if}
-							</select>
+								patches={voices}
+								{used}
+								{examples}
+								action={newPatchAction}
+								disabled={readonly}
+								onchoose={(patch) => commit(setSlot(doc, track.id, index, patch))}
+								onaction={(typed) => void newPatchFor({ track: track.id, index }, typed)}
+							/>
 							{#if !readonly}
 								<button
 									type="button"
-									aria-label={`Edit patch slot ${index + 1}`}
-									title="Show this patch above"
-									onclick={() => onopen(slot)}>Edit</button
+									aria-label={`Open patch slot ${index + 1}`}
+									title="Open this patch in the Patch view"
+									onclick={() => onopen(slot)}>Open <span aria-hidden="true">◆</span></button
 								>
 								<button
 									type="button"
@@ -448,18 +563,19 @@
 							{/if}
 						</div>
 					{/each}
-					{#if !readonly && (voicePatches.own.length || voicePatches.builtin.length)}
-						<select
-							aria-label="Add a patch slot"
-							value=""
-							onchange={(e) => {
-								if (e.currentTarget.value) commit(addSlot(doc, track.id, e.currentTarget.value));
-								e.currentTarget.value = '';
-							}}
-						>
-							<option value="">Add a patch…</option>
-							{@render voiceChoices()}
-						</select>
+					{#if !readonly && voices.length}
+						<div class="line">
+							<PatchPicker
+								label="Add a patch slot"
+								placeholder="Add a patch…"
+								patches={voices}
+								{used}
+								{examples}
+								action={newPatchAction}
+								onchoose={(patch) => commit(addSlot(doc, track.id, patch))}
+								onaction={(typed) => void newPatchFor({ track: track.id, index: track.slots.length }, typed)}
+							/>
+						</div>
 					{/if}
 					<label>
 						mode
@@ -681,8 +797,11 @@
 							{playing}
 							canAudition={reported !== undefined}
 							{readonly}
+							bind:draw
+							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
 							onchange={clipChanged}
 							onaudition={audition}
+							onundo={undo}
 						/>
 					{/key}
 					{#if !readonly && home && !reported}
@@ -695,7 +814,7 @@
 					<p class="muted empty">
 						{readonly
 							? 'Choose a clip in the arrangement to see its notes.'
-							: 'Choose a clip in the arrangement to edit its notes, or double-click a row for a new one.'}
+							: 'Choose a clip in the arrangement to edit its notes, or drag across a row for a new one.'}
 					</p>
 				{/if}
 			{:else if tab === 'mixer'}
@@ -707,14 +826,24 @@
 	</div>
 </section>
 
-{#snippet voiceChoices()}
-	{#each voicePatches.own as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
-	{#if voicePatches.builtin.length}
-		<optgroup label="Built in">
-			{#each voicePatches.builtin as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
-		</optgroup>
-	{/if}
-{/snippet}
+{#if picking}
+	{@const target = picking}
+	{@const on = target.kind === 'head' ? doc.tracks.find((t) => t.id === target.track) : undefined}
+	{#key target}
+		<PatchPicker
+			label={on ? `Patch for ${trackName(on)}` : 'Patch for the new track'}
+			value={on?.slots[0] ?? null}
+			anchor={target.anchor}
+			patches={voices}
+			{used}
+			{examples}
+			action={newPatchAction}
+			onchoose={(patch) => picked(target, patch)}
+			onaction={(typed) => void newPatchFor({ track: target.kind === 'head' ? target.track : null, index: 0 }, typed)}
+			oncancel={() => (picking = null)}
+		/>
+	{/key}
+{/if}
 
 <style>
 	.short {
@@ -842,9 +971,6 @@
 		padding: 0.1rem 0.3rem;
 		font-size: 0.78rem;
 		box-sizing: border-box;
-	}
-	.inspector .line select {
-		flex: 1;
 	}
 	.ramp {
 		display: flex;

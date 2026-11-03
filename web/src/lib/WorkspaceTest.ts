@@ -8,8 +8,10 @@ import {
 	graphError,
 	hearing,
 	parseGraph,
+	viewOf,
 	withDrafts,
 	withParams,
+	withView,
 	type Draft
 } from '#lib/Workspace.ts';
 
@@ -128,5 +130,24 @@ describe('addresses', () => {
 		expect(actionOn('?timeline=a&patch=b', 'save')).toBe('?timeline=a&patch=b&/save');
 		expect(actionOn('', 'save')).toBe('?/save');
 		expect(actionOn('?timeline=a&/old', 'save')).toBe('?timeline=a&/save');
+	});
+
+	it('shows the view it names, or a patch it names, or the song', () => {
+		expect(viewOf('?timeline=a')).toBe('song');
+		expect(viewOf('?timeline=a&view=patch')).toBe('patch');
+		expect(viewOf('?timeline=a&patch=b')).toBe('patch'); // As links did before there were views
+		expect(viewOf('?recipe=R&part=p')).toBe('patch');
+		expect(viewOf('?timeline=a&patch=b&view=song')).toBe('song');
+		expect(viewOf('?timeline=a&view=other')).toBe('song');
+		expect(viewOf('')).toBe('song');
+	});
+
+	it('names a view only where the rest of the address says otherwise', () => {
+		expect(withView('?timeline=a', 'patch')).toBe('?timeline=a&view=patch');
+		expect(withView('?timeline=a&view=patch', 'song')).toBe('?timeline=a');
+		expect(withView('?timeline=a&patch=b', 'song')).toBe('?timeline=a&patch=b&view=song');
+		expect(withView('?recipe=R&part=p&view=song', 'patch')).toBe('?recipe=R&part=p&view=patch');
+		for (const search of ['?timeline=a', '?timeline=a&patch=b', '?recipe=R&part=p&view=patch'])
+			for (const view of ['song', 'patch'] as const) expect(viewOf(withView(search, view))).toBe(view);
 	});
 });

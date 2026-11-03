@@ -116,6 +116,25 @@ export function withParams(search: string, change: Record<string, string | null>
 	return text ? `?${text}` : '?';
 }
 
+// The page shows one of two views at a time, each with all the height: the song, which is the arrangement, its notes and its
+// mix, or the patch, which is one patch's graph.
+export type View = 'song' | 'patch';
+
+// Which view an address shows. `view` says so, and an address without it shows the patch it names, as links did before
+// there were views, and otherwise the song.
+export function viewOf(search: string): View {
+	const params = new URLSearchParams(search);
+	const view = params.get('view');
+	if (view === 'song' || view === 'patch') return view;
+	return params.has('patch') || params.has('part') ? 'patch' : 'song';
+}
+
+// The address showing a view, which leaves out `view` where the rest of it already says the same.
+export function withView(search: string, view: View): string {
+	const params = new URLSearchParams(search);
+	return withParams(search, { view: view === 'song' && !params.has('patch') && !params.has('part') ? null : view });
+}
+
 // A form action on this page, sent from where the page is, so the page stays where it is when it comes back.
 export function actionOn(search: string, name: string): string {
 	const params = new URLSearchParams(search);

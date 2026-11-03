@@ -1,4 +1,4 @@
-# modsynth design, revision 22
+# modsynth design, revision 23
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -832,18 +832,35 @@ and hardware still only ever sees image bytes.
   on every form. The config trusts exactly the two loopback origins on that port, and a form posted from any other site is
   still refused. Serving it anywhere else needs authentication and a proxy that sets `PROTOCOL_HEADER`.
 
-**The editor.** The GUI is one page laid out like a DAW: a transport along the top, the patch editor above, the timeline
-below, both resizable, and a browser down the side, which folds away, for the library and the examples. Its address says
-what is open: `?timeline=` or `?recipe=` below, and `?patch=` above, which otherwise shows the chosen track's patch, so
-choosing a track shows its patch. Only the lower panel's parameters reach the server: a load reruns for the parameters it
-reads, so choosing a patch costs no round trip, and the library, which carries every sample in use, loads only when an action
-changes it. A fresh visit opens the timeline saved last, and the old addresses redirect to the same views.
+**The editor.** The GUI is one page laid out like a DAW, for a laptop 1280 to 1440 px wide. A top bar holds the menu, a tab
+for each view, the transport, one Undo and Redo, the on-screen keys, the master meter and Save. Under it one of two views has
+all the height: Song, with the arrangement, the notes, the mix, the JSON, the image and the inspector, and Patch, with one
+patch's graph. The two used to share the page, one above the other, which left the piano roll 102 px at 1280×800; apart, it
+is 408 px for a timeline of one track and 260 px for one of two tracks and a lane [measured]. The view not on screen stays on
+the page, hidden and inert, so its scroll, zoom and choices are there to come back to.
+
+- A tab or `` ` `` switches views. So does a patch opened from a track, the inspector or a mixer insert, and the Patch view's
+  trail back to the song. A switch is a step in the browser's history, made without a navigation, which would move focus, so
+  Back goes to the view before.
+- A browser down the side holds the library and the examples, and a timeline in it opens in Song and a patch in Patch. B
+  folds it to a rail of icons. Below 1400 px wide it is always the rail, and opens over the page rather than pushing it aside.
+- The address says what is open: `?timeline=` or `?recipe=` for the song, `?patch=` or `?part=` for the patch the Patch view
+  shows, which otherwise is the chosen track's, so choosing a track shows its patch there, and `?view=patch`. An address that
+  names a patch and no view opens Patch, as links did before there were views. Only the song's parameters reach the server: a
+  load reruns for the parameters it reads, so choosing a patch or a view costs no round trip, and the library, which carries
+  every sample in use, loads only when an action changes it. A fresh visit opens the timeline saved last, and the old
+  addresses redirect to the same views.
 
 - Edits to any number of patches and timelines are kept as drafts while other things are opened, and Save writes them all
   in one transaction, patches first, so a timeline is never saved against a patch edit that was refused. Each draft names
   the revision it started from, so a stale one refuses the whole save and loses nothing. A draft edited back to what was
   saved stops being one, and leaving with drafts asks first.
-- One engine plays one image: the song, compiled from the drafts, or the patch on screen on its own. A patch a track plays
+- A patch is a track's instrument. + Track asks which patch the new track plays, and Esc makes no track. A track head names its patch,
+  not its id: the name opens that patch in the Patch view, and ▾ beside it chooses another. Wherever a patch is chosen, the inspector's slots too,
+  one picker filters as it is typed in, and lists what the song already plays, then the library's own patches, then the built-ins grouped
+  as the browser groups the examples. Its last entry, New patch for this track, saves a new patch at once, the same sine and envelope the
+  browser's New patch makes, and puts it on the track as an unsaved edit before opening it.
+- One engine plays one image: the song, compiled from the drafts, or the Patch view's patch on its own. A patch a track plays
   is heard in the song, through that track's mix and inserts, so a patch edit is heard in context as it is made. A voice no
   track plays is compiled on its own as above, and its keys switch the engine to it. Play, a locate, or a note from the
   timeline switches back, to where the song was. The two compile on separate channels, so neither cancels the other, and a
@@ -852,11 +869,22 @@ changes it. A fresh visit opens the timeline saved last, and the old addresses r
 - The status bar says Compiling from an edit until the image made from it is playing, so what is heard is known to be the
   newest edit. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the
   image slot does, and the image before it plays on.
-- Keys belong to the panel used last, so Delete and undo act on the graph or the timeline, not both.
-- The computer keyboard plays the patch keys as most DAWs lay it out: the home row from A is the white keys from the lowest C shown, the row
+- Each patch and timeline keeps its own undo history, of up to 200 steps, while others are open, and saving keeps it. A step is the
+  document's whole text, so an edit typed into its JSON is undone as an editor's is, and what is typed in one visit to the field is one
+  step. Keys and the top bar's Undo and Redo act on the view on screen, so Delete and undo act on the graph or the timeline, not
+  both. An inert view doesn't stop a key handler on the window, so each one asks which view is showing.
+- Every key the editor binds is in one table, `Shortcuts.ts`, with where it works and what it does. Its test holds that none is a piano
+  key, bare or with Shift, that none needs Alt, which is Option on a Mac and opens menus in browsers elsewhere, and that no two meet where
+  both work. A key goes by where it is, as the piano's do, and Mod is ⌘ on a Mac and Ctrl elsewhere, so Ctrl-click stays a right-click on
+  a Mac.
+- Space plays and stops the song from anywhere but a text field, a select or a checkbox, and a button with focus doesn't take it. Home
+  goes back to the start, and so does Stop pressed while stopped, since a laptop may have no Home key.
+- The top bar's keys play what the view on screen is about: the chosen track in the Song view, and in the Patch view its patch,
+  wherever it is heard.
+- The computer keyboard plays them as most DAWs lay it out: the home row from A is the white keys from the lowest C shown, the row
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
-  piano, and a field being typed in or a key with a modifier keeps its own meaning. A key let go while the page is in the background lets go
-  of its note.
+  piano, and a field being typed in or a key with a modifier keeps its own meaning, though a button or a slider with focus doesn't. A key
+  let go while the page is in the background lets go of its note.
 - A song stops where its last clip ends, and its tails ring on, because Stop lets go of every note. A loop goes round instead, and Play at
   the end starts again from the top. The engine plays on past the end, as a device does, so stopping there is the worklet's job, and no
   target's engine behaves differently.
@@ -868,10 +896,31 @@ changes no hash. It takes its node table from the compiler's catalog, the table 
 from section 13, which colours wires by rate, dims nodes that compiled away and places probes. An error's `where` names its node, and an error inside a subpatch lands on
 the subpatch. The compiler stops at the first error, so an editor shows one at a time. The JSON stays on the page, and text that doesn't parse leaves the last drawing alone.
 
+- A node shows a name a person looks for, such as Filter, over the compiler's, biquad. Those names, a group, a line on what each node does, other words
+  for it and each input's unit and range are a table in the web app, `NodeHelp.ts`, which a test holds to the catalog in both directions. A range is the
+  clamp `docs/Format.md` gives, and an input with none written down shows none. The catalog could carry them, but that would be a compiler change for
+  nothing an image holds.
+- Fit never draws text smaller than 11 CSS pixels, and what doesn't fit is panned to: at 1280 by 800 it had drawn the graph's text at 5. A wheel or two
+  fingers pan, as they scroll a page, and Mod with the wheel or a pinch zooms where the pointer is. Wires read once a frame are dashed as well as blue.
+- A node is added from one search, which a double-click on empty canvas, N, + Node, or a wire let go of on empty canvas opens. It finds a node by any of
+  its names, other words for it or what it does, so "filter" finds biquad. The node lands at the pointer, the wire's end or beside the chosen node, at
+  the nearest place that covers no other node, and one from a wire arrives wired to its first input. Tidy lays the graph out again as one edit.
+- A rate error offers to put a snap on its wire, as one edit, and never puts one in unasked, since section 5 leaves that choice to the patch's author.
+  A node that compiled away says why where the graph shows it, which is when none of its wires lead to the out node.
+
 **The timeline editor.** Arrangement, piano roll, lanes and mixer are views of one document, which stays on the page as JSON. Every edit is a pure function from a document to a document, so undo is a list of
 old ones, and as in the graph editor these decide little about what is legal: overlapping clips can be drawn, and the compiler says what is wrong and marks the track. What an edit does take care of is references, so
 deleting a bus takes its sends, outputs, sidechains and lanes with it. Placements stay in tick order, because the compiler takes one that goes backwards for an overlap. The grid is 4/4, and nothing stores that:
 a document holds ticks, so a time signature would change how it is drawn and not how it plays.
+
+Notes, clips and points go in as most DAWs take them. A click on empty grid in the roll adds a note as long as the Draw length, which sits beside Snap,
+follows the last note added, resized or chosen, as FL Studio's does, and steps with `[` and `]`. Dragging before letting go sets the length in Snap steps,
+and a ghost under the pointer says what a click would add, as `E4 · 1/8 · 1.4.000`. A click on a lane adds a point, and dragging across an empty row of
+the arrangement draws a clip of whole bars, in the gap it was drawn in. A double-click on empty space adds as well, and on a note or point it deletes
+nothing: Delete or the right-click menu does. Mod-drag copies notes and clips, as Alt-drag used to, and no gesture uses Alt. A note past a clip's
+end grows the clip to the bar that holds it, which says so with an Undo. Here the editor does decide what is legal: it won't grow a clip if that
+would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
+four bars past the end, so there is room to do it.
 
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
 a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
@@ -896,7 +945,7 @@ guards, "used by", the timelines an edit affects and exports treat them as they 
 
 - Only the server writes them. At startup it makes them what `examples/` holds, in one transaction, and it refuses a save or a delete of one however it is asked. So nothing done in the app reaches what ships, and a row changed some other
   way is put back at the next start. The browser lists them apart from the library's own patches, and leaves their recordings out of its samples.
-- A change goes to a copy. Duplicate makes an ordinary patch with the same graph, named "*name* copy", which names the same recordings rather than copying them. When the timeline open below plays the built-in, the copy takes its place
+- A change goes to a copy. Duplicate makes an ordinary patch with the same graph, named "*name* copy", which names the same recordings rather than copying them. When the open timeline plays the built-in, the copy takes its place
   there, as an unsaved edit, so a change is heard where it plays. A copy compiles to the same bytes, because a patch's bytes depend only on its graph, section 20, and a test holds three examples to that, played entirely by copies.
 - An example with one patch names its built-in after itself, as `builtin-Kick808`, and one with several adds the part, as `builtin-PassionChorale-horn`, named "PassionChorale Horn". A graph several examples share is one built-in,
   named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 74 recipes and 6 pieces make 136 built-ins from 140
@@ -1153,6 +1202,45 @@ when it runs out of sight. Choices made there that the user hasn't weighed in on
   under the pointer holds still between turns.
 - **Scrolling away:** a view scrolled away from the playhead stays there until the playhead comes back into it, or Play starts the song again.
   The piano roll follows only while its own clip is playing.
+
+**Built for the UX sprint, wave 1** (revision 23), as section 19 describes. The user asked for a sprint on the editor's UX. They named three
+problems: notes are hard to put into a timeline, it's unclear where patches are edited, and there's too little room, vertical room most of
+all. A team proposed and reviewed changes, and the user took every recommendation. This wave builds:
+- one undo history for each patch and timeline, and one table of keys;
+- a click that adds a note, and clips that grow to hold it;
+- one picker for a track's patch;
+- a graph that stays readable, with a search for nodes;
+- separate Song and Patch views.
+
+The user ruled out Alt on every platform: Mod is ⌘ on a Mac and Ctrl elsewhere. Waves 2 and 3 follow: step entry, room for notes, the
+transport, a first song that sounds, and recording with snap. Choices made here that the user hasn't weighed in on:
+- **Undo:**
+  - A step is the document's whole text, and each document keeps 200 of them.
+  - A run of typing in the JSON is one step, and it ends when the field is left.
+  - Mod is strict: on a Mac, Ctrl+Z neither undoes nor saves.
+- **Space and Home:**
+  - A focused button or slider doesn't take Space or Home, so Space plays after a fader is dragged.
+  - While a patch plays on its own, Space plays the song instead, as Play does.
+- **Drawing notes:** a drawn note reaches the end of the Snap cell under the pointer. A drawn clip covers whole bars, inside the gap where it
+  was drawn.
+- **Lengthening anyway:** "Lengthen to N bars" and Duplicate after go ahead even when they cause an overlap. The compiler then reports the
+  overlap until the next clip is moved.
+- **Lanes:** a click past a clip's end in a lane does nothing, since lanes don't grow clips.
+- **A new patch for a track** is saved at once, and putting it on the track is a draft. Its name is what was typed in the picker, or else
+  "*Track name* patch".
+- **A track head's ▾** changes slot 1 only, and the inspector changes the others.
+- **Graph zoom:**
+  - Fit never goes below 100%, where a port label is 11 px, nor above 150%.
+  - Fit shows the top-left of a graph too big to read whole, since that's where signals start.
+  - A node's header is two lines, so existing drawings are a little taller.
+- **A subpatch from the search** starts as the first other patch in the library.
+- **The views:**
+  - The Patch view shows the patch the address names, or else the chosen track's.
+  - A change of view, or a patch chosen, moves the address without loading anything, and `?view=patch` survives a reload. Opening a
+    timeline or an example still loads the page.
+  - In Song the keys play the chosen track. They're off while it has no notes, since the preview leaves such a track out of the image.
+  - New patch, Import and Delete patch come back to the Patch view, and New timeline to Song.
+  - Below 1400 px wide the browser forgets whether it was open, and wider it remembers.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

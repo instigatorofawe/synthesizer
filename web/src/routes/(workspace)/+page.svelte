@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { enhance, type SubmitFunction } from '$app/forms';
-	import { goto } from '$app/navigation';
+	import { applyAction, deserialize, enhance, type SubmitFunction } from '$app/forms';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onDestroy, onMount, untrack } from 'svelte';
 	import {
@@ -12,21 +12,25 @@
 		type SongControls,
 		type TapTarget
 	} from '#lib/AudioEngine.ts';
-	import Browser from '#lib/Browser.svelte';
+	import Browser, { type Section } from '#lib/Browser.svelte';
+	import BrowserRail from '#lib/BrowserRail.svelte';
 	import BundleDialog from '#lib/BundleDialog.svelte';
 	import { Compiler, type Compiled } from '#lib/Compiler.ts';
 	import { downloadBytes, downloadImage } from '#lib/Download.ts';
 	import { renderWav } from '#lib/Render.ts';
 	import { nodeOfError } from '#lib/GraphEdit.ts';
+	import { History } from '#lib/History.ts';
+	import Keyboard from '#lib/Keyboard.svelte';
 	import Meter from '#lib/Meter.svelte';
 	import PatchPanel from '#lib/PatchPanel.svelte';
 	import ReportPanel from '#lib/ReportPanel.svelte';
 	import { buildRequest, missingAssets, reachable, type AssetEntry, type CompileReport } from '#lib/Request.ts';
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
-	import Splitter from '#lib/Splitter.svelte';
+	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { BEATS_PER_BAR, patchUses, replacePatch, settlingWrites, tempoAt, type PatchUse } from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
+	import ViewTabs from '#lib/ViewTabs.svelte';
 	import {
 		actionOn,
 		draftKey,
@@ -36,21 +40,29 @@
 		isInsert,
 		parseGraph,
 		stay,
+		viewOf,
 		withDrafts,
 		withParams,
-		type Draft
+		withView,
+		type Draft,
+		type View
 	} from '#lib/Workspace.ts';
 
 	let { data, form } = $props();
 
-	// The engine plays one image at a time: the song, which is the open timeline or example, or the patch on screen on its own,
-	// for a patch no track plays. What the page touches decides which: the transport and the timeline's editors want the song,
-	// and the patch panel's keys want wherever that patch is heard.
+	// The engine plays one image at a time: the song, which is the open timeline or example, or the Patch view's patch on its
+	// own, for a patch no track plays. What the page touches decides which: the transport and the timeline's editors want the
+	// song, and the keys in the Patch view want wherever that patch is heard.
 	type Source = 'song' | 'alone';
 
 	// ------------------------------------------------------------------------------------------------------- what is open
 
-	const search = $derived(page.url.search);
+	// The address as the address bar has it. A change of view, or of the patch the Patch view shows, moves it without a
+	// navigation, since the server reads neither, so it can be newer than the address the page was loaded from.
+	const address = $derived(page.shallow?.url ?? page.url);
+	const search = $derived(address.search);
+	// One of the two views fills the page. The other stays as it was left, with its scroll, zoom and choices, out of sight.
+	const view = $derived(viewOf(search));
 	const recipe = $derived(data.open?.kind === 'recipe' ? data.open : null);
 	const saved = $derived(data.open?.kind === 'timeline' ? data.open : null);
 	const openKey = $derived(recipe ? `recipe:${recipe.entry.name}` : saved ? `timeline:${saved.id}` : '');
@@ -84,12 +96,13 @@
 		return drawnTimelines.get(saved.id) ?? timelineSchema.parse(saved.doc);
 	});
 	const songDoc = $derived(recipe ? recipe.timeline : timelineDoc);
+	const songName = $derived(recipe?.entry.name ?? timelineName);
 	const songPatches = $derived(recipe ? recipe.patches : library);
 
-	// The patch above is the one asked for, and otherwise the chosen track's.
+	// The Patch view shows the patch asked for, and otherwise the chosen track's.
 	let selectedTrack = $state<number | null>(null);
-	const askedPatch = $derived(page.url.searchParams.get('patch'));
-	const askedPart = $derived(page.url.searchParams.get('part'));
+	const askedPatch = $derived(address.searchParams.get('patch'));
+	const askedPart = $derived(address.searchParams.get('part'));
 	const trackSlot = $derived.by(() => {
 		const track = songDoc?.tracks.find((t) => t.id === selectedTrack) ?? songDoc?.tracks[0];
 		return track?.slots[0] ?? null;
@@ -122,7 +135,7 @@
 		patchDraft?.text ?? (savedPatch ? savedPatchText : shown ? JSON.stringify(shown.patch.graph, null, 1) : '')
 	);
 
-	const bundle = $derived(data.library.bundles.find((b) => b.id === page.url.searchParams.get('bundle')));
+	const bundle = $derived(data.library.bundles.find((b) => b.id === address.searchParams.get('bundle')));
 
 	// ------------------------------------------------------------------------------------------------------------ editing
 
@@ -131,9 +144,43 @@
 		drafts = draft ? { ...rest, [key]: draft } : rest;
 	}
 
-	function timelineEdited(change: { name?: string; text?: string }) {
+	// Each patch and timeline keeps its own undo history while others are open, of its text, so that an edit made in its JSON
+	// is undone as one made in its editor is. How an edit came about decides what that history makes of it: one keystroke of a
+	// run typed into the JSON joins the others, the run ends when the field is left, and a step undone or redone isn't an edit.
+	type How = 'edit' | 'typing' | 'history';
+	const history = new History<string>();
+
+	// Puts an edit to a document's text in its history.
+	function remember(key: string, now: string, next: string | undefined, how: How) {
+		if (how === 'history' || next === undefined) return;
+		if (next !== now) history.record(key, now, how === 'typing');
+		else if (how === 'edit') history.end(key); // A field left, with nothing more typed into it
+	}
+
+	// Undo and Redo for the timeline open and the patch on screen, for any button or key that acts on one. An example and a
+	// built-in patch can't be changed, so they have none.
+	const timelineHistory = $derived(
+		saved
+			? history.of(draftKey('timeline', saved.id), {
+					now: () => timelineText,
+					apply: (text) => timelineEdited({ text }, 'history')
+				})
+			: null
+	);
+	const patchHistory = $derived(
+		savedPatch && !savedPatch.builtin
+			? history.of(draftKey('patch', savedPatch.id), {
+					now: () => patchText,
+					apply: (text) => patchEdited({ text }, 'history')
+				})
+			: null
+	);
+
+	function timelineEdited(change: { name?: string; text?: string }, how: How = 'edit') {
 		if (!saved) return;
 		const key = draftKey('timeline', saved.id);
+		remember(key, timelineText, change.text, how);
+		if (change.text === timelineText && change.name === undefined) return;
 		const base = {
 			kind: 'timeline' as const,
 			id: saved.id,
@@ -144,9 +191,12 @@
 		put(key, edited(base, drafts[key], change));
 	}
 
-	function patchEdited(change: { name?: string; text?: string; graph?: Graph }) {
+	function patchEdited(change: { name?: string; text?: string; graph?: Graph }, how: How = 'edit') {
 		if (!savedPatch || savedPatch.builtin) return;
 		const key = draftKey('patch', savedPatch.id);
+		const text = change.graph ? JSON.stringify(change.graph, null, 1) : change.text;
+		remember(key, patchText, text, how);
+		if (text === patchText && change.name === undefined) return;
 		const base = {
 			kind: 'patch' as const,
 			id: savedPatch.id,
@@ -154,7 +204,6 @@
 			name: savedPatch.name,
 			text: savedPatchText
 		};
-		const text = change.graph ? JSON.stringify(change.graph, null, 1) : change.text;
 		const graph = change.graph ?? (text === undefined ? undefined : (parseGraph(text) ?? undefined));
 		put(
 			key,
@@ -187,8 +236,8 @@
 		};
 	};
 
-	// A copy of a built-in patch takes its place in the timeline open below, as an unsaved edit, so that changing it is heard
-	// where it plays. Either way the copy opens above.
+	// A copy of a built-in patch takes its place in the open timeline, as an unsaved edit, so that changing it is heard where
+	// it plays. Either way the copy is what the Patch view shows next.
 	const duplicating: SubmitFunction = () => {
 		return async ({ result, update }) => {
 			await update({ reset: false });
@@ -199,7 +248,7 @@
 			if (original?.builtin && saved && timelineDoc && referencedPatches(timelineDoc).includes(made.from)) {
 				timelineEdited({ text: JSON.stringify(replacePatch(timelineDoc, made.from, made.to), null, 1) });
 			}
-			open({ patch: made.to, part: null });
+			open({ patch: made.to, part: null }, false, 'patch');
 		};
 	};
 
@@ -243,7 +292,7 @@
 		}
 	}
 
-	// A deleted patch or timeline takes its draft with it.
+	// A deleted patch or timeline takes its draft and its history with it.
 	$effect(() => {
 		const known = new Set([
 			...data.library.patches.map((p) => draftKey('patch', p.id)),
@@ -252,6 +301,7 @@
 		untrack(() => {
 			const gone = Object.keys(drafts).filter((key) => !known.has(key));
 			if (gone.length) drafts = Object.fromEntries(Object.entries(drafts).filter(([key]) => known.has(key)));
+			history.keep(known);
 		});
 	});
 
@@ -267,7 +317,7 @@
 	let want = $state<Source>(untrack(() => (data.open ? 'song' : 'alone')));
 	let live = $state<Source | null>(null); // Which the image now playing is, once one is
 	let waiting: (() => void)[] = []; // Sent when what is wanted goes live
-	let songTick = 0; // Where the song was when a patch on its own took over
+	let songTick = $state(0); // Where the song was when a patch on its own took over
 
 	let compiler: Compiler | undefined;
 	let rendering = $state<number | null>(null); // How far a WAV export has got
@@ -487,6 +537,20 @@
 		});
 	}
 
+	const songPlaying = $derived(live === 'song' && !!engineState?.playing);
+
+	// Stop, and pressed again once stopped, back to the start, as most DAWs do. A laptop may have no Home key.
+	function stop() {
+		if (songPlaying) engine.stop();
+		else toStart();
+	}
+
+	// Back to the start of the song. A patch heard on its own keeps the engine, and the song starts there when it comes back.
+	function toStart() {
+		songTick = 0;
+		if (live === 'song') engine.locate(0);
+	}
+
 	// What the timeline's editors send. Notes and moves of the playhead bring the song back; a control dragged while a patch plays
 	// on its own has nothing to move, and settles when its edit compiles.
 	const controls: SongControls = {
@@ -500,11 +564,47 @@
 			live === 'song' && want === 'song' && engine.setInsertParam(insert, param, value)
 	};
 
-	function patchNote(note: number, on: boolean) {
+	// The top bar's keys play what the view on screen is about: the chosen track in the Song view, and in the Patch view its
+	// patch, wherever it is heard. A track the image leaves out, because it has no notes yet, can't be played.
+	const chosenIndex = $derived(goodSong?.report.programs[0]?.tracks.find((t) => t.id === selectedTrack)?.index ?? null);
+	const chosenName = $derived(songDoc?.tracks.find((t) => t.id === selectedTrack)?.name ?? '');
+	const keysPlay = $derived(view === 'song' ? chosenIndex !== null : hears.kind !== 'none');
+	const keysWhere = $derived.by(() => {
+		if (view === 'song') {
+			if (chosenIndex !== null) return `Keys play ${chosenName || `track ${selectedTrack}`}.`;
+			return selectedTrack === null
+				? 'Choose a track for the keys to play.'
+				: 'This track has no notes yet, so keys are silent.';
+		}
+		if (hears.kind === 'song') return `Keys play ${patchName} on ${hears.name}, in the song.`;
+		return hears.kind === 'alone' ? `Keys play ${patchName} on its own.` : hears.why;
+	});
+
+	// Where each key held down went, so it is let go there though the view or the chosen track changed meanwhile.
+	const sounding = new Map<number, { source: Source; track: number }>();
+
+	function keyNote(note: number, on: boolean) {
+		if (!on) {
+			const held = sounding.get(note);
+			sounding.delete(note);
+			// A note whose image has since given way to another went with it.
+			if (held && want === held.source) use(held.source, () => engine.noteOff(held.track, note));
+			return;
+		}
 		const heard = hears;
-		if (heard.kind === 'song')
-			use('song', () => (on ? engine.noteOn(heard.track, note) : engine.noteOff(heard.track, note)));
-		else if (heard.kind === 'alone') use('alone', () => (on ? engine.noteOn(0, note) : engine.noteOff(0, note)));
+		const to: { source: Source; track: number } | null =
+			view === 'song'
+				? chosenIndex === null
+					? null
+					: { source: 'song', track: chosenIndex }
+				: heard.kind === 'song'
+					? { source: 'song', track: heard.track }
+					: heard.kind === 'alone'
+						? { source: 'alone', track: 0 }
+						: null;
+		if (!to) return;
+		sounding.set(note, to);
+		use(to.source, () => engine.noteOn(to.track, note));
 	}
 
 	function patchParam(param: Param, value: number) {
@@ -599,46 +699,125 @@
 	// To a tenth of a bpm, which a ramp needs and a held tempo doesn't show.
 	const tempo = $derived(songDoc ? Math.round(tempoAt(songDoc.tempo, tick) * 10) / 10 : undefined);
 
-	function open(change: Record<string, string | null>, replace = false) {
-		void goto(withParams(search, change), { reset: false, replace });
+	// Changes what the address says, and with it what the page shows. None of it is anything the server loads, so this moves
+	// the address without a navigation, which would also move focus. A change of view is a step Back can undo.
+	function open(change: Record<string, string | null>, replace = false, next: View = view) {
+		void goto(withView(withParams(search, change), next), { shallow: true, replace });
 	}
 
-	// Choosing a track shows its patch, so a patch asked for by name gives way. The track an editor opens on doesn't count.
+	function show(next: View) {
+		if (next !== view) open({}, false, next);
+	}
+
+	// Choosing a track makes its patch the one the Patch view shows, so a patch asked for by name gives way. The track an editor
+	// opens on doesn't count.
 	function trackChosen(id: number | null, first: boolean) {
 		selectedTrack = id;
 		if (!first && (askedPatch !== null || askedPart !== null)) open({ patch: null, part: null }, true);
 	}
 
 	function patchOpened(id: string) {
-		open(recipe ? { part: id, patch: null } : { patch: id, part: null });
+		open(recipe ? { part: id, patch: null } : { patch: id, part: null }, false, 'patch');
 	}
 
-	let browserOpen = $state(true);
-	let patchHeight = $state<number | null>(null); // Once dragged. Until then it is a share of the window.
-	let upperHeight = $state(0);
-	let active = $state<'patch' | 'timeline'>('timeline');
+	// New patch for this track. The patch is saved at once, as the browser's New patch is, and the library loads again so it's
+	// in it. Then the timeline editor puts it on the track, which is an unsaved edit like any other, and opens it.
+	async function newPatchForTrack(name: string): Promise<string | null> {
+		const body = new FormData();
+		body.set('name', name);
+		const response = await fetch(actionOn(search, 'createPatch'), {
+			method: 'POST',
+			body,
+			headers: { accept: 'application/json', 'x-sveltekit-action': 'true' }
+		});
+		const result = deserialize(await response.text());
+		const id = result.type === 'success' ? result.data?.created : undefined;
+		if (typeof id !== 'string') {
+			if (result.type === 'failure') await applyAction(result);
+			return null;
+		}
+		await invalidateAll();
+		return id;
+	}
+
+	// The browser sits beside the views on a wide screen, and folds to a rail of icons when asked. Below 1400 px there isn't the
+	// room, so it is always the rail there, and opens over the views until something in it is chosen.
+	const WIDE = 1400;
+	let windowWidth = $state<number | undefined>(undefined);
+	const wide = $derived(windowWidth === undefined || windowWidth >= WIDE);
+	let browserOpen = $state(true); // On a wide screen, as last left
+	let browserOver = $state(false); // On a narrow one
+	let reveal = $state<Section | null>(null);
+	const browserShown = $derived(wide ? browserOpen : browserOver);
 	let saveForm: HTMLFormElement;
 
-	function resize(pixels: number) {
-		patchHeight = Math.max(90, Math.min(1400, (patchHeight ?? upperHeight) + pixels));
-		localStorage.setItem('modsynth.patch', String(patchHeight));
-	}
-
-	function unresize() {
-		patchHeight = null;
-		localStorage.removeItem('modsynth.patch');
-	}
-
-	function toggleBrowser() {
-		browserOpen = !browserOpen;
+	function toggleBrowser(section: Section | null = null) {
+		reveal = section;
+		if (!wide) {
+			browserOver = section !== null || !browserOver;
+			return;
+		}
+		browserOpen = section !== null || !browserOpen;
 		localStorage.setItem('modsynth.browser', browserOpen ? 'open' : 'closed');
 	}
 
+	// Over the views, the browser goes once it has done its job, or when the page is used instead.
+	$effect(() => {
+		void address.href;
+		untrack(() => (browserOver = false));
+	});
+
+	function outsideBrowser(event: PointerEvent) {
+		const target = event.target as Element;
+		if (browserOver && !target.closest('.side, .rail, .menu')) browserOver = false;
+	}
+
+	// Undo and Redo, the top bar's and the keys, act on what the view on screen edits.
+	const undoable = $derived(view === 'patch' ? patchHistory : timelineHistory);
+
+	// A key a field takes, Mod+Z undoing what was typed into it among them, is the field's. So is one in a dialog.
+	const keptBy = (target: EventTarget | null) => typingIn(target) || !!(target as Element | null)?.closest?.('dialog');
+
+	// Keys that move around the page: ` flips views, B folds the browser, and Esc closes a browser open over the views. They
+	// come before the window's keys, which leave a key alone once it has been used here.
+	function pageKeys(event: KeyboardEvent) {
+		if (event.repeat || keptBy(event.target)) return;
+		if (matches(event, 'flip')) {
+			event.preventDefault();
+			show(view === 'song' ? 'patch' : 'song');
+		} else if (matches(event, 'browser')) {
+			event.preventDefault();
+			toggleBrowser();
+		} else if (matches(event, 'escape') && browserOver) {
+			browserOver = false;
+		}
+	}
+
 	function keydown(event: KeyboardEvent) {
-		if ((event.metaKey || event.ctrlKey) && event.key === 's') {
+		if (matches(event, 'save')) {
 			event.preventDefault();
 			if (dirty.size) saveForm.requestSubmit();
+			return;
 		}
+		if (event.defaultPrevented || keptBy(event.target)) return;
+		if (matches(event, 'play')) {
+			event.preventDefault(); // Or a button with focus is pressed, and the roll scrolls
+			if (event.repeat) return;
+			if (songPlaying) engine.stop();
+			else if (songDoc) play();
+		} else if (matches(event, 'start')) {
+			event.preventDefault();
+			toStart();
+		} else if (undoable && (matches(event, 'undo') || matches(event, 'redo'))) {
+			event.preventDefault();
+			if (matches(event, 'undo')) undoable.undo();
+			else undoable.redo();
+		}
+	}
+
+	// Some browsers press a button when Space comes back up, so that is the transport's too.
+	function keyup(event: KeyboardEvent) {
+		if (matches(event, 'play') && !keptBy(event.target)) event.preventDefault();
 	}
 
 	function leaving(event: BeforeUnloadEvent) {
@@ -650,8 +829,6 @@
 	});
 
 	onMount(() => {
-		const height = Number(localStorage.getItem('modsynth.patch'));
-		if (height > 0) patchHeight = height;
 		browserOpen = localStorage.getItem('modsynth.browser') !== 'closed';
 		engine.onState = (s) => {
 			engineState = s;
@@ -684,27 +861,29 @@
 </script>
 
 <svelte:head><title>{recipe?.entry.name ?? (timelineName || 'modsynth')} · modsynth</title></svelte:head>
-<svelte:window onkeydown={keydown} onbeforeunload={leaving} />
+<svelte:window onkeydown={keydown} onkeyup={keyup} onbeforeunload={leaving} bind:innerWidth={windowWidth} />
+<svelte:document onkeydown={pageKeys} />
 
-<div class="workspace">
-	<header class="transport">
+<div class="workspace" onpointerdowncapture={outsideBrowser} role="presentation">
+	<header class="topbar">
 		<button
 			type="button"
-			class="icon"
+			class="icon menu"
 			aria-label="Browser"
-			aria-pressed={browserOpen}
-			title="Show or hide the browser"
-			onclick={toggleBrowser}
+			aria-pressed={browserShown}
+			title={`Show or hide the browser (${label('browser')})`}
+			onclick={() => toggleBrowser()}
 		>
 			<span aria-hidden="true">☰</span>
 		</button>
-		<strong class="brand">modsynth</strong>
+		<ViewTabs {view} song={songName} patch={patchName} onview={show} />
 		{#if !started}
 			<button type="button" onclick={() => use(want)}>Start audio</button>
 		{/if}
-		<button type="button" class="play" onclick={play} disabled={!songDoc}><span aria-hidden="true">▶ </span>Play</button
+		<button type="button" class="play" onclick={play} disabled={!songDoc} title="Play (Space)"
+			><span aria-hidden="true">▶ </span>Play</button
 		>
-		<button type="button" onclick={() => engine.stop()} disabled={!started}
+		<button type="button" onclick={stop} disabled={!started} title="Stop. Pressed again, back to the start (Home)"
 			><span aria-hidden="true">■ </span>Stop</button
 		>
 		<div class="readout" title="Bar and beat">
@@ -712,54 +891,81 @@
 			<span class="muted">tick <span data-testid="tick">{tick}</span></span>
 		</div>
 		{#if tempo}<span class="readout muted" data-testid="tempo">{tempo} BPM</span>{/if}
+		<div class="undo" role="group" aria-label="Undo and redo">
+			<button
+				type="button"
+				class="icon"
+				aria-label="Undo"
+				title={`Undo the last edit to the ${view === 'song' ? 'song' : 'patch'} (${label('undo')})`}
+				disabled={!undoable?.canUndo}
+				onclick={() => undoable?.undo()}><span aria-hidden="true">↶</span></button
+			>
+			<button
+				type="button"
+				class="icon"
+				aria-label="Redo"
+				title={`Redo the last edit undone in the ${view === 'song' ? 'song' : 'patch'} (${label('redo')})`}
+				disabled={!undoable?.canRedo}
+				onclick={() => undoable?.redo()}><span aria-hidden="true">↷</span></button
+			>
+		</div>
+		<Keyboard disabled={!keysPlay} where={keysWhere} onnote={keyNote} />
 		<div class="master"><Meter ring={masterRing} label="Master level" /></div>
-		{#if engineState}
-			<span class="muted state" data-testid="state" data-playing={engineState.playing}>
-				<span data-testid="voices">{engineState.voices}</span> voices, generation
-				<span data-testid="generation">{engineState.generation}</span>
-				{#if engineState.guardTrips}, {engineState.guardTrips} guard trips{/if}
-				{#if engineState.limited < 1}, <span class="limiting" data-testid="limiting"
-						>limiting {(20 * Math.log10(engineState.limited)).toFixed(1)} dB</span
-					>{/if}
-				{#if LOAD_ERRORS[engineState.error]}, {LOAD_ERRORS[engineState.error]}{/if}
-			</span>
-		{/if}
-		{#if live === 'alone' || (want === 'alone' && started)}
-			<span class="alone" data-testid="playing-alone">Playing {patchName || 'a patch'} on its own</span>
-		{/if}
 		<span class="grow"></span>
-		{#if dirty.size}<span class="muted" data-testid="unsaved">{dirty.size} unsaved</span>{/if}
+		{#if dirty.size}<span class="muted unsaved" data-testid="unsaved">{dirty.size} unsaved</span>{/if}
 		<form method="POST" action={actionOn(search, 'save')} use:enhance={saving} bind:this={saveForm}>
-			<button disabled={!dirty.size} title="Save every unsaved patch and timeline (Ctrl+S)">Save</button>
+			<button disabled={!dirty.size} title={`Save every unsaved patch and timeline (${label('save')})`}>Save</button>
 		</form>
 	</header>
 
-	<div class="body" class:closed={!browserOpen}>
-		{#if browserOpen}
-			<Browser
-				{search}
-				examples={data.examples}
-				timelines={data.library.timelines}
-				patches={library}
-				samples={data.library.samples}
-				bundles={data.library.bundles}
-				{dirty}
-				openTimeline={saved?.id ?? null}
-				openRecipe={recipe?.entry.name ?? null}
-				shownPatch={shown?.patch.id ?? null}
-			/>
+	<div class="body" class:pinned={wide && browserOpen} class:unmeasured={windowWidth === undefined}>
+		{#if windowWidth === undefined || (wide && browserOpen)}
+			<div class="side">{@render browser()}</div>
+		{/if}
+		{#if windowWidth === undefined || !(wide && browserOpen)}
+			<BrowserRail open={browserShown} onopen={(section) => toggleBrowser(section)} />
+		{/if}
+		{#if !wide && browserOver}
+			<div class="side over">{@render browser()}</div>
 		{/if}
 
-		<main class="panels">
-			<div
-				class="upper"
-				class:active={active === 'patch'}
-				style:height={patchHeight === null ? '40%' : `${patchHeight}px`}
-				bind:clientHeight={upperHeight}
-				onpointerdowncapture={() => (active = 'patch')}
-				onfocusincapture={() => (active = 'patch')}
-				role="presentation"
-			>
+		<main class="views">
+			<div id="song-view" class="view" class:hidden={view !== 'song'} inert={view !== 'song'}>
+				{#if songDoc}
+					{#key openKey}
+						<TimelineEditor
+							doc={songDoc}
+							patches={songPatches}
+							program={goodSong?.report.programs[0] ?? null}
+							errors={songErrors}
+							{tick}
+							playing={live === 'song' && !!engineState?.playing}
+							targets={songTargets}
+							{rings}
+							engine={controls}
+							history={timelineHistory}
+							readonly={recipe !== null}
+							active={view === 'song'}
+							tabs={[
+								{ id: 'json', label: 'JSON', content: json },
+								{ id: 'image', label: 'Image', content: image }
+							]}
+							{heading}
+							examples={data.examples}
+							onchange={(next) => timelineEdited({ text: JSON.stringify(next, null, 1) })}
+							ontrack={trackChosen}
+							onopen={patchOpened}
+							onnewpatch={newPatchForTrack}
+						/>
+					{/key}
+				{:else}
+					<p class="muted empty">
+						No timeline is open. Choose one or an example in the browser, or make a new one there.
+					</p>
+				{/if}
+			</div>
+
+			<div id="patch-view" class="view" class:hidden={view !== 'patch'} inert={view !== 'patch'}>
 				<PatchPanel
 					patch={shown?.patch ?? null}
 					name={patchName}
@@ -784,76 +990,54 @@
 					{maxProbes}
 					hearing={hears}
 					scopes={patchScopes}
-					active={active === 'patch'}
+					active={view === 'patch'}
+					song={songName}
+					onsong={() => show('song')}
 					onname={(name) => patchEdited({ name })}
 					ongraph={(graph) => patchEdited({ graph })}
-					ontext={(text) => patchEdited({ text })}
+					ontext={(text, typing) => patchEdited({ text }, typing ? 'typing' : 'edit')}
+					history={patchHistory}
 					onprobes={(next) => (probes = next)}
-					onnote={patchNote}
 					onparam={patchParam}
-					onpart={(id) => open({ part: id, patch: null })}
+					onpart={(id) => open({ part: id, patch: null }, false, 'patch')}
 				/>
-			</div>
-
-			<Splitter label="Resize the patch editor" onmove={resize} onreset={unresize} />
-
-			<div
-				class="lower"
-				class:active={active === 'timeline'}
-				onpointerdowncapture={() => (active = 'timeline')}
-				onfocusincapture={() => (active = 'timeline')}
-				role="presentation"
-			>
-				{#if songDoc}
-					{#key openKey}
-						<TimelineEditor
-							doc={songDoc}
-							patches={songPatches}
-							program={goodSong?.report.programs[0] ?? null}
-							errors={songErrors}
-							{tick}
-							playing={live === 'song' && !!engineState?.playing}
-							targets={songTargets}
-							{rings}
-							engine={controls}
-							readonly={recipe !== null}
-							active={active === 'timeline'}
-							tabs={[
-								{ id: 'json', label: 'JSON', content: json },
-								{ id: 'image', label: 'Image', content: image }
-							]}
-							{heading}
-							onchange={(next) => timelineEdited({ text: JSON.stringify(next, null, 1) })}
-							ontrack={trackChosen}
-							onopen={patchOpened}
-						/>
-					{/key}
-				{:else}
-					<p class="muted empty">
-						No timeline is open. Choose one or an example in the browser, or make a new one there.
-					</p>
-				{/if}
 			</div>
 		</main>
 	</div>
 
-	<footer class="status" aria-live="polite" aria-busy={busy} data-testid="status">
-		{#if busy}<span class="muted">Compiling…</span>{/if}
-		{#if form?.message}<span class="problem">{form.message}</span>{/if}
-		{#if form?.saved}<span class="muted">Saved.</span>{/if}
-		{#if renderProblem}<span class="problem">WAV export: {renderProblem}</span>{/if}
-		{#if assetProblem}<span class="problem">{assetProblem}</span>{/if}
-		{#if rejected}<span class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</span
-			>{/if}
-		{#if timelineParsed.error}<span class="problem">Timeline JSON: {timelineParsed.error}</span>{/if}
-		{#if patchProblem}<span class="problem">Graph JSON: {patchProblem}</span>{/if}
-		{#each errors as problem (`${problem.where} ${problem.message}`)}
-			<span class="problem" data-testid="compile-error"><code>{problem.where}</code> {problem.message}</span>
-		{/each}
-		{#if goodSong && !busy && !form?.message && !form?.saved && !rejected && !assetProblem && !errors.length && !timelineParsed.error && !patchProblem}
-			<span class="muted">{(goodSong.report.image_bytes / 1024).toFixed(1)} KB image</span>
+	<footer class="statusbar">
+		<div class="status" aria-live="polite" aria-busy={busy} data-testid="status">
+			{#if busy}<span class="muted">Compiling…</span>{/if}
+			{#if form?.message}<span class="problem">{form.message}</span>{/if}
+			{#if form?.saved}<span class="muted">Saved.</span>{/if}
+			{#if renderProblem}<span class="problem">WAV export: {renderProblem}</span>{/if}
+			{#if assetProblem}<span class="problem">{assetProblem}</span>{/if}
+			{#if rejected}<span class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</span
+				>{/if}
+			{#if timelineParsed.error}<span class="problem">Timeline JSON: {timelineParsed.error}</span>{/if}
+			{#if patchProblem}<span class="problem">Graph JSON: {patchProblem}</span>{/if}
+			{#each errors as problem (`${problem.where} ${problem.message}`)}
+				<span class="problem" data-testid="compile-error"><code>{problem.where}</code> {problem.message}</span>
+			{/each}
+			{#if goodSong && !busy && !form?.message && !form?.saved && !rejected && !assetProblem && !errors.length && !timelineParsed.error && !patchProblem}
+				<span class="muted">{(goodSong.report.image_bytes / 1024).toFixed(1)} KB image</span>
+			{/if}
+			{#if !started}<span class="muted">Audio starts with Play, a key, or Start audio.</span>{/if}
+		</div>
+		{#if live === 'alone' || (want === 'alone' && started)}
+			<span class="alone" data-testid="playing-alone">Playing {patchName || 'a patch'} on its own</span>
 		{/if}
-		{#if !started}<span class="muted">Audio starts with Play, a key, or Start audio.</span>{/if}
+		{#if engineState}
+			<span class="muted state" data-testid="state" data-playing={engineState.playing}>
+				<span data-testid="voices">{engineState.voices}</span> voices, generation
+				<span data-testid="generation">{engineState.generation}</span>
+				{#if engineState.guardTrips}, {engineState.guardTrips} guard trips{/if}
+				{#if engineState.limited < 1}, <span class="limiting" data-testid="limiting"
+						>limiting {(20 * Math.log10(engineState.limited)).toFixed(1)} dB</span
+					>{/if}
+				{#if LOAD_ERRORS[engineState.error]}, {LOAD_ERRORS[engineState.error]}{/if}
+			</span>
+		{/if}
 	</footer>
 </div>
 
@@ -868,6 +1052,22 @@
 		/>
 	{/key}
 {/if}
+
+{#snippet browser()}
+	<Browser
+		{search}
+		examples={data.examples}
+		timelines={data.library.timelines}
+		patches={library}
+		samples={data.library.samples}
+		bundles={data.library.bundles}
+		{dirty}
+		openTimeline={saved?.id ?? null}
+		openRecipe={recipe?.entry.name ?? null}
+		shownPatch={view === 'patch' ? (shown?.patch.id ?? null) : null}
+		{reveal}
+	/>
+{/snippet}
 
 {#snippet heading()}
 	{#if recipe}
@@ -928,7 +1128,8 @@
 				aria-label="Timeline JSON"
 				spellcheck="false"
 				value={timelineText}
-				oninput={(e) => timelineEdited({ text: e.currentTarget.value })}></textarea>
+				oninput={(e) => timelineEdited({ text: e.currentTarget.value }, 'typing')}
+				onchange={(e) => timelineEdited({ text: e.currentTarget.value })}></textarea>
 		{/if}
 	</div>
 {/snippet}
@@ -944,25 +1145,35 @@
 		height: 100vh;
 		overflow: hidden;
 	}
-	.transport {
+	/* One line for both views, which fits a 1280 px screen: long names give way first. */
+	.topbar {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		padding: 0.35rem 0.6rem;
+		gap: 0.45rem;
+		padding: 0.3rem 0.6rem;
 		background: var(--panel);
 		border-bottom: 1px solid var(--line);
 		font-size: 0.82rem;
 		min-width: 0;
+		white-space: nowrap;
 	}
-	.transport button {
+	.topbar > :global(*) {
+		flex: none;
+	}
+	.topbar > :global(.views) {
+		flex: 0 1 auto;
+	}
+	.topbar button {
 		padding: 0.2rem 0.6rem;
 	}
-	.icon {
+	.topbar .icon {
 		font-size: 1rem;
 		line-height: 1;
+		padding: 0.15rem 0.45rem;
 	}
-	.brand {
-		margin-right: 0.6rem;
+	.undo {
+		display: flex;
+		gap: 0.2rem;
 	}
 	.play {
 		border-color: #238636;
@@ -971,7 +1182,7 @@
 		display: flex;
 		align-items: baseline;
 		gap: 0.4rem;
-		padding: 0.1rem 0.6rem;
+		padding: 0.1rem 0.5rem;
 		background: #0d1117;
 		border: 1px solid var(--line);
 		border-radius: 5px;
@@ -980,10 +1191,14 @@
 	}
 	.big {
 		font-size: 1rem;
-		min-width: 3.5rem;
+		min-width: 2.2rem;
 	}
 	.master {
-		width: 110px;
+		width: 72px;
+	}
+	.grow {
+		flex: 1 1 0;
+		min-width: 0;
 	}
 	.state {
 		white-space: nowrap;
@@ -997,45 +1212,69 @@
 	.limiting {
 		color: #d29922;
 	}
+	/* The browser beside the views, or its rail. Before the page knows how wide the window is, the width decides. */
 	.body {
+		position: relative;
 		display: grid;
-		grid-template-columns: 250px minmax(0, 1fr);
+		grid-template-columns: 32px minmax(0, 1fr);
 		min-height: 0;
 	}
-	.body.closed {
-		grid-template-columns: minmax(0, 1fr);
+	.body.pinned {
+		grid-template-columns: 250px minmax(0, 1fr);
 	}
-	.panels {
-		display: flex;
-		flex-direction: column;
+	.body.unmeasured > :global(.rail) {
+		display: none;
+	}
+	@media (max-width: 1399.98px) {
+		.body.unmeasured {
+			grid-template-columns: 32px minmax(0, 1fr);
+		}
+		.body.unmeasured > .side {
+			display: none;
+		}
+		.body.unmeasured > :global(.rail) {
+			display: flex;
+		}
+	}
+	.side {
 		min-height: 0;
 		min-width: 0;
 	}
-	.upper {
-		flex: none;
-		min-height: 90px;
-		max-height: calc(100% - 160px);
-		border-top: 2px solid transparent;
+	/* On a narrow screen the browser opens over the views, beside its rail, rather than pushing them aside. */
+	.side.over {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: 32px;
+		width: 250px;
+		z-index: 20;
+		box-shadow: 6px 0 18px #0009;
 	}
-	.lower {
-		flex: 1;
+	/* Both views take the same place, and the one not shown keeps its layout, so its scroll and sizes are there to come back to. */
+	.views {
+		display: grid;
 		min-height: 0;
-		padding: 0 0.6rem 0.4rem;
-		border-top: 2px solid transparent;
+		min-width: 0;
 	}
-	.upper.active,
-	.lower.active {
-		border-top-color: #1f6feb80;
+	.view {
+		grid-area: 1 / 1;
+		min-height: 0;
+		min-width: 0;
+	}
+	#song-view {
+		padding: 0 0.6rem 0.4rem;
+	}
+	.view.hidden {
+		visibility: hidden;
 	}
 	.empty {
 		padding: 2rem;
 		text-align: center;
 	}
-	.status {
+	.statusbar {
 		display: flex;
 		gap: 0.6rem;
 		align-items: center;
-		flex-wrap: wrap;
 		max-height: 5.5rem;
 		overflow-y: auto;
 		padding: 0.2rem 0.6rem;
@@ -1043,6 +1282,14 @@
 		border-top: 1px solid var(--line);
 		font-size: 0.78rem;
 		min-height: 1.6rem;
+	}
+	.status {
+		flex: 1;
+		display: flex;
+		gap: 0.6rem;
+		align-items: center;
+		flex-wrap: wrap;
+		min-width: 0;
 	}
 	.status .problem {
 		margin: 0;

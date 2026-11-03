@@ -1,10 +1,26 @@
+<script lang="ts" module>
+	// The browser's lists, which its rail has an icon for each of.
+	export const SECTIONS = [
+		{ id: 'timelines', name: 'Timelines', icon: '♫' },
+		{ id: 'patches', name: 'Patches', icon: '◆' },
+		{ id: 'samples', name: 'Samples', icon: '∿' },
+		{ id: 'builtins', name: 'Built-in patches', icon: '▣' },
+		{ id: 'bundles', name: 'Bundles', icon: '▤' },
+		{ id: 'examples', name: 'Examples', icon: '▶' }
+	] as const;
+
+	export type Section = (typeof SECTIONS)[number]['id'];
+</script>
+
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { actionOn, draftKey, isInsert, withParams } from '#lib/Workspace.ts';
+	import { untrack } from 'svelte';
+	import { actionOn, draftKey, isInsert, withParams, withView } from '#lib/Workspace.ts';
 	import type { Graph } from '#lib/Schema.ts';
 
 	// The sidebar: the library on top and the examples that ship with the app below. Everything in it is a link that changes what
-	// the page shows, so the page, its audio and its unsaved edits stay where they are.
+	// the page shows, so the page, its audio and its unsaved edits stay where they are. A timeline or an example opens in the
+	// Song view, and a patch in the Patch view.
 	let {
 		search,
 		examples,
@@ -15,7 +31,8 @@
 		dirty,
 		openTimeline,
 		openRecipe,
-		shownPatch
+		shownPatch,
+		reveal = null
 	}: {
 		search: string; // The page's address now, which every link here changes a part of
 		examples: { name: string; recipes: { name: string; listen_for: string }[] }[];
@@ -35,15 +52,30 @@
 		openTimeline: string | null;
 		openRecipe: string | null;
 		shownPatch: string | null;
+		reveal?: Section | null; // A list to open and scroll to as the browser opens, when its rail asked for one
 	} = $props();
 
 	let filter = $state('');
+	let scroller: HTMLDivElement;
+
+	$effect(() => {
+		const section = reveal;
+		if (!section) return;
+		untrack(() => {
+			const at = scroller.querySelector<HTMLElement>(`[data-section="${section}"]`);
+			if (at instanceof HTMLDetailsElement) at.open = true;
+			at?.scrollIntoView({ block: 'start' });
+		});
+	});
 
 	const matches = (name: string) => !filter.trim() || name.toLowerCase().includes(filter.trim().toLowerCase());
 
-	const timelineHref = (id: string) => withParams(search, { timeline: id, recipe: null, patch: null, part: null });
-	const recipeHref = (name: string) => withParams(search, { recipe: name, timeline: null, patch: null, part: null });
-	const patchHref = (id: string) => withParams(search, { patch: id, part: null });
+	const inSong = $derived(withView(search, 'song'));
+	const timelineHref = (id: string) =>
+		withView(withParams(search, { timeline: id, recipe: null, patch: null, part: null }), 'song');
+	const recipeHref = (name: string) =>
+		withView(withParams(search, { recipe: name, timeline: null, patch: null, part: null }), 'song');
+	const patchHref = (id: string) => withView(withParams(search, { patch: id, part: null }), 'patch');
 	const bundleHref = (id: string) => withParams(search, { bundle: id });
 
 	const shownTimelines = $derived(timelines.filter((t) => matches(t.name)));
@@ -83,10 +115,10 @@
 <nav class="browser" aria-label="Browser">
 	<input class="filter" type="search" placeholder="Filter" aria-label="Filter the browser" bind:value={filter} />
 
-	<div class="scroll">
+	<div class="scroll" bind:this={scroller}>
 		<h2>Library</h2>
 
-		<details open>
+		<details open data-section="timelines">
 			<summary>Timelines <span class="count">{timelines.length}</span></summary>
 			<ul aria-label="Timelines">
 				{#each shownTimelines as timeline (timeline.id)}
@@ -98,25 +130,25 @@
 				{/each}
 			</ul>
 			<form method="POST" action={actionOn(search, 'createTimeline')} use:enhance class="add">
-				<input type="hidden" name="back" value={search} />
+				<input type="hidden" name="back" value={inSong} />
 				<input name="name" placeholder="New timeline" aria-label="New timeline name" required />
 				<button aria-label="Add timeline">+</button>
 			</form>
 		</details>
 
-		<details open>
+		<details open data-section="patches">
 			<summary>Patches <span class="count">{ownPatches.length}</span></summary>
 			<ul aria-label="Patches">
 				{#each shownPatches as patch (patch.id)}{@render patchLink(patch)}{/each}
 			</ul>
 			<form method="POST" action={actionOn(search, 'createPatch')} use:enhance class="add">
-				<input type="hidden" name="back" value={search} />
+				<input type="hidden" name="back" value={withView(search, 'patch')} />
 				<input name="name" placeholder="New patch" aria-label="New patch name" required />
 				<button aria-label="Add patch">+</button>
 			</form>
 		</details>
 
-		<details open>
+		<details open data-section="samples">
 			<summary>Samples <span class="count">{ownSamples.length}</span></summary>
 			<p class="muted note">
 				WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like
@@ -144,7 +176,7 @@
 				use:enhance
 				class="import"
 			>
-				<input type="hidden" name="back" value={search} />
+				<input type="hidden" name="back" value={withView(search, 'patch')} />
 				<input type="file" name="files" accept=".wav,audio/wav" multiple aria-label="WAV files" />
 				<div class="add">
 					<input name="name" placeholder="Instrument name" aria-label="Instrument name" />
@@ -156,6 +188,7 @@
 		<details
 			open={filter.trim() !== '' || builtinPatches.some((p) => p.id === shownPatch) || undefined}
 			data-testid="builtins"
+			data-section="builtins"
 		>
 			<summary>Built-in patches <span class="count">{builtinPatches.length}</span></summary>
 			<p class="muted note">
@@ -166,7 +199,7 @@
 			</ul>
 		</details>
 
-		<details open>
+		<details open data-section="bundles">
 			<summary>Bundles <span class="count">{bundles.length}</span></summary>
 			<p class="muted note">Several timelines compiled into one image, for a device to choose between.</p>
 			<ul aria-label="Bundles">
@@ -181,7 +214,7 @@
 			</form>
 		</details>
 
-		<h2>Examples</h2>
+		<h2 data-section="examples">Examples</h2>
 		<p class="muted note">
 			Short pieces that ship with the app. Each plays as it is, its patches are built in, and adding one to the library
 			copies its timeline to change.

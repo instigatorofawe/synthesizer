@@ -1,17 +1,22 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import AutomationLane from '#lib/AutomationLane.svelte';
+	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { followScroll } from '#lib/Follow.ts';
+	import { matches, modHeld, modKey } from '#lib/Shortcuts.ts';
 	import {
 		addNote,
 		addPoint,
 		describeLane,
 		duplicateNotes,
+		growToHold,
 		humanize,
 		isBlackKey,
 		lanesOf,
 		moveNotes,
 		noteName,
+		noteValue,
+		position,
 		quantize,
 		rampVelocities,
 		removeLane,
@@ -20,8 +25,10 @@
 		scaleVelocities,
 		setNotes,
 		snapTick,
+		ticksPerBar,
 		type Clip,
-		type LaneChoice
+		type LaneChoice,
+		type Note
 	} from '#lib/TimelineEdit.ts';
 
 	let {
@@ -34,8 +41,11 @@
 		playing = false,
 		canAudition,
 		readonly = false,
+		draw = $bindable(),
+		cangrow = () => true,
 		onchange,
-		onaudition
+		onaudition,
+		onundo = () => {}
 	}: {
 		clip: Clip;
 		ppq: number;
@@ -46,8 +56,11 @@
 		playing?: boolean; // Whether the song is playing, which the roll follows while it plays this clip
 		canAudition: boolean;
 		readonly?: boolean;
+		draw: number; // How long a clicked note is, in ticks. It follows the last note added, resized or chosen, as FL Studio's does.
+		cangrow?: (length: number) => boolean; // Whether the clip can be this long without running into the clip after it
 		onchange: (clip: Clip) => void;
 		onaudition: (note: number, on: boolean) => void;
+		onundo?: () => void; // The timeline's own undo, for the Undo beside "Clip is now 2 bars"
 	} = $props();
 
 	const KEY = 12;
@@ -56,25 +69,38 @@
 	const VELOCITY = 56;
 	const EDGE = 6;
 	const AUDITION_MS = 220;
+	const PAST_BARS = 4; // Shown past the clip's end, so there is room to put a note that grows it
+	const DRAG = 4; // Pixels a press moves before it is a drag rather than a click
+	const NOTICE_MS = 6000;
 
 	type Point = { x: number; y: number };
 	type Gesture =
-		| { kind: 'move'; anchor: number; from: Point; clip: Clip }
+		// A copy moves `indices` of `base`, which holds the originals and the copies, so the originals stay where they were.
+		| { kind: 'move'; anchor: number; from: Point; base: Clip; indices: Set<number>; copy: boolean; clip: Clip }
 		| { kind: 'size'; anchor: number; from: Point; clip: Clip }
 		| { kind: 'velocity'; clip: Clip; indices: Set<number>; lane: Element }
 		| { kind: 'length'; clip: Clip }
-		| { kind: 'band'; from: Point; at: Point };
+		| { kind: 'band'; from: Point; at: Point }
+		| { kind: 'draw'; from: Point; note: Note; drawn: boolean; clip: Clip };
 
 	let roll: SVGSVGElement;
 	let scroller: HTMLDivElement;
 	let beatWidth = $state(64);
 	let chosen = $state.raw(new Set<number>());
 	let gesture = $state.raw<Gesture | null>(null);
-	let lastLength = $state<number | null>(null); // A new note takes after the last one touched
+	let ghost = $state.raw<{ tick: number; note: number } | null>(null); // The empty cell under the pointer
+	let menu = $state.raw<{ x: number; y: number } | null>(null);
+	let notice = $state<string | null>(null); // Said after a clip grows, with an Undo beside it
+	let offer = $state.raw<{ note: Note; length: number } | null>(null); // A note that would have grown the clip into the next
+	let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+	let mod = $state('Ctrl'); // What the hint calls Mod, which only the browser knows
 
 	const perTick = $derived(beatWidth / ppq);
+	const bar = $derived(ticksPerBar({ ppq }));
 	const shown = $derived(gesture && 'clip' in gesture ? gesture.clip : clip);
-	const widthTicks = $derived(Math.max(shown.length, ...shown.notes.map((n) => n.tick + n.dur)) + ppq);
+	const widthTicks = $derived(
+		Math.max(shown.length + PAST_BARS * bar, ...shown.notes.map((n) => n.tick + n.dur + ppq))
+	);
 	const width = $derived(widthTicks * perTick);
 	const beats = $derived(Math.ceil(widthTicks / ppq));
 	const lanes = $derived(lanesOf(clip));
@@ -90,10 +116,36 @@
 	const rowOf = (note: number) => (127 - note) * KEY;
 	const noteAt = (y: number) => Math.min(127, Math.max(0, 127 - Math.floor(y / KEY)));
 
+	// The cell under the pointer, at the line of the grid before it, which is where a click puts a note.
+	function cellAt(event: { clientX: number; clientY: number }) {
+		const at = canvas(event);
+		return { tick: Math.max(0, Math.floor(at.x / perTick / grid) * grid), note: noteAt(at.y) };
+	}
+
+	// A right-click chooses what it is on and opens its menu, and Ctrl-click is a right-click on a Mac, so neither drags.
+	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && modKey() === 'Meta');
+
+	const describe = (note: Pick<Note, 'tick' | 'note' | 'dur'>) =>
+		`${noteName(note.note)} · ${noteValue(note.dur, ppq)} · ${position(note.tick, ppq)}`;
+
+	// What the ghost says: the note a click would add, or the one being drawn. Past the end it says what that does to the clip.
+	const ghostLabel = $derived.by(() => {
+		const note = gesture?.kind === 'draw' ? gesture.note : ghost && { ...ghost, dur: draw };
+		if (!note) return null;
+		const grown = growToHold(clip, note.tick, ppq);
+		if (grown === clip) return describe(note);
+		return `${describe(note)} · ${cangrow(grown.length) ? `makes the clip ${bars(grown.length)}` : 'past the end'}`;
+	});
+
+	const bars = (length: number) => `${length / bar} bar${length === bar ? '' : 's'}`;
+
 	function pressNote(event: PointerEvent, index: number, kind: 'move' | 'size') {
 		event.stopPropagation();
 		roll.focus({ preventScroll: true });
-		if (event.shiftKey) {
+		ghost = null;
+		offer = null;
+		const menuing = secondary(event);
+		if (event.shiftKey && !menuing) {
 			const next = new Set(chosen);
 			if (next.has(index)) next.delete(index);
 			else next.add(index);
@@ -101,25 +153,124 @@
 		} else if (!chosen.has(index)) {
 			chosen = new Set([index]);
 		}
-		if (!readonly) gesture = { kind, anchor: index, from: canvas(event), clip };
+		if (readonly || menuing) return;
+		if (!event.shiftKey) draw = clip.notes[index].dur;
+		const from = canvas(event);
+		if (kind === 'move' && modHeld(event)) {
+			// The copies go on the end, and they are what moves.
+			const order = [...chosen].sort((a, b) => a - b);
+			const base = { ...clip, notes: [...clip.notes, ...order.map((i) => clip.notes[i])] };
+			const indices = new Set(order.map((_, k) => clip.notes.length + k));
+			const anchor = clip.notes.length + order.indexOf(index);
+			gesture = { kind, anchor, from, base, indices, copy: true, clip: base };
+		} else if (kind === 'move') {
+			gesture = { kind, anchor: index, from, base: clip, indices: chosen, copy: false, clip };
+		} else {
+			gesture = { kind, anchor: index, from, clip };
+		}
 	}
 
+	// A click on empty grid adds a note there, as long as the Draw length, and dragging before letting go sets its length.
 	function pressGround(event: PointerEvent) {
 		roll.focus({ preventScroll: true });
-		if (event.shiftKey) gesture = { kind: 'band', from: canvas(event), at: canvas(event) };
-		else chosen = new Set();
+		offer = null;
+		pressed = null;
+		if (secondary(event)) return;
+		if (event.shiftKey) {
+			gesture = { kind: 'band', from: canvas(event), at: canvas(event) };
+			return;
+		}
+		if (readonly) {
+			chosen = new Set();
+			return;
+		}
+		const { tick, note } = cellAt(event);
+		pressed = { tick, note };
+		// A note already there is too short to hit, or the first click of a double-click put it there.
+		const there = clip.notes.findIndex((n) => n.tick === tick && n.note === note);
+		if (there >= 0) {
+			chosen = new Set([there]);
+			return;
+		}
+		const added = { tick, note, vel: 100, dur: draw };
+		ghost = null;
+		chosen = new Set([clip.notes.length]);
+		gesture = { kind: 'draw', from: canvas(event), note: added, drawn: false, clip: addNote(clip, added) };
+		audition(note);
 	}
 
-	function doubleGround(event: MouseEvent) {
-		if (readonly) return;
-		const at = canvas(event);
-		const tick = Math.floor(at.x / perTick / grid) * grid;
-		if (tick >= clip.length) return;
-		const note = noteAt(at.y);
-		const dur = lastLength ?? Math.max(grid, Math.round(ppq / 4));
+	// A double-click on empty grid adds a note too. Its first click almost always has, so this adds one only if it hasn't, in
+	// the cell that click chose. The double-click's own position is in whole pixels where a press's isn't, so near the edge
+	// of a row it can fall in the next one, and a note there would be a second.
+	let pressed: { tick: number; note: number } | null = null;
+	function doubleGround() {
+		if (readonly || !pressed) return;
+		const { tick, note } = pressed;
+		if (clip.notes.some((n) => n.tick === tick && n.note === note)) return;
+		place({ tick, note, vel: 100, dur: draw });
+	}
+
+	function tell(text: string) {
+		clearTimeout(noticeTimer);
+		grownText = null;
+		notice = text;
+		noticeTimer = setTimeout(() => (notice = null), NOTICE_MS);
+	}
+
+	// A note past the end grows the clip to the bar that holds it, unless that would run a placement of the clip into the
+	// next one on its track. Then the note waits, with an offer to lengthen the clip anyway.
+	function place(note: Note) {
+		const grown = growToHold(clip, note.tick, ppq);
+		if (grown !== clip && !cangrow(grown.length)) {
+			chosen = new Set();
+			offer = { note, length: grown.length };
+			return;
+		}
+		// Asked before the change, which reaches `clip` at once.
+		const grows = grown !== clip;
+		draw = note.dur;
 		chosen = new Set([clip.notes.length]);
-		onchange(addNote(clip, { tick, note, vel: 100, dur }));
-		audition(note);
+		onchange(addNote(grown, note));
+		if (grows) tell(`Clip is now ${bars(grown.length)}`);
+	}
+
+	function lengthen() {
+		if (!offer) return;
+		const { note } = offer;
+		const length = Math.max(clip.length, offer.length);
+		offer = null;
+		draw = note.dur;
+		chosen = new Set([clip.notes.length]);
+		onchange(addNote({ ...clip, length }, note));
+		tell(`Clip is now ${bars(length)}`);
+	}
+
+	function undoGrowth() {
+		clearTimeout(noticeTimer);
+		notice = null;
+		chosen = new Set();
+		onundo();
+	}
+
+	onDestroy(() => clearTimeout(noticeTimer));
+
+	// The notice is about the edit that grew the clip, and its Undo undoes the last edit. So the next change to the clip takes
+	// the notice away, before its Undo can take back something else.
+	let grownText: string | null = null;
+	$effect(() => {
+		const text = notice === null ? null : JSON.stringify(clip);
+		untrack(() => {
+			if (text === null) grownText = null;
+			else if (grownText === null) grownText = text;
+			else if (text !== grownText) notice = null;
+		});
+	});
+
+	// The ghost follows the pointer over empty grid, from cell to cell.
+	function hover(event: PointerEvent) {
+		const empty = (event.target as Element).classList.contains('lane');
+		const cell = readonly || gesture || menu || !empty ? null : cellAt(event);
+		if (cell?.tick !== ghost?.tick || cell?.note !== ghost?.note) ghost = cell;
 	}
 
 	function audition(note: number) {
@@ -129,11 +280,18 @@
 	}
 
 	function moved(g: Extract<Gesture, { kind: 'move' }>, at: Point): Clip {
-		const anchor = clip.notes[g.anchor];
+		const anchor = g.base.notes[g.anchor];
 		const wanted = snapTick(anchor.tick + (at.x - g.from.x) / perTick, grid) - anchor.tick;
-		const last = Math.max(...[...chosen].map((i) => clip.notes[i].tick));
-		return moveNotes(clip, chosen, Math.min(wanted, clip.length - 1 - last), Math.round((g.from.y - at.y) / KEY));
+		const last = Math.max(...[...g.indices].map((i) => g.base.notes[i].tick));
+		const dt = Math.min(wanted, clip.length - 1 - last);
+		return moveNotes(g.base, g.indices, dt, Math.round((g.from.y - at.y) / KEY));
 	}
+
+	// Whether a move has left every note where it was, which a click on a note does.
+	const still = (g: Extract<Gesture, { kind: 'move' }>) =>
+		[...g.indices].every(
+			(i) => g.clip.notes[i].tick === g.base.notes[i].tick && g.clip.notes[i].note === g.base.notes[i].note
+		);
 
 	function resized(g: Extract<Gesture, { kind: 'size' }>, at: Point): Clip {
 		const anchor = clip.notes[g.anchor];
@@ -146,7 +304,14 @@
 		if (gesture.kind === 'move') gesture = { ...gesture, clip: moved(gesture, canvas(event)) };
 		else if (gesture.kind === 'size') gesture = { ...gesture, clip: resized(gesture, canvas(event)) };
 		else if (gesture.kind === 'band') gesture = { ...gesture, at: canvas(event) };
-		else if (gesture.kind === 'velocity') {
+		else if (gesture.kind === 'draw') {
+			const at = canvas(event);
+			if (!gesture.drawn && Math.abs(at.x - gesture.from.x) < DRAG) return;
+			// The note reaches the end of the cell under the pointer, so it covers what the pointer has crossed.
+			const end = (Math.floor(at.x / perTick / grid) + 1) * grid;
+			const note = { ...gesture.note, dur: Math.max(grid, end - gesture.note.tick) };
+			gesture = { ...gesture, drawn: true, note, clip: addNote(clip, note) };
+		} else if (gesture.kind === 'velocity') {
 			const { indices, lane } = gesture;
 			gesture = { ...gesture, clip: setNotes(clip, indices, { vel: velocityFor(event, lane) }) };
 		} else if (gesture.kind === 'length') {
@@ -173,8 +338,11 @@
 		gesture = null;
 		if (!held) return;
 		if (held.kind === 'band') return finishBand(held.from, held.at);
+		if (held.kind === 'draw') return place(held.note);
+		if (held.kind === 'move' && still(held)) return;
 		if (held.clip === clip) return;
-		if (held.kind === 'size' && one) lastLength = held.clip.notes[held.anchor].dur;
+		if (held.kind === 'size') draw = held.clip.notes[held.anchor].dur;
+		if (held.kind === 'move') chosen = held.indices;
 		onchange(held.clip);
 	}
 
@@ -194,32 +362,74 @@
 		if (chosen.size) onchange(moveNotes(clip, chosen, ticks, notes));
 	}
 
+	// The roll's keys, from the editor's one table of them. Each needs exactly its own modifiers.
 	function keydown(event: KeyboardEvent) {
 		if (readonly) return;
-		const command = event.metaKey || event.ctrlKey;
-		if (event.key === 'Delete' || event.key === 'Backspace') {
+		const by = (id: Parameters<typeof matches>[1]) => matches(event, id);
+		if (by('roll.delete') || by('roll.backspace')) {
 			event.preventDefault();
 			const gone = chosen;
 			chosen = new Set();
 			if (gone.size) onchange(removeNotes(clip, gone));
-		} else if (command && event.key === 'a') {
+		} else if (by('select-all')) {
 			event.preventDefault();
 			chosen = new Set(clip.notes.keys());
-		} else if (command && event.key === 'd') {
+		} else if (by('duplicate')) {
 			event.preventDefault();
 			const copied = duplicateNotes(clip, chosen);
 			chosen = copied.chosen;
 			onchange(copied.clip);
-		} else if (event.key === 'Escape') {
-			chosen = new Set();
-		} else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+		} else if (by('escape')) {
+			// The first Esc lets go of what is held or offered, and the next lets go of the notes.
+			if (gesture?.kind === 'draw') chosen = new Set();
+			if (gesture) gesture = null;
+			else if (offer) offer = null;
+			else chosen = new Set();
+		} else if (by('roll.up') || by('roll.down') || by('roll.octave-up') || by('roll.octave-down')) {
 			event.preventDefault();
-			nudge(0, (event.key === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1));
-		} else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+			nudge(0, (event.code === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1));
+		} else if (by('roll.earlier') || by('roll.later')) {
 			event.preventDefault();
-			nudge((event.key === 'ArrowLeft' ? -1 : 1) * grid, 0);
+			nudge((event.code === 'ArrowLeft' ? -1 : 1) * grid, 0);
 		}
 	}
+
+	function noteMenu(event: MouseEvent, index: number) {
+		event.preventDefault();
+		event.stopPropagation();
+		gesture = null;
+		if (!chosen.has(index)) chosen = new Set([index]);
+		if (!readonly) menu = { x: event.clientX, y: event.clientY };
+	}
+
+	// Shift+F10 or the menu key opens the chosen notes' menu, at the first of them.
+	function rollMenu(event: MouseEvent) {
+		event.preventDefault();
+		gesture = null;
+		if (readonly || event.target !== roll || !chosen.size) return;
+		const first = roll.querySelector(`[data-testid="note-${Math.min(...chosen)}"] .body`);
+		const box = (first ?? roll).getBoundingClientRect();
+		menu = { x: box.left, y: box.bottom };
+	}
+
+	const noteItems = (): MenuItem[] => [
+		{
+			label: 'Delete',
+			action: () => {
+				const gone = chosen;
+				chosen = new Set();
+				onchange(removeNotes(clip, gone));
+			}
+		},
+		{
+			label: 'Duplicate',
+			action: () => {
+				const copied = duplicateNotes(clip, chosen);
+				chosen = copied.chosen;
+				onchange(copied.clip);
+			}
+		}
+	];
 
 	function pressKey(event: PointerEvent, note: number) {
 		if (!canAudition) return;
@@ -281,6 +491,7 @@
 	});
 
 	onMount(() => {
+		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
 		// A whole clip if it fits, up to a size where a short one doesn't turn into a few very long notes.
 		beatWidth = Math.min(96, Math.max(16, (scroller.clientWidth - KEYS) / (clip.length / ppq + 1)));
 		const pitches = clip.notes.map((note) => note.note);
@@ -401,140 +612,180 @@
 			{/if}
 		</fieldset>
 	{:else if !readonly}
-		<span class="muted">
-			Double-click to add a note, and on one to remove it. Drag to move, drag its end to resize, shift-drag to select.
-			Arrows nudge.
-		</span>
+		{@const hint = `Click to add a note, and drag to set its length. Drag a note to move it, its end to resize it, and hold ${mod} to copy it. Delete or a right-click removes it. Shift-drag selects, and arrows nudge.`}
+		<span class="muted hint" title={hint}>{hint}</span>
 	{/if}
 </div>
 
-<div class="roll" bind:this={scroller} onscroll={scrolled}>
-	<div class="inner" style:width="{KEYS + width}px">
-		<svg class="keys" width={KEYS} height={HEIGHT} aria-hidden="true">
-			{#each { length: 128 }, row}
-				{@const note = 127 - row}
-				<rect
-					class="key"
-					class:black={isBlackKey(note)}
-					y={row * KEY}
-					width={KEYS}
-					height={KEY}
-					role="presentation"
-					data-testid={`key-${note}`}
-					onpointerdown={(event) => pressKey(event, note)}
-				/>
-				{#if note % 12 === 0}<text class="octave" x="4" y={row * KEY + KEY - 2}>{noteName(note)}</text>{/if}
-			{/each}
-		</svg>
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-		<svg
-			bind:this={roll}
-			{width}
-			height={HEIGHT}
-			role="application"
-			aria-label="Piano roll"
-			tabindex="0"
-			data-testid="roll"
-			data-per-tick={perTick}
-			onkeydown={keydown}
-		>
-			{#each { length: 128 }, row}
-				<rect
-					class="lane"
-					class:black={isBlackKey(127 - row)}
-					y={row * KEY}
-					{width}
-					height={KEY}
-					role="presentation"
-					onpointerdown={pressGround}
-					ondblclick={doubleGround}
-				/>
-			{/each}
-			{#each { length: beats + 1 }, beat}
-				<line
-					class:bar={beat % 4 === 0}
-					class="beat"
-					x1={beat * ppq * perTick}
-					x2={beat * ppq * perTick}
-					y1="0"
-					y2={HEIGHT}
-				/>
-			{/each}
-			<rect
-				class="past"
-				x={shown.length * perTick}
-				width={Math.max(0, width - shown.length * perTick)}
-				height={HEIGHT}
-			/>
-			{#each shown.notes as note, index (index)}
-				<g
-					class="note"
-					class:chosen={chosen.has(index)}
-					data-testid={`note-${index}`}
-					data-tick={note.tick}
-					data-note={note.note}
-					data-dur={note.dur}
-					data-vel={note.vel}
-				>
+<div class="frame">
+	<div class="roll" bind:this={scroller} onscroll={scrolled}>
+		<div class="inner" style:width="{KEYS + width}px">
+			<svg class="keys" width={KEYS} height={HEIGHT} aria-hidden="true">
+				{#each { length: 128 }, row}
+					{@const note = 127 - row}
 					<rect
-						class="body"
-						x={note.tick * perTick}
-						y={rowOf(note.note) + 1}
-						width={Math.max(note.dur * perTick, 3)}
-						height={KEY - 2}
-						rx="2"
+						class="key"
+						class:black={isBlackKey(note)}
+						y={row * KEY}
+						width={KEYS}
+						height={KEY}
 						role="presentation"
-						onpointerdown={(event) => pressNote(event, index, 'move')}
-						ondblclick={(event) => {
+						data-testid={`key-${note}`}
+						onpointerdown={(event) => pressKey(event, note)}
+					/>
+					{#if note % 12 === 0}<text class="octave" x="4" y={row * KEY + KEY - 2}>{noteName(note)}</text>{/if}
+				{/each}
+			</svg>
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+			<svg
+				bind:this={roll}
+				{width}
+				height={HEIGHT}
+				role="application"
+				aria-label="Piano roll"
+				tabindex="0"
+				data-testid="roll"
+				data-per-tick={perTick}
+				onkeydown={keydown}
+				onpointermove={hover}
+				onpointerleave={() => (ghost = null)}
+				oncontextmenu={rollMenu}
+			>
+				{#each { length: 128 }, row}
+					<rect
+						class="lane"
+						class:black={isBlackKey(127 - row)}
+						y={row * KEY}
+						{width}
+						height={KEY}
+						role="presentation"
+						onpointerdown={pressGround}
+						ondblclick={doubleGround}
+					/>
+				{/each}
+				{#each { length: beats + 1 }, beat}
+					<line
+						class:bar={beat % 4 === 0}
+						class="beat"
+						x1={beat * ppq * perTick}
+						x2={beat * ppq * perTick}
+						y1="0"
+						y2={HEIGHT}
+					/>
+				{/each}
+				<rect
+					class="past"
+					x={shown.length * perTick}
+					width={Math.max(0, width - shown.length * perTick)}
+					height={HEIGHT}
+				/>
+				{#each shown.notes as note, index (index)}
+					<g
+						class="note"
+						class:chosen={chosen.has(index)}
+						data-testid={`note-${index}`}
+						data-tick={note.tick}
+						data-note={note.note}
+						data-dur={note.dur}
+						data-vel={note.vel}
+					>
+						<rect
+							class="body"
+							x={note.tick * perTick}
+							y={rowOf(note.note) + 1}
+							width={Math.max(note.dur * perTick, 3)}
+							height={KEY - 2}
+							rx="2"
+							role="presentation"
+							onpointerdown={(event) => pressNote(event, index, 'move')}
+							oncontextmenu={(event) => noteMenu(event, index)}
+						/>
+						{#if !readonly}
+							<rect
+								class="edge"
+								x={Math.max(note.dur * perTick, 3) + note.tick * perTick - EDGE}
+								y={rowOf(note.note) + 1}
+								width={EDGE}
+								height={KEY - 2}
+								role="presentation"
+								data-testid={`edge-${index}`}
+								onpointerdown={(event) => pressNote(event, index, 'size')}
+								oncontextmenu={(event) => noteMenu(event, index)}
+							/>
+						{/if}
+					</g>
+				{/each}
+				{#if !readonly}
+					<rect
+						class="end"
+						x={shown.length * perTick - 3}
+						width="6"
+						height={HEIGHT}
+						role="presentation"
+						data-testid="clip-end"
+						onpointerdown={(event) => {
 							event.stopPropagation();
-							if (readonly) return;
-							chosen = new Set();
-							onchange(removeNotes(clip, new Set([index])));
+							gesture = { kind: 'length', clip };
 						}}
 					/>
-					{#if !readonly}
-						<rect
-							class="edge"
-							x={Math.max(note.dur * perTick, 3) + note.tick * perTick - EDGE}
-							y={rowOf(note.note) + 1}
-							width={EDGE}
-							height={KEY - 2}
-							role="presentation"
-							data-testid={`edge-${index}`}
-							onpointerdown={(event) => pressNote(event, index, 'size')}
-						/>
-					{/if}
-				</g>
-			{/each}
-			{#if !readonly}
-				<rect
-					class="end"
-					x={shown.length * perTick - 3}
-					width="6"
-					height={HEIGHT}
-					role="presentation"
-					data-testid="clip-end"
-					onpointerdown={(event) => {
-						event.stopPropagation();
-						gesture = { kind: 'length', clip };
-					}}
-				/>
-			{/if}
-			{#if gesture?.kind === 'band'}
-				<rect
-					class="band"
-					x={Math.min(gesture.from.x, gesture.at.x)}
-					y={Math.min(gesture.from.y, gesture.at.y)}
-					width={Math.abs(gesture.at.x - gesture.from.x)}
-					height={Math.abs(gesture.at.y - gesture.from.y)}
-				/>
-			{/if}
-			{#if playhead !== null}
-				<line class="playhead" x1={playhead * perTick} x2={playhead * perTick} y1="0" y2={HEIGHT} />
-			{/if}
-		</svg>
+				{/if}
+				{#if ghost && !gesture}
+					<rect
+						class="ghost"
+						x={ghost.tick * perTick}
+						y={rowOf(ghost.note) + 1}
+						width={Math.max(draw * perTick, 3)}
+						height={KEY - 2}
+						rx="2"
+					/>
+				{/if}
+				{#if ghostLabel}
+					{@const at = gesture?.kind === 'draw' ? gesture.note : { ...ghost!, dur: draw }}
+					<text
+						class="ghost-label"
+						x={(at.tick + at.dur) * perTick + 6}
+						y={rowOf(at.note) + KEY - 2}
+						data-testid="ghost">{ghostLabel}</text
+					>
+				{/if}
+				{#if gesture?.kind === 'band'}
+					<rect
+						class="band"
+						x={Math.min(gesture.from.x, gesture.at.x)}
+						y={Math.min(gesture.from.y, gesture.at.y)}
+						width={Math.abs(gesture.at.x - gesture.from.x)}
+						height={Math.abs(gesture.at.y - gesture.from.y)}
+					/>
+				{/if}
+				{#if playhead !== null}
+					<line class="playhead" x1={playhead * perTick} x2={playhead * perTick} y1="0" y2={HEIGHT} />
+				{/if}
+			</svg>
+		</div>
 	</div>
+	{#if offer}
+		<div class="notice" role="alert" data-testid="lengthen-offer">
+			<span>Growing this clip to {bars(offer.length)} would run it into the next clip on its track.</span>
+			<button type="button" onclick={lengthen}>Lengthen to {bars(offer.length)}</button>
+			<button type="button" aria-label="Leave the clip as it is" onclick={() => (offer = null)}>×</button>
+		</div>
+	{:else if notice}
+		<div class="notice" role="status" data-testid="clip-grown">
+			<span>{notice}</span>
+			<button type="button" onclick={undoGrowth}>Undo</button>
+		</div>
+	{/if}
 </div>
+
+{#if menu}
+	<ContextMenu
+		x={menu.x}
+		y={menu.y}
+		label={chosen.size > 1 ? `${chosen.size} notes` : 'Note'}
+		items={noteItems()}
+		onclose={() => (menu = null)}
+	/>
+{/if}
 
 <div class="below" use:follows>
 	<div style:width="{KEYS + width}px" style:padding-left="{KEYS}px" style:box-sizing="border-box">
@@ -587,25 +838,39 @@
 			{#each free as choice (choice.key)}<option value={choice.key}>{choice.label}</option>{/each}
 		</select>
 		<span class="muted"
-			>Double-click a lane to add a point, and on a point to remove it. A point's ramp is how many ticks it takes to get
-			there.</span
+			>Click a lane to add a point, and drag one to move it. Delete or a right-click removes it. A point's ramp is how
+			many ticks it takes to get there.</span
 		>
 	</div>
 {/if}
 
 <style>
+	/* One line, whatever is chosen: a click that adds a note chooses it, and if the hint gave way to taller fields, the roll
+	   would move under the pointer, and a double-click's second click would land on another row. What doesn't fit scrolls. */
 	.toolbar {
 		flex: none;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		min-height: 2rem;
+		height: 2rem;
 		font-size: 0.8rem;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: none;
 		margin: 0.2rem 0;
 	}
 	.toolbar button {
 		padding: 0 0.5rem;
+	}
+	.toolbar > * {
+		flex: none;
+	}
+	.toolbar > .hint {
+		flex: 1 1 0;
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	fieldset {
 		display: flex;
@@ -619,10 +884,17 @@
 		width: 4.5rem;
 		padding: 0.05rem 0.25rem;
 	}
-	/* The roll takes the room its panel has, and scrolls inside it. */
-	.roll {
+	/* The roll takes the room its panel has, and scrolls inside it. What it says about a clip floats over its corner. */
+	.frame {
+		position: relative;
 		flex: 1 1 200px;
 		min-height: 100px;
+		display: flex;
+		flex-direction: column;
+	}
+	.roll {
+		flex: 1;
+		min-height: 0;
 		overflow: auto;
 		border: 1px solid var(--line);
 		border-radius: 6px 6px 0 0;
@@ -702,6 +974,40 @@
 	.playhead {
 		stroke: #f0883e;
 		pointer-events: none;
+	}
+	.ghost {
+		fill: #2f81f740;
+		stroke: #79c0ff;
+		stroke-dasharray: 3 2;
+		pointer-events: none;
+	}
+	.ghost-label {
+		fill: var(--text);
+		font-size: 11px;
+		stroke: #0d1117;
+		stroke-width: 3px;
+		paint-order: stroke;
+		pointer-events: none;
+	}
+	.notice {
+		position: absolute;
+		right: 0.75rem;
+		bottom: 0.75rem;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		max-width: calc(100% - 5rem);
+		padding: 0.35rem 0.5rem 0.35rem 0.75rem;
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		box-shadow: 0 4px 14px #00000080;
+		font-size: 0.8rem;
+	}
+	.notice button {
+		flex: none;
+		padding: 0.1rem 0.5rem;
 	}
 	.below {
 		flex: none;

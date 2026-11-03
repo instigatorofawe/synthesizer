@@ -29,8 +29,8 @@ async function newTrack(page: Page, name: string) {
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
 	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
-	await page.getByRole('button', { name: 'Add track' }).click();
-	await page.getByLabel('Patch slot 1', { exact: true }).selectOption('lead');
+	await page.getByRole('button', { name: 'Add track' }).click(); // It asks which patch the track plays
+	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 }
 
 // A track with a one-bar clip, made by a double-click, open in the roll.
@@ -76,6 +76,7 @@ test('a click adds a note as long as the Draw length, and the ghost says what it
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-tick', '1440');
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-note', '64');
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-dur', '240');
+	await expect(page.getByTestId('clip-grown')).toHaveCount(0); // A note inside the clip leaves its length alone
 
 	// [ and ] step it, by where the keys are, and choosing a note brings its length back.
 	await page.keyboard.press(']');

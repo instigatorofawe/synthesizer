@@ -12,6 +12,7 @@
 		ticksPerBar,
 		windowOf,
 		type Clip,
+		type PatchLike,
 		type Track
 	} from '#lib/TimelineEdit.ts';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
@@ -47,6 +48,10 @@
 		badTracks,
 		badClips,
 		meter = () => null,
+		patches = [],
+		picking = null,
+		onpick = () => {},
+		onopen = () => {},
 		onselect,
 		onchange,
 		onnew,
@@ -65,6 +70,10 @@
 		badTracks: Set<number>; // What the last compile complained about
 		badClips: Set<string>;
 		meter?: (track: number) => Ring | null; // What each track's level meter reads
+		patches?: PatchLike[]; // What the heads name each track's patches by
+		picking?: number | null; // The track whose head opened the patch picker
+		onpick?: (track: number, anchor: HTMLElement) => void; // A head's ▾, to choose another patch
+		onopen?: (track: number, patch: string) => void; // A head's patch name, to edit that patch
 		onselect: (selection: Selection) => void;
 		onchange: (doc: Timeline, selection?: Selection) => void;
 		onnew: (track: number, tick: number, length?: number) => void; // A new clip there, a bar long unless it says
@@ -105,6 +114,10 @@
 		const box = svg.getBoundingClientRect();
 		return { x: event.clientX - box.left, y: event.clientY - box.top };
 	}
+
+	// A head names a patch by its name. An id that isn't in the library is shown as it is, and the compiler says what's wrong.
+	const patchName = (id: string) => patches.find((patch) => patch.id === id)?.name ?? id;
+	const trackName = (track: Track) => track.name || `Track ${track.id}`;
 
 	const rowAt = (y: number) => Math.min(doc.tracks.length - 1, Math.max(0, Math.floor((y - TOP) / ROW)));
 
@@ -357,18 +370,50 @@
 <div class="arrangement" bind:this={view} data-testid="arrangement-view">
 	<div class="heads" bind:this={heads} style:padding-top="{TOP}px">
 		{#each doc.tracks as track (track.id)}
+			{@const names = track.slots.map(patchName)}
 			<div class="head" class:chosen={selection.track === track.id} style:height="{ROW}px">
 				<button
 					type="button"
+					class="select"
 					class:problem={badTracks.has(track.id)}
 					data-testid={`track-${track.id}`}
 					aria-pressed={selection.track === track.id}
 					onclick={() => onselect({ track: track.id, placement: null })}
 				>
-					<span class="title">{track.name || `Track ${track.id}`}</span>
-					<span class="muted">{track.slots.join(', ') || 'no patch'}{track.mute ? ', muted' : ''}</span>
+					<span class="title">{trackName(track)}</span>
 				</button>
-				<Meter ring={meter(track.id)} label={`Level of ${track.name || `Track ${track.id}`}`} />
+				<!-- The track plays its patch: its name opens it, and ▾ chooses another. -->
+				<div class="patch">
+					{#if names.length}
+						<button
+							type="button"
+							class="patchname"
+							data-testid={`track-patch-${track.id}`}
+							aria-label={`Open ${names[0]}`}
+							title={names[0]}
+							onclick={() => onopen(track.id, track.slots[0])}>{names[0]}</button
+						>
+						{#if names.length > 1}
+							<span class="muted more" title={names.slice(1).join(', ')}>+{names.length - 1}</span>
+						{/if}
+					{:else}
+						<span class="muted none">no patch</span>
+					{/if}
+					{#if track.mute}<span class="muted more">muted</span>{/if}
+					{#if !readonly}
+						<button
+							type="button"
+							class="pick"
+							aria-label={`Change the patch of ${trackName(track)}`}
+							aria-haspopup="listbox"
+							aria-expanded={picking === track.id}
+							title="Choose another patch"
+							onmousedown={(event) => event.preventDefault()}
+							onclick={(event) => onpick(track.id, event.currentTarget)}>▾</button
+						>
+					{/if}
+				</div>
+				<Meter ring={meter(track.id)} label={`Level of ${trackName(track)}`} />
 			</div>
 		{:else}
 			<p class="muted empty">No tracks yet.</p>
@@ -525,18 +570,61 @@
 		padding: 0 0.4rem 0.35rem 0;
 	}
 	.head button {
+		margin: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		text-align: left;
+		overflow: hidden;
+	}
+	.head .select {
 		flex: 1;
 		min-height: 0;
 		display: flex;
 		flex-direction: column;
-		justify-content: center;
+		justify-content: flex-end;
 		width: 100%;
-		text-align: left;
-		border: 0;
-		border-radius: 0;
-		background: transparent;
+		padding: 0 0.6rem;
 		font-size: 0.8rem;
-		overflow: hidden;
+	}
+	.patch {
+		display: flex;
+		align-items: center;
+		gap: 0.2rem;
+		min-width: 0;
+		padding: 0 0 0.2rem 0.6rem;
+		font-size: 0.72rem;
+	}
+	.head .patchname {
+		flex: 0 1 auto;
+		min-width: 0;
+		padding: 0;
+		color: var(--muted);
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+	.head .patchname:hover {
+		color: var(--accent);
+		text-decoration: underline;
+	}
+	.head .pick {
+		flex: none;
+		margin-left: auto;
+		padding: 0 0.3rem;
+		font-size: 0.8rem;
+		border-radius: 3px;
+		color: var(--muted);
+		line-height: 1.2;
+	}
+	.head .pick:hover,
+	.head .pick[aria-expanded='true'] {
+		color: var(--text);
+		background: #ffffff14;
+	}
+	.more,
+	.none {
+		flex: none;
+		white-space: nowrap;
 	}
 	.head :global(.meter) {
 		margin-left: 0.6rem;
@@ -545,19 +633,13 @@
 		background: #1a212b;
 		box-shadow: inset 3px 0 0 var(--accent);
 	}
-	.head button.problem {
+	.head .select.problem {
 		box-shadow: inset 3px 0 0 #f85149;
 	}
 	.title {
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-	}
-	.head .muted {
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		font-size: 0.72rem;
 	}
 	.empty {
 		padding: 0.5rem;

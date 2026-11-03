@@ -221,20 +221,23 @@
 			offer = { note, length: grown.length };
 			return;
 		}
+		// Asked before the change, which reaches `clip` at once.
+		const grows = grown !== clip;
 		draw = note.dur;
 		chosen = new Set([clip.notes.length]);
 		onchange(addNote(grown, note));
-		if (grown !== clip) tell(`Clip is now ${bars(grown.length)}`);
+		if (grows) tell(`Clip is now ${bars(grown.length)}`);
 	}
 
 	function lengthen() {
 		if (!offer) return;
-		const { note, length } = offer;
+		const { note } = offer;
+		const length = Math.max(clip.length, offer.length);
 		offer = null;
 		draw = note.dur;
 		chosen = new Set([clip.notes.length]);
-		onchange(addNote({ ...clip, length: Math.max(clip.length, length) }, note));
-		tell(`Clip is now ${bars(Math.max(clip.length, length))}`);
+		onchange(addNote({ ...clip, length }, note));
+		tell(`Clip is now ${bars(length)}`);
 	}
 
 	function undoGrowth() {

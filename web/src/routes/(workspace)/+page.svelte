@@ -28,6 +28,7 @@
 	import Meter from '#lib/Meter.svelte';
 	import { friendlyName } from '#lib/NodeHelp.ts';
 	import PatchPanel from '#lib/PatchPanel.svelte';
+	import { setSongValue, songValue } from '#lib/ParamValues.ts';
 	import { placeOf, placeWords, sizeOf, type Names, type Problem } from '#lib/Problems.ts';
 	import ReportPanel from '#lib/ReportPanel.svelte';
 	import { buildRequest, missingAssets, reachable, type AssetEntry, type CompileReport } from '#lib/Request.ts';
@@ -35,6 +36,7 @@
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
 	import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
+	import { stepVelocity } from '#lib/StepEntry.ts';
 	import {
 		BEATS_PER_BAR,
 		mixWrites,
@@ -721,16 +723,59 @@
 	let songEditor = $state<ReturnType<typeof TimelineEditor>>();
 	let stepWriting = $state(false);
 
+	// The velocity the keys play at, which is the roll's Vel, the velocity of new notes: so what is heard is what step entry and
+	// a take write, and C and V step it in either view. It outlasts the song it was set in, as the keys do.
+	let velocity = $state(100);
+
+	// Hold latches what the keys play: a key let go keeps sounding until it is played again, Esc, or Hold is turned off, which
+	// lets go of everything. It is only what is heard. Step entry still hears each key come up as it does, and a key a take
+	// records isn't latched, so the take writes how long it was down and what plays back is what was heard.
+	let hold = $state(false);
+	let latched = $state.raw<ReadonlySet<number>>(new Set());
+	const freeing = new Set<number>(); // Keys down to let go of a note they held, whose coming up is nothing more
+
 	function keyNote(note: number, on: boolean, at?: number) {
 		// What is written doesn't change what is heard. A key let go goes to step entry whatever the view, since it may have
 		// started a chord there, which waits for it. While a take runs, the take writes what is played instead.
 		if (!on || (view === 'song' && stepWriting && !take)) songEditor?.stepKey(note, on);
-		soundNote(note, on, at);
+		if (on && latched.has(note)) {
+			letGo([note], at);
+			// While a take records, a key played again sounds and is written as any other key is.
+			if (!take || takePhase !== 'started') {
+				freeing.add(note);
+				return;
+			}
+		}
+		if (!on && freeing.delete(note)) return;
+		const held = sounding.get(note);
+		if (!on && hold && held && !held.stamped) {
+			latched = new Set([...latched, note]);
+			return;
+		}
+		soundNote(note, on, at, velocity);
 	}
+
+	function letGo(notes: Iterable<number>, at?: number) {
+		const going = new Set(notes);
+		if (!going.size) return;
+		latched = new Set([...latched].filter((note) => !going.has(note)));
+		for (const note of going) soundNote(note, false, at);
+	}
+
+	function holdKeys(on: boolean) {
+		hold = on;
+		if (!on) letGo(latched);
+	}
+
+	// A held note goes with the image it was playing in, once another takes over.
+	$effect(() => {
+		const now = want;
+		untrack(() => letGo([...latched].filter((note) => sounding.get(note)?.source !== now)));
+	});
 
 	// Plays a note where the view on screen is heard, which is all the roll's audition of a track the image leaves out asks
 	// for: it mustn't reach step entry, which would write it.
-	function soundNote(note: number, on: boolean, at?: number) {
+	function soundNote(note: number, on: boolean, at?: number, vel = 100) {
 		if (!on) {
 			const held = sounding.get(note);
 			sounding.delete(note);
@@ -756,7 +801,7 @@
 		// A take records the keys that play its track, from the count-in on, and stamps them with when they were pressed.
 		const stamped = at !== undefined && takePhase === 'started' && to.source === 'song' && to.track === takeIndex;
 		sounding.set(note, { ...to, stamped });
-		use(to.source, () => engine.noteOn(to.track, note, 100, stamped ? at : undefined));
+		use(to.source, () => engine.noteOn(to.track, note, vel, stamped ? at : undefined));
 	}
 
 	// ----------------------------------------------------------------------------------------------------------- recording
@@ -891,9 +936,40 @@
 		}
 	}
 
-	function patchParam(param: Param, value: number) {
+	// A Control moves the sound where the Patch view's patch is heard, as it is dragged. Let go on a track of a song that can
+	// change, the value is the track's, saved with the song as a mixer knob's is: one step of the song's undo, and one compile,
+	// whose settling then plays what the song holds. Heard alone, or in an example, it moves the sound and saves nothing.
+	const controlsSave = $derived(hears.kind === 'song' && saved !== null && !recipe && timelineDoc !== null);
+	const controlValues = $derived.by(() => {
+		const values: Record<string, number> = {};
+		if (hears.kind !== 'song' || !songDoc || !shown) return values;
+		for (const param of shown.patch.graph.params) {
+			const value = songValue(songDoc, hears.id, param);
+			if (value !== undefined) values[String(param.id)] = value;
+		}
+		return values;
+	});
+	const controlsUnsaved = $derived.by(() => {
+		if (controlsSave) return '';
+		const keep = patchHistory ? ' Make default keeps it in the patch, for every song.' : '';
+		if (recipe && hears.kind === 'song')
+			return "An example's song can't be changed, so this moves the sound and saves nothing.";
+		return `No track plays this patch, so this moves the sound and saves nothing.${keep}`;
+	});
+
+	function patchParam(param: Param, value: number, done = false) {
 		if (hears.kind === 'song' && live === 'song') engine.setParam(hears.track, param.id, value);
 		else if (hears.kind === 'alone' && live === 'alone') engine.setParam(0, param.id, value);
+		if (done && controlsSave && hears.kind === 'song' && timelineDoc) {
+			timelineEdited({ text: JSON.stringify(setSongValue(timelineDoc, hears.id, param, value), null, 1) });
+		}
+	}
+
+	// A track's own value taken away, so the patch's default plays there again, heard at once and settled by the compile.
+	function patchParamReset(param: Param) {
+		if (!controlsSave || hears.kind !== 'song' || !timelineDoc) return;
+		if (live === 'song') engine.setParam(hears.track, param.id, param.default);
+		timelineEdited({ text: JSON.stringify(setSongValue(timelineDoc, hears.id, param, undefined), null, 1) });
 	}
 
 	// ------------------------------------------------------------------------------------------------------ probes, scopes
@@ -1252,6 +1328,9 @@
 		} else if (matches(event, 'start')) {
 			event.preventDefault();
 			toStart();
+		} else if (matches(event, 'softer') || matches(event, 'louder')) {
+			event.preventDefault(); // C and V step the velocity the keys play and new notes take, in either view
+			velocity = stepVelocity(velocity, matches(event, 'louder') ? 1 : -1);
 		} else if (undoable && (matches(event, 'undo') || matches(event, 'redo'))) {
 			event.preventDefault();
 			if (matches(event, 'undo')) undoable.undo();
@@ -1445,6 +1524,11 @@
 			recording={recordState === 'counting' || recordState === 'recording'}
 			where={keysWhere}
 			onnote={keyNote}
+			{hold}
+			{latched}
+			bind:velocity
+			onhold={holdKeys}
+			onletgo={() => letGo(latched)}
 		/>
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
 		<span class="grow"></span>
@@ -1502,6 +1586,7 @@
 							onwriting={(writing) => (stepWriting = writing)}
 							onsolo={toggleSolo}
 							onkey={(note, on) => started && soundNote(note, on)}
+							bind:velocity
 						/>
 					{/key}
 				{:else}
@@ -1545,6 +1630,9 @@
 					choose={nodeAsked}
 					onprobes={(next) => (probes = next)}
 					onparam={patchParam}
+					onreset={patchParamReset}
+					values={controlValues}
+					unsaved={controlsUnsaved}
 					onpart={(id) => void open({ part: id, patch: null }, false, 'patch')}
 				/>
 			</div>

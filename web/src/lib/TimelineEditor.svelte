@@ -13,7 +13,7 @@
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
-	import { clampVelocity, stepVelocity, type Cursor } from '#lib/StepEntry.ts';
+	import { clampVelocity, type Cursor } from '#lib/StepEntry.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -85,7 +85,8 @@
 		onnewpatch,
 		onwriting = () => {},
 		onsolo = () => {},
-		onkey
+		onkey,
+		velocity = $bindable(100)
 	}: {
 		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
 		doc: Timeline;
@@ -114,6 +115,7 @@
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
 		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, once audio has started
+		velocity?: number; // The velocity of new notes, clicked or stepped, which is the keys' too, so the page keeps it
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -131,7 +133,6 @@
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
-	let velocity = $state(100); // The velocity of new notes, clicked or stepped, which C and V step
 	// Step entry, which R or the Step toggle turns on and Esc leaves. It outlasts a change of clip, and its cursor is kept for
 	// each clip, so coming back to one carries on where it left off.
 	let stepping = $state(false);
@@ -485,7 +486,7 @@
 	}
 
 	// R turns step entry on or off, wherever focus is but a field or a dialog. From another tab it opens the notes to write
-	// in, and with no clip there is nothing to write into. C and V step the velocity of new notes.
+	// in, and with no clip there is nothing to write into. C and V, which step the velocity of new notes, are the page's.
 	function noteKeys(event: KeyboardEvent) {
 		const target = event.target as Element | null;
 		if (readonly || !active || typingIn(target) || target?.closest?.('dialog')) return;
@@ -494,9 +495,6 @@
 			if (event.repeat || !clip) return;
 			stepping = tab !== 'notes' || !stepping;
 			tab = 'notes';
-		} else if (matches(event, 'softer') || matches(event, 'louder')) {
-			event.preventDefault();
-			velocity = stepVelocity(velocity, matches(event, 'louder') ? 1 : -1);
 		}
 	}
 

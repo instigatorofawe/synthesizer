@@ -4,6 +4,8 @@
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
 	import GraphEditor from '#lib/GraphEditor.svelte';
+	import PatchControls from '#lib/PatchControls.svelte';
+	import { withDefault } from '#lib/ParamValues.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
@@ -45,6 +47,9 @@
 		ontext,
 		onprobes,
 		onparam,
+		onreset = () => {},
+		values = {},
+		unsaved = '',
 		onpart
 	}: {
 		patch: { id: string } | null;
@@ -78,7 +83,10 @@
 		ongraph: (graph: Graph) => void;
 		ontext: (text: string, typing: boolean) => void; // Typing until the field is left, which undoes as one step
 		onprobes: (probes: Probe[]) => void;
-		onparam: (param: Param, value: number) => void;
+		onparam: (param: Param, value: number, done: boolean) => void; // A Control dragged, or let go
+		onreset?: (param: Param) => void; // A Control's value taken off the track, so the patch's default plays
+		values?: Record<string, number>; // What the song holds for the patch's parameters, on the track it is heard on
+		unsaved?: string; // Why a Control's value isn't saved when it is let go, or '' when it is saved into the song
 		onpart: (id: string) => void;
 	} = $props();
 
@@ -223,21 +231,17 @@
 								</p>
 							{/each}
 							{#if params.length && playable}
-								<h4>Controls</h4>
-								{#each params as param (param.id)}
-									<label class="control">
-										<span>{param.name || `param ${param.id}`}</span>
-										<input
-											type="range"
-											min={param.min}
-											max={param.max}
-											step={(param.max - param.min) / 500}
-											value={param.default}
-											aria-label={`Control ${param.name || param.id}`}
-											oninput={(e) => onparam(param, Number(e.currentTarget.value))}
-										/>
-									</label>
-								{/each}
+								<PatchControls
+									id={patch.id}
+									{graph}
+									{hearing}
+									{values}
+									{unsaved}
+									editable={!readonly}
+									{onparam}
+									{onreset}
+									ondefault={(param, value) => ongraph(withDefault(graph, param.id, value))}
+								/>
 							{/if}
 						{/snippet}
 					</GraphEditor>
@@ -376,28 +380,5 @@
 	}
 	.waiting span {
 		color: var(--text);
-	}
-	.control {
-		display: flex;
-		align-items: center;
-		gap: 0.3rem;
-		margin-bottom: 0.2rem;
-	}
-	.control span {
-		flex: 0 0 5rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-size: 0.75rem;
-	}
-	.control input {
-		flex: 1;
-		min-width: 0;
-		width: auto;
-	}
-	h4 {
-		margin: 0.6rem 0 0.2rem;
-		font-size: 0.78rem;
-		color: var(--muted);
 	}
 </style>

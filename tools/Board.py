@@ -42,6 +42,7 @@ GOLDENS = {
     "Hold": 1920,
     "Mods": 1920,
     "Steals": 1920,
+    "Lines16": 1920,
 }
 
 

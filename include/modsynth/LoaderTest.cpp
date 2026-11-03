@@ -337,6 +337,36 @@ const u16 kBuffer0 = operand(Bank::Buffer, 0);
 const u16 kBuffer1 = operand(Bank::Buffer, 1);
 const u16 kConst0 = operand(Bank::Const, 0);
 
+// Revision 8: a line of 16-bit samples. Its steps must all say so, since what the line holds decides its memory.
+TEST(Rules, AnI16LineNeedsRevisionEightAndStepsThatAgree) {
+    Hand hand;
+    hand.patch.delays = {0.1f, 0.1f};
+    WireStep write{}, read{}, f32_write{};
+    write.op = static_cast<u8>(Op::DelayWriteI16);
+    write.in[0] = kBuffer0;
+    read.op = static_cast<u8>(Op::DelayReadI16);
+    read.out[0] = kBuffer0;
+    read.in[0] = kConst0;
+    f32_write.op = static_cast<u8>(Op::DelayWrite);
+    f32_write.in[0] = kBuffer0;
+    f32_write.resource = 1;  // An f32 line beside the i16 one is fine
+    hand.patch.voice.insert(hand.patch.voice.end(), {write, read, f32_write});
+    const auto declared = hand.bytes();
+    ASSERT_EQ(load<ManifestHeader>(declared.data() + sizeof(ChunkHeader)).revision, 8u);
+    EXPECT_EQ(load_error(declared), LoadError::None);
+
+    const u32 seven = 7;
+    EXPECT_EQ(load_error(with_manifest(declared, offsetof(ManifestHeader, revision), &seven, 4)), LoadError::BadPatch);
+
+    Hand f32_onto_i16 = hand;
+    f32_onto_i16.patch.voice[3].resource = 0;
+    EXPECT_EQ(load_error(f32_onto_i16.bytes()), LoadError::BadPatch) << "an f32 write after i16 steps";
+    Hand i16_onto_f32 = hand;
+    i16_onto_f32.patch.voice.push_back(read);
+    i16_onto_f32.patch.voice.back().resource = 1;
+    EXPECT_EQ(load_error(i16_onto_f32.bytes()), LoadError::BadPatch) << "an i16 read after an f32 write";
+}
+
 ParamDesc param(u16 id, ParamScope scope, u16 reg) {
     ParamDesc d{};
     d.id = id;

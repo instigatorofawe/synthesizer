@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -27,6 +28,7 @@
 #include <modsynth/Config.hpp>
 #include <modsynth/Format.hpp>
 #include <modsynth/Loader.hpp>
+#include <modsynth/Peak.hpp>
 #include <modsynth/Profile.hpp>
 #include <modsynth/Synth.hpp>
 
@@ -237,9 +239,16 @@ inline const std::vector<NodeSpec>& node_specs() {
         {"snap", {{"in", 0.0f}}, {"out"}},
         {"ratio", {{"in", 60.0f}}, {"out"}, {{"root", {}, true}}},
         {"pan", {{"in", 0.0f}, {"position", 0.0f}}, {"l", "r"}},
-        {"delay", {{"in", 0.0f}, {"time", 0.25f}}, {"out"}, {{"max", {}, true}}},
-        {"comb", {{"in", 0.0f}, {"time", 0.03f}, {"feedback", 0.8f}, {"damp", 0.2f}}, {"out"}, {{"max", {}, true}}},
-        {"allpass", {{"in", 0.0f}, {"time", 0.005f}, {"feedback", 0.5f}}, {"out"}, {{"max", {}, true}}},
+        // `line` is what the delay line holds: i16 takes half the memory, at about -96 dB of rounding.
+        {"delay", {{"in", 0.0f}, {"time", 0.25f}}, {"out"}, {{"max", {}, true}, {"line", {"f32", "i16"}}}},
+        {"comb",
+         {{"in", 0.0f}, {"time", 0.03f}, {"feedback", 0.8f}, {"damp", 0.2f}},
+         {"out"},
+         {{"max", {}, true}, {"line", {"f32", "i16"}}}},
+        {"allpass",
+         {{"in", 0.0f}, {"time", 0.005f}, {"feedback", 0.5f}},
+         {"out"},
+         {{"max", {}, true}, {"line", {"f32", "i16"}}}},
         {"follow", {{"in", 0.0f}, {"release", 0.1f}}, {"out"}},
         {"lfo", {{"rate", 1.0f}, {"depth", 1.0f}}, {"out"}},
         {"math",
@@ -825,6 +834,12 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
         delays.push_back(seconds);
         return static_cast<u16>(delays.size() - 1);
     };
+    // Whether a delay node's line holds 16-bit samples, which its ops' I16 forms use.
+    const auto line_i16 = [&](const Node& n) {
+        const std::string line = n.config.value("line", "f32");
+        if (line != "f32" && line != "i16") throw CompileError(node_where(n.id), "unknown line '" + line + "'");
+        return line == "i16";
+    };
 
     std::map<int, u16> delay_lines;
     for (const int it : order) {
@@ -1058,23 +1073,26 @@ inline CompiledPatch compile_patch(const json& source, const std::string& where,
         } else if (type == "delay") {
             if (!delay_lines.count(id)) delay_lines[id] = add_delay(n, 1.0f);
             const u16 line = delay_lines[id];
+            const bool i16 = line_i16(n);
             if (second_part) {
                 const Value time = scalar_in(n, "time");
                 const u8 mode = feedback.count(id) ? kReadBeforeWrite : u8{0};
-                set("out", audio_step(Op::DelayRead, {time}, 1, state, mode, line).out[0]);
+                set("out", audio_step(i16 ? Op::DelayReadI16 : Op::DelayRead, {time}, 1, state, mode, line).out[0]);
             } else {
                 // A feedback delay's read may already have run, and this is where its input is finally known.
-                audio_step(Op::DelayWrite, {buffer_in(n, "in")}, 0, state + 1, 0, line);
+                audio_step(i16 ? Op::DelayWriteI16 : Op::DelayWrite, {buffer_in(n, "in")}, 0, state + 1, 0, line);
             }
         } else if (type == "comb") {
             const u16 line = add_delay(n, 0.1f);
             const Value in = buffer_in(n, "in"), time = scalar_in(n, "time"), fb = scalar_in(n, "feedback"),
                         damp = scalar_in(n, "damp");
-            set("out", audio_step(Op::Comb, {in, time, fb, damp}, 1, state, 0, line).out[0]);
+            const Op op = line_i16(n) ? Op::CombI16 : Op::Comb;
+            set("out", audio_step(op, {in, time, fb, damp}, 1, state, 0, line).out[0]);
         } else if (type == "allpass") {
             const u16 line = add_delay(n, 0.05f);
             const Value in = buffer_in(n, "in"), time = scalar_in(n, "time"), fb = scalar_in(n, "feedback");
-            set("out", audio_step(Op::Allpass, {in, time, fb}, 1, state, 0, line).out[0]);
+            const Op op = line_i16(n) ? Op::AllpassI16 : Op::Allpass;
+            set("out", audio_step(op, {in, time, fb}, 1, state, 0, line).out[0]);
         } else if (type == "follow") {
             const Value in = buffer_in(n, "in"), release = scalar_in(n, "release");
             set("out", audio_step(Op::Follow, {in, release}, 1, state).out[0]);
@@ -3267,8 +3285,20 @@ inline std::string over_budget(const ChunkTable& table, u64 program, u64 cycles,
     return text;
 }
 
-// Fails what a device would refuse, checked as it would load the image, and otherwise says how much of it the image
-// takes. `names` names each Program, in the order a bank selects them.
+// How far past full scale a Program goes, for its error.
+inline std::string over_full_scale(const Peak& peak) {
+    char text[160];
+    std::snprintf(
+        text, sizeof text,
+        "reaches %.3f at %.2f s, %.1f dB over full scale, and this target plays up to 1. Turn it down: the master's "
+        "gain, or a track's or a bus's.",
+        static_cast<double>(peak.level), peak.seconds, 20.0 * std::log10(static_cast<double>(peak.level)));
+    return text;
+}
+
+// Fails what a device would refuse, checked as it would load the image, and what it would play past full scale, which
+// a device has no limiter to stop, found by playing each Program here as the device would. Otherwise says how much of
+// the device the image takes. `names` names each Program, in the order a bank selects them.
 inline json check_target(const Target& t, const std::vector<std::byte>& bytes, const std::vector<std::string>& names) {
     const auto fail = [&](const std::string& why) { throw CompileError("target", t.name + ": " + why); };
     const auto bytes_text = [](u64 n) { return std::to_string(n) + " bytes"; };
@@ -3344,6 +3374,11 @@ inline json check_target(const Target& t, const std::vector<std::byte>& bytes, c
             entry["voices"] = std::move(tracks);
             most_cycles = std::max(most_cycles, cycles);
         }
+        const Peak peak = peak_of({reinterpret_cast<const std::byte*>(aligned.data()), bytes.size()}, i, t.rate,
+                                  t.frame_size, t.channels);
+        if (!peak.ok) fail(name + " can't be played here to find its peak");
+        if (peak.level > 1.0f) fail(name + " " + over_full_scale(peak));
+        entry["peak"] = peak.level;
         programs.push_back(std::move(entry));
         most.fast = std::max(most.fast, need.fast);
         most.bulk = std::max(most.bulk, need.bulk);

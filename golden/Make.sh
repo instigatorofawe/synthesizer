@@ -54,3 +54,6 @@ request["omit"] = [c["hash"] for c in json.load(open(report))["chunks"] if c["ki
 json.dump(request, open("build/tools/Thin.json", "w"))
 subprocess.run(["build/tools/modsynth_compile", "build/tools/Thin.json", "golden/Demo.thin.image"], check=True)
 PYTHON
+
+# Revision 8.
+make_golden Lines16 1920

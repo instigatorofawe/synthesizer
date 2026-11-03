@@ -67,7 +67,8 @@ json every_tick(u32 repeat, u32 dur = 1) {
         "clips": [{"id": "c", "length": 1, "notes": [{"tick": 0, "note": 60, "vel": 100, "dur": )" +
                        std::to_string(dur) + R"(}]}],
         "tracks": [{"id": 1, "voices": 4, "slots": ["p"], "placements": [{"clip": "c", "tick": 0, "repeat": )" +
-                       std::to_string(repeat) + R"(}]}]}}]})");
+                       std::to_string(repeat) + R"(}]}],
+        "master": {"gain": 0.1}}}]})");  // Saws in step reach 2.9, which a target would refuse as too loud
 }
 
 }  // namespace

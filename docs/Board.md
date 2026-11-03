@@ -107,6 +107,8 @@ only if the board would play it:
 - Its frame size is the board's.
 - Its image and chunk count fit what the board stores.
 - Each Program fits in the board's memory, laid out with the board's own struct sizes.
+- No Program plays a sample past full scale on the board, which has no limiter. The compiler plays each one as the board would, mono at
+  its rate, to find out.
 
 The report's `target` says how much of each it uses.
 

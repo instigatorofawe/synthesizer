@@ -571,6 +571,58 @@ def op_programs() -> dict:
             8,
             4,
         ),
+        # The three above on lines of 16-bit samples.
+        "DelayI16": (
+            "chain",
+            lambda id, s: (
+                [
+                    {
+                        "id": id,
+                        "type": "delay",
+                        "max": 0.005,
+                        "line": "i16",
+                        "inputs": {"time": 0.004},
+                    }
+                ],
+                [wire(s, id, "in")],
+            ),
+            8,
+            4,
+        ),
+        "CombI16": (
+            "chain",
+            lambda id, s: (
+                [
+                    {
+                        "id": id,
+                        "type": "comb",
+                        "max": 0.005,
+                        "line": "i16",
+                        "inputs": {"time": 0.004},
+                    }
+                ],
+                [wire(s, id, "in")],
+            ),
+            8,
+            4,
+        ),
+        "AllpassI16": (
+            "chain",
+            lambda id, s: (
+                [
+                    {
+                        "id": id,
+                        "type": "allpass",
+                        "max": 0.005,
+                        "line": "i16",
+                        "inputs": {"time": 0.004},
+                    }
+                ],
+                [wire(s, id, "in")],
+            ),
+            8,
+            4,
+        ),
         "Follow": (
             "chain",
             lambda id, s: (

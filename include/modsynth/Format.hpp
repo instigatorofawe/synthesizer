@@ -35,7 +35,7 @@ template <class T>
 
 inline constexpr u32 kChunkMagic = 0x4B43534D;  // "MSCK"
 inline constexpr u8 kFormatVersion = 1;         // Changes only if an old engine must not even try to read an image
-inline constexpr u32 kFormatRevision = 7;       // The newest additions this engine understands
+inline constexpr u32 kFormatRevision = 8;       // The newest additions this engine understands
 inline constexpr u32 kChunkAlign = 8;
 inline constexpr u16 kNone = 0xFFFF;
 
@@ -209,16 +209,24 @@ struct OpSignature {
 }
 [[nodiscard]] constexpr bool op_known(u8 op) { return op >= 1 && op < static_cast<u8>(Op::kCount); }
 
+// The ops whose delay line holds 16-bit samples. Every step on one line must agree, and the line takes half the memory.
+[[nodiscard]] constexpr bool op_line_i16(u8 op) {
+    return op >= static_cast<u8>(Op::DelayWriteI16) && op <= static_cast<u8>(Op::AllpassI16);
+}
+// A delay line's samples, in floats of bulk memory, which is how the engine lays it out.
+[[nodiscard]] constexpr u32 line_floats(u32 samples, bool i16) { return i16 ? (samples + 1) / 2 : samples; }
+
 // The revision that added an opcode. An image must declare it, so an older engine reports "needs a newer engine" and
 // not "damaged". Lines in Opcodes.def can't carry this, as they never change. A revision adding an opcode adds a line.
 [[nodiscard]] constexpr u32 op_revision(Op op) {
-    return op >= Op::Sample3   ? 7
-           : op >= Op::OscMod  ? 6
-           : op >= Op::KLfo2   ? 5
-           : op >= Op::Sample2 ? 4
-           : op >= Op::Tone    ? 2
-           : op >= Op::Saw     ? 1
-                               : 0;
+    return op >= Op::DelayWriteI16 ? 8
+           : op >= Op::Sample3     ? 7
+           : op >= Op::OscMod      ? 6
+           : op >= Op::KLfo2       ? 5
+           : op >= Op::Sample2     ? 4
+           : op >= Op::Tone        ? 2
+           : op >= Op::Saw         ? 1
+                                   : 0;
 }
 
 struct WireStep {

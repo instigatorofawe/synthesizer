@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <gtest/gtest.h>
 #include <random>
+#include <set>
 #include <string>
 
 #include <modsynth/TestSupport.hpp>
@@ -358,6 +359,51 @@ TEST(CompilePatch, AcceptsFeedbackThroughADelay) {
         if (s.op == static_cast<u8>(Op::DelayRead)) read_first = s.mode == kReadBeforeWrite;
     }
     EXPECT_TRUE(read_first);
+}
+
+// `"line": "i16"` asks for the I16 form of each op on that node's line, and only that node's.
+TEST(CompilePatch, AnI16LineCompilesToTheI16Ops) {
+    json graph = json::parse(R"({
+      "nodes": [
+        {"id": 1, "type": "noise"}, {"id": 2, "type": "add"}, {"id": 3, "type": "delay", "max": 0.1, "line": "i16"},
+        {"id": 4, "type": "mul", "inputs": {"b": 0.5}}, {"id": 5, "type": "comb", "line": "i16"},
+        {"id": 6, "type": "allpass", "line": "i16"}, {"id": 7, "type": "allpass"}, {"id": 8, "type": "out"}
+      ],
+      "edges": [
+        {"from": 1, "to": 2, "input": "a"}, {"from": 4, "to": 2, "input": "b"}, {"from": 2, "to": 3, "input": "in"},
+        {"from": 3, "to": 4, "input": "a"}, {"from": 4, "to": 5, "input": "in"}, {"from": 5, "to": 6, "input": "in"},
+        {"from": 6, "to": 7, "input": "in"}, {"from": 7, "to": 8, "input": "l"}
+      ]})");
+    const auto patch = compile_patch(graph, "p");
+    PatchView v;
+    ASSERT_TRUE(parse_patch(patch.chunk.payload, v));
+    std::multiset<int> ops;
+    for (u32 i = 0; i < v.h.voice_steps; ++i) {
+        const WireStep s = v.step(v.h.control_steps + i);
+        if (op_signature(static_cast<Op>(s.op)).resource == Resource::Delay) ops.insert(s.op);
+        if (s.op == static_cast<u8>(Op::DelayReadI16)) EXPECT_EQ(s.mode, kReadBeforeWrite);
+    }
+    EXPECT_EQ(ops, (std::multiset<int>{static_cast<int>(Op::Allpass), static_cast<int>(Op::DelayWriteI16),
+                                       static_cast<int>(Op::DelayReadI16), static_cast<int>(Op::CombI16),
+                                       static_cast<int>(Op::AllpassI16)}));
+
+    const auto declared = [](const std::vector<std::byte>& image) {
+        return load<ManifestHeader>(image.data() + sizeof(ChunkHeader)).revision;
+    };
+    EXPECT_EQ(declared(compile_image({{"patches", {{"p", {{"graph", graph}}}}}, {"programs", json::array()}}).image),
+              8u);
+    for (json& n : graph["nodes"]) n.erase("line");
+    EXPECT_LT(declared(compile_image({{"patches", {{"p", {{"graph", graph}}}}}, {"programs", json::array()}}).image),
+              8u)
+        << "an image with no I16 op keeps loading on older engines";
+
+    graph["nodes"][4]["line"] = "i8";
+    try {
+        compile_patch(graph, "p");
+        ADD_FAILURE() << "compiled";
+    } catch (const CompileError& e) {
+        EXPECT_NE(std::string(e.what()).find("unknown line 'i8'"), std::string::npos) << e.what();
+    }
 }
 
 TEST(CompilePatch, FeedForwardDelayRunsWriteFirst) {

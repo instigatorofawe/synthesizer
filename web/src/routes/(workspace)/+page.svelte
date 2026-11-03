@@ -718,6 +718,9 @@
 				<span data-testid="voices">{engineState.voices}</span> voices, generation
 				<span data-testid="generation">{engineState.generation}</span>
 				{#if engineState.guardTrips}, {engineState.guardTrips} guard trips{/if}
+				{#if engineState.limited < 1}, <span class="limiting" data-testid="limiting"
+						>limiting {(20 * Math.log10(engineState.limited)).toFixed(1)} dB</span
+					>{/if}
 				{#if LOAD_ERRORS[engineState.error]}, {LOAD_ERRORS[engineState.error]}{/if}
 			</span>
 		{/if}
@@ -990,6 +993,9 @@
 		font-size: 0.75rem;
 		color: #d29922;
 		white-space: nowrap;
+	}
+	.limiting {
+		color: #d29922;
 	}
 	.body {
 		display: grid;

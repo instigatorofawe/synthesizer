@@ -58,13 +58,15 @@ async function timelineJson(page: Page) {
 	return page.getByLabel('Timeline JSON');
 }
 
+// The patch's JSON is a tab of the graph's side column, beside the graph.
 async function graphJson(page: Page) {
-	await page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'JSON' }).click();
+	await page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name: 'JSON' }).click();
 	return page.getByLabel('Graph JSON');
 }
 
+// Back from the JSON to the side column's Patch tab, where the scopes are.
 const graphView = (page: Page) =>
-	page.getByRole('tablist', { name: 'Patch views' }).getByRole('tab', { name: 'Graph' }).click();
+	page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name: 'Patch' }).click();
 
 const peaksIn = (scope: ReturnType<Page['getByRole']>, held = false) =>
 	scope

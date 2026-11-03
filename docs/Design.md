@@ -931,6 +931,7 @@ to.
 changes no hash. It takes its node table from the compiler's catalog, the table the compiler reads, so the two can't disagree. The compiler's report carries the debug sidecar
 from section 13, which colours wires by rate, dims nodes that compiled away and places probes. An error's `where` names its node, and an error inside a subpatch lands on
 the subpatch. The compiler stops at the first error, so an editor shows one at a time. The JSON stays on the page, and text that doesn't parse leaves the last drawing alone.
+It is a tab of the side column, beside Node and Patch, so the graph stays on screen while it is open and draws what is typed as it is typed.
 
 - A node shows a name a person looks for, such as Filter, over the compiler's, biquad. Those names, a group, a line on what each node does, other words
   for it and each input's unit and range are a table in the web app, `NodeHelp.ts`, which a test holds to the catalog in both directions. A range is the
@@ -943,6 +944,15 @@ the subpatch. The compiler stops at the first error, so an editor shows one at a
   the nearest place that covers no other node, and one from a wire arrives wired to its first input. Tidy lays the graph out again as one edit.
 - A rate error offers to put a snap on its wire, as one edit, and never puts one in unasked, since section 5 leaves that choice to the patch's author.
   A node that compiled away says why where the graph shows it, which is when none of its wires lead to the out node.
+- A wire is clicked on a wide stroke that can't be seen, under the one that can. Chosen, the side column says what it joins and what its input goes back
+  to without it, and Delete takes it away. Shift-drag on empty canvas draws a box that chooses what it touches, Shift-click adds a node or takes it away,
+  and Mod+A chooses them all. Several move as one edit and are deleted as one, which leaves the note node and the patch's ports, since a track, an insert
+  or another patch is wired through them. One chosen on its own can still be deleted, as an insert drops its note node.
+- Mod+C copies the chosen nodes and the wires between them into the page's clipboard, so they paste into any patch. A wire from a node left behind
+  isn't copied, since what it comes from doesn't come along. A paste goes at the pointer or beside what was copied, at the nearest place that covers no
+  node, with ids above every id the patch has (`pasteNodes`). A patch has one out node, so a second isn't pasted. A param node reads the parameter it
+  read in its own patch, a parameter of the same name in another, or else a copy of its own, added to the patch, since an id names a parameter only in
+  its own patch. Mod+D duplicates, and Mod-drag leaves the nodes where they were and drags copies.
 
 **The timeline editor.** Arrangement, piano roll, lanes and mixer are views of one document, which stays on the page as JSON. Every edit is a pure function from a document to a document, so undo is a list of
 old ones, and as in the graph editor these decide little about what is legal: overlapping clips can be drawn, and the compiler says what is wrong and marks the track. What an edit does take care of is references, so
@@ -995,7 +1005,7 @@ four-note chord on it peaks near -5 dBFS, short of the limiter [measured].
 
 Mod+C, Mod+V and Mod+D copy, paste and duplicate the chosen notes while the roll has focus, and the chosen clip in the
 arrangement otherwise, but not in a field. Outside a field Mod+D is always taken in the Song view, so the browser never
-bookmarks the page for it. The clipboard is the page's own (`Clipboard.ts`), with notes and a clip kept apart, and it lasts
+bookmarks the page for it. The clipboard is the page's own (`Clipboard.ts`), with notes, a clip and a graph's nodes kept apart, and it lasts
 as long as the page does, so a copy reaches another clip or timeline, and can come from an example. A paste lands straight
 after what was copied, in the clip or on the track it came from, and the next paste straight after that one, so pasting
 again lays copies end to end as Mod+D does. Anywhere else it lands where it was copied from. The playhead would be the other

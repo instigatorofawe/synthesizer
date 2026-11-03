@@ -1,27 +1,34 @@
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
+	import { clipboard } from '#lib/Clipboard.ts';
+	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import {
 		addNode,
 		addZone,
+		boundsOf,
 		COLUMN,
 		connect,
+		copyNodes,
 		detailOf,
 		disconnect,
 		edgeInto,
 		freeSpot,
 		inputsOf,
 		insertSnap,
-		moveNode,
+		isPort,
+		moveNodes,
 		NODE_HEADER,
 		NODE_WIDTH,
 		nodeHeight,
+		nodesTouching,
 		optionsOf,
 		outputsOf,
 		parseCurve,
+		pasteNodes,
 		placed,
 		PORT_SPACING,
 		rateErrorInput,
-		removeNode,
+		removeNodes,
 		removeZone,
 		setField,
 		setLiteral,
@@ -30,7 +37,9 @@
 		tidy,
 		whyCompiledAway,
 		zonesOf,
+		type Box,
 		type CatalogEntry,
+		type CopiedNodes,
 		type GraphNode,
 		type LibraryPatch,
 		type Point
@@ -38,7 +47,7 @@
 	import { friendlyName, helpOf, rangeText, shown } from '#lib/NodeHelp.ts';
 	import NodePalette from '#lib/NodePalette.svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
-	import { matches, modHeld, typingIn } from '#lib/Shortcuts.ts';
+	import { label, matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 
@@ -56,7 +65,9 @@
 		readonly = false,
 		active = true,
 		choose = null,
+		tab = $bindable('patch'),
 		side,
+		json,
 		onchange,
 		onprobes
 	}: {
@@ -73,14 +84,24 @@
 		readonly?: boolean; // For looking at: a node can be chosen and probed, and nothing changes
 		active?: boolean; // Whether keys are for this editor, when it shares a page with others
 		choose?: { node: number } | null; // A node to choose and bring into view, asked for from outside, each time a new one
+		tab?: SideTab; // What the side column shows, kept by the page from one patch to the next
 		side?: Snippet; // Drawn above the inspector
+		json?: Snippet; // The patch's JSON, in the side column's last tab
 		onchange: (graph: Graph) => void;
 		onprobes: (probes: Probe[]) => void;
 	} = $props();
 
+	// What the side column shows: what is chosen on the canvas, the patch's parameters, or its JSON, beside the graph.
+	export type SideTab = 'node' | 'patch' | 'json';
+
+	// A wire, by the input it goes into, since an input takes one wire.
+	type WireEnd = { to: number; input: string };
+
 	type Gesture =
 		| { kind: 'pan'; from: Point; view: Point }
-		| { kind: 'move'; id: number; offset: Point; at: Point }
+		// The chosen nodes dragged, or their copies with Mod held. Nothing moves until the pointer has gone further than a click.
+		| { kind: 'move'; ids: number[]; client: Point; start: Point; by: Point; moved: boolean }
+		| { kind: 'box'; from: Point; at: Point } // Shift-drag on empty canvas
 		| { kind: 'wire'; from: number; port: string; start: Point; at: Point };
 
 	// The node search, open. A node it adds goes at `at` or the nearest free place, and one opened from a wire dropped on empty
@@ -105,21 +126,64 @@
 	const MARGIN = 40; // Around a fitted graph, which leaves room for a message under a node
 	const PALETTE_WIDTH = 300;
 	const PALETTE_HEIGHT = 340; // At most: the search and a list of 280 pixels
+	const DRAG = 3; // CSS pixels a press goes before it is a drag, so that a click doesn't move a node by a pixel
+	const COPY_STEP = 24; // Below and right of the nodes copied, where a duplicate or a paste goes if there is room
 
 	let svg: SVGSVGElement;
 	let size = $state({ width: 1000, height: 560 }); // Of the canvas on screen, in CSS pixels
 	let view = $state({ x: -30, y: -30, scale: 1 }); // The graph point at the canvas's top left, and CSS pixels to a unit
-	let selected = $state<number | null>(null);
+	let selection = $state(new Set<number>()); // The chosen nodes' ids, replaced whole on each change
+	let chosenWire = $state<WireEnd | null>(null); // Or a wire, which is chosen on its own
 	let gesture = $state<Gesture | null>(null);
+	let copying = $state.raw<Graph | null>(null); // While Mod-drag copies: the graph with the copies in it, which are what move
 	let palette = $state<Palette | null>(null);
-	let hover: { x: number; y: number } | null = null; // The pointer over the canvas, where N opens the search
+	let menu = $state<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+	let hover: { x: number; y: number } | null = null; // The pointer over the canvas, where N opens the search and Mod+V pastes
+
+	// A graph opens on its patch, or on its JSON if that was open for the last one, since nothing in it is chosen yet.
+	if (untrack(() => tab) === 'node') tab = 'patch';
 
 	const heightOf = (node: GraphNode) => nodeHeight(node, catalog, library);
 	const sizeOf = (node: GraphNode) => ({ width: NODE_WIDTH, height: heightOf(node) });
-	const laid = $derived(placed(graph, heightOf));
+	const laid = $derived(copying ?? placed(graph, heightOf));
 	const others = $derived(library.filter((patch) => patch.id !== self));
 	const types = $derived(catalog.map((entry) => entry.type));
-	const chosen = $derived(laid.nodes.find((node) => node.id === selected) ?? null);
+	// What is chosen and still there, after an undo or an edit to the JSON took some of it away.
+	const picked = $derived(laid.nodes.filter((node) => selection.has(node.id)));
+	const chosen = $derived(picked.length === 1 ? picked[0] : null);
+	// Delete takes all of several, but the nodes the patch is played and wired through. One on its own goes, whatever it is.
+	const deletable = $derived(picked.length > 1 ? picked.filter((node) => !isPort(node)) : picked);
+	const kept = $derived(picked.length > 1 ? picked.filter(isPort) : []);
+	const keptText = $derived.by(() => {
+		const names = kept.map((node) => `${friendlyName(node.type)} ${node.id}`);
+		const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
+		const [stay, them] = names.length === 1 ? ['stays', 'it'] : ['stay', 'them'];
+		return `${list} ${stay}, since the patch is played and wired through ${them}. Choose one on its own to delete it.`;
+	});
+	const modName = modKey() === 'Meta' ? '⌘' : 'Ctrl';
+	const boxOf = (box: { from: Point; at: Point }): Box => ({
+		x: Math.min(box.from.x, box.at.x),
+		y: Math.min(box.from.y, box.at.y),
+		width: Math.abs(box.at.x - box.from.x),
+		height: Math.abs(box.at.y - box.from.y)
+	});
+	// What a box being drawn would choose, shown chosen as it is drawn.
+	const boxed = $derived(gesture?.kind === 'box' ? new Set(nodesTouching(laid, boxOf(gesture), heightOf)) : null);
+	const moving = (id: number) => gesture?.kind === 'move' && gesture.ids.includes(id);
+	const looksChosen = (id: number) => (boxed ? boxed.has(id) : selection.has(id) || moving(id));
+
+	// The chosen wire, if it is still there: what it joins, how often it is read, and the value its input goes back to without it.
+	const wireShown = $derived.by(() => {
+		const edge = chosenWire ? edgeInto(laid, chosenWire.to, chosenWire.input) : undefined;
+		const from = laid.nodes.find((node) => node.id === edge?.from);
+		const to = laid.nodes.find((node) => node.id === edge?.to);
+		if (!edge || !from || !to) return null;
+		const port = edge.port ?? 'out';
+		const input = edge.input ?? 'in';
+		const own =
+			to.inputs?.[input] ?? inputsOf(to, catalog, library).find((candidate) => candidate.name === input)?.default;
+		return { from, port, to, input, own, rate: nodes?.[from.id]?.ports[port]?.rate };
+	});
 
 	// A node of a type as the search adds it, which is what decides its ports. A subpatch starts as the first patch it can be.
 	const fresh = (type: string): GraphNode =>
@@ -136,7 +200,9 @@
 	const commit = (next: Graph) => onchange(next);
 
 	const positionOf = (node: GraphNode): Point =>
-		gesture?.kind === 'move' && gesture.id === node.id ? gesture.at : { x: node.x as number, y: node.y as number };
+		gesture?.kind === 'move' && gesture.moved && gesture.ids.includes(node.id)
+			? { x: (node.x as number) + gesture.by.x, y: (node.y as number) + gesture.by.y }
+			: { x: node.x as number, y: node.y as number };
 	const inputY = (index: number) => NODE_HEADER + PORT_SPACING * index + PORT_SPACING / 2;
 
 	function outputPoint(node: GraphNode, port: string): Point {
@@ -185,18 +251,78 @@
 		return { x: point.x, y: point.y };
 	}
 
+	// What is chosen: some nodes, one wire, or nothing. The side column follows, to what is chosen or back to the patch, unless
+	// it shows the JSON, which stays open until another tab is.
+	function select(ids: Iterable<number> = [], wire: WireEnd | null = null) {
+		selection = new Set(ids);
+		chosenWire = wire;
+		const any = selection.size > 0 || wire !== null;
+		if (any && tab === 'patch') tab = 'node';
+		else if (!any && tab === 'node') tab = 'patch';
+	}
+
+	// A right-click, or a Ctrl-click on a Mac, opens a menu, and starts nothing.
+	const menuing = (event: PointerEvent) =>
+		event.button === 2 || (event.button === 0 && event.ctrlKey && modKey() === 'Meta');
+
 	function startPan(event: PointerEvent) {
-		selected = null;
 		gesture = { kind: 'pan', from: { x: event.clientX, y: event.clientY }, view: { x: view.x, y: view.y } };
 	}
 
-	function startMove(event: PointerEvent, node: GraphNode) {
+	// A press on empty canvas lets go of what was chosen, and a drag from there pans. With Shift it draws a box instead, which
+	// chooses the nodes it touches. The middle button pans and leaves what is chosen.
+	function pressCanvas(event: PointerEvent) {
+		if (menuing(event)) return;
+		if (event.button !== 0) return startPan(event);
+		if (event.shiftKey) {
+			const from = toCanvas(event);
+			gesture = { kind: 'box', from, at: { ...from } };
+			return;
+		}
+		select();
+		startPan(event);
+	}
+
+	// A press on a wire chooses it, and a drag from there pans, as from empty canvas. With Shift it's the canvas's, a box.
+	function pressWire(event: PointerEvent, wire: WireEnd) {
+		if (event.shiftKey && !menuing(event)) return;
 		event.stopPropagation();
-		selected = node.id;
-		if (readonly) return;
-		const at = positionOf(node);
-		const pointer = toCanvas(event);
-		gesture = { kind: 'move', id: node.id, at, offset: { x: pointer.x - at.x, y: pointer.y - at.y } };
+		select([], wire);
+		if (!menuing(event)) startPan(event);
+	}
+
+	// A node on its own, or with Shift added to what is chosen or taken away from it, by a click or by Enter on its title.
+	function chooseNode(node: GraphNode, adding: boolean) {
+		if (!adding) return select([node.id]);
+		const next = new Set(selection);
+		if (next.has(node.id)) next.delete(node.id);
+		else next.add(node.id);
+		select(next);
+	}
+
+	// A press on a node chooses it, and Shift adds it to what is chosen or takes it away. A drag moves everything chosen, as one
+	// edit, and with Mod held it moves copies of them instead, as Mod-drag copies notes and clips.
+	function pressNode(event: PointerEvent, node: GraphNode) {
+		event.stopPropagation();
+		if (event.shiftKey && !menuing(event)) return chooseNode(node, true);
+		if (!selection.has(node.id)) select([node.id]);
+		if (readonly || menuing(event)) return;
+		let ids = picked.map((candidate) => candidate.id);
+		if (modHeld(event)) {
+			const copied = copyNodes(laid, ids, self);
+			if (!copied) return;
+			const base = pasteNodes(laid, copied, self, { x: 0, y: 0 });
+			if (!base.ids.length) return; // Only the out node, which a patch has one of
+			copying = base.graph;
+			ids = base.ids;
+		}
+		const client = { x: event.clientX, y: event.clientY };
+		gesture = { kind: 'move', ids, client, start: toCanvas(event), by: { x: 0, y: 0 }, moved: false };
+	}
+
+	function cancelGesture() {
+		gesture = null;
+		copying = null;
 	}
 
 	function startWire(event: PointerEvent, node: GraphNode, port: string) {
@@ -214,7 +340,8 @@
 			view.y = gesture.view.y - (event.clientY - gesture.from.y) / view.scale;
 		} else if (gesture.kind === 'move') {
 			const pointer = toCanvas(event);
-			gesture.at = { x: pointer.x - gesture.offset.x, y: pointer.y - gesture.offset.y };
+			gesture.moved ||= Math.hypot(event.clientX - gesture.client.x, event.clientY - gesture.client.y) > DRAG;
+			gesture.by = { x: pointer.x - gesture.start.x, y: pointer.y - gesture.start.y };
 		} else {
 			gesture.at = toCanvas(event);
 		}
@@ -222,9 +349,17 @@
 
 	function pointerUp(event: PointerEvent) {
 		if (gesture?.kind === 'move') {
-			const node = laid.nodes.find((candidate) => candidate.id === (gesture as { id: number }).id);
-			const { id, at } = gesture;
-			if (node && (node.x !== at.x || node.y !== at.y)) commit(moveNode(laid, id, Math.round(at.x), Math.round(at.y)));
+			const { ids, by, moved } = gesture;
+			const base = laid; // With the copies in it, while Mod-drag copies
+			const copied = copying !== null;
+			cancelGesture();
+			const [dx, dy] = [Math.round(by.x), Math.round(by.y)];
+			if (!moved || (!dx && !dy)) return;
+			commit(moveNodes(base, ids, dx, dy));
+			if (copied) select(ids);
+			return;
+		} else if (gesture?.kind === 'box') {
+			select(nodesTouching(laid, boxOf(gesture), heightOf));
 		} else if (gesture?.kind === 'wire') {
 			// A wire let go of on empty canvas asks what it should go to. Under the pointer is what it was dropped on: a touch keeps
 			// sending events to where it started.
@@ -299,12 +434,20 @@
 	// A node reached from the keyboard comes into view, by as little panning as that takes. A click doesn't move the view, since
 	// what was clicked is in it, and a node about to be dragged mustn't move.
 	function reveal(node: GraphNode) {
+		revealBox({ x: node.x as number, y: node.y as number, width: NODE_WIDTH, height: heightOf(node) });
+	}
+
+	// Pasted nodes come into view the same way, and if they can't all be seen at once, their top left does.
+	function revealBox(box: Box) {
 		const width = size.width / view.scale;
 		const height = size.height / view.scale;
-		const [x, y] = [node.x as number, node.y as number];
 		const into = (start: number, length: number, at: number, extent: number) =>
-			at < start ? at - MARGIN : at + extent > start + length ? at + extent + MARGIN - length : start;
-		view = { ...view, x: into(view.x, width, x, NODE_WIDTH), y: into(view.y, height, y, heightOf(node)) };
+			at >= start && at + extent <= start + length
+				? start
+				: at < start || extent + 2 * MARGIN > length
+					? at - MARGIN
+					: at + extent + MARGIN - length;
+		view = { ...view, x: into(view.x, width, box.x, box.width), y: into(view.y, height, box.y, box.height) };
 	}
 
 	// The node search opens at the pointer, or at the canvas's top left under the toolbar's button. What it adds goes where the
@@ -353,7 +496,7 @@
 		if (wire && first) next = connect(next, wire.from, wire.port, id, first.name);
 		closePalette(true);
 		commit(next);
-		selected = id;
+		select([id]);
 	}
 
 	function tidyUp() {
@@ -383,32 +526,135 @@
 		if (fixed) commit(fixed.graph);
 	}
 
-	function removeSelected() {
-		if (selected === null) return;
-		const id = selected;
-		const left = probes.filter((probe) => probe.node !== id);
+	// Delete takes the chosen wire, which leaves its input at its own value, or the chosen nodes with their wires and probes,
+	// as one edit.
+	function removeChosen() {
+		if (wireShown) {
+			const { to, input } = wireShown;
+			select();
+			commit(disconnect(laid, to.id, input));
+			return;
+		}
+		const ids = new Set(deletable.map((node) => node.id));
+		if (!ids.size) return;
+		const left = probes.filter((probe) => !ids.has(probe.node));
 		if (left.length !== probes.length) onprobes(left);
-		commit(removeNode(laid, id));
-		selected = null;
+		select();
+		commit(removeNodes(laid, ids));
 	}
 
+	const chosenIds = () => picked.map((node) => node.id);
+
+	// The page keeps what is copied, so it can be pasted into another patch as well as this one.
+	function copyChosen(): boolean {
+		const copied = copyNodes(laid, chosenIds(), self);
+		if (copied) clipboard.nodes = copied;
+		return copied !== null;
+	}
+
+	// Pasted nodes go where the pointer is, and otherwise a little below and right of where they were copied from, at the
+	// nearest place where they cover no node. They come chosen, and into view.
+	function paste(copied: CopiedNodes | null, pointer: Point | null) {
+		if (!copied || readonly) return;
+		const box = boundsOf(copied.nodes, heightOf);
+		const want = pointer
+			? { x: pointer.x - NODE_WIDTH / 2, y: pointer.y - NODE_HEADER / 2 }
+			: { x: box.x + COPY_STEP, y: box.y + COPY_STEP };
+		const spot = freeSpot(laid, want, box, sizeOf);
+		const { graph: next, ids } = pasteNodes(laid, copied, self, { x: spot.x - box.x, y: spot.y - box.y });
+		if (!ids.length) return;
+		commit(next);
+		select(ids);
+		revealBox({ ...box, x: spot.x, y: spot.y });
+	}
+
+	const duplicateChosen = () => paste(copyNodes(laid, chosenIds(), self), null);
+
+	const pointerOnCanvas = () => (hover ? toCanvas({ clientX: hover.x, clientY: hover.y }) : null);
+
 	// N and the full stop go by where the key is, as the piano keys do, and take no modifier, which leaves them to the browser.
+	// Esc lets go of one thing at a time: a drag, then what is chosen. Mod with A, V or D is kept from the browser, which would
+	// choose the page's text or bookmark the page, and so is Mod+C when there is something chosen to copy.
 	function keydown(event: KeyboardEvent) {
 		if (!active || typingIn(event.target)) return;
-		if (matches(event, 'escape') && gesture) {
-			gesture = null;
+		if (matches(event, 'escape')) {
+			if (event.defaultPrevented) return; // Something nearer the top of the page let go of something
+			if (gesture) cancelGesture();
+			else if (selection.size || chosenWire) select();
 		} else if (matches(event, 'fit')) {
 			event.preventDefault();
 			fit();
+		} else if (matches(event, 'select-all')) {
+			event.preventDefault();
+			select(laid.nodes.map((node) => node.id));
+		} else if (matches(event, 'copy')) {
+			if (copyChosen()) event.preventDefault();
+		} else if (matches(event, 'paste')) {
+			event.preventDefault();
+			paste(clipboard.nodes, pointerOnCanvas());
+		} else if (matches(event, 'duplicate')) {
+			event.preventDefault();
+			duplicateChosen();
 		} else if (readonly) {
 			return;
 		} else if (matches(event, 'node-search')) {
 			event.preventDefault();
 			openPalette(hover);
-		} else if ((matches(event, 'graph.delete') || matches(event, 'graph.backspace')) && selected !== null) {
+		} else if ((matches(event, 'graph.delete') || matches(event, 'graph.backspace')) && (picked.length || wireShown)) {
 			event.preventDefault();
-			removeSelected();
+			removeChosen();
 		}
+	}
+
+	// A right-click opens a menu for what is under it: the nodes chosen, a wire, or the canvas. Delete there deletes, as the
+	// key does.
+	function contextMenu(event: MouseEvent) {
+		cancelGesture();
+		const target = event.target as Element;
+		const nodeId = target.closest('g.node')?.getAttribute('data-node');
+		const wireKey = target.closest('[data-wire]')?.getAttribute('data-wire');
+		const node = laid.nodes.find((candidate) => String(candidate.id) === nodeId);
+		const wire = wires.find((candidate) => candidate.key === wireKey);
+		const open = (label: string, items: MenuItem[]) => {
+			event.preventDefault();
+			menu = { x: event.clientX, y: event.clientY, label, items };
+		};
+		if (node) {
+			if (!selection.has(node.id)) select([node.id]);
+			open(picked.length > 1 ? `${picked.length} nodes` : `${friendlyName(node.type)} ${node.id}`, nodeItems());
+		} else if (wire) {
+			select([], { to: wire.to, input: wire.input });
+			if (!readonly) open('Wire', wireItems());
+		} else if (!readonly) {
+			const at = toCanvas(event);
+			const client = { x: event.clientX, y: event.clientY };
+			open('Graph', [
+				{ label: 'Paste', disabled: !clipboard.nodes, action: () => paste(clipboard.nodes, at) },
+				{ label: 'Add a node…', action: () => openPalette(client) }
+			]);
+		}
+	}
+
+	const nodeItems = (): MenuItem[] => [
+		{ label: 'Copy', action: copyChosen },
+		...(readonly
+			? []
+			: [
+					{ label: 'Duplicate', action: duplicateChosen },
+					{
+						label: deletable.length > 1 ? `Delete ${deletable.length} nodes` : 'Delete',
+						disabled: !deletable.length,
+						action: removeChosen
+					}
+				])
+	];
+
+	function wireItems(): MenuItem[] {
+		const snap = wireShown && snapFor(wireShown.to) === wireShown.input ? wireShown : null;
+		return [
+			{ label: 'Delete', action: removeChosen },
+			...(snap ? [{ label: 'Put a snap on this wire', action: () => putSnap(snap.to, snap.input) }] : [])
+		];
 	}
 
 	const probed = (node: number, port: string) => probes.some((probe) => probe.node === node && probe.port === port);
@@ -497,7 +743,8 @@
 		untrack(() => {
 			const node = laid.nodes.find((candidate) => candidate.id === asked.node);
 			if (!node) return;
-			selected = node.id;
+			select([node.id]);
+			tab = 'node';
 			reveal(node);
 		});
 	});
@@ -553,7 +800,7 @@
 		</span>
 	</div>
 
-	<div class="editor">
+	<div class="editor" class:wide={tab === 'json'}>
 		<div class="canvas">
 			<!-- The canvas takes focus, so that N and the full stop act on the graph and the search gives focus back to it. -->
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -565,16 +812,33 @@
 				tabindex="0"
 				data-testid="graph"
 				data-scale={view.scale}
-				onpointerdown={startPan}
+				onpointerdown={pressCanvas}
 				onpointermove={pointerMove}
 				onpointerleave={() => (hover = null)}
 				ondblclick={(event) => {
 					if (!(event.target as Element).closest('g.node')) openPalette({ x: event.clientX, y: event.clientY });
 				}}
 				onwheel={wheel}
+				oncontextmenu={contextMenu}
 			>
+				<!-- Each wire is hit on a wide stroke that can't be seen, under the one that can, so it takes no aim to click. -->
 				{#each wires as wire (wire.key)}
-					<path class={`wire ${wire.rate}`} d={wire.path} data-testid={`wire-${wire.to}-${wire.input}`} />
+					{@const on = wireShown?.to.id === wire.to && wireShown.input === wire.input}
+					<path
+						class="hit"
+						d={wire.path}
+						role="presentation"
+						data-wire={wire.key}
+						data-testid={`hit-${wire.to}-${wire.input}`}
+						onpointerdown={(event) => pressWire(event, wire)}
+					/>
+					<path
+						class={`wire ${wire.rate}`}
+						class:chosen={on}
+						d={wire.path}
+						data-testid={`wire-${wire.to}-${wire.input}`}
+						data-chosen={on}
+					/>
 				{/each}
 				{#if gesture?.kind === 'wire'}
 					<path class="wire drawing" d={curve(gesture.start, gesture.at)} />
@@ -589,11 +853,12 @@
 					{@const why = dead ? whyCompiledAway(laid, node.id) : null}
 					<g
 						class="node"
-						class:chosen={node.id === selected}
+						class:chosen={looksChosen(node.id)}
 						class:dead
 						class:problem={problem !== undefined}
 						transform={`translate(${at.x} ${at.y})`}
 						data-testid={`node-${node.id}`}
+						data-node={node.id}
 						data-error={problem !== undefined}
 						data-dead={dead}
 					>
@@ -604,7 +869,7 @@
 							{height}
 							rx="5"
 							role="presentation"
-							onpointerdown={(event) => startMove(event, node)}
+							onpointerdown={(event) => pressNode(event, node)}
 						/>
 						<rect
 							class="title"
@@ -614,12 +879,12 @@
 							role="button"
 							tabindex="0"
 							aria-label={`${friendlyName(node.type)}, ${node.type} ${node.id}`}
-							onpointerdown={(event) => startMove(event, node)}
+							onpointerdown={(event) => pressNode(event, node)}
 							onfocus={(event) => {
 								if (event.currentTarget.matches(':focus-visible')) reveal(node);
 							}}
 							onkeydown={(event) => {
-								if (event.key === 'Enter') selected = node.id;
+								if (event.key === 'Enter') chooseNode(node, event.shiftKey);
 							}}
 						/>
 						<text class="heading" x="8" y="16">{friendlyName(node.type)}</text>
@@ -689,7 +954,14 @@
 						</g>
 					{/if}
 				{/each}
+				{#if gesture?.kind === 'box'}
+					{@const box = boxOf(gesture)}
+					<rect class="box" x={box.x} y={box.y} width={box.width} height={box.height} data-testid="box" />
+				{/if}
 			</svg>
+			{#if menu}
+				<ContextMenu x={menu.x} y={menu.y} label={menu.label} items={menu.items} onclose={() => (menu = null)} />
+			{/if}
 			{#if palette}
 				<NodePalette
 					types={offered}
@@ -703,289 +975,366 @@
 		</div>
 
 		<aside class="inspector">
-			{@render side?.()}
-			{#if chosen}
-				{@const help = helpOf(chosen.type)}
-				{@const snap = readonly ? null : snapFor(chosen)}
-				{@const dead = !failed && nodes !== undefined && !nodes[chosen.id]}
-				<h3>{friendlyName(chosen.type)} <span class="muted">{chosen.type} {chosen.id}</span></h3>
-				{#if help}<p class="muted about">{help.description}</p>{/if}
-				{#if errors.get(chosen.id)}<p class="problem" data-testid="node-error">{errors.get(chosen.id)}</p>{/if}
-				{#if snap}
-					<button type="button" class="fix" onclick={() => putSnap(chosen, snap)}>Put a snap on this wire</button>
-					<p class="muted about">
-						It reads {snap} once a frame. That is right for an envelope and wrong for anything faster.
-					</p>
+			<div class="tabs" role="tablist" aria-label="Side column">
+				<button type="button" role="tab" aria-selected={tab === 'node'} onclick={() => (tab = 'node')}
+					>{wireShown ? 'Wire' : picked.length > 1 ? 'Nodes' : 'Node'}</button
+				>
+				<button type="button" role="tab" aria-selected={tab === 'patch'} onclick={() => (tab = 'patch')}>Patch</button>
+				{#if json}
+					<button type="button" role="tab" aria-selected={tab === 'json'} onclick={() => (tab = 'json')}>JSON</button>
 				{/if}
-				{#if dead}
-					<p class="muted about" data-testid="node-dead">
-						{whyCompiledAway(laid, chosen.id) ?? 'It compiled away, so it makes nothing that is heard.'}
-					</p>
-				{/if}
-				<fieldset class="bare" disabled={readonly}>
-					{#if chosen.type === 'shape'}
-						<label>
-							curve
-							<input
-								aria-label="curve"
-								value={Array.isArray(chosen.curve) ? chosen.curve.join(', ') : ''}
-								placeholder="-1, 0, 1"
-								onchange={(e) =>
-									commit(
-										setOption(laid, chosen.id, 'curve', parseCurve(e.currentTarget.value) as never, catalog, library)
-									)}
-							/>
-						</label>
-					{/if}
-					{#if chosen.type === 'sample' && chosen.mode === 'zones'}
-						<h4>Zones</h4>
-						{#each zonesOf(chosen) as zone, index (index)}
-							{@const keys = zone.keys ?? [0, 127]}
-							{@const velocities = zone.velocities ?? [0, 127]}
-							<div class="zone" data-testid={`zone-${index}`}>
-								<select
-									aria-label={`Zone ${index + 1} asset`}
-									value={zone.asset}
-									onchange={(e) => commit(setZone(laid, chosen.id, index, { asset: e.currentTarget.value }))}
-								>
-									{#each assets as asset (asset.id)}<option value={asset.id}>{asset.name}</option>{/each}
-								</select>
+			</div>
+			{#if tab === 'json' && json}
+				<div class="panel json" role="tabpanel" aria-label="JSON">{@render json()}</div>
+			{:else}
+				<div class="panel" role="tabpanel" aria-label={tab === 'node' ? 'What is chosen' : 'Patch'}>
+					{@render side?.()}
+					{#if tab === 'node' && wireShown}
+						{@const { from, port, to, input, own, rate } = wireShown}
+						{@const unit = helpOf(to.type)?.inputs[input]?.unit}
+						<h3>Wire</h3>
+						<p class="joins" data-testid="wire-joins">
+							<strong>{friendlyName(from.type)} {from.id}</strong>
+							{port} → <strong>{friendlyName(to.type)} {to.id}</strong>
+							{input}
+						</p>
+						{#if rate}<p class="muted about">{rate === 'audio' ? 'Audio, every sample.' : 'Read once a frame.'}</p>{/if}
+						{#if !readonly}
+							{#if snapFor(to) === input}
+								<button type="button" class="fix" onclick={() => putSnap(to, input)}>Put a snap on this wire</button>
+							{/if}
+							{#if own !== undefined}
+								<p class="muted about">
+									Without it, {input} takes its own value, {shown(own)}{unit ? ` ${unit}` : ''}.
+								</p>
+							{/if}
+							<button type="button" onclick={removeChosen}>Delete wire</button>
+						{/if}
+					{:else if tab === 'node' && picked.length > 1}
+						<h3>{picked.length} nodes</h3>
+						{#if !readonly}
+							{#if kept.length}<p class="muted about" data-testid="kept">{keptText}</p>{/if}
+							<button type="button" onclick={removeChosen} disabled={!deletable.length}
+								>Delete {deletable.length} node{deletable.length === 1 ? '' : 's'}</button
+							>
+						{/if}
+						<p class="muted about">
+							{readonly
+								? `${label('copy')} copies them, to paste into a patch of your own.`
+								: `Drag one to move them all, or hold ${modName} to drag copies. ${label('copy')} copies them for this patch or another.`}
+						</p>
+						<ul class="picked">
+							{#each picked as node (node.id)}
+								<li>
+									<button type="button" onclick={() => select([node.id])}
+										>{friendlyName(node.type)} <span class="muted">{node.type} {node.id}</span></button
+									>
+								</li>
+							{/each}
+						</ul>
+					{:else if tab === 'node' && chosen}
+						{@const help = helpOf(chosen.type)}
+						{@const snap = readonly ? null : snapFor(chosen)}
+						{@const dead = !failed && nodes !== undefined && !nodes[chosen.id]}
+						<h3>{friendlyName(chosen.type)} <span class="muted">{chosen.type} {chosen.id}</span></h3>
+						{#if help}<p class="muted about">{help.description}</p>{/if}
+						{#if errors.get(chosen.id)}<p class="problem" data-testid="node-error">{errors.get(chosen.id)}</p>{/if}
+						{#if snap}
+							<button type="button" class="fix" onclick={() => putSnap(chosen, snap)}>Put a snap on this wire</button>
+							<p class="muted about">
+								It reads {snap} once a frame. That is right for an envelope and wrong for anything faster.
+							</p>
+						{/if}
+						{#if dead}
+							<p class="muted about" data-testid="node-dead">
+								{whyCompiledAway(laid, chosen.id) ?? 'It compiled away, so it makes nothing that is heard.'}
+							</p>
+						{/if}
+						<fieldset class="bare" disabled={readonly}>
+							{#if chosen.type === 'shape'}
 								<label>
-									keys
+									curve
 									<input
-										type="number"
-										min="0"
-										max="127"
-										aria-label={`Zone ${index + 1} lowest key`}
-										value={keys[0]}
-										onchange={(e) =>
-											commit(setZone(laid, chosen.id, index, { keys: [Number(e.currentTarget.value), keys[1]] }))}
-									/>
-									<input
-										type="number"
-										min="0"
-										max="127"
-										aria-label={`Zone ${index + 1} highest key`}
-										value={keys[1]}
-										onchange={(e) =>
-											commit(setZone(laid, chosen.id, index, { keys: [keys[0], Number(e.currentTarget.value)] }))}
-									/>
-								</label>
-								<label>
-									velocity
-									<input
-										type="number"
-										min="0"
-										max="127"
-										aria-label={`Zone ${index + 1} lowest velocity`}
-										value={velocities[0]}
+										aria-label="curve"
+										value={Array.isArray(chosen.curve) ? chosen.curve.join(', ') : ''}
+										placeholder="-1, 0, 1"
 										onchange={(e) =>
 											commit(
-												setZone(laid, chosen.id, index, { velocities: [Number(e.currentTarget.value), velocities[1]] })
-											)}
-									/>
-									<input
-										type="number"
-										min="0"
-										max="127"
-										aria-label={`Zone ${index + 1} highest velocity`}
-										value={velocities[1]}
-										onchange={(e) =>
-											commit(
-												setZone(laid, chosen.id, index, { velocities: [velocities[0], Number(e.currentTarget.value)] })
-											)}
-									/>
-								</label>
-								<label>
-									root
-									<input
-										type="number"
-										min="0"
-										max="127"
-										step="any"
-										placeholder="asset's"
-										aria-label={`Zone ${index + 1} root`}
-										value={zone.root ?? ''}
-										onchange={(e) =>
-											commit(
-												setZone(laid, chosen.id, index, {
-													root: e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value)
-												})
+												setOption(
+													laid,
+													chosen.id,
+													'curve',
+													parseCurve(e.currentTarget.value) as never,
+													catalog,
+													library
+												)
 											)}
 									/>
 								</label>
-								{#if !readonly}
-									<button type="button" onclick={() => commit(removeZone(laid, chosen.id, index))}>Remove zone</button>
+							{/if}
+							{#if chosen.type === 'sample' && chosen.mode === 'zones'}
+								<h4>Zones</h4>
+								{#each zonesOf(chosen) as zone, index (index)}
+									{@const keys = zone.keys ?? [0, 127]}
+									{@const velocities = zone.velocities ?? [0, 127]}
+									<div class="zone" data-testid={`zone-${index}`}>
+										<select
+											aria-label={`Zone ${index + 1} asset`}
+											value={zone.asset}
+											onchange={(e) => commit(setZone(laid, chosen.id, index, { asset: e.currentTarget.value }))}
+										>
+											{#each assets as asset (asset.id)}<option value={asset.id}>{asset.name}</option>{/each}
+										</select>
+										<label>
+											keys
+											<input
+												type="number"
+												min="0"
+												max="127"
+												aria-label={`Zone ${index + 1} lowest key`}
+												value={keys[0]}
+												onchange={(e) =>
+													commit(setZone(laid, chosen.id, index, { keys: [Number(e.currentTarget.value), keys[1]] }))}
+											/>
+											<input
+												type="number"
+												min="0"
+												max="127"
+												aria-label={`Zone ${index + 1} highest key`}
+												value={keys[1]}
+												onchange={(e) =>
+													commit(setZone(laid, chosen.id, index, { keys: [keys[0], Number(e.currentTarget.value)] }))}
+											/>
+										</label>
+										<label>
+											velocity
+											<input
+												type="number"
+												min="0"
+												max="127"
+												aria-label={`Zone ${index + 1} lowest velocity`}
+												value={velocities[0]}
+												onchange={(e) =>
+													commit(
+														setZone(laid, chosen.id, index, {
+															velocities: [Number(e.currentTarget.value), velocities[1]]
+														})
+													)}
+											/>
+											<input
+												type="number"
+												min="0"
+												max="127"
+												aria-label={`Zone ${index + 1} highest velocity`}
+												value={velocities[1]}
+												onchange={(e) =>
+													commit(
+														setZone(laid, chosen.id, index, {
+															velocities: [velocities[0], Number(e.currentTarget.value)]
+														})
+													)}
+											/>
+										</label>
+										<label>
+											root
+											<input
+												type="number"
+												min="0"
+												max="127"
+												step="any"
+												placeholder="asset's"
+												aria-label={`Zone ${index + 1} root`}
+												value={zone.root ?? ''}
+												onchange={(e) =>
+													commit(
+														setZone(laid, chosen.id, index, {
+															root: e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value)
+														})
+													)}
+											/>
+										</label>
+										{#if !readonly}
+											<button type="button" onclick={() => commit(removeZone(laid, chosen.id, index))}
+												>Remove zone</button
+											>
+										{/if}
+									</div>
+								{/each}
+								{#if !readonly && assets.length}
+									<button type="button" onclick={() => commit(addZone(laid, chosen.id, assets[0].id))}>Add zone</button>
 								{/if}
+								<label>
+									reverse
+									<input
+										type="checkbox"
+										aria-label="reverse"
+										checked={chosen.reverse === true}
+										onchange={(e) => commit(setField(laid, chosen.id, 'reverse', e.currentTarget.checked || undefined))}
+									/>
+								</label>
+								<label>
+									tail
+									<input
+										type="checkbox"
+										aria-label="tail"
+										checked={chosen.tail === true}
+										onchange={(e) => commit(setField(laid, chosen.id, 'tail', e.currentTarget.checked || undefined))}
+									/>
+								</label>
+							{/if}
+							{#each optionsOf(chosen, catalog).filter((option) => !(chosen.mode === 'zones' && option.name === 'asset')) as option (option.name)}
+								<label>
+									{option.name}
+									{#if option.choices.length}
+										<select
+											aria-label={option.name}
+											value={chosen[option.name] ?? ''}
+											onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, false)}
+										>
+											<option value="">default</option>
+											{#each option.choices as choice (choice)}<option value={choice}>{choice}</option>{/each}
+										</select>
+									{:else if option.name === 'patch'}
+										<select
+											aria-label="patch"
+											value={chosen.patch ?? ''}
+											onchange={(e) => optionChanged(chosen, 'patch', e.currentTarget.value, false)}
+										>
+											<option value="">none</option>
+											{#each others as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
+										</select>
+									{:else if option.name === 'asset'}
+										<select
+											aria-label="asset"
+											value={chosen.asset ?? ''}
+											onchange={(e) => optionChanged(chosen, 'asset', e.currentTarget.value, false)}
+										>
+											<option value="">none</option>
+											{#each assets as asset (asset.id)}<option value={asset.id}>{asset.name}</option>{/each}
+										</select>
+									{:else if option.name === 'param'}
+										<select
+											aria-label="param"
+											value={chosen.param ?? ''}
+											onchange={(e) => optionChanged(chosen, 'param', e.currentTarget.value, true)}
+										>
+											<option value="">none</option>
+											{#each laid.params as param (param.id)}<option value={param.id}
+													>{param.name || `param ${param.id}`}</option
+												>{/each}
+										</select>
+									{:else}
+										<input
+											aria-label={option.name}
+											type={option.number ? 'number' : 'text'}
+											step="any"
+											value={field(chosen[option.name])}
+											onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, option.number)}
+										/>
+									{/if}
+								</label>
+							{/each}
+							{#if inputsOf(chosen, catalog, library).length}<h4>Inputs</h4>{/if}
+							{#each inputsOf(chosen, catalog, library) as input (input.name)}
+								{@const about = help?.inputs[input.name]}
+								{@const range = rangeText(about)}
+								<div class="input">
+									<span class="name"
+										>{input.name}{#if about?.unit}<span class="unit">{about.unit}</span>{/if}</span
+									>
+									<select
+										aria-label={`source of ${input.name}`}
+										value={sourceOf(chosen, input.name)}
+										onchange={(e) => sourceChanged(chosen, input.name, e.currentTarget.value)}
+									>
+										<option value="">value</option>
+										{#each laid.nodes as source (source.id)}
+											{#each outputsOf(source, catalog, library) as port (port)}
+												<option value={`${source.id}:${port}`}>{source.id} {source.type}.{port}</option>
+											{/each}
+										{/each}
+									</select>
+									{#if !edgeInto(laid, chosen.id, input.name)}
+										<input
+											type="number"
+											step="any"
+											aria-label={`value of ${input.name}`}
+											placeholder={shown(input.default)}
+											value={field(chosen.inputs?.[input.name])}
+											onchange={(e) => literalChanged(chosen, input.name, e.currentTarget.value)}
+										/>
+									{/if}
+									{#if range}<span class="range" data-testid={`range-${input.name}`}>{range}</span>{/if}
+								</div>
+							{/each}
+						</fieldset>
+						{#if outputsOf(chosen, catalog, library).length}<h4>Outputs</h4>{/if}
+						{#each outputsOf(chosen, catalog, library) as port (port)}
+							<div class="input">
+								<span>{port}</span>
+								<span class="muted">{nodes?.[chosen.id]?.ports[port]?.rate ?? ''}</span>
+								<button
+									type="button"
+									disabled={!probed(chosen.id, port) &&
+										(probes.length >= maxProbes || nodes?.[chosen.id]?.ports[port]?.operand === undefined)}
+									onclick={() => toggleProbe(chosen, port)}
+								>
+									{probed(chosen.id, port) ? `Stop probing ${port}` : `Probe ${port}`}
+								</button>
 							</div>
 						{/each}
-						{#if !readonly && assets.length}
-							<button type="button" onclick={() => commit(addZone(laid, chosen.id, assets[0].id))}>Add zone</button>
-						{/if}
-						<label>
-							reverse
-							<input
-								type="checkbox"
-								aria-label="reverse"
-								checked={chosen.reverse === true}
-								onchange={(e) => commit(setField(laid, chosen.id, 'reverse', e.currentTarget.checked || undefined))}
-							/>
-						</label>
-						<label>
-							tail
-							<input
-								type="checkbox"
-								aria-label="tail"
-								checked={chosen.tail === true}
-								onchange={(e) => commit(setField(laid, chosen.id, 'tail', e.currentTarget.checked || undefined))}
-							/>
-						</label>
-					{/if}
-					{#each optionsOf(chosen, catalog).filter((option) => !(chosen.mode === 'zones' && option.name === 'asset')) as option (option.name)}
-						<label>
-							{option.name}
-							{#if option.choices.length}
-								<select
-									aria-label={option.name}
-									value={chosen[option.name] ?? ''}
-									onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, false)}
-								>
-									<option value="">default</option>
-									{#each option.choices as choice (choice)}<option value={choice}>{choice}</option>{/each}
-								</select>
-							{:else if option.name === 'patch'}
-								<select
-									aria-label="patch"
-									value={chosen.patch ?? ''}
-									onchange={(e) => optionChanged(chosen, 'patch', e.currentTarget.value, false)}
-								>
-									<option value="">none</option>
-									{#each others as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
-								</select>
-							{:else if option.name === 'asset'}
-								<select
-									aria-label="asset"
-									value={chosen.asset ?? ''}
-									onchange={(e) => optionChanged(chosen, 'asset', e.currentTarget.value, false)}
-								>
-									<option value="">none</option>
-									{#each assets as asset (asset.id)}<option value={asset.id}>{asset.name}</option>{/each}
-								</select>
-							{:else if option.name === 'param'}
-								<select
-									aria-label="param"
-									value={chosen.param ?? ''}
-									onchange={(e) => optionChanged(chosen, 'param', e.currentTarget.value, true)}
-								>
-									<option value="">none</option>
-									{#each laid.params as param (param.id)}<option value={param.id}
-											>{param.name || `param ${param.id}`}</option
-										>{/each}
-								</select>
-							{:else}
-								<input
-									aria-label={option.name}
-									type={option.number ? 'number' : 'text'}
-									step="any"
-									value={field(chosen[option.name])}
-									onchange={(e) => optionChanged(chosen, option.name, e.currentTarget.value, option.number)}
-								/>
-							{/if}
-						</label>
-					{/each}
-					{#if inputsOf(chosen, catalog, library).length}<h4>Inputs</h4>{/if}
-					{#each inputsOf(chosen, catalog, library) as input (input.name)}
-						{@const about = help?.inputs[input.name]}
-						{@const range = rangeText(about)}
-						<div class="input">
-							<span class="name"
-								>{input.name}{#if about?.unit}<span class="unit">{about.unit}</span>{/if}</span
-							>
-							<select
-								aria-label={`source of ${input.name}`}
-								value={sourceOf(chosen, input.name)}
-								onchange={(e) => sourceChanged(chosen, input.name, e.currentTarget.value)}
-							>
-								<option value="">value</option>
-								{#each laid.nodes as source (source.id)}
-									{#each outputsOf(source, catalog, library) as port (port)}
-										<option value={`${source.id}:${port}`}>{source.id} {source.type}.{port}</option>
-									{/each}
+						{#if !readonly}<button type="button" onclick={removeChosen}>Delete node</button>{/if}
+					{:else if tab === 'node'}
+						<p class="muted">
+							Choose a node or a wire to see it here. Shift-drag a box or Shift-click to choose several, and {label(
+								'select-all'
+							)} chooses every node.
+						</p>
+					{:else}
+						<h3>Parameters</h3>
+						{#each laid.params as param, index (param.id)}
+							<fieldset disabled={readonly}>
+								<legend>{param.id}</legend>
+								{#each paramFields as name (name)}
+									<label>
+										{name}
+										<input
+											type={name === 'name' ? 'text' : 'number'}
+											step="any"
+											aria-label={`param ${param.id} ${name}`}
+											value={field(param[name])}
+											onchange={(e) =>
+												changeParam(index, {
+													[name]: name === 'name' ? e.currentTarget.value : Number(e.currentTarget.value)
+												})}
+										/>
+									</label>
 								{/each}
-							</select>
-							{#if !edgeInto(laid, chosen.id, input.name)}
-								<input
-									type="number"
-									step="any"
-									aria-label={`value of ${input.name}`}
-									placeholder={shown(input.default)}
-									value={field(chosen.inputs?.[input.name])}
-									onchange={(e) => literalChanged(chosen, input.name, e.currentTarget.value)}
-								/>
-							{/if}
-							{#if range}<span class="range" data-testid={`range-${input.name}`}>{range}</span>{/if}
-						</div>
-					{/each}
-				</fieldset>
-				{#if outputsOf(chosen, catalog, library).length}<h4>Outputs</h4>{/if}
-				{#each outputsOf(chosen, catalog, library) as port (port)}
-					<div class="input">
-						<span>{port}</span>
-						<span class="muted">{nodes?.[chosen.id]?.ports[port]?.rate ?? ''}</span>
-						<button
-							type="button"
-							disabled={!probed(chosen.id, port) &&
-								(probes.length >= maxProbes || nodes?.[chosen.id]?.ports[port]?.operand === undefined)}
-							onclick={() => toggleProbe(chosen, port)}
-						>
-							{probed(chosen.id, port) ? `Stop probing ${port}` : `Probe ${port}`}
-						</button>
-					</div>
-				{/each}
-				{#if !readonly}<button type="button" onclick={removeSelected}>Delete node</button>{/if}
-			{:else}
-				<h3>Parameters</h3>
-				{#each laid.params as param, index (param.id)}
-					<fieldset disabled={readonly}>
-						<legend>{param.id}</legend>
-						{#each paramFields as name (name)}
-							<label>
-								{name}
-								<input
-									type={name === 'name' ? 'text' : 'number'}
-									step="any"
-									aria-label={`param ${param.id} ${name}`}
-									value={field(param[name])}
-									onchange={(e) =>
-										changeParam(index, {
-											[name]: name === 'name' ? e.currentTarget.value : Number(e.currentTarget.value)
-										})}
-								/>
-							</label>
+								<label>
+									scope
+									<select
+										value={param.scope}
+										onchange={(e) => changeParam(index, { scope: e.currentTarget.value as Param['scope'] })}
+									>
+										<option value="voice">voice</option>
+										<option value="track">track</option>
+										<option value="global">global</option>
+									</select>
+								</label>
+								{#if !readonly}
+									<button
+										type="button"
+										onclick={() => commit({ ...laid, params: laid.params.filter((_, i) => i !== index) })}
+									>
+										Remove
+									</button>
+								{/if}
+							</fieldset>
 						{/each}
-						<label>
-							scope
-							<select
-								value={param.scope}
-								onchange={(e) => changeParam(index, { scope: e.currentTarget.value as Param['scope'] })}
-							>
-								<option value="voice">voice</option>
-								<option value="track">track</option>
-								<option value="global">global</option>
-							</select>
-						</label>
-						{#if !readonly}
-							<button
-								type="button"
-								onclick={() => commit({ ...laid, params: laid.params.filter((_, i) => i !== index) })}
-							>
-								Remove
-							</button>
-						{/if}
-					</fieldset>
-				{/each}
-				{#if !readonly}<button type="button" onclick={addParam}>Add parameter</button>{/if}
-				<p class="muted">Select a node to {readonly ? 'see how it is set up' : 'change it'}.</p>
+						{#if !readonly}<button type="button" onclick={addParam}>Add parameter</button>{/if}
+						<p class="muted">Select a node to {readonly ? 'see how it is set up' : 'change it'}.</p>
+					{/if}
+				</div>
 			{/if}
 		</aside>
 	</div>
@@ -1045,6 +1394,10 @@
 		grid-template-columns: minmax(0, 1fr) 260px;
 		gap: 0.5rem;
 	}
+	/* JSON reads better wider, and the graph keeps most of the width */
+	.editor.wide {
+		grid-template-columns: minmax(0, 1fr) 360px;
+	}
 	.canvas {
 		position: relative;
 		min-width: 0;
@@ -1070,6 +1423,28 @@
 		fill: none;
 		stroke: var(--muted);
 		stroke-width: 1.6;
+		pointer-events: none;
+	}
+	.hit {
+		fill: none;
+		stroke: transparent;
+		stroke-width: 14;
+		pointer-events: stroke;
+		cursor: pointer;
+	}
+	.hit:hover + .wire {
+		stroke-width: 2.6;
+	}
+	.wire.chosen,
+	.hit:hover + .wire.chosen {
+		stroke: var(--text);
+		stroke-width: 3;
+	}
+	/* As the piano roll draws its box */
+	.box {
+		fill: #58a6ff20;
+		stroke: var(--accent);
+		pointer-events: none;
 	}
 	.wire.audio {
 		stroke: #3fb950;
@@ -1089,6 +1464,7 @@
 	}
 	.node.chosen .body {
 		stroke: var(--accent);
+		stroke-width: 2;
 	}
 	.node.problem .body {
 		stroke: #f85149;
@@ -1163,13 +1539,65 @@
 		stroke: #d29922;
 	}
 	.inspector {
+		display: flex;
+		flex-direction: column;
 		background: var(--panel);
 		border: 1px solid var(--line);
 		border-radius: 6px;
-		padding: 0.6rem;
+		min-height: 0;
+		overflow: hidden;
+		font-size: 0.85rem;
+	}
+	.tabs {
+		flex: none;
+		display: flex;
+		border-bottom: 1px solid var(--line);
+	}
+	.tabs button {
+		flex: 1;
+		border: 0;
+		border-bottom: 2px solid transparent;
+		border-radius: 0;
+		background: transparent;
+		padding: 0.35rem 0.4rem;
+		font-size: 0.78rem;
+		color: var(--muted);
+	}
+	.tabs button[aria-selected='true'] {
+		color: var(--text);
+		border-bottom-color: var(--accent);
+	}
+	.panel {
+		flex: 1;
 		min-height: 0;
 		overflow: auto;
-		font-size: 0.85rem;
+		padding: 0.6rem;
+	}
+	.panel.json {
+		display: flex;
+		flex-direction: column;
+		padding: 0.4rem;
+		overflow: hidden;
+	}
+	.joins {
+		margin: 0 0 0.3rem;
+		font-size: 0.8rem;
+	}
+	.picked {
+		list-style: none;
+		margin: 0.4rem 0;
+		padding: 0;
+	}
+	.picked button {
+		width: 100%;
+		border: 0;
+		background: transparent;
+		padding: 0.1rem 0.2rem;
+		text-align: left;
+		font-size: 0.8rem;
+	}
+	.picked button:hover {
+		background: #1f6feb33;
 	}
 	.inspector h3 {
 		margin: 0 0 0.2rem;

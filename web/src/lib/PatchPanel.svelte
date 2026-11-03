@@ -1,17 +1,16 @@
 <script lang="ts">
 	import { enhance, type SubmitFunction } from '$app/forms';
-	import { untrack } from 'svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
-	import GraphEditor from '#lib/GraphEditor.svelte';
+	import GraphEditor, { type SideTab } from '#lib/GraphEditor.svelte';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { actionOn, stay, withView, type Hearing } from '#lib/Workspace.ts';
 
-	// The Patch view: one patch, drawn as a graph or shown as JSON, with scopes on what it makes. A trail back to the song
-	// heads it, through the track the patch is heard on.
+	// The Patch view: one patch, drawn as a graph, with what is chosen in it, its parameters or its JSON beside it, and scopes on
+	// what it makes. A trail back to the song heads it, through the track the patch is heard on.
 	let {
 		patch,
 		name,
@@ -82,12 +81,8 @@
 		onpart: (id: string) => void;
 	} = $props();
 
-	let view = $state<'graph' | 'json'>('graph');
-
-	// A node asked for is in the graph, so that is what shows.
-	$effect(() => {
-		if (choose) untrack(() => (view = 'graph'));
-	});
+	// What the side column shows, kept from one patch to the next, so the JSON stays open while patches are looked through.
+	let tab = $state<SideTab>('patch');
 
 	// A link, so it can open in another tab, that otherwise switches views without leaving the page.
 	function backToSong(event: MouseEvent) {
@@ -154,11 +149,6 @@
 				</span>
 			{/if}
 			<span class="grow"></span>
-			<div class="views" role="tablist" aria-label="Patch views">
-				<button type="button" role="tab" aria-selected={view === 'graph'} onclick={() => (view = 'graph')}>Graph</button
-				>
-				<button type="button" role="tab" aria-selected={view === 'json'} onclick={() => (view = 'json')}>JSON</button>
-			</div>
 			{#if duplicate}
 				<form method="POST" action={actionOn(search, 'duplicatePatch')} use:enhance={duplicating}>
 					<input type="hidden" name="id" value={duplicate} />
@@ -179,17 +169,22 @@
 		{/if}
 	</header>
 
+	<!-- The JSON is a tab in the graph's side column, with the graph beside it, and what is typed there is drawn as it is typed. -->
+	{#snippet json()}
+		<textarea
+			aria-label="Graph JSON"
+			spellcheck="false"
+			{readonly}
+			value={text}
+			oninput={(e) => ontext(e.currentTarget.value, true)}
+			onchange={(e) => ontext(e.currentTarget.value, false)}></textarea>
+	{/snippet}
+
 	{#if patch}
 		<div class="body">
-			{#if view === 'json'}
-				<textarea
-					aria-label="Graph JSON"
-					spellcheck="false"
-					{readonly}
-					value={text}
-					oninput={(e) => ontext(e.currentTarget.value, true)}
-					onchange={(e) => ontext(e.currentTarget.value, false)}></textarea>
-			{:else if graph}
+			{#if !graph}
+				{@render json()}
+			{:else}
 				{#key patch.id}
 					<GraphEditor
 						{graph}
@@ -205,6 +200,8 @@
 						{readonly}
 						{active}
 						{choose}
+						bind:tab
+						{json}
 						onchange={ongraph}
 						{onprobes}
 					>
@@ -325,7 +322,6 @@
 		flex-wrap: wrap;
 	}
 	.parts button,
-	.views button,
 	.duplicate,
 	.delete {
 		padding: 0.1rem 0.5rem;
@@ -334,23 +330,6 @@
 	.parts button[aria-pressed='true'] {
 		border-color: var(--accent);
 		background: #1f6feb33;
-	}
-	.views {
-		display: flex;
-	}
-	.views button {
-		border-radius: 0;
-	}
-	.views button:first-child {
-		border-radius: 5px 0 0 5px;
-	}
-	.views button:last-child {
-		border-radius: 0 5px 5px 0;
-		border-left: 0;
-	}
-	.views button[aria-selected='true'] {
-		background: #1f6feb33;
-		border-color: var(--accent);
 	}
 	.body {
 		flex: 1;
@@ -362,6 +341,7 @@
 		flex: 1;
 		min-height: 0;
 		resize: none;
+		font-size: 0.72rem;
 	}
 	.heard {
 		font-size: 0.75rem;

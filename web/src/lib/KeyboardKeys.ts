@@ -1,6 +1,8 @@
 // The computer keyboard as a piano, as most DAWs lay it out: the home row is the white keys from C, the row above it the
 // black keys, and Z and X move down and up an octave. Keys are matched by where they are, `KeyboardEvent.code`, so a
-// French or German layout plays the same piano.
+// French or German layout plays the same piano. No other shortcut may use these keys, bare or with Shift (Shortcuts.ts).
+import { shortcut, typingIn } from '#lib/Shortcuts.ts';
+
 const KEYS = [
 	'KeyA', // C
 	'KeyW',
@@ -24,6 +26,12 @@ const KEYS = [
 
 const LETTERS: Record<string, string> = { Semicolon: ';', Quote: "'" };
 
+const OCTAVE_DOWN = shortcut('octave-down').code;
+const OCTAVE_UP = shortcut('octave-up').code;
+
+// Every key the piano takes: its notes and its octave.
+export const PIANO_KEYS: readonly string[] = [...KEYS, OCTAVE_DOWN, OCTAVE_UP];
+
 // The lowest C the keys can reach and the highest, so every key plays a note from 0 to 127.
 export const LOWEST_BASE = 0;
 export const HIGHEST_BASE = 127 - (KEYS.length - 1) - ((127 - (KEYS.length - 1)) % 12);
@@ -36,8 +44,8 @@ export function noteForKey(code: string, base: number): number | null {
 
 // The base after a key that moves it, or null for any other key. It stays a C, and every key stays on a note.
 export function baseAfter(code: string, base: number): number | null {
-	if (code === 'KeyZ') return Math.max(LOWEST_BASE, base - 12);
-	if (code === 'KeyX') return Math.min(HIGHEST_BASE, base + 12);
+	if (code === OCTAVE_DOWN) return Math.max(LOWEST_BASE, base - 12);
+	if (code === OCTAVE_UP) return Math.min(HIGHEST_BASE, base + 12);
 	return null;
 }
 
@@ -48,9 +56,8 @@ export function keyFor(note: number, base: number): string {
 	return LETTERS[code] ?? code.slice(3);
 }
 
-// Whether a key belongs to something else on the page: a field being typed in, or a shortcut with a modifier.
+// Whether a key belongs to something else on the page: a field being typed in, or a shortcut with a modifier. A button or a
+// slider with focus leaves the keys to the piano, as it leaves Space to the transport.
 export function belongsElsewhere(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'target'>): boolean {
-	if (event.metaKey || event.ctrlKey || event.altKey) return true;
-	const target = event.target as { closest?: (selector: string) => unknown } | null;
-	return !!target?.closest?.('input, textarea, select, [contenteditable="true"]');
+	return event.metaKey || event.ctrlKey || event.altKey || typingIn(event.target);
 }

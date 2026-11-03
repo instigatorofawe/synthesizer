@@ -852,11 +852,19 @@ changes it. A fresh visit opens the timeline saved last, and the old addresses r
 - The status bar says Compiling from an edit until the image made from it is playing, so what is heard is known to be the
   newest edit. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the
   image slot does, and the image before it plays on.
-- Keys belong to the panel used last, so Delete and undo act on the graph or the timeline, not both.
+- Each patch and timeline keeps its own undo history, of up to 200 steps, while others are open, and saving keeps it. A step is the
+  document's whole text, so an edit typed into its JSON is undone as an editor's is, and what is typed in one visit to the field is one
+  step. Keys belong to the panel used last, so Delete and undo act on the graph or the timeline, not both.
+- Every key the editor binds is in one table, `Shortcuts.ts`, with where it works and what it does. Its test holds that none is a piano
+  key, bare or with Shift, that none needs Alt, which is Option on a Mac and opens menus in browsers elsewhere, and that no two meet where
+  both work. A key goes by where it is, as the piano's do, and Mod is ⌘ on a Mac and Ctrl elsewhere, so Ctrl-click stays a right-click on
+  a Mac.
+- Space plays and stops the song from anywhere but a text field, a select or a checkbox, and a button with focus doesn't take it. Home
+  goes back to the start, and so does Stop pressed while stopped, since a laptop may have no Home key.
 - The computer keyboard plays the patch keys as most DAWs lay it out: the home row from A is the white keys from the lowest C shown, the row
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
-  piano, and a field being typed in or a key with a modifier keeps its own meaning. A key let go while the page is in the background lets go
-  of its note.
+  piano, and a field being typed in or a key with a modifier keeps its own meaning, though a button or a slider with focus doesn't. A key
+  let go while the page is in the background lets go of its note.
 - A song stops where its last clip ends, and its tails ring on, because Stop lets go of every note. A loop goes round instead, and Play at
   the end starts again from the top. The engine plays on past the end, as a device does, so stopping there is the worklet's job, and no
   target's engine behaves differently.

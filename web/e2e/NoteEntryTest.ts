@@ -22,7 +22,7 @@ const BAR = 1920; // Ticks in a bar at a new timeline's 480 ppq
 const notes = (page: Page) => page.locator('[data-testid^="note-"]');
 
 async function newTrack(page: Page, name: string) {
-	await page.setViewportSize({ width: 1440, height: 1500 });
+	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
 	await page.getByLabel('New timeline name').fill(name);

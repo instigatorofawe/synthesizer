@@ -57,6 +57,7 @@
 		onnew,
 		onlocate,
 		onloop,
+		onexpand = () => {},
 		actions
 	}: {
 		doc: Timeline;
@@ -79,6 +80,7 @@
 		onnew: (track: number, tick: number, length?: number) => void; // A new clip there, a bar long unless it says
 		onlocate: (tick: number) => void;
 		onloop: (start: number, end: number) => void;
+		onexpand?: (at: { track: number; placement: number }) => void; // A double-click on a clip, which opens its notes in the whole view
 		actions?: PlacementActions;
 	} = $props();
 
@@ -493,6 +495,7 @@
 						tabindex="0"
 						aria-label={`${block.name} at bar ${barOf(block.tick, doc.ppq)}`}
 						onpointerdown={(event) => startMove(event, block)}
+						ondblclick={() => onexpand({ track: block.track.id, placement: block.index })}
 						oncontextmenu={(event) => blockMenu(event, block)}
 						onkeydown={(event) => {
 							if (event.key === 'Enter') onselect({ track: block.track.id, placement: block.index });
@@ -550,7 +553,9 @@
 		background: #0d1117;
 		min-width: 0;
 		min-height: 0;
-		height: 100%;
+		/* As tall as the ruler, the loop strip and the tracks, so the notes below have the rest. Past about four tracks on a
+		   laptop it scrolls instead, so the notes keep most of the height however many tracks there are. */
+		max-height: 35vh;
 		box-sizing: border-box;
 	}
 	.heads {

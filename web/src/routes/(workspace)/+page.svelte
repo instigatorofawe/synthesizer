@@ -789,6 +789,7 @@
 			event.preventDefault();
 			toggleBrowser();
 		} else if (matches(event, 'escape') && browserOver) {
+			event.preventDefault(); // Esc closes one thing at a time, and the browser over the views is the nearest
 			browserOver = false;
 		}
 	}
@@ -934,6 +935,7 @@
 				{#if songDoc}
 					{#key openKey}
 						<TimelineEditor
+							id={openKey}
 							doc={songDoc}
 							patches={songPatches}
 							program={goodSong?.report.programs[0] ?? null}

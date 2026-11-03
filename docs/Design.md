@@ -836,14 +836,26 @@ and hardware still only ever sees image bytes.
 for each view, the transport, one Undo and Redo, the on-screen keys, the master meter and Save. Under it one of two views has
 all the height: Song, with the arrangement, the notes, the mix, the JSON, the image and the inspector, and Patch, with one
 patch's graph. The two used to share the page, one above the other, which left the piano roll 102 px at 1280×800; apart, it
-is 408 px for a timeline of one track and 260 px for one of two tracks and a lane [measured]. The view not on screen stays on
-the page, hidden and inert, so its scroll, zoom and choices are there to come back to.
+is 426 px for a timeline of one track and 278 px for one of two tracks and a lane, and Expand makes those 528 and 440
+[measured]. The view not on screen stays on the page, hidden and inert, so its scroll, zoom and choices are there to come back
+to.
 
 - A tab or `` ` `` switches views. So does a patch opened from a track, the inspector or a mixer insert, and the Patch view's
   trail back to the song. A switch is a step in the browser's history, made without a navigation, which would move focus, so
   Back goes to the view before.
 - A browser down the side holds the library and the examples, and a timeline in it opens in Song and a patch in Patch. B
   folds it to a rail of icons. Below 1400 px wide it is always the rail, and opens over the page rather than pushing it aside.
+- In Song the arrangement is as tall as its ruler and tracks, up to about a third of the window, past which it scrolls, and the
+  notes have the rest, so the roll's room doesn't depend on a splitter dragged for another song. Expand, ⤢ at the right of the
+  tabs or a double-click on a clip, gives the notes the whole view, and ⤢ again or Esc brings the arrangement back. Esc closes
+  one thing at a time: a menu, then a drag, then a mode such as Expand, and only then what is chosen. The inspector is a column
+  down the right of the arrangement and the notes, which I or its own control folds to a rail. Below 1400 px wide it starts
+  folded, as the browser does, and each side of 1400 remembers what it was left as, so opening it on a laptop leaves a wide
+  screen alone.
+- The roll scrolls as a page does, and Shift with the wheel scrolls it sideways. Mod with the wheel, or a pinch, zooms it where
+  the pointer is, and Mod and Shift with the wheel make its rows taller or shorter. `.` or Fit fits it to the clip's notes. Each
+  clip keeps its zoom and its rows' height across a reload, in localStorage under the timeline and the clip, and its scroll
+  while the page is open, so a clip comes back as it was left. None of it is in the document, which the compiler would refuse.
 - The address says what is open: `?timeline=` or `?recipe=` for the song, `?patch=` or `?part=` for the patch the Patch view
   shows, which otherwise is the chosen track's, so choosing a track shows its patch there, and `?view=patch`. An address that
   names a patch and no view opens Patch, as links did before there were views. Only the song's parameters reach the server: a

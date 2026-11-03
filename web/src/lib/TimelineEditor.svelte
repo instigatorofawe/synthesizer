@@ -8,11 +8,11 @@
 	import type { ExampleGroup } from '#lib/PatchGroups.ts';
 	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
-	import Splitter from '#lib/Splitter.svelte';
 	import type { ProgramReport } from '#lib/Request.ts';
+	import { ZOOM_KEY, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
-	import { matches, modKey, typingIn } from '#lib/Shortcuts.ts';
+	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import {
 		addClip,
 		addPlayChange,
@@ -55,6 +55,7 @@
 	} from '#lib/TimelineEdit.ts';
 
 	let {
+		id = '',
 		doc,
 		patches,
 		program,
@@ -75,6 +76,7 @@
 		onopen = () => {},
 		onnewpatch
 	}: {
+		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
 		doc: Timeline;
 		patches: PatchLike[];
 		program: ProgramReport | null;
@@ -120,9 +122,6 @@
 	let loop = $state<{ start: number; end: number } | null>(null);
 	let looping = $state(false);
 	let tab = $state('notes');
-	let dragged = $state<number | null>(null); // The arrangement's height, once someone has dragged it
-	// Until then it fits its tracks, up to a size that leaves room for the notes.
-	const height = $derived(dragged ?? Math.min(270, 34 + Math.max(doc.tracks.length, 1) * 60 + 20));
 	const canUndo = $derived(history?.canUndo ?? false);
 	const canRedo = $derived(history?.canRedo ?? false);
 
@@ -250,21 +249,83 @@
 		tab = 'notes';
 	}
 
-	const HEIGHT_KEY = 'modsynth.arrangement';
+	// The arrangement is as tall as its tracks, and the notes have the rest. Expand gives the notes the whole view, the
+	// arrangement's height and the inspector's width too, until ⤢ or Esc brings them back.
+	let expanded = $state(false);
+	let peek = $state(false); // The inspector, shown beside expanded notes all the same
+	function expand(on = !expanded) {
+		expanded = on;
+		peek = false;
+	}
+
+	// A double-click on a clip opens it: its notes, with the whole view.
+	function expandClip(at: { track: number; placement: number }) {
+		select(at);
+		expand(true);
+	}
+
+	// The inspector is a column down the right of the view, and folds to a rail. Below 1400 px wide it starts folded, as the
+	// browser does there, and each side of 1400 remembers what was chosen on it, so unfolding it on a laptop doesn't unfold it
+	// on a wide screen. Until the page knows how wide the window is, the width decides.
+	const WIDE = 1400;
+	let wide = $state<boolean | null>(null);
+	let folded = $state({ wide: false, narrow: true });
+	const inspectorKey = (wide: boolean) => `modsynth.inspector.${wide ? 'wide' : 'narrow'}`;
+	const inspecting = $derived(expanded ? peek : wide === null ? null : !folded[wide ? 'wide' : 'narrow']);
+
+	function toggleInspector() {
+		if (expanded) {
+			peek = !peek;
+			return;
+		}
+		if (wide === null) return;
+		const side = wide ? 'wide' : 'narrow';
+		folded[side] = !folded[side];
+		localStorage.setItem(inspectorKey(wide), folded[side] ? 'folded' : 'open');
+	}
+
 	onMount(() => {
-		const kept = Number(localStorage.getItem(HEIGHT_KEY));
-		if (kept > 0) dragged = kept;
+		for (const side of [true, false]) {
+			const kept = localStorage.getItem(inspectorKey(side));
+			if (kept) folded[side ? 'wide' : 'narrow'] = kept === 'folded';
+		}
+		const query = matchMedia(`(min-width: ${WIDE}px)`);
+		wide = query.matches;
+		return on(query, 'change', () => (wide = query.matches));
 	});
 
-	function resize(pixels: number) {
-		dragged = Math.max(70, Math.min(900, height + pixels));
-		localStorage.setItem(HEIGHT_KEY, String(dragged));
+	// Each clip keeps how the roll showed it: its zoom and row height across a reload, and its scroll while the page is open.
+	let roll = $state<ReturnType<typeof PianoRoll>>();
+	const viewKey = (clip: string) => zoomKey(id, clip);
+	function rollViewOf(clip: string): RollView | null {
+		const seen = rollViews.get(viewKey(clip));
+		if (seen) return seen;
+		// The server draws the roll as a clip first looks, and the browser then puts it as it was kept.
+		if (typeof localStorage === 'undefined') return null;
+		return keptZoom(localStorage.getItem(ZOOM_KEY), viewKey(clip));
+	}
+	function viewed(clip: string, view: RollView, zoomed: boolean) {
+		rollViews.set(viewKey(clip), view);
+		if (zoomed) localStorage.setItem(ZOOM_KEY, keepZoom(localStorage.getItem(ZOOM_KEY), viewKey(clip), view));
 	}
 
-	function unresize() {
-		dragged = null;
-		localStorage.removeItem(HEIGHT_KEY);
+	// I folds the inspector, `.` fits the roll to its clip's notes, and Esc leaves Expand once nothing nearer has taken it: a
+	// menu, a drag, or what the roll is doing. They have their own listener, so the editor's `keydown` stays as it is.
+	function viewKeys(event: KeyboardEvent) {
+		if (!active || event.defaultPrevented || typingIn(event.target)) return;
+		if (matches(event, 'inspector')) {
+			event.preventDefault();
+			if (!event.repeat) toggleInspector();
+		} else if (matches(event, 'fit') && tab === 'notes' && roll) {
+			event.preventDefault();
+			void roll.fit();
+		} else if (matches(event, 'escape') && expanded) {
+			event.preventDefault();
+			expand(false);
+		}
 	}
+
+	onMount(() => on(window, 'keydown', viewKeys));
 
 	const ringOf = (id: number) => {
 		const target = targets.find((t) => t.chain === `track:${id}`);
@@ -302,6 +363,8 @@
 		const next = renameClip(doc, clipId, name.trim());
 		if (next === doc) return;
 		commit(next);
+		const seen = rollViews.get(viewKey(clipId)); // A clip renamed keeps how the roll showed it
+		if (seen) rollViews.set(viewKey(name.trim()), seen);
 		clipId = name.trim();
 	}
 
@@ -391,7 +454,13 @@
 
 <svelte:window onkeydown={keydown} />
 
-<section class="timeline" aria-label="Timeline editor">
+<section
+	class="timeline"
+	class:expanded
+	class:inspecting={inspecting === true}
+	class:folded={inspecting === false}
+	aria-label="Timeline editor"
+>
 	<div class="toolbar">
 		{@render heading?.()}
 		{#if !readonly}
@@ -434,7 +503,8 @@
 		</span>
 	</div>
 
-	<div class="top" style:height="{height}px">
+	<!-- The arrangement and the inspector take their places in the editor's grid: see `.top` below. -->
+	<div class="top">
 		<Arrangement
 			{doc}
 			{selection}
@@ -457,9 +527,21 @@
 			actions={placementActions}
 			onlocate={locate}
 			onloop={setLoop}
+			onexpand={expandClip}
 		/>
 
-		<aside class="inspector">
+		<aside class="inspector" id="inspector">
+			<div class="fold">
+				<span class="muted">Inspector</span>
+				<button
+					type="button"
+					aria-label="Inspector"
+					aria-expanded="true"
+					aria-controls="inspector"
+					title={`Fold the inspector (${label('inspector')})`}
+					onclick={toggleInspector}>»</button
+				>
+			</div>
 			<fieldset disabled={readonly}>
 				<details>
 					<summary>Tempo, {doc.tempo[0]?.bpm} BPM</summary>
@@ -767,9 +849,16 @@
 				{/if}
 			</fieldset>
 		</aside>
+		<button
+			type="button"
+			class="rail"
+			aria-label="Inspector"
+			aria-expanded="false"
+			aria-controls="inspector"
+			title={`Show the inspector (${label('inspector')})`}
+			onclick={toggleInspector}><span aria-hidden="true">«</span> Inspector</button
+		>
 	</div>
-
-	<Splitter label="Resize the arrangement" onmove={resize} onreset={unresize} />
 
 	<div class="detail">
 		<div class="tabs" role="tablist" aria-label="Timeline views">
@@ -783,11 +872,22 @@
 				>
 			{/each}
 		</div>
+		<button
+			type="button"
+			class="expand"
+			aria-label="Expand"
+			aria-pressed={expanded}
+			title={expanded
+				? 'Bring the arrangement and the inspector back (Esc)'
+				: 'Give this the whole view. A double-click on a clip does too, and Esc comes back.'}
+			onclick={() => expand()}>⤢</button
+		>
 		<div class="pane" class:notes={tab === 'notes'} role="tabpanel">
 			{#if tab === 'notes'}
 				{#if clip}
 					{#key clip.id}
 						<PianoRoll
+							bind:this={roll}
 							{clip}
 							ppq={doc.ppq}
 							{grid}
@@ -799,9 +899,12 @@
 							{readonly}
 							bind:draw
 							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
+							view={rollViewOf(clip.id)}
+							{expanded}
 							onchange={clipChanged}
 							onaudition={audition}
 							onundo={undo}
+							onview={(view, zoomed) => clip && viewed(clip.id, view, zoomed)}
 						/>
 					{/key}
 					{#if !readonly && home && !reported}
@@ -854,14 +957,19 @@
 		flex-wrap: wrap;
 		gap: 0.25rem 0.75rem;
 	}
+	/* The toolbar across the top, the arrangement over the notes, and the inspector down the right of both. The arrangement is
+	   as tall as its tracks, up to a limit it sets itself, and the notes have the rest. */
 	.timeline {
-		display: flex;
-		flex-direction: column;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-rows: auto auto minmax(0, 1fr);
+		grid-template-areas: 'toolbar toolbar' 'arrangement side' 'detail side';
+		column-gap: 0.5rem;
 		height: 100%;
 		min-height: 0;
 	}
 	.toolbar {
-		flex: none;
+		grid-area: toolbar;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -886,17 +994,66 @@
 		text-overflow: ellipsis;
 		font-size: 0.75rem;
 	}
+	/* `.top` holds the arrangement and the inspector, and puts no box of its own in the grid, so each takes its own place. */
 	.top {
-		flex: none;
-		max-height: calc(100% - 9rem);
-		min-height: 70px;
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 250px;
-		gap: 0.5rem;
-		padding-bottom: 0.4rem;
-		box-sizing: border-box;
+		display: contents;
+	}
+	.top > :global(.arrangement) {
+		grid-area: arrangement;
+		margin-bottom: 0.4rem;
+	}
+	.expanded .top > :global(.arrangement) {
+		display: none;
+	}
+	/* The inspector shows, or its rail does. Until the page knows how wide the window is, the width decides. */
+	.inspecting .rail,
+	.folded .inspector {
+		display: none;
+	}
+	@media (min-width: 1400px) {
+		.timeline:not(.inspecting, .folded) .rail {
+			display: none;
+		}
+	}
+	@media (max-width: 1399.98px) {
+		.timeline:not(.inspecting, .folded) .inspector {
+			display: none;
+		}
+	}
+	.rail {
+		grid-area: side;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		width: 1.6rem;
+		margin: 0;
+		padding: 0.5rem 0;
+		writing-mode: vertical-rl;
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		color: var(--muted);
+		font-size: 0.75rem;
+	}
+	.rail:hover {
+		color: var(--text);
+	}
+	.rail span {
+		writing-mode: horizontal-tb;
+	}
+	.fold {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin: -0.2rem 0 0.2rem;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
 	}
 	.inspector {
+		grid-area: side;
+		width: 250px;
+		box-sizing: border-box;
 		background: var(--panel);
 		border: 1px solid var(--line);
 		border-radius: 6px;
@@ -905,14 +1062,16 @@
 		overflow: auto;
 		font-size: 0.8rem;
 	}
+	/* The tabs, with ⤢ at the right of their strip, over what the chosen one shows. */
 	.detail {
-		flex: 1;
+		grid-area: detail;
 		min-height: 0;
-		display: flex;
-		flex-direction: column;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-rows: auto minmax(0, 1fr);
 	}
 	.tabs {
-		flex: none;
+		grid-area: 1 / 1 / 2 / 3;
 		display: flex;
 		gap: 0.15rem;
 		padding-top: 0.3rem;
@@ -932,8 +1091,20 @@
 		border-color: var(--line);
 		color: var(--text);
 	}
+	.expand {
+		grid-area: 1 / 2;
+		align-self: end;
+		margin: 0 0 0.15rem;
+		padding: 0 0.4rem;
+		font-size: 1rem;
+		line-height: 1.2;
+	}
+	.expand[aria-pressed='true'] {
+		color: var(--accent);
+		border-color: var(--accent);
+	}
 	.pane {
-		flex: 1;
+		grid-area: 2 / 1 / 3 / 3;
 		min-height: 0;
 		overflow: auto;
 		padding-top: 0.4rem;

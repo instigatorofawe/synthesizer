@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, tick as settle, untrack } from 'svelte';
 	import AutomationLane from '#lib/AutomationLane.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { followScroll } from '#lib/Follow.ts';
+	import { ROW, ROWS, anchored, clampBeat, fitRoll, wheelAction, type RollView } from '#lib/RollView.ts';
 	import { matches, modHeld, modKey } from '#lib/Shortcuts.ts';
 	import {
 		addNote,
@@ -43,9 +44,12 @@
 		readonly = false,
 		draw = $bindable(),
 		cangrow = () => true,
+		view = null,
+		expanded = false,
 		onchange,
 		onaudition,
-		onundo = () => {}
+		onundo = () => {},
+		onview = () => {}
 	}: {
 		clip: Clip;
 		ppq: number;
@@ -58,14 +62,15 @@
 		readonly?: boolean;
 		draw: number; // How long a clicked note is, in ticks. It follows the last note added, resized or chosen, as FL Studio's does.
 		cangrow?: (length: number) => boolean; // Whether the clip can be this long without running into the clip after it
+		view?: RollView | null; // Where the roll starts: the clip's zoom, row height and scroll as it was left, if it was
+		expanded?: boolean; // Whether the notes have the whole view, which Esc leaves before it lets go of the notes
 		onchange: (clip: Clip) => void;
 		onaudition: (note: number, on: boolean) => void;
 		onundo?: () => void; // The timeline's own undo, for the Undo beside "Clip is now 2 bars"
+		onview?: (view: RollView, zoomed: boolean) => void; // As it scrolls, and as someone zooms it, which `zoomed` says
 	} = $props();
 
-	const KEY = 12;
 	const KEYS = 48;
-	const HEIGHT = 128 * KEY;
 	const VELOCITY = 56;
 	const EDGE = 6;
 	const AUDITION_MS = 220;
@@ -85,7 +90,10 @@
 
 	let roll: SVGSVGElement;
 	let scroller: HTMLDivElement;
-	let beatWidth = $state(64);
+	let beatWidth = $state(untrack(() => view?.beat ?? 64));
+	let rowHeight = $state(untrack(() => view?.row ?? ROW)); // A row is a semitone, a whole number of pixels high
+	let rowAim = untrack(() => rowHeight); // What a slow pinch is making the rows, a little at a time, before it is rounded
+	const rollHeight = $derived(128 * rowHeight);
 	let chosen = $state.raw(new Set<number>());
 	let gesture = $state.raw<Gesture | null>(null);
 	let ghost = $state.raw<{ tick: number; note: number } | null>(null); // The empty cell under the pointer
@@ -113,8 +121,8 @@
 		return { x: event.clientX - box.left, y: event.clientY - box.top };
 	}
 
-	const rowOf = (note: number) => (127 - note) * KEY;
-	const noteAt = (y: number) => Math.min(127, Math.max(0, 127 - Math.floor(y / KEY)));
+	const rowOf = (note: number) => (127 - note) * rowHeight;
+	const noteAt = (y: number) => Math.min(127, Math.max(0, 127 - Math.floor(y / rowHeight)));
 
 	// The cell under the pointer, at the line of the grid before it, which is where a click puts a note.
 	function cellAt(event: { clientX: number; clientY: number }) {
@@ -279,7 +287,7 @@
 		const wanted = snapTick(anchor.tick + (at.x - g.from.x) / perTick, grid) - anchor.tick;
 		const last = Math.max(...[...g.indices].map((i) => g.base.notes[i].tick));
 		const dt = Math.min(wanted, clip.length - 1 - last);
-		return moveNotes(g.base, g.indices, dt, Math.round((g.from.y - at.y) / KEY));
+		return moveNotes(g.base, g.indices, dt, Math.round((g.from.y - at.y) / rowHeight));
 	}
 
 	// Whether a move has left every note where it was, which a click on a note does.
@@ -321,7 +329,7 @@
 		const inside = new Set<number>();
 		clip.notes.forEach((note, index) => {
 			const y = rowOf(note.note);
-			if (note.tick < right && note.tick + note.dur > left && y < bottom && y + KEY > top) inside.add(index);
+			if (note.tick < right && note.tick + note.dur > left && y < bottom && y + rowHeight > top) inside.add(index);
 		});
 		chosen = inside;
 	}
@@ -375,11 +383,14 @@
 			chosen = copied.chosen;
 			onchange(copied.clip);
 		} else if (by('escape')) {
-			// The first Esc lets go of what is held or offered, and the next lets go of the notes.
+			// The first Esc lets go of what is held or offered, and the next lets go of the notes. Expand comes between, and the
+			// editor leaves it, so Esc goes on to the editor only then.
 			if (gesture?.kind === 'draw') chosen = new Set();
 			if (gesture) gesture = null;
 			else if (offer) offer = null;
+			else if (expanded) return;
 			else chosen = new Set();
+			event.preventDefault();
 		} else if (by('roll.up') || by('roll.down') || by('roll.octave-up') || by('roll.octave-down')) {
 			event.preventDefault();
 			nudge(0, (event.code === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1));
@@ -470,6 +481,52 @@
 	}
 	function scrolled() {
 		for (const element of followers) element.scrollLeft = scroller.scrollLeft;
+		report();
+	}
+
+	// What the roll shows, for the editor to keep for this clip. A zoom is someone's choice, and a scroll only where they were.
+	function report(zoomed = false) {
+		const { scrollLeft: left, scrollTop: top } = scroller;
+		onview({ beat: beatWidth, row: rowHeight, left, top }, zoomed);
+	}
+
+	// A zoom to `beat` pixels a beat and `row` pixels a row, which keeps the tick and the note under the pointer where they
+	// were. Without a pointer it keeps the left edge and the middle row.
+	async function zoom(beat: number, row: number, pointer?: { clientX: number; clientY: number }) {
+		const box = scroller.getBoundingClientRect();
+		const x = pointer ? pointer.clientX - box.left : KEYS;
+		const y = pointer ? pointer.clientY - box.top : scroller.clientHeight / 2;
+		const [left, top] = [scroller.scrollLeft, scroller.scrollTop];
+		const across = clampBeat(beat) / beatWidth;
+		rowAim = Math.min(ROWS.most, Math.max(ROWS.least, row));
+		const down = Math.round(rowAim) / rowHeight;
+		beatWidth = clampBeat(beat);
+		rowHeight = Math.round(rowAim);
+		await settle(); // The roll is its new size before it scrolls
+		scroller.scrollLeft = anchored(left, x, across, KEYS);
+		scroller.scrollTop = anchored(top, y, down);
+		report(true);
+	}
+
+	// A wheel or two fingers scroll, as they would anywhere. Shift, Mod and a pinch are the roll's: see `wheelAction`.
+	function wheel(event: WheelEvent) {
+		const action = wheelAction(event, modKey(), scroller.clientHeight);
+		if (action.kind === 'scroll') return;
+		event.preventDefault();
+		if (action.kind === 'sideways') scroller.scrollLeft += action.by;
+		else if (action.kind === 'zoom') void zoom(beatWidth * action.by, rowHeight, event);
+		else void zoom(beatWidth, rowAim * action.by, event);
+	}
+
+	// The clip's notes, as large as the roll can show them all, which `.` does too.
+	export async function fit() {
+		const fitted = fitRoll(clip, ppq, { width: scroller.clientWidth - KEYS, height: scroller.clientHeight });
+		beatWidth = fitted.beat;
+		rowHeight = rowAim = fitted.row;
+		await settle();
+		scroller.scrollLeft = fitted.left;
+		scroller.scrollTop = fitted.top;
+		report(true);
 	}
 
 	// While the song plays this clip, the roll keeps the playhead in sight, as the arrangement does.
@@ -487,8 +544,14 @@
 
 	onMount(() => {
 		mod = modKey() === 'Meta' ? '⌘' : 'Ctrl';
+		// A clip seen before comes back as it was left, and one zoomed before a reload at that zoom, around its notes.
+		if (view?.left !== undefined && view.top !== undefined) {
+			scroller.scrollLeft = view.left;
+			scroller.scrollTop = view.top;
+			return;
+		}
 		// A whole clip if it fits, up to a size where a short one doesn't turn into a few very long notes.
-		beatWidth = Math.min(96, Math.max(16, (scroller.clientWidth - KEYS) / (clip.length / ppq + 1)));
+		if (!view) beatWidth = Math.min(96, Math.max(16, (scroller.clientWidth - KEYS) / (clip.length / ppq + 1)));
 		const pitches = clip.notes.map((note) => note.note);
 		const middle = pitches.length ? (Math.min(...pitches) + Math.max(...pitches)) / 2 : 60;
 		scroller.scrollTop = rowOf(middle) - scroller.clientHeight / 2;
@@ -498,12 +561,19 @@
 <svelte:window onpointermove={pointerMove} onpointerup={pointerUp} />
 
 <div class="toolbar">
-	<button type="button" onclick={() => (beatWidth = Math.max(16, beatWidth / 1.5))} aria-label="Zoom the roll out"
-		>−</button
+	<button
+		type="button"
+		onclick={() => zoom(beatWidth / 1.5, rowHeight)}
+		aria-label="Zoom the roll out"
+		title={`Zoom out. ${mod} with the wheel zooms, and ${mod}+Shift with it sets the rows' height.`}>−</button
 	>
-	<button type="button" onclick={() => (beatWidth = Math.min(400, beatWidth * 1.5))} aria-label="Zoom the roll in"
-		>+</button
+	<button
+		type="button"
+		onclick={() => zoom(beatWidth * 1.5, rowHeight)}
+		aria-label="Zoom the roll in"
+		title={`Zoom in. ${mod} with the wheel zooms, and ${mod}+Shift with it sets the rows' height.`}>+</button
 	>
+	<button type="button" onclick={fit} title="Fit the roll to the clip's notes (.)">Fit</button>
 	{#if one}
 		<fieldset disabled={readonly}>
 			<span class="muted">{chosen.size === 1 ? noteName(one.note) : `${chosen.size} notes`}</span>
@@ -615,34 +685,36 @@
 </div>
 
 <div class="frame">
-	<div class="roll" bind:this={scroller} onscroll={scrolled}>
+	<div class="roll" bind:this={scroller} onscroll={scrolled} onwheel={wheel}>
 		<div class="inner" style:width="{KEYS + width}px">
-			<svg class="keys" width={KEYS} height={HEIGHT} aria-hidden="true">
+			<svg class="keys" width={KEYS} height={rollHeight} aria-hidden="true">
 				{#each { length: 128 }, row}
 					{@const note = 127 - row}
 					<rect
 						class="key"
 						class:black={isBlackKey(note)}
-						y={row * KEY}
+						y={row * rowHeight}
 						width={KEYS}
-						height={KEY}
+						height={rowHeight}
 						role="presentation"
 						data-testid={`key-${note}`}
 						onpointerdown={(event) => pressKey(event, note)}
 					/>
-					{#if note % 12 === 0}<text class="octave" x="4" y={row * KEY + KEY - 2}>{noteName(note)}</text>{/if}
+					{#if note % 12 === 0}<text class="octave" x="4" y={row * rowHeight + rowHeight - 2}>{noteName(note)}</text
+						>{/if}
 				{/each}
 			</svg>
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 			<svg
 				bind:this={roll}
 				{width}
-				height={HEIGHT}
+				height={rollHeight}
 				role="application"
 				aria-label="Piano roll"
 				tabindex="0"
 				data-testid="roll"
 				data-per-tick={perTick}
+				data-row-height={rowHeight}
 				onkeydown={keydown}
 				onpointermove={hover}
 				onpointerleave={() => (ghost = null)}
@@ -652,9 +724,9 @@
 					<rect
 						class="lane"
 						class:black={isBlackKey(127 - row)}
-						y={row * KEY}
+						y={row * rowHeight}
 						{width}
-						height={KEY}
+						height={rowHeight}
 						role="presentation"
 						onpointerdown={pressGround}
 						ondblclick={doubleGround}
@@ -667,14 +739,14 @@
 						x1={beat * ppq * perTick}
 						x2={beat * ppq * perTick}
 						y1="0"
-						y2={HEIGHT}
+						y2={rollHeight}
 					/>
 				{/each}
 				<rect
 					class="past"
 					x={shown.length * perTick}
 					width={Math.max(0, width - shown.length * perTick)}
-					height={HEIGHT}
+					height={rollHeight}
 				/>
 				{#each shown.notes as note, index (index)}
 					<g
@@ -691,7 +763,7 @@
 							x={note.tick * perTick}
 							y={rowOf(note.note) + 1}
 							width={Math.max(note.dur * perTick, 3)}
-							height={KEY - 2}
+							height={rowHeight - 2}
 							rx="2"
 							role="presentation"
 							onpointerdown={(event) => pressNote(event, index, 'move')}
@@ -703,7 +775,7 @@
 								x={Math.max(note.dur * perTick, 3) + note.tick * perTick - EDGE}
 								y={rowOf(note.note) + 1}
 								width={EDGE}
-								height={KEY - 2}
+								height={rowHeight - 2}
 								role="presentation"
 								data-testid={`edge-${index}`}
 								onpointerdown={(event) => pressNote(event, index, 'size')}
@@ -717,7 +789,7 @@
 						class="end"
 						x={shown.length * perTick - 3}
 						width="6"
-						height={HEIGHT}
+						height={rollHeight}
 						role="presentation"
 						data-testid="clip-end"
 						onpointerdown={(event) => {
@@ -732,7 +804,7 @@
 						x={ghost.tick * perTick}
 						y={rowOf(ghost.note) + 1}
 						width={Math.max(draw * perTick, 3)}
-						height={KEY - 2}
+						height={rowHeight - 2}
 						rx="2"
 					/>
 				{/if}
@@ -741,7 +813,7 @@
 					<text
 						class="ghost-label"
 						x={(at.tick + at.dur) * perTick + 6}
-						y={rowOf(at.note) + KEY - 2}
+						y={rowOf(at.note) + rowHeight - 2}
 						data-testid="ghost">{ghostLabel}</text
 					>
 				{/if}
@@ -755,7 +827,7 @@
 					/>
 				{/if}
 				{#if playhead !== null}
-					<line class="playhead" x1={playhead * perTick} x2={playhead * perTick} y1="0" y2={HEIGHT} />
+					<line class="playhead" x1={playhead * perTick} x2={playhead * perTick} y1="0" y2={rollHeight} />
 				{/if}
 			</svg>
 		</div>
@@ -854,6 +926,14 @@
 	}
 	.toolbar button {
 		padding: 0 0.5rem;
+	}
+	/* A hint is one line, cut short where the roll is narrow, so it never takes a row of notes. */
+	.toolbar > .muted {
+		flex: 1 1 0;
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	fieldset {
 		display: flex;

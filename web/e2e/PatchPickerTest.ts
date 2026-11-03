@@ -29,7 +29,7 @@ const addTrack = (page: Page) => page.getByRole('button', { name: 'Add track' })
 const headPatch = (page: Page, track: number) => page.getByTestId(`track-patch-${track}`);
 
 async function newTimeline(page: Page, name: string) {
-	await page.setViewportSize({ width: 1440, height: 1500 });
+	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
 	await page.getByLabel('New timeline name').fill(name);

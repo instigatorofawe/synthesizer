@@ -138,3 +138,12 @@ fails if the document and the code disagree:
 Work goes to a branch as it happens. A finished milestone lands as one squashed pull request into `main`, and only those
 pull requests run CI, so run the checks above before pushing. One that changes only Markdown skips CI, unless it changes
 `docs/Format.md`, which `tools/ReadImage.py` reads.
+
+## License
+
+modsynth is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). You may use, change and share it for
+any noncommercial purpose. That includes personal study, research, hobby projects, and use by charities, schools, public research
+bodies and governments. Commercial use needs a separate license from the author.
+
+The libraries the build fetches or installs, such as nlohmann/json, GoogleTest, Google Benchmark, nanobind and CMSIS, keep their own
+licenses. The scores in [examples/Pieces/Scores](examples/Pieces/Scores) are Mutopia Project editions in the public domain.

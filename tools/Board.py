@@ -315,9 +315,12 @@ def load_image(path: Path, board: Board) -> bytes:
     request = json.loads(path.read_text())
     if not isinstance(request, dict):
         raise Refused("not a request")
-    backend = board.text("I")["backend"]
-    name = "NucleoCmsis.json" if backend == "cmsis" else "Nucleo.json"
+    info = board.text("I")
+    name = "NucleoCmsis.json" if info["backend"] == "cmsis" else "Nucleo.json"
     request["target"] = json.loads((ROOT / "firmware" / "Profiles" / name).read_text())
+    if info.get("budget") == "0":
+        # Firmware built with MODSYNTH_COST_LIMIT off refuses nothing for its cost, to measure what Programs cost.
+        del request["target"]["cost"]
     try:
         return modsynth.compile_image(request)
     except modsynth.CompileError as e:

@@ -23,14 +23,21 @@ using namespace modsynth;
 #ifdef MODSYNTH_CMSIS
 using Dsp = CmsisBackend;
 constexpr const char* kBackend = "cmsis";
-constexpr const modsynth::Costs& kCosts = kNucleoCmsisCosts;
+constexpr modsynth::Costs kLimit = kNucleoCmsisCosts;
 #else
 using Dsp = ScalarBackend;
 constexpr const char* kBackend = "scalar";
-constexpr const modsynth::Costs& kCosts = kNucleoCosts;
+constexpr modsynth::Costs kLimit = kNucleoCosts;
 #endif
 
 namespace {
+
+// A build for measuring what Programs cost, which is how the cost table is made, refuses none of them.
+#ifdef MODSYNTH_UNCAPPED
+constexpr modsynth::Costs kCosts{};
+#else
+constexpr modsynth::Costs kCosts = kLimit;
+#endif
 
 // Clocks and rates -------------------------------------------------------------------------------------------------
 
@@ -690,13 +697,13 @@ void info() {
     t.pair("board", "NUCLEO-L476RG").pair("backend", kBackend).pair("frame", N).pair("channels", 1);
     t.pair("core_hz", kCoreHz).pair("rate_millihertz", static_cast<u64>(kPlayRate * 1000.0f));
     t.pair("fast", sizeof g_fast).pair("bulk", sizeof g_bulk).pair("chunks", std::size(g_refs));
-    t.pair("slot_capacity", kCapacity).pair("revision", kFormatRevision);
+    t.pair("slot_capacity", kCapacity).pair("revision", kFormatRevision).pair("budget", kCosts.budget);
     t.pair("slot", g_active < 0 ? "none" : g_active == 0 ? "A" : "B");
     if (g_active >= 0) {
         SlotHeader h;
         (void)read_slot(static_cast<u32>(g_active), h);
         t.pair("sequence", h.sequence).pair("image", h.size).pair("need_fast", g_need.fast);
-        t.pair("need_bulk", g_need.bulk).pair("need_cycles", g_cycles).pair("budget", kCosts.budget);
+        t.pair("need_bulk", g_need.bulk).pair("need_cycles", g_cycles);
     }
     send_text('i', t.data);
 }

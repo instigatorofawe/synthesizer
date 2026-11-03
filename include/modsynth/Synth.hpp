@@ -284,7 +284,11 @@ class Synth {
             out.events += run.notes * (k.note + (voices + fades) * k.note_voice + params * k.note_param +
                                        (bytes + 63) / 64 * k.note_block + starting);
             out.events += run.params * ((params + insert_params + h.globals) * k.note_param + voices * k.note_voice);
-            if (voice) voice[t] = sounding + segments * k.voice + (plays ? k.glide : 0);
+            // One voice fewer saves its sound, and every note and parameter in the frame looking at it.
+            if (voice) {
+                voice[t] =
+                    sounding + segments * k.voice + (plays ? k.glide : 0) + (run.notes + run.params) * k.note_voice;
+            }
         }
         for (u32 i = 0; i < h.inserts; ++i) {
             const PatchView v = patch_view(chunks, p.patch(p.insert(i).patch));
@@ -2192,13 +2196,14 @@ class Synth {
 
             const float* left = scratch + operand_index(b.view.h.out_left) * N;
             const float* right = scratch + operand_index(b.view.h.out_right) * N;
+            const bool same = b.view.h.out_left == b.view.h.out_right;
             v.gate = {};
-            if (!K::finite(left) || !K::finite(right)) {
+            if (!finite(left, right, same)) {
                 v.active = false;
                 ++t.guard_trips;
                 continue;
             }
-            mix_output(g, dst, left, right, b.view.h.out_left == b.view.h.out_right);
+            mix_output(g, dst, left, right, same);
             if (!v.held && (!b.ends || !c.busy)) v.active = false;
         }
         for (u32 n = 0; n < t.fade_count; ++n) run_fade(g, t, n, dst, scratch);
@@ -2232,12 +2237,12 @@ class Synth {
         v.gate = {};
         float* left = scratch + operand_index(b.view.h.out_left) * N;
         float* right = scratch + operand_index(b.view.h.out_right) * N;
-        if (!K::finite(left) || !K::finite(right)) {
+        const bool same = b.view.h.out_left == b.view.h.out_right;
+        if (!finite(left, right, same)) {
             v.active = false;
             ++t.guard_trips;
             return;
         }
-        const bool same = b.view.h.out_left == b.view.h.out_right;
         for (u32 i = f.from; i < N; ++i) {
             const float gain =
                 f.done < fade_length_ ? 1.0f - static_cast<float>(f.done + 1) / static_cast<float>(fade_length_) : 0.0f;
@@ -2250,14 +2255,20 @@ class Synth {
         if (f.done >= fade_length_ || (b.ends && !c.busy)) v.active = false;
     }
 
-    // A stereo source on a mono build folds to (L + R) / 2. A patch with one output pays nothing for this.
+    // An output's guard. One buffer on both sides is checked once.
+    [[nodiscard]] static bool finite(const float* left, const float* right, bool same) {
+        return K::finite(left) && (same || K::finite(right));
+    }
+
+    // A stereo source on a mono build folds to (L + R) / 2. A patch with one output pays nothing for this. Adding at a
+    // gain of 1 is an add, which rounds the same.
     void mix_output(Generation& g, u32 dst, const float* left, const float* right, bool same) {
         if constexpr (Ch == 2) {
             (void)same;
-            B::accumulate(left, 1.0f, bus(g, dst, 0), N);
-            B::accumulate(right, 1.0f, bus(g, dst, 1), N);
+            B::add(bus(g, dst, 0), left, bus(g, dst, 0), N);
+            B::add(bus(g, dst, 1), right, bus(g, dst, 1), N);
         } else if (same) {
-            B::accumulate(left, 1.0f, bus(g, dst, 0), N);
+            B::add(bus(g, dst, 0), left, bus(g, dst, 0), N);
         } else {
             B::accumulate(left, 0.5f, bus(g, dst, 0), N);
             B::accumulate(right, 0.5f, bus(g, dst, 0), N);
@@ -2290,7 +2301,7 @@ class Synth {
 
         const float* left = scratch + operand_index(v.h.out_left) * N;
         const float* right = scratch + operand_index(v.h.out_right) * N;
-        if (!K::finite(left) || !K::finite(right)) {
+        if (!finite(left, right, v.h.out_left == v.h.out_right)) {
             // Feedback can hold a non-finite value forever, so a tripped insert restarts empty.
             ++i.guard_trips;
             init_instance(b, i.slot, i.instance, 0);

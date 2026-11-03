@@ -44,15 +44,11 @@ BUILDS = {
     "MonoCmsis": "BenchMonoCmsis",  # The board's two builds are the mono ones
 }
 
-# What "fits" means. Instructions are exact, but cycles per instruction and the reserve are a model until a board says.
-CYCLES_PER_INSTRUCTION = 1.5
-RESERVE = 0.3
-CLOCK_MHZ = 80
-RAM_KB = 128
 
-
-def run(*command: object, **options: object) -> subprocess.CompletedProcess:
-    return subprocess.run([str(c) for c in command], check=True, **options)
+def run(
+    *command: object, check: bool = True, **options: object
+) -> subprocess.CompletedProcess:
+    return subprocess.run([str(c) for c in command], check=check, **options)
 
 
 def configure_host() -> None:
@@ -213,19 +209,36 @@ def m4(_: argparse.Namespace) -> None:
     (BUILD / "M4.json").write_text(json.dumps(report, indent=1) + "\n")
 
 
-def over_budget(recipe: dict, engine_bytes: int) -> str:
-    """Why a recipe doesn't fit the floor in docs/Design.md section 15, or an empty string."""
-    budget = CLOCK_MHZ * 1e6 * (1 - RESERVE) / (RATE * CYCLES_PER_INSTRUCTION)
-    reasons = []
-    if recipe["peak"] > budget:
-        reasons.append("CPU")
-    if (recipe["fast"] + recipe["bulk"] + engine_bytes) / 1024 > RAM_KB:
-        reasons.append("RAM")
-    return " and ".join(reasons)
-
-
-def megahertz(instructions: float) -> float:
-    return instructions * RATE * CYCLES_PER_INSTRUCTION / 1e6
+def board_fit(names: list[str]) -> dict[str, tuple[str, float]]:
+    """Each recipe compiled for the board's scalar build: whether it fits, and its dearest frame as a share of the
+    budget, as the compiler works them out."""
+    profile = json.loads((ROOT / "firmware" / "Profiles" / "Nucleo.json").read_text())
+    unlimited = profile | {"cost": profile["cost"] | {"budget": 2**32 - 1}}
+    request_path, image, report_path = (
+        BUILD / "Fit.json",
+        BUILD / "Fit.image",
+        BUILD / "Fit.report.json",
+    )
+    fit = {}
+    for name in names:
+        request = json.loads((RECIPES / f"{name}.json").read_text())
+        request["target"] = unlimited
+        request_path.write_text(json.dumps(request))
+        run(
+            BUILD / "modsynth_compile",
+            request_path,
+            image,
+            report_path,
+            check=False,
+            capture_output=True,
+        )
+        report = json.loads(report_path.read_text())
+        if not report.get("ok"):
+            fit[name] = ("RAM", math.nan)
+            continue
+        share = report["target"]["cycles"][0] / profile["cost"]["budget"]
+        fit[name] = ("yes" if share <= 1 else "CPU", share)
+    return fit
 
 
 def kernel_rows(stereo: dict, cmsis: dict, native: dict) -> list[str]:
@@ -246,19 +259,83 @@ def kernel_rows(stereo: dict, cmsis: dict, native: dict) -> list[str]:
 
 
 def recipe_rows(
-    stereo: dict, mono: dict, cmsis: dict, hosted: dict, groups: dict
+    stereo: dict, mono: dict, cmsis: dict, hosted: dict, groups: dict, fit: dict
 ) -> list[str]:
     rows = []
     for name, r in sorted(stereo["recipes"].items(), key=lambda item: -item[1]["peak"]):
         h = hosted[f"Recipe/{name}/manual_time"]
-        problem = over_budget(r, stereo["engine_bytes"])
+        verdict, share = fit[name]
+        bound = "" if math.isnan(share) else f"{share:.0%}"
         rows.append(
             f"| {name} | {groups[name]} | {r['image'] / 1024:.1f} | {(r['fast'] + r['bulk']) / 1024:.1f} | {r['voices']} "
             f"| {r['mean']:.0f} | {r['p999']:.0f} | {r['peak']:.0f} | {mono['recipes'][name]['peak']:.0f} "
-            f"| {cmsis['recipes'][name]['peak']:.0f} | {megahertz(r['peak']):.0f} | {problem or 'yes'} "
+            f"| {cmsis['recipes'][name]['peak']:.0f} | {bound} | {verdict} "
             f"| {h['real_time'] / (r['frames'] * FRAME):.1f} | {h['p999_frame_ns'] / 1000:.1f} / {h['worst_frame_ns'] / 1000:.1f} |"
         )
     return rows
+
+
+def cost_lines(mono: dict, work: dict) -> list[str]:
+    """The board's cost table, term by term: instructions on QEMU, the board's cycles for each, and the price."""
+    calibration = json.loads(CALIBRATION_FILE.read_text())
+    ratios = calibration["builds"]["scalar"]["terms"]
+    instr = instructions(mono, work)
+    table = priced(mono, work, calibration["builds"]["scalar"], calibration["output"])
+    rows = [
+        f"| {key} | {max(instr[key], 0):.0f} | {ratios[pair]:.2f} | {table[key]} |"
+        for key, pair in TERMS.items()
+        if key != "glide"
+    ]
+    text = (
+        f"What the NUCLEO-L476RG's scalar build refuses a Program by, from `firmware/NucleoCosts.hpp`. Its budget is "
+        f"{table['budget']:,} cycles a frame: the core's {CORE_HZ * FRAME * TIMER_PERIOD // CORE_HZ:,} less "
+        f"{calibration['output']:,} for playing a frame out. Each term is measured by a pair of calibration Programs, in "
+        "instructions here and in cycles on the board, and priced at their ratio with "
+        f"{MARGIN - 1:.0%} more. A step is priced at its dearest kernel row below, at its op's ratio."
+    )
+    return [
+        text,
+        "",
+        "| Term | Instructions | Cycles an instruction | Price |",
+        "|---|---:|---:|---:|",
+        *rows,
+    ]
+
+
+def parallel_lines(hosted: dict) -> list[str]:
+    """The pieces and the demo on a thread pool, from bench/ParallelBench.cpp."""
+    runs = {}
+    for name, b in hosted.items():
+        if name.startswith("Parallel/"):
+            _, program, frame, executor = name.split("/")[:4]
+            runs[(program, frame, executor)] = b
+    if not runs:
+        return []
+    rows = []
+    for program, frame in sorted(
+        {(p, f) for p, f, _ in runs}, key=lambda k: (k[0], int(k[1]))
+    ):
+        serial = runs[(program, frame, "serial")]
+        cells = [
+            f"{serial['frame_ns'] / 1000:.1f} / {serial['worst_frame_ns'] / 1000:.0f}"
+        ]
+        for workers in ("2", "4", "8"):
+            r = runs[(program, frame, workers)]
+            cells.append(
+                f"{serial['frame_ns'] / r['frame_ns']:.2f}x / {r['worst_frame_ns'] / 1000:.0f}"
+            )
+        rows.append(f"| {program} | {frame} | " + " | ".join(cells) + " |")
+    text = (
+        "The first 20 s of each, on a pool of 2, 4 and 8 workers against the same engine run serially. Each cell is the "
+        "speedup of the mean frame, then the worst frame in µs."
+    )
+    return [
+        text,
+        "",
+        "| Program | Frame | Serial µs / worst | 2 workers | 4 workers | 8 workers |",
+        "|---|---:|---:|---:|---:|---:|",
+        *rows,
+    ]
 
 
 def engine_lines(stereo: dict, overhead: dict) -> list[str]:
@@ -275,7 +352,7 @@ def engine_lines(stereo: dict, overhead: dict) -> list[str]:
         f"A Program with nothing to play costs {silent:.1f} instructions a sample. One voice of a naive saw, the cheapest voice "
         f"that makes a sound, costs {one:.1f}, and four cost {four:.1f}, so each voice after the first adds {each:.1f}. Its kernels "
         f"account for {work:.1f} of that, which leaves {each - work:.1f} on every voice whatever it plays: setting up its context, "
-        "checking both channels for non-finite samples, and adding them to the bus."
+        "checking its output for non-finite samples, and adding it to the bus."
     )
     return [text]
 
@@ -300,14 +377,12 @@ def table(_: argparse.Namespace) -> None:
     index = json.loads((RECIPES / "Index.json").read_text())
     groups = {r["name"]: r["group"] for r in index}
     recipes = list(stereo["recipes"].values())
-    problems = {
-        n: over_budget(r, stereo["engine_bytes"]) for n, r in stereo["recipes"].items()
-    }
-    fit = sum(not p for p in problems.values())
+    fit = board_fit(list(stereo["recipes"]))
+    fits = sum(verdict == "yes" for verdict, _ in fit.values())
+    work = json.loads((BUILD / "Work.json").read_text())
     commit = run(
         "git", "rev-parse", "--short", "HEAD", capture_output=True, text=True, cwd=ROOT
     ).stdout.strip()
-    budget = CLOCK_MHZ * (1 - RESERVE)
     source = (
         f"Cortex-M4 counts come from `firmware/Bench.cpp` on QEMU's mps2-an386, built with {m4_report['compiler']} at -O2, "
         f"frame {FRAME}, {RATE} Hz. They are exact and repeat, so a change in one is a change in the code. Host figures come "
@@ -315,19 +390,19 @@ def table(_: argparse.Namespace) -> None:
     )
     caution = (
         "Section 17 of `docs/Design.md` applies: host figures rank kernels on that host only and are not carried to Cortex-M. "
-        f"Megahertz here is a model, instructions at {CYCLES_PER_INSTRUCTION} cycles each, with no flash wait states, cache "
-        "misses or DMA. Only a board can replace it."
+        "What a frame costs the board in cycles comes from its own calibration, in the cost table below."
     )
     summary = (
-        f"{fit} of {len(recipes)} fit the floor in section 15: an {CLOCK_MHZ} MHz L476 with {RESERVE:.0%} held back, so "
-        f"{budget:.0f} MHz at the worst frame, and {RAM_KB} KB of RAM including the {stereo['engine_bytes'] / 1024:.1f} KB engine "
-        f"object. Images have a median of {statistics.median(r['image'] for r in recipes) / 1024:.1f} KB and RAM a median of "
+        f"{fits} of {len(recipes)} compile for the NUCLEO-L476RG, whose loader refuses the same ones: the rest could need "
+        "more cycles in a frame than it has, or more memory. Images have a median of "
+        f"{statistics.median(r['image'] for r in recipes) / 1024:.1f} KB and RAM a median of "
         f"{statistics.median(r['fast'] + r['bulk'] for r in recipes) / 1024:.1f} KB. Loading one takes "
         f"{min(r['load'] for r in recipes):,} to {max(r['load'] for r in recipes):,} instructions."
     )
     columns = (
         "Instructions are per sample, stereo and scalar unless named. Peak is the worst frame of the whole recipe, played from "
-        "start to end. Host ns is per sample of the mean frame. A host's worst frame is mostly the operating system."
+        "start to end. Board is the compiler's bound on a frame for the board, with every voice sounding, as a share of its "
+        "budget. Host ns is per sample of the mean frame. A host's worst frame is mostly the operating system."
     )
     kernels = (
         f"One step at a time, per sample, on inputs a recipe gives it. A control step runs once a frame, so its figure is its "
@@ -349,13 +424,17 @@ def table(_: argparse.Namespace) -> None:
         "",
         columns,
         "",
-        "| Recipe | Group | Image KB | RAM KB | Voices | Mean | p99.9 | Peak | Peak, mono | Peak, CMSIS | Peak MHz | Fits | Host ns | Host p99.9 / worst frame µs |",
+        "| Recipe | Group | Image KB | RAM KB | Voices | Mean | p99.9 | Peak | Peak, mono | Peak, CMSIS | Board | Fits | Host ns | Host p99.9 / worst frame µs |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|",
-        *recipe_rows(stereo, mono, cmsis, hosted, groups),
+        *recipe_rows(stereo, mono, cmsis, hosted, groups, fit),
         "",
         "## Engine",
         "",
         *engine_lines(stereo, overhead),
+        "",
+        "## The board's cost table",
+        "",
+        *cost_lines(mono, work),
         "",
         "## Kernels",
         "",
@@ -366,8 +445,10 @@ def table(_: argparse.Namespace) -> None:
         *kernel_rows(stereo, cmsis, native),
         "",
     ]
+    if parallel := parallel_lines(hosted):
+        lines += ["## Parallel", "", *parallel, ""]
     TABLE.write_text("\n".join(lines))
-    print(f"{TABLE.relative_to(ROOT)}: {fit} of {len(recipes)} fit")
+    print(f"{TABLE.relative_to(ROOT)}: {fits} of {len(recipes)} fit")
 
 
 # The cost table ---------------------------------------------------------------------------------------------------
@@ -391,6 +472,7 @@ BOARD_BUILDS = {
     "cmsis": "MonoCmsis",
 }  # each of the board's builds, and its QEMU build
 MARGIN = 1.1  # every price is this much above what was measured
+SMALLEST = 5  # instructions below which a term's cycles per instruction can't be told from noise
 TOLERANCE = 0.01  # how far a count may move from the baseline before CI fails
 SAW = (
     "KMtoF, still",
@@ -604,7 +686,16 @@ def calibrate(arguments: argparse.Namespace) -> None:
         qemu = m4_report["builds"][BOARD_BUILDS[backend]]
         cycles = pairs(lambda n, board=board: float(board[n]["mean"]), counts(work))
         instr = pairs(means(qemu), counts(work))
-        ratio = {key: cycles[key] / instr[key] for key in sorted(set(TERMS.values()))}
+        # A term too small to measure, as a frame's extra piece is, takes the dearest ratio of the rest.
+        ratio = {
+            key: cycles[key] / instr[key]
+            for key in sorted(set(TERMS.values()))
+            if instr[key] > SMALLEST
+        }
+        ratio |= {
+            key: max(ratio.values()) for key in set(TERMS.values()) if key not in ratio
+        }
+        ratio = dict(sorted(ratio.items()))
         ops = {}
         for op, (program, base) in OP_PROGRAMS.items():
             ops[op] = (float(board[program]["mean"]) - float(board[base]["mean"])) / (
@@ -636,7 +727,9 @@ def priced(build: dict, work: dict, calibration: dict, output: int) -> dict:
     budget = math.floor(CORE_HZ * FRAME / rate) - output
     instr = instructions(build, work)
     terms = {
-        key: math.ceil(max(instr[key], 0.0) * calibration["terms"][pair] * MARGIN)
+        key: max(
+            math.ceil(max(instr[key], 0.0) * calibration["terms"][pair] * MARGIN), 0
+        )
         for key, pair in TERMS.items()
     }
     steps = calibration["steps"]

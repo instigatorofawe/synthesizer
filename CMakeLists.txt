@@ -235,9 +235,16 @@ if(MODSYNTH_BUILD_BENCH)
     FetchContent_MakeAvailable(benchmark)
 
     file(GLOB MODSYNTH_BENCH_SOURCES CONFIGURE_DEPENDS bench/*.cpp)
+    if(NOT MODSYNTH_PARALLEL)
+        list(FILTER MODSYNTH_BENCH_SOURCES EXCLUDE REGEX "ParallelBench\\.cpp$")
+    endif()
     add_executable(modsynth_bench ${MODSYNTH_BENCH_SOURCES})
     target_link_libraries(modsynth_bench PRIVATE modsynth_compiler benchmark::benchmark_main)
-    target_compile_definitions(modsynth_bench PRIVATE MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes")
+    if(MODSYNTH_PARALLEL)
+        target_link_libraries(modsynth_bench PRIVATE modsynth_parallel)
+    endif()
+    target_compile_definitions(modsynth_bench PRIVATE MODSYNTH_RECIPES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Recipes"
+        MODSYNTH_PIECES="${CMAKE_CURRENT_SOURCE_DIR}/examples/Pieces")
 endif()
 
 if(MODSYNTH_INSTALL)

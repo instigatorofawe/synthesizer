@@ -23,6 +23,28 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		this.generation = 0;
 		this.tapStart = new Array(TAP_SLOTS).fill(null);
 		this.tapDropped = new Array(TAP_SLOTS).fill(0); // Blocks lost since this slot last sent one
+		// postMessage copies a message as it sends it, so the audio thread sends the same objects every time and makes
+		// no garbage for them. What it can't keep is a view for each block, since every buffer comes back a new one.
+		this.tapMessages = Array.from({ length: TAP_SLOTS }, (_, slot) => ({
+			type: 'tap',
+			slot,
+			buffer: null,
+			start: 0,
+			dropped: 0,
+			generation: 0
+		}));
+		this.transfer = [null];
+		this.stateMessage = {
+			type: 'state',
+			tick: 0,
+			playing: false,
+			voices: 0,
+			generation: 0,
+			liveId: 0,
+			error: 0,
+			loading: false,
+			guardTrips: 0
+		};
 		this.quanta = 0;
 		this.port.onmessage = (e) => this.receive(e.data);
 		// registerProcessor() cannot wait for this, so process() outputs silence until it resolves.
@@ -121,17 +143,14 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 			const offset = pointer >> 2;
 			this.tapStart[slot] ??= m.HEAPF32.subarray(offset, offset + this.tapBlock);
 			new Float32Array(buffer).set(this.tapStart[slot]);
-			this.port.postMessage(
-				{
-					type: 'tap',
-					slot,
-					buffer,
-					start: m._ms_tap_start(),
-					dropped: this.tapDropped[slot],
-					generation: m._ms_generation()
-				},
-				[buffer]
-			);
+			const message = this.tapMessages[slot];
+			message.buffer = buffer;
+			message.start = m._ms_tap_start();
+			message.dropped = this.tapDropped[slot];
+			message.generation = m._ms_generation();
+			this.transfer[0] = buffer;
+			this.port.postMessage(message, this.transfer);
+			message.buffer = this.transfer[0] = null;
 			this.tapDropped[slot] = 0;
 		}
 	}
@@ -157,17 +176,16 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		if (output[1]) output[1].set(this.right);
 		this.collectTaps();
 		if (++this.quanta % STATE_EVERY === 0) {
-			this.port.postMessage({
-				type: 'state',
-				tick: m._ms_tick(),
-				playing: m._ms_playing() !== 0,
-				voices: m._ms_voices(),
-				generation,
-				liveId: this.liveId,
-				error: m._ms_error(),
-				loading: m._ms_loading() !== 0,
-				guardTrips: m._ms_guard_trips()
-			});
+			const state = this.stateMessage;
+			state.tick = m._ms_tick();
+			state.playing = m._ms_playing() !== 0;
+			state.voices = m._ms_voices();
+			state.generation = generation;
+			state.liveId = this.liveId;
+			state.error = m._ms_error();
+			state.loading = m._ms_loading() !== 0;
+			state.guardTrips = m._ms_guard_trips();
+			this.port.postMessage(state);
 		}
 		return true;
 	}

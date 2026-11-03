@@ -34,6 +34,15 @@ for image in Lanes Zones Hold Mods Steals; do
     python3 tools/CompareAudio.py "golden/$image.stereo.f32" "build/firmware/StereoCmsis.$image.f32"
 done
 
+# The board's firmware has the first 128 KB of flash, before slot A. Growing past the budget fails here first, with
+# room still to spare, and Nucleo.ld fails one that would run into the slot.
+budget=$((112 * 1024))
+for name in Nucleo NucleoCmsis; do
+    flash=$(arm-none-eabi-size -A "build/firmware/$name.elf" | awk '$1 == ".text" || $1 == ".ARM.exidx" || $1 == ".data" { n += $2 } END { print n }')
+    echo "$name: $flash bytes of flash, of a budget of $budget"
+    [ "$flash" -le "$budget" ] || { echo "$name is over its flash budget"; exit 1; }
+done
+
 # The profiles the compiler checks requests against are what the board's build says about itself.
 for name in Nucleo NucleoCmsis; do
     python3 -c 'import json, sys; sys.exit(json.load(open(sys.argv[1])) != json.load(open(sys.argv[2])))' \

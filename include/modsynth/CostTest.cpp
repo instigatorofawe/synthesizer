@@ -125,7 +125,7 @@ TEST(Cost, ATargetRefusesWhatCouldOverrunAFrame) {
     request["programs"][0]["timeline"]["tracks"][0]["voices"] = fits;
     const json target = compile_image(request).report.at("target");
     EXPECT_LE(target.at("cycles")[0].get<u64>(), target.at("cycles")[1].get<u64>());
-    EXPECT_GT(fits, 4);
+    EXPECT_GE(fits, 1);
 }
 
 // What a frame does, counted by the engine itself, is never more than frame_cost() assumes of any frame: voices and

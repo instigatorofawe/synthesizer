@@ -772,39 +772,67 @@ struct Kernels {
         }
 
         float* out = buffer(c, s.out[0]);
-        u32 i = 0;
-        const auto until = [&](u32 end) {
-            while (i < end) {
-                switch (st.stage) {
-                    case Attack:
-                        st.level += st.attack_inc;
-                        if (st.level >= 1.0f) {
-                            st.level = 1.0f;
-                            st.stage = Decay;
+        // A loop for each stage, on a level and a place held in locals, so a sample costs its stage's arithmetic and
+        // not a switch and a store. The sample a stage ends on is written as the stage leaves it, as before.
+        const auto until = [&out, &st, sustain](u32 from, u32 end) {
+            float level = st.level;
+            u32 stage = st.stage, n = from;
+            while (n < end) {
+                switch (stage) {
+                    case Attack: {
+                        const float inc = st.attack_inc;
+                        for (; n < end; ++n) {
+                            level += inc;
+                            if (level >= 1.0f) {
+                                level = 1.0f;
+                                stage = Decay;
+                                out[n++] = level;
+                                break;
+                            }
+                            out[n] = level;
                         }
                         break;
-                    case Decay:
-                        st.level = sustain + (st.level - sustain) * st.decay_coef;
-                        if (st.level - sustain < 1e-4f) {
-                            st.level = sustain;
-                            st.stage = Sustain;
+                    }
+                    case Decay: {
+                        const float coef = st.decay_coef;
+                        for (; n < end; ++n) {
+                            level = sustain + (level - sustain) * coef;
+                            if (level - sustain < 1e-4f) {
+                                level = sustain;
+                                stage = Sustain;
+                                out[n++] = level;
+                                break;
+                            }
+                            out[n] = level;
                         }
                         break;
+                    }
                     case Sustain:
-                        st.level = sustain;
+                        level = sustain;
+                        for (; n < end; ++n) out[n] = level;
                         break;
-                    case Release:
-                        st.level *= st.release_coef;
-                        if (st.level < 1e-4f) {
-                            st.level = 0.0f;
-                            st.stage = Idle;
+                    case Release: {
+                        const float coef = st.release_coef;
+                        for (; n < end; ++n) {
+                            level *= coef;
+                            if (level < 1e-4f) {
+                                level = 0.0f;
+                                stage = Idle;
+                                out[n++] = level;
+                                break;
+                            }
+                            out[n] = level;
                         }
                         break;
+                    }
                     default:
-                        st.level = 0.0f;
+                        level = 0.0f;
+                        for (; n < end; ++n) out[n] = level;
                 }
-                out[i++] = st.level;
             }
+            st.level = level;
+            st.stage = stage;
+            return n;
         };
         const u32 on = c.gate.on, off = c.gate.off;
         const bool on_first = on <= off;
@@ -813,15 +841,16 @@ struct Kernels {
             if (at == on) st.stage = Attack;
             if (at == off && st.stage != Idle) st.stage = Release;
         };
+        u32 i = 0;
         if (first < N) {
-            until(first);
+            i = until(i, first);
             apply(first);
             if (second < N && second != first) {
-                until(second);
+                i = until(i, second);
                 apply(second);
             }
         }
-        until(N);
+        until(i, N);
         if (st.stage != Idle) c.busy = true;
     }
 
@@ -843,30 +872,37 @@ struct Kernels {
         std::fill(left, left + start, 0.0f);
         std::fill(right, right + start, 0.0f);
         u32 i = start;
-        const u32 ch = a.channels;
-        for (; i < N && !st.done; ++i) {
-            const u32 idx = static_cast<u32>(st.position >> 32);
-            if (!looping && idx >= a.frames) {
-                st.done = 1;
-                break;
-            }
-            const float frac = static_cast<float>(static_cast<u32>(st.position)) * 2.3283064e-10f;
-            const float l0 = read(a, idx, 0), l1 = read(a, idx + 1, 0);
-            float value = l0 + (l1 - l0) * frac;
-            float other = value;
-            if (ch == 2) {
-                const float r0 = read(a, idx, 1), r1 = read(a, idx + 1, 1);
-                other = r0 + (r1 - r0) * frac;
-            }
-            if constexpr (C.channels == 1) {
-                // A mono build folds here, so a stereo asset costs one extra read and no stereo buses.
-                value = other = (value + other) * 0.5f;
-            }
-            left[i] = value;
-            right[i] = other;
-            st.position += inc;
-            if (looping && st.position >= loop_end) st.position -= loop_length;
-        }
+        // A recording that ended stays ended, even if a live swap gives it a loop.
+        if (!st.done)
+            with_format(a, [&]<bool F32, bool Stereo>() {
+                u64 position = st.position;
+                u32 n = i;
+                for (; n < N; ++n) {
+                    const u32 idx = static_cast<u32>(position >> 32);
+                    if (!looping && idx >= a.frames) {
+                        st.done = 1;
+                        break;
+                    }
+                    const float frac = static_cast<float>(static_cast<u32>(position)) * 2.3283064e-10f;
+                    const float l0 = read_as<F32, Stereo>(a, idx, 0), l1 = read_as<F32, Stereo>(a, idx + 1, 0);
+                    float value = l0 + (l1 - l0) * frac;
+                    float other = value;
+                    if constexpr (Stereo) {
+                        const float r0 = read_as<F32, Stereo>(a, idx, 1), r1 = read_as<F32, Stereo>(a, idx + 1, 1);
+                        other = r0 + (r1 - r0) * frac;
+                    }
+                    if constexpr (C.channels == 1) {
+                        // A mono build folds here, so a stereo asset costs one extra read and no stereo buses.
+                        value = other = (value + other) * 0.5f;
+                    }
+                    left[n] = value;
+                    right[n] = other;
+                    position += inc;
+                    if (looping && position >= loop_end) position -= loop_length;
+                }
+                st.position = position;
+                i = n;
+            });
         std::fill(left + i, left + N, 0.0f);
         std::fill(right + i, right + N, 0.0f);
         if (!st.done) c.busy = true;
@@ -944,34 +980,43 @@ struct Kernels {
             if (in_loop && !reverse && st.position >= loop_end) st.position = loop_start;
             if (in_loop && reverse && st.position < loop_start) st.position = loop_end - 1;
             const u64 floor = in_loop ? loop_start : 0;
-            for (; i < end && !st.done; ++i) {
-                const u32 idx = static_cast<u32>(st.position >> 32);
-                if (idx >= a.frames) {
-                    st.done = 1;
-                    break;
+            if (st.done) return;
+            with_format(a, [&]<bool F32, bool Stereo>() {
+                u64 position = st.position;
+                u32 n = i;
+                bool done = false;
+                for (; n < end && !done; ++n) {
+                    const u32 idx = static_cast<u32>(position >> 32);
+                    if (idx >= a.frames) {
+                        done = true;
+                        break;
+                    }
+                    const float frac = static_cast<float>(static_cast<u32>(position)) * 2.3283064e-10f;
+                    const float l0 = read_as<F32, Stereo>(a, idx, 0), l1 = read_as<F32, Stereo>(a, idx + 1, 0);
+                    float value = l0 + (l1 - l0) * frac;
+                    float other = value;
+                    if constexpr (Stereo) {
+                        const float r0 = read_as<F32, Stereo>(a, idx, 1), r1 = read_as<F32, Stereo>(a, idx + 1, 1);
+                        other = r0 + (r1 - r0) * frac;
+                    }
+                    if constexpr (C.channels == 1) value = other = (value + other) * 0.5f;
+                    left[n] = value;
+                    right[n] = other;
+                    if (!reverse) {
+                        position += inc;
+                        if (in_loop && position >= loop_end) position -= loop_length;
+                    } else if (position - floor >= inc) {
+                        position -= inc;
+                    } else if (in_loop) {
+                        position += loop_length - inc;
+                    } else {
+                        done = true;
+                    }
                 }
-                const float frac = static_cast<float>(static_cast<u32>(st.position)) * 2.3283064e-10f;
-                const float l0 = read(a, idx, 0), l1 = read(a, idx + 1, 0);
-                float value = l0 + (l1 - l0) * frac;
-                float other = value;
-                if (a.channels == 2) {
-                    const float r0 = read(a, idx, 1), r1 = read(a, idx + 1, 1);
-                    other = r0 + (r1 - r0) * frac;
-                }
-                if constexpr (C.channels == 1) value = other = (value + other) * 0.5f;
-                left[i] = value;
-                right[i] = other;
-                if (!reverse) {
-                    st.position += inc;
-                    if (in_loop && st.position >= loop_end) st.position -= loop_length;
-                } else if (st.position - floor >= inc) {
-                    st.position -= inc;
-                } else if (in_loop) {
-                    st.position += loop_length - inc;
-                } else {
-                    st.done = 1;
-                }
-            }
+                st.position = position;
+                if (done) st.done = 1;
+                i = n;
+            });
         };
         if (c.gate.off < N) {
             until(c.gate.off);
@@ -1073,34 +1118,44 @@ struct Kernels {
                 if (in_loop && !reverse && head.position >= loop_end) head.position = loop_start;
                 if (in_loop && reverse && head.position < loop_start) head.position = loop_end - 1;
                 const u64 floor = in_loop ? loop_start : 0;
-                for (; i < end && !head.done; ++i) {
-                    const u32 idx = static_cast<u32>(head.position >> 32);
-                    if (idx >= a.frames) {
-                        head.done = 1;
-                        break;
+                if (head.done) return;
+                with_format(a, [&]<bool F32, bool Stereo>() {
+                    u64 position = head.position;
+                    const float gain = head.gain;
+                    u32 n = i;
+                    bool done = false;
+                    for (; n < end && !done; ++n) {
+                        const u32 idx = static_cast<u32>(position >> 32);
+                        if (idx >= a.frames) {
+                            done = true;
+                            break;
+                        }
+                        const float frac = static_cast<float>(static_cast<u32>(position)) * 2.3283064e-10f;
+                        const float l0 = read_as<F32, Stereo>(a, idx, 0), l1 = read_as<F32, Stereo>(a, idx + 1, 0);
+                        float value = l0 + (l1 - l0) * frac;
+                        float other = value;
+                        if constexpr (Stereo) {
+                            const float r0 = read_as<F32, Stereo>(a, idx, 1), r1 = read_as<F32, Stereo>(a, idx + 1, 1);
+                            other = r0 + (r1 - r0) * frac;
+                        }
+                        if constexpr (C.channels == 1) value = other = (value + other) * 0.5f;
+                        left[n] += value * gain;
+                        right[n] += other * gain;
+                        if (!reverse) {
+                            position += inc;
+                            if (in_loop && position >= loop_end) position -= loop_length;
+                        } else if (position - floor >= inc) {
+                            position -= inc;
+                        } else if (in_loop) {
+                            position += loop_length - inc;
+                        } else {
+                            done = true;
+                        }
                     }
-                    const float frac = static_cast<float>(static_cast<u32>(head.position)) * 2.3283064e-10f;
-                    const float l0 = read(a, idx, 0), l1 = read(a, idx + 1, 0);
-                    float value = l0 + (l1 - l0) * frac;
-                    float other = value;
-                    if (a.channels == 2) {
-                        const float r0 = read(a, idx, 1), r1 = read(a, idx + 1, 1);
-                        other = r0 + (r1 - r0) * frac;
-                    }
-                    if constexpr (C.channels == 1) value = other = (value + other) * 0.5f;
-                    left[i] += value * head.gain;
-                    right[i] += other * head.gain;
-                    if (!reverse) {
-                        head.position += inc;
-                        if (in_loop && head.position >= loop_end) head.position -= loop_length;
-                    } else if (head.position - floor >= inc) {
-                        head.position -= inc;
-                    } else if (in_loop) {
-                        head.position += loop_length - inc;
-                    } else {
-                        head.done = 1;
-                    }
-                }
+                    head.position = position;
+                    if (done) head.done = 1;
+                    i = n;
+                });
             };
             if (!on_release && c.gate.off < N && c.gate.off >= from) {
                 until(c.gate.off);
@@ -1113,12 +1168,30 @@ struct Kernels {
         if (busy) c.busy = true;
     }
 
-    [[nodiscard]] static float read(const BoundAsset& a, u32 frame, u32 channel) {
-        const u32 index = frame * a.channels + channel;
-        if (a.encoding == static_cast<u8>(AssetEncoding::I16)) {
+    // A sample of a recording whose encoding and channels the caller knows, so a loop over it tests neither.
+    template <bool F32, bool Stereo>
+    [[nodiscard]] static float read_as(const BoundAsset& a, u32 frame, u32 channel) {
+        const u32 index = frame * (Stereo ? 2u : 1u) + channel;
+        if constexpr (F32) {
+            return reinterpret_cast<const float*>(a.data)[index];
+        } else {
             return static_cast<float>(reinterpret_cast<const std::int16_t*>(a.data)[index]) * 3.0517578e-5f;
         }
-        return reinterpret_cast<const float*>(a.data)[index];
+    }
+
+    // Runs `f` with a recording's encoding and channels as constants. The validator allows only these four.
+    template <class F>
+    static void with_format(const BoundAsset& a, F&& f) {
+        const bool f32 = a.encoding == static_cast<u8>(AssetEncoding::F32), stereo = a.channels == 2;
+        if (f32 && stereo) {
+            f.template operator()<true, true>();
+        } else if (f32) {
+            f.template operator()<true, false>();
+        } else if (stereo) {
+            f.template operator()<false, true>();
+        } else {
+            f.template operator()<false, false>();
+        }
     }
 
     // A linear law, so left + right is always `in`. A mono build can therefore output in / 2 for any position, which is
@@ -1137,13 +1210,21 @@ struct Kernels {
         }
     }
 
+    // The most of a frame that reads or writes from `at` on before the line wraps.
+    [[nodiscard]] static u32 before_wrap(const DelayLine& line, u32 at, u32 left) {
+        return std::min(left, line.length - at);
+    }
+
     static void delay_write(const DecodedStep& s, RunContext& c) {
         DelayLine& line = c.lines[s.resource];
         const float* in = buffer(c, s.in[0]);
         u32 w = line.write;
-        for (u32 i = 0; i < N; ++i) {
-            line.data[w] = in[i];
-            if (++w == line.length) w = 0;
+        for (u32 i = 0; i < N;) {
+            const u32 run = before_wrap(line, w, N - i);
+            std::memcpy(line.data + w, in + i, sizeof(float) * run);
+            i += run;
+            w += run;
+            if (w == line.length) w = 0;
         }
         line.write = w;
         line.written = std::min(line.length, line.written + N);
@@ -1158,14 +1239,18 @@ struct Kernels {
         u32 d = wanted < static_cast<float>(ceiling) ? static_cast<u32>(wanted) : ceiling;
         if (before_write) d = std::max(d, N);  // Feedback cannot read what this frame has not written yet
         const u32 behind = before_write ? d : d + N;
-        for (u32 i = 0; i < N; ++i) {
-            const u32 distance = behind - i;
-            if (distance > line.written) {
-                out[i] = 0.0f;
-                continue;
-            }
-            const u32 r = line.write >= distance ? line.write - distance : line.write + line.length - distance;
-            out[i] = line.data[r];
+        // A read further back than the line has been written gives silence, and those come first in a frame, as each
+        // sample reads one nearer. The rest are at most two copies, either side of the wrap.
+        const u32 zeros = behind > line.written ? std::min(N, behind - line.written) : 0;
+        std::fill(out, out + zeros, 0.0f);
+        const u32 first = behind - zeros;
+        u32 r = line.write >= first ? line.write - first : line.write + line.length - first;
+        for (u32 i = zeros; i < N;) {
+            const u32 run = before_wrap(line, r, N - i);
+            std::memcpy(out + i, line.data + r, sizeof(float) * run);
+            i += run;
+            r += run;
+            if (r == line.length) r = 0;
         }
     }
 
@@ -1185,20 +1270,46 @@ struct Kernels {
         const float feedback = clamp(scalar(c, s.in[2]), -0.995f, 0.995f);
         const float damp = clamp(scalar(c, s.in[3]), 0.0f, 0.99f);
         float low = st.low;
-        u32 w = line.write, written = line.written;
-        for (u32 i = 0; i < N; ++i) {
-            const u32 r = w >= d ? w - d : w + line.length - d;
-            const float y = d <= written ? line.data[r] : 0.0f;
-            const float x = in[i];  // read first: out may alias in
-            low = y * (1.0f - damp) + low * damp;
-            line.data[w] = x + low * feedback;
-            out[i] = y;
-            if (++w == line.length) w = 0;
-            if (written < line.length) ++written;
+        u32 w = line.write;
+        const u32 written = line.written;
+        // A delay further back than the line has been written reads silence, and those samples come first in a frame,
+        // as the line fills by one a sample. Then each stretch to a wrap runs without testing for one.
+        const u32 zeros = d > written ? std::min(N, d - written) : 0;
+        for (u32 i = 0; i < zeros;) {
+            const u32 run = before_wrap(line, w, zeros - i);
+            float* to = line.data + w;
+            for (u32 j = 0; j < run; ++j) {
+                const float y = 0.0f;
+                const float x = in[i + j];  // read first: out may alias in
+                low = y * (1.0f - damp) + low * damp;
+                to[j] = x + low * feedback;
+                out[i + j] = y;
+            }
+            i += run;
+            w += run;
+            if (w == line.length) w = 0;
         }
-        st.low = flush(low);
+        u32 r = w >= d ? w - d : w + line.length - d;
+        for (u32 i = zeros; i < N;) {
+            const u32 run = before_wrap(line, r, before_wrap(line, w, N - i));
+            float* to = line.data + w;
+            const float* from = line.data + r;
+            for (u32 j = 0; j < run; ++j) {
+                const float y = from[j];
+                const float x = in[i + j];  // read first: out may alias in
+                low = y * (1.0f - damp) + low * damp;
+                to[j] = x + low * feedback;
+                out[i + j] = y;
+            }
+            i += run;
+            w += run;
+            r += run;
+            if (w == line.length) w = 0;
+            if (r == line.length) r = 0;
+        }
         line.write = w;
-        line.written = written;
+        line.written = std::min(line.length, written + N);
+        st.low = flush(low);
     }
 
     static void allpass(const DecodedStep& s, RunContext& c) {
@@ -1207,18 +1318,42 @@ struct Kernels {
         float* out = buffer(c, s.out[0]);
         const u32 d = line_delay(c, line, scalar(c, s.in[1]));
         const float feedback = clamp(scalar(c, s.in[2]), -0.995f, 0.995f);
-        u32 w = line.write, written = line.written;
-        for (u32 i = 0; i < N; ++i) {
-            const u32 r = w >= d ? w - d : w + line.length - d;
-            const float y = d <= written ? line.data[r] : 0.0f;
-            const float x = in[i];  // read first: out may alias in
-            line.data[w] = x + y * feedback;
-            out[i] = y - x;
-            if (++w == line.length) w = 0;
-            if (written < line.length) ++written;
+        u32 w = line.write;
+        const u32 written = line.written;
+        // As in comb()
+        const u32 zeros = d > written ? std::min(N, d - written) : 0;
+        for (u32 i = 0; i < zeros;) {
+            const u32 run = before_wrap(line, w, zeros - i);
+            float* to = line.data + w;
+            for (u32 j = 0; j < run; ++j) {
+                const float y = 0.0f;
+                const float x = in[i + j];  // read first: out may alias in
+                to[j] = x + y * feedback;
+                out[i + j] = y - x;
+            }
+            i += run;
+            w += run;
+            if (w == line.length) w = 0;
+        }
+        u32 r = w >= d ? w - d : w + line.length - d;
+        for (u32 i = zeros; i < N;) {
+            const u32 run = before_wrap(line, r, before_wrap(line, w, N - i));
+            float* to = line.data + w;
+            const float* from = line.data + r;
+            for (u32 j = 0; j < run; ++j) {
+                const float y = from[j];
+                const float x = in[i + j];  // read first: out may alias in
+                to[j] = x + y * feedback;
+                out[i + j] = y - x;
+            }
+            i += run;
+            w += run;
+            r += run;
+            if (w == line.length) w = 0;
+            if (r == line.length) r = 0;
         }
         line.write = w;
-        line.written = written;
+        line.written = std::min(line.length, written + N);
     }
 
     static void follow(const DecodedStep& s, RunContext& c) {

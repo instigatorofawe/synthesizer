@@ -29,7 +29,8 @@ struct KernelCase {
     u8 square = 0;     // Buffer inputs, by bit, that hold -1 and 1 in turn rather than noise
     u32 stage = 0;     // The stage an Env is held in
     Recording recording = Recording::None;
-    u32 rows = 1;  // How many recordings a Sample3 plays at once: two for a velocity crossfade
+    u32 rows = 1;     // How many recordings a Sample3 plays at once: two for a velocity crossfade
+    u32 written = 0;  // How much of its delay line has been written, each frame, or 0 for all of it
 };
 
 inline constexpr u8 kLowPass = static_cast<u8>(BiquadMode::LowPass);
@@ -160,6 +161,10 @@ inline constexpr KernelCase kKernelCases[] = {
     {.name = "DelayRead, feedback", .op = Op::DelayRead, .mode = kReadBeforeWrite, .in = {0.05f}},
     {.name = "Comb", .op = Op::Comb, .in = {0.0f, 0.05f, 0.8f, 0.2f}},
     {.name = "Allpass", .op = Op::Allpass, .in = {0.0f, 0.05f, 0.5f}},
+    // A line still filling, as one is in a note's first frames: half the frame reads silence and half the line.
+    {.name = "Comb, filling", .op = Op::Comb, .in = {0.0f, 0.05f, 0.8f, 0.2f}, .written = 2400 - 16},
+    {.name = "Allpass, filling", .op = Op::Allpass, .in = {0.0f, 0.05f, 0.5f}, .written = 2400 - 16},
+    {.name = "DelayRead, filling", .op = Op::DelayRead, .in = {0.05f}, .written = 2400 + 16},
     {.name = "Follow", .op = Op::Follow, .in = {0.0f, 0.1f}},
     {.name = "Follow, moving", .op = Op::Follow, .in = {0.0f, 0.1f}, .wobble = 0b10},
     {.name = "KMul", .op = Op::KMul, .in = {2.0f, 3.0f}},
@@ -258,10 +263,11 @@ class KernelRig {
     void frame() {
         const KernelCase& k = *case_;
         if (k.moving >= 0) constants_[k.moving] = odd_ ? k.in[k.moving] : k.to;
-        for (u32 i = 0; i < 4; ++i) {
+        for (u32 i = 0; k.wobble != 0 && i < 4; ++i) {
             if (k.wobble >> i & 1) constants_[i] = odd_ ? k.in[i] : k.in[i] * 1.5f;
         }
         odd_ = !odd_;
+        if (k.written != 0) line_.written = k.written;
         if (k.op == Op::Env) {
             auto& st = *reinterpret_cast<typename K::EnvState*>(state_);
             st.stage = k.stage;

@@ -3237,8 +3237,8 @@ inline std::string over_budget(const ChunkTable& table, u64 program, u64 cycles,
         const u32 voices = p.track(t).voices;
         if (voice[t] == 0) continue;
         const u64 cut = (over + voice[t] - 1) / voice[t];
-        text += " Track " + std::to_string(p.track(t).id) + " has " + std::to_string(voices) + " voices at " +
-                std::to_string(voice[t]) + " cycles each";
+        text += " Track " + std::to_string(p.track(t).id) + " has " + std::to_string(voices) +
+                (voices == 1 ? " voice at " : " voices at ") + std::to_string(voice[t]) + " cycles each";
         text += cut < voices ? ", and fits with " + std::to_string(voices - cut) + "." : ".";
     }
     return text;

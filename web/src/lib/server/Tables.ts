@@ -10,12 +10,14 @@ const timestamps = {
 		.default(sql`(unixepoch() * 1000)`)
 };
 
-// Global: every timeline can use every patch.
+// Global: every timeline can use every patch. A built-in patch is one of the examples' own, kept as it ships: the server writes
+// it from examples/ at startup and refuses any other change to it.
 export const patches = sqliteTable('patches', {
 	id: text('id').primaryKey(),
 	name: text('name').notNull(),
 	graph: text('graph', { mode: 'json' }).notNull(),
 	revision: integer('revision').notNull().default(1),
+	builtin: integer('builtin', { mode: 'boolean' }).notNull().default(false),
 	...timestamps
 });
 
@@ -67,6 +69,7 @@ export const assets = sqliteTable('assets', {
 	loopStart: integer('loop_start').notNull().default(0),
 	loopEnd: integer('loop_end').notNull().default(0),
 	bytes: blob('bytes', { mode: 'buffer' }).notNull(),
+	builtin: integer('builtin', { mode: 'boolean' }).notNull().default(false), // A built-in patch's recording, as it ships
 	...timestamps
 });
 

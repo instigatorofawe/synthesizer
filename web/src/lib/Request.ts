@@ -48,6 +48,13 @@ export function reachable(roots: string[], patches: PatchEntry[], assets: AssetE
 	return { patches: [...found.values()], assets: assets.filter((asset) => named.has(asset.id)) };
 }
 
+// The recordings those patches name that the page doesn't hold yet, which a built-in patch's are until something saved uses it.
+export function missingAssets(roots: string[], patches: PatchEntry[], assets: AssetEntry[]): string[] {
+	const have = new Set(assets.map((asset) => asset.id));
+	const named = reachable(roots, patches, []).patches.flatMap((patch) => referencedAssets(patch.graph));
+	return [...new Set(named)].filter((id) => !have.has(id)).sort();
+}
+
 export function buildRequest(
 	patches: PatchEntry[],
 	assets: AssetEntry[],

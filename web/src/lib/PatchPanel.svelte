@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
+	import { enhance, type SubmitFunction } from '$app/forms';
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
 	import GraphEditor from '#lib/GraphEditor.svelte';
@@ -17,6 +17,9 @@
 		graph,
 		text,
 		readonly,
+		builtin,
+		duplicate,
+		duplicating,
 		dirty,
 		users,
 		parts,
@@ -46,6 +49,9 @@
 		graph: Graph | null; // What is drawn: the text if it parses, and otherwise what it last was
 		text: string;
 		readonly: boolean;
+		builtin: boolean; // One of the library's built-in patches, which can't be changed
+		duplicate: string | null; // The library patch Duplicate copies, which for an example's patch is its built-in one
+		duplicating: SubmitFunction;
 		dirty: boolean;
 		users: { id: string; name: string }[]; // Timelines a saved edit changes
 		parts: { id: string; name: string }[]; // An example's patches, to choose between
@@ -103,8 +109,15 @@
 					{/each}
 				</div>
 			{/if}
+			{#if builtin}<span class="tag" title="One of the examples' patches, which can't be changed">built in</span>{/if}
 			{#if use}
 				<span class="muted info" data-testid="patch-use">{use}</span>
+			{:else if builtin}
+				<span class="muted info" data-testid="used-by" title={users.map((u) => u.name).join(', ')}>
+					{users.length
+						? `Used by ${users.length} timeline${users.length === 1 ? '' : 's'}: ${users.map((u) => u.name).join(', ')}`
+						: 'Not used by a timeline'}
+				</span>
 			{:else if users.length}
 				<span class="muted info" data-testid="used-by" title={users.map((u) => u.name).join(', ')}>
 					Saving changes {users.length} timeline{users.length === 1 ? '' : 's'}: {users.map((u) => u.name).join(', ')}
@@ -117,6 +130,14 @@
 				>
 				<button type="button" role="tab" aria-selected={view === 'json'} onclick={() => (view = 'json')}>JSON</button>
 			</div>
+			{#if duplicate}
+				<form method="POST" action={actionOn(search, 'duplicatePatch')} use:enhance={duplicating}>
+					<input type="hidden" name="id" value={duplicate} />
+					<button class="duplicate" title="Make a copy of this patch, as it is saved, that can be changed"
+						>{readonly ? 'Duplicate to edit' : 'Duplicate'}</button
+					>
+				</form>
+			{/if}
 			{#if !readonly}
 				<form method="POST" action={actionOn(search, 'deletePatch')} use:enhance={stay}>
 					<input type="hidden" name="id" value={patch.id} />
@@ -230,6 +251,14 @@
 	.dot {
 		color: #d29922;
 	}
+	.tag {
+		font-size: 0.65rem;
+		color: var(--muted);
+		border: 1px solid var(--line);
+		border-radius: 3px;
+		padding: 0 0.2rem;
+		white-space: nowrap;
+	}
 	.info {
 		min-width: 0;
 		white-space: nowrap;
@@ -244,6 +273,7 @@
 	}
 	.parts button,
 	.views button,
+	.duplicate,
 	.delete {
 		padding: 0.1rem 0.5rem;
 		font-size: 0.78rem;

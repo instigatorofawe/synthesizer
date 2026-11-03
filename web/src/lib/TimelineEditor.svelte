@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick as settle, untrack, type Snippet } from 'svelte';
 	import { on } from 'svelte/events';
-	import Arrangement, { type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
+	import Arrangement, { type Loop, type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
@@ -29,6 +29,7 @@
 		noteValue,
 		place,
 		placementIndex,
+		placementSpan,
 		placeOfError,
 		removeClip,
 		removePlacement,
@@ -46,7 +47,6 @@
 		tempoAt,
 		setTrack,
 		snapTick,
-		songLength,
 		stepLength,
 		windowOf,
 		ticksPerBar,
@@ -65,12 +65,15 @@
 		rings,
 		engine,
 		history = null,
+		loop = null,
+		looping = false,
 		readonly = false,
 		active = true,
 		tabs = [],
 		heading,
 		examples = [],
 		onchange,
+		onloop = () => {},
 		ontrack = () => {},
 		onopen = () => {},
 		onnewpatch
@@ -85,12 +88,15 @@
 		rings: Ring[];
 		engine: SongControls;
 		history?: Undoable | null; // The timeline's undo, which the page keeps while other things are open
+		loop?: Loop | null; // The loop, which the page keeps since the top bar turns it on and off. Null is the whole song.
+		looping?: boolean;
 		readonly?: boolean;
 		active?: boolean; // Whether keys are for this editor, which they are while its view is on screen
 		tabs?: { id: string; label: string; content: Snippet }[]; // More views of the document, after the notes and the mixer
 		heading?: Snippet; // At the start of the toolbar
 		examples?: ExampleGroup[]; // How the browser groups the examples, which the patch pickers group built-in patches by
 		onchange: (doc: Timeline) => void;
+		onloop?: (loop: Loop | null, on: boolean) => void; // A loop set or changed here, and whether it is on
 		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
@@ -117,14 +123,10 @@
 		return [...lengths, { label: noteValue(draw, doc.ppq), ticks: draw }].sort((a, b) => a.ticks - b.ticks);
 	});
 	let barWidth = $state(96);
-	let loop = $state<{ start: number; end: number } | null>(null);
-	let looping = $state(false);
 	let tab = $state('notes');
 	let dragged = $state<number | null>(null); // The arrangement's height, once someone has dragged it
 	// Until then it fits its tracks, up to a size that leaves room for the notes.
 	const height = $derived(dragged ?? Math.min(270, 34 + Math.max(doc.tracks.length, 1) * 60 + 20));
-	const canUndo = $derived(history?.canUndo ?? false);
-	const canRedo = $derived(history?.canRedo ?? false);
 
 	const track = $derived(doc.tracks.find((t) => t.id === selection.track));
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
@@ -140,7 +142,6 @@
 	const used = $derived(doc.tracks.flatMap((t) => t.slots));
 	const newPatchAction = $derived(onnewpatch && !readonly ? 'New patch for this track' : '');
 	const choices = $derived(laneChoices(doc, home?.id ?? null, patches));
-	const length = $derived(program?.length_ticks ?? songLength(doc));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
 	const badClips = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).clip ?? [])));
 
@@ -158,8 +159,8 @@
 		if (next !== doc) onchange(next);
 	}
 
+	// The roll's "Clip is now N bars · Undo" takes back the growing. The top bar has the Undo and Redo for everything else.
 	const undo = () => history?.undo();
-	const redo = () => history?.redo();
 
 	// The page shows the chosen track's patch, so it hears about every choice of track.
 	let told = false;
@@ -327,8 +328,30 @@
 		delete: (at) => {
 			select(at);
 			deleteClip();
+		},
+		// The loop goes over the placement and its repeats, and the playhead into it, so Play plays the loop.
+		loop: (at) => {
+			select(at);
+			const placed = doc.tracks.find((t) => t.id === at.track)?.placements[at.placement];
+			if (!placed) return;
+			const range = { start: placed.tick, end: placed.tick + placementSpan(doc, placed) };
+			onloop(range, true);
+			if (tick < range.start || tick >= range.end) engine.locate(range.start);
 		}
 	};
+
+	// Shows where a problem is, for the compile light's links: a track, a clip and where it is placed, or a tab.
+	export function reveal(place: { track?: number | null; clip?: string | null; tab?: string }) {
+		const clip = place.clip ?? null;
+		const on =
+			place.track === undefined || place.track === null
+				? doc.tracks.find((t) => clip !== null && t.placements.some((p) => p.clip === clip))
+				: doc.tracks.find((t) => t.id === place.track);
+		const index = clip === null ? -1 : (on?.placements.findIndex((p) => p.clip === clip) ?? -1);
+		if (on) selection = { track: on.id, placement: index >= 0 ? index : null };
+		if (clip !== null && doc.clips.some((c) => c.id === clip)) clipId = clip;
+		tab = place.tab ?? 'notes';
+	}
 
 	// [ and ] step the Draw length. They go by where the keys are, as the piano keys do, and a field keeps them. They have
 	// their own listener, so the editor's `keydown` stays as it is.
@@ -354,27 +377,6 @@
 	function locate(at: number) {
 		engine.locate(at);
 	}
-
-	function setLoop(start: number, end: number) {
-		loop = end > start ? { start, end } : null;
-		looping = loop !== null;
-		engine.setLoop(start, end);
-	}
-
-	function toggleLoop() {
-		looping = !looping;
-		if (!looping) engine.setLoop(0, 0);
-		else if (loop) engine.setLoop(loop.start, loop.end);
-		else {
-			loop = { start: 0, end: Math.max(length, ticksPerBar(doc)) };
-			engine.setLoop(loop.start, loop.end);
-		}
-	}
-
-	// A loop can be drawn before there is an engine to tell, and a new image can arrive in a new engine.
-	$effect(() => {
-		if (targets.length && looping && loop) engine.setLoop(loop.start, loop.end);
-	});
 
 	// Undo and Redo are the page's keys, since they act on whichever panel is in use.
 	function keydown(event: KeyboardEvent) {
@@ -404,8 +406,6 @@
 				onmousedown={(event) => event.preventDefault()}
 				onclick={(event) => toggle({ kind: 'add', anchor: event.currentTarget })}>+ Track</button
 			>
-			<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
-			<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
 		{/if}
 		{#if !readonly}
 			<label
@@ -425,9 +425,8 @@
 		</label>
 		<button type="button" onclick={() => (barWidth = Math.max(24, barWidth / 1.5))} aria-label="Zoom out">−</button>
 		<button type="button" onclick={() => (barWidth = Math.min(800, barWidth * 1.5))} aria-label="Zoom in">+</button>
-		<button type="button" onclick={toggleLoop} aria-pressed={looping}>Loop {looping ? 'on' : 'off'}</button>
 		<span class="muted hint">
-			Click the numbers to move the playhead, and drag under them for a loop.
+			Click the numbers to move the playhead.
 			{#if !readonly}Drag across a row for a new clip, or double-click it for a bar. Drag a clip's right edge to repeat
 				it, hold
 				{mod} to copy it, and right-click it for more.{/if}
@@ -442,7 +441,8 @@
 			{grid}
 			{tick}
 			{playing}
-			loop={looping ? loop : null}
+			{loop}
+			{looping}
 			{readonly}
 			{badTracks}
 			{badClips}
@@ -456,7 +456,7 @@
 			onnew={newClip}
 			actions={placementActions}
 			onlocate={locate}
-			onloop={setLoop}
+			{onloop}
 		/>
 
 		<aside class="inspector">

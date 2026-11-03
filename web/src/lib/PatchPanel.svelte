@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { enhance, type SubmitFunction } from '$app/forms';
+	import { untrack } from 'svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
 	import type { CatalogEntry, LibraryPatch } from '#lib/GraphEdit.ts';
 	import GraphEditor from '#lib/GraphEditor.svelte';
-	import type { Undoable } from '#lib/History.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
@@ -37,7 +37,7 @@
 		hearing,
 		scopes,
 		active,
-		history,
+		choose = null,
 		song,
 		onsong,
 		onname,
@@ -71,7 +71,7 @@
 		hearing: Hearing;
 		scopes: { slot: number; label: string; ring: Ring }[];
 		active: boolean; // Whether this view is on screen, so keys are for it
-		history: Undoable | null; // The patch's undo, which the page keeps while other things are open
+		choose?: { node: number } | null; // A node to choose, from the compile light's link to a problem, which shows the graph
 		song: string; // The open timeline's or example's name
 		onsong: () => void; // Back to the Song view
 		onname: (name: string) => void;
@@ -83,6 +83,11 @@
 	} = $props();
 
 	let view = $state<'graph' | 'json'>('graph');
+
+	// A node asked for is in the graph, so that is what shows.
+	$effect(() => {
+		if (choose) untrack(() => (view = 'graph'));
+	});
 
 	// A link, so it can open in another tab, that otherwise switches views without leaving the page.
 	function backToSong(event: MouseEvent) {
@@ -199,7 +204,7 @@
 						{maxProbes}
 						{readonly}
 						{active}
-						{history}
+						{choose}
 						onchange={ongraph}
 						{onprobes}
 					>

@@ -38,7 +38,6 @@
 	import { friendlyName, helpOf, rangeText, shown } from '#lib/NodeHelp.ts';
 	import NodePalette from '#lib/NodePalette.svelte';
 	import type { Probe } from '#lib/AudioEngine.ts';
-	import type { Undoable } from '#lib/History.ts';
 	import { matches, modHeld, typingIn } from '#lib/Shortcuts.ts';
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
@@ -56,7 +55,7 @@
 		maxProbes,
 		readonly = false,
 		active = true,
-		history = null,
+		choose = null,
 		side,
 		onchange,
 		onprobes
@@ -73,7 +72,7 @@
 		maxProbes: number;
 		readonly?: boolean; // For looking at: a node can be chosen and probed, and nothing changes
 		active?: boolean; // Whether keys are for this editor, when it shares a page with others
-		history?: Undoable | null; // The patch's undo, which the page keeps, and which its keys act on
+		choose?: { node: number } | null; // A node to choose and bring into view, asked for from outside, each time a new one
 		side?: Snippet; // Drawn above the inspector
 		onchange: (graph: Graph) => void;
 		onprobes: (probes: Probe[]) => void;
@@ -114,8 +113,6 @@
 	let gesture = $state<Gesture | null>(null);
 	let palette = $state<Palette | null>(null);
 	let hover: { x: number; y: number } | null = null; // The pointer over the canvas, where N opens the search
-	const canUndo = $derived(history?.canUndo ?? false);
-	const canRedo = $derived(history?.canRedo ?? false);
 
 	const heightOf = (node: GraphNode) => nodeHeight(node, catalog, library);
 	const sizeOf = (node: GraphNode) => ({ width: NODE_WIDTH, height: heightOf(node) });
@@ -137,8 +134,6 @@
 
 	// The page records each edit, so its history outlasts this editor.
 	const commit = (next: Graph) => onchange(next);
-	const undo = () => history?.undo();
-	const redo = () => history?.redo();
 
 	const positionOf = (node: GraphNode): Point =>
 		gesture?.kind === 'move' && gesture.id === node.id ? gesture.at : { x: node.x as number, y: node.y as number };
@@ -493,6 +488,19 @@
 		observer.observe(svg);
 		return () => observer.disconnect();
 	});
+
+	// A node asked for from outside, by the compile light's link to a problem, is chosen and brought into view. This comes after
+	// the first fit, so the fit doesn't move it out again.
+	$effect(() => {
+		const asked = choose;
+		if (!asked) return;
+		untrack(() => {
+			const node = laid.nodes.find((candidate) => candidate.id === asked.node);
+			if (!node) return;
+			selected = node.id;
+			reveal(node);
+		});
+	});
 </script>
 
 <svelte:window onkeydown={keydown} onpointerup={pointerUp} />
@@ -508,8 +516,6 @@
 				aria-expanded={palette !== null}
 				onclick={() => openPalette(null)}>+ Node</button
 			>
-			<button type="button" onclick={undo} disabled={!canUndo}>Undo</button>
-			<button type="button" onclick={redo} disabled={!canRedo}>Redo</button>
 			<button type="button" onclick={tidyUp} title="Lay the graph out again, left to right as signals flow">Tidy</button
 			>
 		{/if}

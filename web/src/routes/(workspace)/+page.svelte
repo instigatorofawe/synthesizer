@@ -2,7 +2,7 @@
 	import { applyAction, deserialize, enhance, type SubmitFunction } from '$app/forms';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
-	import { onDestroy, onMount, untrack } from 'svelte';
+	import { onDestroy, onMount, tick as rendered, untrack } from 'svelte';
 	import {
 		AudioEngine,
 		LOAD_ERRORS,
@@ -12,24 +12,30 @@
 		type SongControls,
 		type TapTarget
 	} from '#lib/AudioEngine.ts';
+	import type { Loop } from '#lib/Arrangement.svelte';
 	import Browser, { type Section } from '#lib/Browser.svelte';
 	import BrowserRail from '#lib/BrowserRail.svelte';
 	import BundleDialog from '#lib/BundleDialog.svelte';
+	import CompileLight from '#lib/CompileLight.svelte';
 	import { Compiler, type Compiled } from '#lib/Compiler.ts';
+	import DocumentMenu from '#lib/DocumentMenu.svelte';
 	import { downloadBytes, downloadImage } from '#lib/Download.ts';
 	import { renderWav } from '#lib/Render.ts';
 	import { nodeOfError } from '#lib/GraphEdit.ts';
 	import { History } from '#lib/History.ts';
 	import Keyboard from '#lib/Keyboard.svelte';
 	import Meter from '#lib/Meter.svelte';
+	import { friendlyName } from '#lib/NodeHelp.ts';
 	import PatchPanel from '#lib/PatchPanel.svelte';
+	import { placeOf, placeWords, sizeOf, type Names, type Problem } from '#lib/Problems.ts';
 	import ReportPanel from '#lib/ReportPanel.svelte';
 	import { buildRequest, missingAssets, reachable, type AssetEntry, type CompileReport } from '#lib/Request.ts';
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
-	import { BEATS_PER_BAR, patchUses, replacePatch, settlingWrites, tempoAt, type PatchUse } from '#lib/TimelineEdit.ts';
+	import { patchUses, position, replacePatch, settlingWrites, type PatchUse } from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
+	import { gliding, parseBpm, parsePosition, shownTempo, tempoTyped, tempoWords, wholeSong } from '#lib/Transport.ts';
 	import ViewTabs from '#lib/ViewTabs.svelte';
 	import {
 		actionOn,
@@ -39,7 +45,6 @@
 		hearing,
 		isInsert,
 		parseGraph,
-		stay,
 		viewOf,
 		withDrafts,
 		withParams,
@@ -248,7 +253,7 @@
 			if (original?.builtin && saved && timelineDoc && referencedPatches(timelineDoc).includes(made.from)) {
 				timelineEdited({ text: JSON.stringify(replacePatch(timelineDoc, made.from, made.to), null, 1) });
 			}
-			open({ patch: made.to, part: null }, false, 'patch');
+			void open({ patch: made.to, part: null }, false, 'patch');
 		};
 	};
 
@@ -459,6 +464,8 @@
 			sent.song = '';
 			songTick = 0;
 			selectedTrack = null;
+			loop = null;
+			looping = false;
 			if (started && want === 'song') {
 				engine.stop();
 				engine.locate(0);
@@ -551,13 +558,46 @@
 		if (live === 'song') engine.locate(0);
 	}
 
+	// The playhead moved by the top bar's position: shown there at once, and where the song starts if a patch on its own is
+	// playing now.
+	function moveTo(at: number) {
+		songTick = at;
+		controls.locate(at);
+	}
+
+	// The loop is the editor's, not the song's: it isn't saved, and another song starts without one. The top bar turns it on and
+	// off, and the arrangement's strip shows it, draws it and moves it. Until one is drawn it is the whole song, which follows the
+	// song as it grows, so null stands for that.
+	let loop = $state.raw<Loop | null>(null);
+	let looping = $state(false);
+	let loopSent = false;
+
+	function setLoop(next: Loop | null, on: boolean) {
+		loop = next;
+		looping = on;
+	}
+
+	const toggleLoop = () => setLoop(loop, !looping);
+
+	// What the engine loops, sent again with each new image, which can be in a new engine. A loop drawn before audio starts
+	// reaches the engine this way too.
+	$effect(() => {
+		void targets;
+		const range = looping && songDoc ? (loop ?? wholeSong(songDoc)) : null;
+		untrack(() => {
+			if (range) engine.setLoop(range.start, range.end);
+			else if (loopSent) engine.setLoop(0, 0);
+			loopSent = range !== null;
+		});
+	});
+
 	// What the timeline's editors send. Notes and moves of the playhead bring the song back; a control dragged while a patch plays
 	// on its own has nothing to move, and settles when its edit compiles.
 	const controls: SongControls = {
 		noteOn: (track, note, velocity) => use('song', () => engine.noteOn(track, note, velocity)),
 		noteOff: (track, note) => use('song', () => engine.noteOff(track, note)),
 		locate: (tick) => use('song', () => engine.locate(tick)),
-		setLoop: (start, end) => engine.setLoop(start, end),
+		setLoop: (start, end) => setLoop(end > start ? { start, end } : null, end > start),
 		setMix: (register, value) => live === 'song' && want === 'song' && engine.setMix(register, value),
 		setParam: (track, param, value) => live === 'song' && want === 'song' && engine.setParam(track, param, value),
 		setInsertParam: (insert, param, value) =>
@@ -679,6 +719,127 @@
 	const patchFailed = $derived(inSong ? song?.report.ok === false : alone?.report.ok === false);
 	const patchProblem = $derived(shown && !shown.example ? graphError(patchText) : '');
 
+	// ---------------------------------------------------------------------------------------------- the compile light
+
+	// What the light lists. Each problem says where it is in words, and its link goes there: a node's opens the Patch view with the
+	// node chosen, and a track's, a clip's or the mix's opens the Song view with it chosen.
+	let editor = $state<ReturnType<typeof TimelineEditor>>();
+	let nodeAsked = $state.raw<{ node: number } | null>(null);
+
+	const names: Names = {
+		patch: (id) => (songPatches.find((p) => p.id === id) ?? library.find((p) => p.id === id))?.name,
+		node: (patch, id) => {
+			const graph = (songPatches.find((p) => p.id === patch) ?? library.find((p) => p.id === patch))?.graph;
+			const node = graph?.nodes.find((n) => n.id === id);
+			return node ? `${friendlyName(node.type)} ${node.id}` : undefined;
+		},
+		track: (id) => songDoc?.tracks.find((t) => t.id === id)?.name
+	};
+
+	async function openSong(place: { track?: number | null; clip?: string | null; tab?: string }) {
+		await show('song');
+		editor?.reveal(place);
+	}
+
+	function openNode(patch: string, node: number | null) {
+		if (node !== null) nodeAsked = { node };
+		if (shown?.patch.id === patch) void show('patch');
+		else patchOpened(patch);
+	}
+
+	function goTo(where: string): (() => void) | undefined {
+		const place = placeOf(where);
+		if (!place) return undefined;
+		if (place.kind === 'patch') return () => openNode(place.patch, place.node);
+		return () => void openSong({ track: place.track, clip: place.clip, tab: place.mix ? 'mixer' : undefined });
+	}
+
+	const warnings = $derived(song?.report.ok ? (song.report.programs[0]?.warnings ?? []) : []);
+	const problems = $derived.by((): Problem[] => {
+		const list: Problem[] = [];
+		if (assetProblem) list.push({ key: 'assets', severity: 'error', place: 'Recordings', message: assetProblem });
+		if (rejected) {
+			const message = `The engine refused this image: ${rejected}.`;
+			list.push({ key: 'rejected', severity: 'error', place: 'Engine', message, testid: 'load-rejected' });
+		}
+		const loadError = engineState ? LOAD_ERRORS[engineState.error] : '';
+		if (loadError) list.push({ key: 'load', severity: 'error', place: 'Engine', message: loadError });
+		if (timelineParsed.error) {
+			const go = () => void openSong({ tab: 'json' });
+			list.push({ key: 'timeline-json', severity: 'error', place: 'Timeline JSON', message: timelineParsed.error, go });
+		}
+		if (patchProblem) {
+			const go = () => void show('patch');
+			list.push({ key: 'graph-json', severity: 'error', place: 'Graph JSON', message: patchProblem, go });
+		}
+		for (const { where, message } of errors) {
+			const place = placeWords(where, names);
+			list.push({
+				key: `${where} ${message}`,
+				severity: 'error',
+				place,
+				message,
+				testid: 'compile-error',
+				go: goTo(where)
+			});
+		}
+		warnings.forEach(({ where, message }, index) => {
+			const place = placeWords(where, names);
+			list.push({ key: `warning ${index}`, severity: 'warning', place, message, go: goTo(where) });
+		});
+		if (engineState?.guardTrips) {
+			const message = `A voice made a value that isn't a number ${engineState.guardTrips} times, and its guard silenced it.`;
+			list.push({ key: 'guards', severity: 'warning', place: 'Engine', message });
+		}
+		return list;
+	});
+	const imageSize = $derived(
+		goodSong ? sizeOf(goodSong.report.image_bytes) : goodAlone ? sizeOf(goodAlone.report.image_bytes) : ''
+	);
+
+	// ------------------------------------------------------------------------------------------------------------ messages
+
+	// Short messages over the foot of the page: what an action did, or why it didn't. One that says something went wrong stays
+	// until it is shut or the next action, and the rest go after a few seconds. A screen reader hears each, and hears how many
+	// problems the light shows once an edit has compiled, when that changes.
+	let note = $state<string | null>(null);
+	let noteTimer: ReturnType<typeof setTimeout> | undefined;
+	let shutForm = $state.raw<unknown>(null); // The action result whose message was shut
+
+	function say(text: string) {
+		note = text;
+		clearTimeout(noteTimer);
+		noteTimer = setTimeout(() => (note = null), 4000);
+	}
+
+	$effect(() => {
+		const result = form;
+		untrack(() => {
+			if (result?.saved) say('Saved.');
+		});
+	});
+	const formProblem = $derived(form?.message && shutForm !== form ? form.message : '');
+
+	const problemCount = $derived.by(() => {
+		if (busy) return null;
+		const errorCount = problems.filter((problem) => problem.severity === 'error').length;
+		if (errorCount) return `${errorCount} ${errorCount === 1 ? 'problem' : 'problems'}`;
+		return problems.length ? `${problems.length} ${problems.length === 1 ? 'warning' : 'warnings'}` : 'No problems';
+	});
+	let heard = $state('');
+	$effect(() => {
+		const now = problemCount;
+		if (now !== null) untrack(() => (heard = now));
+	});
+
+	// The menu's Rename goes to the name, in the Song view's toolbar.
+	let nameField = $state<HTMLInputElement>();
+	async function rename() {
+		await show('song');
+		await rendered();
+		nameField?.select();
+	}
+
 	function usedAs(use: PatchUse) {
 		if (use.kind === 'insert') return `an insert on ${use.chain}`;
 		const slot = use.track.slots.length > 1 ? `, slot ${use.slot + 1}` : '';
@@ -693,31 +854,66 @@
 
 	const ppq = $derived(songDoc?.ppq ?? 480);
 	const tick = $derived(live === 'song' ? (engineState?.tick ?? 0) : songTick);
-	const position = $derived(
-		`${Math.floor(tick / (ppq * BEATS_PER_BAR)) + 1}.${Math.floor((tick % (ppq * BEATS_PER_BAR)) / ppq) + 1}`
-	);
-	// To a tenth of a bpm, which a ramp needs and a held tempo doesn't show.
-	const tempo = $derived(songDoc ? Math.round(tempoAt(songDoc.tempo, tick) * 10) / 10 : undefined);
+
+	// The position and the tempo are fields. Typing a position moves the playhead, and typing a tempo changes the tempo in effect
+	// at the playhead, the one change of the song's that is playing there. While one is typed into, the playhead moving on
+	// doesn't overwrite what is typed. An example can't change, so neither can be typed into there.
+	let typedPosition = $state<string | null>(null);
+	let typedTempo = $state<string | null>(null);
+	const positionText = $derived(typedPosition ?? position(tick, ppq));
+	const tempoText = $derived(typedTempo ?? (songDoc ? String(shownTempo(songDoc.tempo, tick, false)) : ''));
+	const tempoTitle = $derived(songDoc ? tempoWords(songDoc.tempo, tick, ppq) : 'The tempo, once a song is open');
+	const glide = $derived(songDoc ? gliding(songDoc.tempo, tick) : null);
+
+	// Enter or leaving the field sends what was typed, and Esc puts back what was there.
+	function fieldKeys(event: KeyboardEvent & { currentTarget: HTMLInputElement }, cancel: () => void) {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			event.currentTarget.blur();
+		} else if (matches(event, 'escape')) {
+			event.preventDefault();
+			cancel();
+			event.currentTarget.blur();
+		}
+	}
+
+	function positionTyped() {
+		const text = typedPosition;
+		typedPosition = null;
+		if (text === null || !songDoc || recipe) return;
+		const at = parsePosition(text, ppq);
+		if (at === null) say(`“${text.trim()}” isn't a position. Type bar.beat.tick, as 3.2.000, or a bar.`);
+		else if (at !== tick) moveTo(at);
+	}
+
+	function tempoEntered() {
+		const text = typedTempo;
+		typedTempo = null;
+		if (text === null || !saved || !timelineDoc) return;
+		const bpm = parseBpm(text);
+		if (bpm === null) say(`“${text.trim()}” isn't a tempo. Type beats a minute, from 1 to 1000.`);
+		else timelineEdited({ text: JSON.stringify(tempoTyped(timelineDoc, tick, bpm), null, 1) });
+	}
 
 	// Changes what the address says, and with it what the page shows. None of it is anything the server loads, so this moves
 	// the address without a navigation, which would also move focus. A change of view is a step Back can undo.
 	function open(change: Record<string, string | null>, replace = false, next: View = view) {
-		void goto(withView(withParams(search, change), next), { shallow: true, replace });
+		return goto(withView(withParams(search, change), next), { shallow: true, replace });
 	}
 
-	function show(next: View) {
-		if (next !== view) open({}, false, next);
+	async function show(next: View) {
+		if (next !== view) await open({}, false, next);
 	}
 
 	// Choosing a track makes its patch the one the Patch view shows, so a patch asked for by name gives way. The track an editor
 	// opens on doesn't count.
 	function trackChosen(id: number | null, first: boolean) {
 		selectedTrack = id;
-		if (!first && (askedPatch !== null || askedPart !== null)) open({ patch: null, part: null }, true);
+		if (!first && (askedPatch !== null || askedPart !== null)) void open({ patch: null, part: null }, true);
 	}
 
 	function patchOpened(id: string) {
-		open(recipe ? { part: id, patch: null } : { patch: id, part: null }, false, 'patch');
+		void open(recipe ? { part: id, patch: null } : { patch: id, part: null }, false, 'patch');
 	}
 
 	// New patch for this track. The patch is saved at once, as the browser's New patch is, and the library loads again so it's
@@ -784,7 +980,7 @@
 		if (event.repeat || keptBy(event.target)) return;
 		if (matches(event, 'flip')) {
 			event.preventDefault();
-			show(view === 'song' ? 'patch' : 'song');
+			void show(view === 'song' ? 'patch' : 'song');
 		} else if (matches(event, 'browser')) {
 			event.preventDefault();
 			toggleBrowser();
@@ -855,6 +1051,7 @@
 
 	onDestroy(() => {
 		for (const timer of Object.values(timers)) clearTimeout(timer);
+		clearTimeout(noteTimer);
 		compiler?.close();
 		engine.close();
 	});
@@ -876,21 +1073,89 @@
 		>
 			<span aria-hidden="true">☰</span>
 		</button>
-		<ViewTabs {view} song={songName} patch={patchName} onview={show} />
+		<ViewTabs
+			{view}
+			song={songName}
+			patch={patchName}
+			alone={live === 'alone' || (want === 'alone' && started)}
+			menu={recipe || saved ? songMenu : undefined}
+			onview={show}
+		/>
 		{#if !started}
-			<button type="button" onclick={() => use(want)}>Start audio</button>
+			<button
+				type="button"
+				title="Browsers make no sound until the page is clicked or a key pressed, so audio starts with this, Play or a key"
+				onclick={() => use(want)}>Start audio</button
+			>
 		{/if}
-		<button type="button" class="play" onclick={play} disabled={!songDoc} title="Play (Space)"
-			><span aria-hidden="true">▶ </span>Play</button
-		>
-		<button type="button" onclick={stop} disabled={!started} title="Stop. Pressed again, back to the start (Home)"
-			><span aria-hidden="true">■ </span>Stop</button
-		>
-		<div class="readout" title="Bar and beat">
-			<span class="big">{position}</span>
-			<span class="muted">tick <span data-testid="tick">{tick}</span></span>
+		<div class="transport" role="group" aria-label="Transport">
+			<button type="button" class="icon play" aria-label="Play" onclick={play} disabled={!songDoc} title="Play (Space)"
+				><span aria-hidden="true">▶</span></button
+			>
+			<button
+				type="button"
+				class="icon"
+				aria-label="Stop"
+				onclick={stop}
+				disabled={!started}
+				title="Stop. Pressed again, back to the start (Home)"><span aria-hidden="true">■</span></button
+			>
+			<button
+				type="button"
+				class="icon"
+				aria-label="Loop"
+				aria-pressed={looping}
+				onclick={toggleLoop}
+				disabled={!songDoc}
+				title="Loop, over what the strip under the arrangement's bar numbers shows"
+				><span aria-hidden="true">⟲</span></button
+			>
 		</div>
-		{#if tempo}<span class="readout muted" data-testid="tempo">{tempo} BPM</span>{/if}
+		<input
+			class="field position"
+			aria-label="Position"
+			title={recipe
+				? 'Where the playhead is, as bar.beat.tick'
+				: 'Where the playhead is, as bar.beat.tick. Type a place, as 3.2.000 or a bar, to move it there.'}
+			data-testid="position"
+			spellcheck="false"
+			autocomplete="off"
+			value={positionText}
+			readonly={recipe !== null}
+			disabled={!songDoc}
+			onfocus={(event) => {
+				if (recipe) return;
+				typedPosition = position(tick, ppq);
+				event.currentTarget.select();
+			}}
+			oninput={(event) => (typedPosition = event.currentTarget.value)}
+			onkeydown={(event) => fieldKeys(event, () => (typedPosition = null))}
+			onblur={positionTyped}
+		/>
+		<label class="tempo" title={tempoTitle}>
+			<input
+				class="field bpm"
+				aria-label="Tempo"
+				data-testid="tempo"
+				inputmode="decimal"
+				spellcheck="false"
+				autocomplete="off"
+				value={tempoText}
+				readonly={recipe !== null}
+				disabled={!songDoc}
+				onfocus={(event) => {
+					if (recipe || !songDoc) return;
+					typedTempo = String(shownTempo(songDoc.tempo, tick, true));
+					event.currentTarget.value = typedTempo;
+					event.currentTarget.select();
+				}}
+				oninput={(event) => (typedTempo = event.currentTarget.value)}
+				onkeydown={(event) => fieldKeys(event, () => (typedTempo = null))}
+				onblur={tempoEntered}
+			/>
+			<span class="muted">BPM</span>
+			{#if glide}<span class="glide" aria-hidden="true">{glide === 'up' ? '↗' : '↘'}</span>{/if}
+		</label>
 		<div class="undo" role="group" aria-label="Undo and redo">
 			<button
 				type="button"
@@ -910,8 +1175,9 @@
 			>
 		</div>
 		<Keyboard disabled={!keysPlay} where={keysWhere} onnote={keyNote} />
-		<div class="master"><Meter ring={masterRing} label="Master level" /></div>
+		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
 		<span class="grow"></span>
+		<CompileLight {busy} {problems} size={imageSize} details={engineDetails} />
 		{#if dirty.size}<span class="muted unsaved" data-testid="unsaved">{dirty.size} unsaved</span>{/if}
 		<form method="POST" action={actionOn(search, 'save')} use:enhance={saving} bind:this={saveForm}>
 			<button disabled={!dirty.size} title={`Save every unsaved patch and timeline (${label('save')})`}>Save</button>
@@ -934,6 +1200,7 @@
 				{#if songDoc}
 					{#key openKey}
 						<TimelineEditor
+							bind:this={editor}
 							doc={songDoc}
 							patches={songPatches}
 							program={goodSong?.report.programs[0] ?? null}
@@ -944,6 +1211,9 @@
 							{rings}
 							engine={controls}
 							history={timelineHistory}
+							{loop}
+							{looping}
+							onloop={setLoop}
 							readonly={recipe !== null}
 							active={view === 'song'}
 							tabs={[
@@ -992,53 +1262,36 @@
 					scopes={patchScopes}
 					active={view === 'patch'}
 					song={songName}
-					onsong={() => show('song')}
+					onsong={() => void show('song')}
 					onname={(name) => patchEdited({ name })}
 					ongraph={(graph) => patchEdited({ graph })}
 					ontext={(text, typing) => patchEdited({ text }, typing ? 'typing' : 'edit')}
-					history={patchHistory}
+					choose={nodeAsked}
 					onprobes={(next) => (probes = next)}
 					onparam={patchParam}
-					onpart={(id) => open({ part: id, patch: null }, false, 'patch')}
+					onpart={(id) => void open({ part: id, patch: null }, false, 'patch')}
 				/>
 			</div>
 		</main>
 	</div>
 
-	<footer class="statusbar">
-		<div class="status" aria-live="polite" aria-busy={busy} data-testid="status">
-			{#if busy}<span class="muted">Compiling…</span>{/if}
-			{#if form?.message}<span class="problem">{form.message}</span>{/if}
-			{#if form?.saved}<span class="muted">Saved.</span>{/if}
-			{#if renderProblem}<span class="problem">WAV export: {renderProblem}</span>{/if}
-			{#if assetProblem}<span class="problem">{assetProblem}</span>{/if}
-			{#if rejected}<span class="problem" data-testid="load-rejected">The engine refused this image: {rejected}.</span
-				>{/if}
-			{#if timelineParsed.error}<span class="problem">Timeline JSON: {timelineParsed.error}</span>{/if}
-			{#if patchProblem}<span class="problem">Graph JSON: {patchProblem}</span>{/if}
-			{#each errors as problem (`${problem.where} ${problem.message}`)}
-				<span class="problem" data-testid="compile-error"><code>{problem.where}</code> {problem.message}</span>
-			{/each}
-			{#if goodSong && !busy && !form?.message && !form?.saved && !rejected && !assetProblem && !errors.length && !timelineParsed.error && !patchProblem}
-				<span class="muted">{(goodSong.report.image_bytes / 1024).toFixed(1)} KB image</span>
-			{/if}
-			{#if !started}<span class="muted">Audio starts with Play, a key, or Start audio.</span>{/if}
-		</div>
-		{#if live === 'alone' || (want === 'alone' && started)}
-			<span class="alone" data-testid="playing-alone">Playing {patchName || 'a patch'} on its own</span>
+	<div class="messages" role="status" aria-live="polite">
+		{#if rendering !== null}<p class="message">Rendering the WAV, {Math.round(rendering * 100)}%</p>{/if}
+		{#if renderProblem}
+			<p class="message bad">
+				WAV export: {renderProblem}
+				<button type="button" aria-label="Dismiss" onclick={() => (renderProblem = '')}>×</button>
+			</p>
 		{/if}
-		{#if engineState}
-			<span class="muted state" data-testid="state" data-playing={engineState.playing}>
-				<span data-testid="voices">{engineState.voices}</span> voices, generation
-				<span data-testid="generation">{engineState.generation}</span>
-				{#if engineState.guardTrips}, {engineState.guardTrips} guard trips{/if}
-				{#if engineState.limited < 1}, <span class="limiting" data-testid="limiting"
-						>limiting {(20 * Math.log10(engineState.limited)).toFixed(1)} dB</span
-					>{/if}
-				{#if LOAD_ERRORS[engineState.error]}, {LOAD_ERRORS[engineState.error]}{/if}
-			</span>
+		{#if formProblem}
+			<p class="message bad">
+				{formProblem}
+				<button type="button" aria-label="Dismiss" onclick={() => (shutForm = form)}>×</button>
+			</p>
 		{/if}
-	</footer>
+		{#if note}<p class="message">{note}</p>{/if}
+		<span class="unseen">{heard}</span>
+	</div>
 </div>
 
 {#if bundle}
@@ -1048,7 +1301,7 @@
 			timelines={data.library.timelines}
 			{search}
 			report={form?.exported?.report ?? null}
-			onclose={() => open({ bundle: null })}
+			onclose={() => void open({ bundle: null })}
 		/>
 	{/key}
 {/if}
@@ -1069,49 +1322,52 @@
 	/>
 {/snippet}
 
+<!-- The song's name, at the start of the Song view's toolbar, as the patch's is at the start of the Patch view's. What is done
+	 to the song as a whole is in the Song tab's ▾ menu. -->
 {#snippet heading()}
 	{#if recipe}
 		<span class="kind">Example</span>
 		<strong class="songname" title={recipe.entry.listen_for}>{recipe.entry.name}</strong>
 		<span class="muted listen">{recipe.entry.listen_for}</span>
-		{#if recipe.inLibrary}
-			<a href={withParams(search, { timeline: recipe.inLibrary, recipe: null, part: null, patch: null })}
-				>Open in the library</a
-			>
-		{:else}
-			<form method="POST" action={actionOn(search, 'addRecipe')} use:enhance>
-				<input type="hidden" name="name" value={recipe.entry.name} />
-				<button>Add to library</button>
-			</form>
-		{/if}
 	{:else if saved}
 		<span class="kind">Timeline</span>
 		<input
+			bind:this={nameField}
 			class="songname"
 			aria-label="Timeline name"
 			value={timelineName}
 			oninput={(e) => timelineEdited({ name: e.currentTarget.value })}
 		/>
 		{#if timelineDraft}<span class="dot" title="Unsaved changes">•</span>{/if}
-		<form method="POST" action={actionOn(search, 'exportTimeline')} use:enhance={stay}>
-			<input type="hidden" name="id" value={saved.id} />
-			<button title="Compile the saved version to an image file">Export saved version</button>
-		</form>
-		<form method="POST" action={actionOn(search, 'deleteTimeline')} use:enhance={stay}>
-			<input type="hidden" name="id" value={saved.id} />
-			<input type="hidden" name="back" value={search} />
-			<button>Delete timeline</button>
-		</form>
-	{/if}
-	{#if recipe || saved}
-		<button
-			type="button"
-			disabled={!goodSong || rendering !== null}
-			title="Render the song as it now compiles to a WAV file"
-			onclick={exportWav}>{rendering === null ? 'Export WAV' : `Rendering ${Math.round(rendering * 100)}%`}</button
-		>
 	{/if}
 	{#if saved && !recipe}<span class="divider"></span>{/if}
+{/snippet}
+
+{#snippet songMenu()}
+	<DocumentMenu
+		{search}
+		timeline={saved && !recipe ? { id: saved.id } : null}
+		example={recipe ? { name: recipe.entry.name, inLibrary: recipe.inLibrary ?? null } : null}
+		{rendering}
+		canRender={goodSong !== null}
+		onrename={() => void rename()}
+		onwav={() => void exportWav()}
+	/>
+{/snippet}
+
+<!-- Under the light's list: where the playhead is and what the engine is doing. -->
+{#snippet engineDetails()}
+	<p class="engine muted">
+		The playhead is at tick <span data-testid="tick">{tick}</span>.
+		{#if engineState}
+			<span data-testid="state" data-playing={engineState.playing}>
+				The engine plays <span data-testid="voices">{engineState.voices}</span> voices, and image
+				<span data-testid="generation">{engineState.generation}</span> since audio started.
+			</span>
+		{:else}
+			Audio starts with Play, a key, or Start audio.
+		{/if}
+	</p>
 {/snippet}
 
 {#snippet json()}
@@ -1141,7 +1397,7 @@
 <style>
 	.workspace {
 		display: grid;
-		grid-template-rows: auto minmax(0, 1fr) auto;
+		grid-template-rows: auto minmax(0, 1fr);
 		height: 100vh;
 		overflow: hidden;
 	}
@@ -1171,46 +1427,97 @@
 		line-height: 1;
 		padding: 0.15rem 0.45rem;
 	}
-	.undo {
+	.undo,
+	.transport {
 		display: flex;
 		gap: 0.2rem;
 	}
 	.play {
 		border-color: #238636;
 	}
-	.readout {
-		display: flex;
-		align-items: baseline;
-		gap: 0.4rem;
-		padding: 0.1rem 0.5rem;
-		background: #0d1117;
-		border: 1px solid var(--line);
-		border-radius: 5px;
-		font-variant-numeric: tabular-nums;
-		white-space: nowrap;
+	.icon[aria-pressed='true'] {
+		color: var(--text);
+		background: #1f6feb33;
+		border-color: var(--accent);
 	}
-	.big {
-		font-size: 1rem;
-		min-width: 2.2rem;
+	/* The position and the tempo read as a display does, and are typed into as fields. */
+	.field {
+		padding: 0.1rem 0.4rem;
+		background: #0d1117;
+		font-variant-numeric: tabular-nums;
+		text-align: right;
+	}
+	.field:read-only {
+		color: var(--muted);
+	}
+	.position {
+		width: 4.6rem;
+		font-size: 0.95rem;
+	}
+	.tempo {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+	.bpm {
+		width: 3.4rem;
+	}
+	.glide {
+		color: var(--accent);
 	}
 	.master {
-		width: 72px;
+		width: 80px;
 	}
 	.grow {
 		flex: 1 1 0;
 		min-width: 0;
 	}
-	.state {
-		white-space: nowrap;
+	.engine {
+		margin: 0.3rem 0 0;
 		font-size: 0.75rem;
 	}
-	.alone {
-		font-size: 0.75rem;
-		color: #d29922;
-		white-space: nowrap;
+	/* Over the foot of the page, out of the way of what it is over unless it says something. */
+	.messages {
+		position: fixed;
+		left: 50%;
+		bottom: 0.8rem;
+		transform: translateX(-50%);
+		z-index: 50;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.3rem;
+		pointer-events: none;
 	}
-	.limiting {
-		color: #d29922;
+	.message {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		margin: 0;
+		padding: 0.35rem 0.8rem;
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 6px;
+		box-shadow: 0 4px 14px #00000080;
+		font-size: 0.82rem;
+		pointer-events: auto;
+	}
+	.message.bad {
+		border-color: #f8514999;
+		background: #2a1416;
+	}
+	.message button {
+		padding: 0 0.35rem;
+		border: 0;
+		background: transparent;
+	}
+	.unseen {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 	/* The browser beside the views, or its rail. Before the page knows how wide the window is, the width decides. */
 	.body {
@@ -1270,30 +1577,6 @@
 	.empty {
 		padding: 2rem;
 		text-align: center;
-	}
-	.statusbar {
-		display: flex;
-		gap: 0.6rem;
-		align-items: center;
-		max-height: 5.5rem;
-		overflow-y: auto;
-		padding: 0.2rem 0.6rem;
-		background: var(--panel);
-		border-top: 1px solid var(--line);
-		font-size: 0.78rem;
-		min-height: 1.6rem;
-	}
-	.status {
-		flex: 1;
-		display: flex;
-		gap: 0.6rem;
-		align-items: center;
-		flex-wrap: wrap;
-		min-width: 0;
-	}
-	.status .problem {
-		margin: 0;
-		padding: 0.1rem 0.5rem;
 	}
 	.kind {
 		font-size: 0.7rem;

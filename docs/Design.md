@@ -833,7 +833,8 @@ and hardware still only ever sees image bytes.
   still refused. Serving it anywhere else needs authentication and a proxy that sets `PROTOCOL_HEADER`.
 
 **The editor.** The GUI is one page laid out like a DAW, for a laptop 1280 to 1440 px wide. A top bar holds the menu, a tab
-for each view, the transport, one Undo and Redo, the on-screen keys, the master meter and Save. Under it one of two views has
+for each view, the transport and the loop, the position and the tempo, one Undo and Redo, the on-screen keys, the master meter,
+the compile light and Save. There is no status bar. Under it one of two views has
 all the height: Song, with the arrangement, the notes, the mix, the JSON, the image and the inspector, and Patch, with one
 patch's graph. The two used to share the page, one above the other, which left the piano roll 102 px at 1280×800; apart, it
 is 408 px for a timeline of one track and 260 px for one of two tracks and a lane [measured]. The view not on screen stays on
@@ -866,13 +867,25 @@ the page, hidden and inert, so its scroll, zoom and choices are there to come ba
   timeline switches back, to where the song was. The two compile on separate channels, so neither cancels the other, and a
   request that hasn't changed isn't compiled again, so opening something new swaps nothing. An insert has no keys and is
   compiled on its own only for its errors and dead nodes.
-- The status bar says Compiling from an edit until the image made from it is playing, so what is heard is known to be the
+- The compile light says Compiling from an edit until the image made from it is playing, so what is heard is known to be the
   newest edit. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the
   image slot does, and the image before it plays on.
+- Otherwise the light says at a glance whether what is on screen compiles: green with the image's size, or a count of problems or
+  of warnings. A click lists them, each saying where it is in words, "Stereo lead › Filter 13" rather than `patch:lead/node:13`, as a
+  link: a node's opens the Patch view with the node chosen, and a track's, a clip's or the mix's opens the Song view with it chosen.
+  JSON that doesn't parse, recordings that didn't load and an image the engine refused are problems there too, and guard trips are
+  warnings. Under the list, the engine's voices and generation. The list stays on the page while it is shut, so a test reads it
+  without opening it.
+- What an action did, or why it didn't, is a short message over the foot of the page, read out by a screen reader: "Saved."
+  goes after a few seconds, and a refusal or a failed WAV export stays until it is shut. A patch heard on its own is marked on
+  the Patch tab, and the hint that audio starts with a click is Start audio's tooltip.
+- What is done to a song as a whole is rare, so it is in the Song tab's ▾ menu: Rename, Export WAV, Export saved version and
+  Delete timeline, or for an example, Add to library or Open in the library. The name stays a field at the start of the Song
+  view's toolbar, as a patch's is in the Patch view's trail, and Rename goes to it.
 - Each patch and timeline keeps its own undo history, of up to 200 steps, while others are open, and saving keeps it. A step is the
   document's whole text, so an edit typed into its JSON is undone as an editor's is, and what is typed in one visit to the field is one
   step. Keys and the top bar's Undo and Redo act on the view on screen, so Delete and undo act on the graph or the timeline, not
-  both. An inert view doesn't stop a key handler on the window, so each one asks which view is showing.
+  both. The editors have no Undo of their own. An inert view doesn't stop a key handler on the window, so each one asks which view is showing.
 - Every key the editor binds is in one table, `Shortcuts.ts`, with where it works and what it does. Its test holds that none is a piano
   key, bare or with Shift, that none needs Alt, which is Option on a Mac and opens menus in browsers elsewhere, and that no two meet where
   both work. A key goes by where it is, as the piano's do, and Mod is ⌘ on a Mac and Ctrl elsewhere, so Ctrl-click stays a right-click on
@@ -885,6 +898,15 @@ the page, hidden and inert, so its scroll, zoom and choices are there to come ba
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
   piano, and a field being typed in or a key with a modifier keeps its own meaning, though a button or a slider with focus doesn't. A key
   let go while the page is in the background lets go of its note.
+- The position and the tempo in the top bar are fields. A position typed as the ghost note reads, bar.beat.tick, or as a bar, moves
+  the playhead. A tempo typed changes the tempo change in effect at the playhead and no other, so a song with several reads as each
+  part of it plays, and the inspector lists them all. Inside a ramp the field shows how far the glide has got, and typed into, it
+  shows and sets where the glide starts. An example's can't be typed into.
+- The loop is the editor's, not the song's, so it isn't saved, and another song starts without one. ⟲ in the top bar turns it on
+  and off, with no letter key, and the strip under the arrangement's bar numbers always shows it, dimmed while it is off. Until one
+  is drawn it is the whole song. A drag on the strip draws one, a drag on the loop moves it, or by an end stretches it, and a click
+  turns it on or off, as Logic's cycle strip does. Loop this clip, in a clip's menu, sets it to the placement and its repeats,
+  turns it on, and moves the playhead into it.
 - A song stops where its last clip ends, and its tails ring on, because Stop lets go of every note. A loop goes round instead, and Play at
   the end starts again from the top. The engine plays on past the end, as a device does, so stopping there is the worklet's job, and no
   target's engine behaves differently.
@@ -925,7 +947,8 @@ four bars past the end, so there is room to do it.
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
 a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
 gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. What the page plays and Export WAV writes pass through a limiter after the
-engine, at full scale, and the status bar says when it is limiting and by how much, section 24. Export WAV renders the song as it compiles now, in a
+engine, at full scale, and a light on the master meter says when it is limiting, with how much in its tooltip, section 24. It holds
+for a moment after the last time, as a clip light does, since the limiter comes and goes many times a second. Export WAV renders the song as it compiles now, in a
 worker with the worklet's engine, to its end and on until its voices stop and a tenth of a second stays below -100 dB, as the Python binding's render does.
 
 Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the image and its keys are silent until it has one. `live` keeps unused tracks, so it could pass a document

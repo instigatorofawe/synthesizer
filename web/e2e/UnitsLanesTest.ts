@@ -31,6 +31,7 @@ const notes = (page: Page) => page.locator('[data-testid^="note-"]');
 async function trackWithClip(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
+	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
 	await page.getByLabel('New timeline name').fill(name);
 	await page.getByLabel('New timeline name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);

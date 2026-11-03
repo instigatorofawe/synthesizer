@@ -21,6 +21,12 @@ export interface PatchLike {
 	id: string;
 	name: string;
 	graph: Graph;
+	builtin?: boolean; // One of the examples' own, which can't be changed
+}
+
+// A patch picker's choices: what the library's owner made, and then the built-in ones.
+export function byOwner<T extends PatchLike>(patches: T[]): { own: T[]; builtin: T[] } {
+	return { own: patches.filter((patch) => !patch.builtin), builtin: patches.filter((patch) => patch.builtin) };
 }
 
 // The grid is 4/4 and nothing stores that. A document holds ticks, so a time signature would change how it is drawn and
@@ -409,6 +415,23 @@ export function removeSlot(doc: Timeline, id: number, index: number): Timeline {
 		...chain,
 		slots: (chain as Track).slots.filter((_, i) => i !== index)
 	}));
+}
+
+// Every slot and insert that plays one patch plays another instead, with its parameters and lanes, as a copy of it does.
+export function replacePatch(doc: Timeline, from: string, to: string): Timeline {
+	const inserts = <T extends { inserts: Insert[] }>(chain: T): T => ({
+		...chain,
+		inserts: chain.inserts.map((insert) => (insert.patch === from ? { ...insert, patch: to } : insert))
+	});
+	return {
+		...doc,
+		tracks: doc.tracks.map((track) => ({
+			...inserts(track),
+			slots: track.slots.map((slot) => (slot === from ? to : slot))
+		})),
+		buses: doc.buses.map(inserts),
+		master: inserts(doc.master)
+	};
 }
 
 // ----------------------------------------------------------------------------------------------- clips and placements

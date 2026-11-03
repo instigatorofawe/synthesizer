@@ -1,7 +1,7 @@
 {
  "patches": {
   "p": {
-   "name": "p",
+   "name": "voice",
    "graph": {
     "nodes": [
      {
@@ -152,7 +152,7 @@
    }
   },
   "fx": {
-   "name": "fx",
+   "name": "effect",
    "graph": {
     "nodes": [
      {

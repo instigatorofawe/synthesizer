@@ -26,5 +26,19 @@
   "seconds": 148.75,
   "group": "pieces",
   "listen_for": "Grieg's trolls, orchestrated from the piano score: bassoons and pizzicato basses tiptoe through the theme, which climbs, gathers the orchestra and speeds up until the trolls shriek over the timpani."
+ },
+ {
+  "name": "BachInventionInF",
+  "file": "BachInventionInF.json",
+  "seconds": 59.75,
+  "group": "pieces",
+  "listen_for": "Bach's two-part invention in F as an old games console would play it, a pulse wave for the right hand and a triangle for the left, chasing each other across the speakers in a small room: a whole piece the NUCLEO-L476RG plays."
+ },
+ {
+  "name": "TheEntertainer",
+  "file": "TheEntertainer.json",
+  "seconds": 187.5,
+  "group": "pieces",
+  "listen_for": "Joplin's rag on an old upright whose unisons have drifted apart, not fast and steady as he asked, its bass striding under the syncopated tune, the second time through the B strain an octave up, as marked."
  }
 ]

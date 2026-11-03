@@ -34,6 +34,22 @@ CALIBRATION = (
     BUILD / "Calibration"
 )  # Programs that each lean on one kind of work, from bench/MakeCalibration.py
 TABLE = ROOT / "docs" / "Benchmarks.md"
+# Recipes added since the board last timed every recipe, docs/Board.md, so their Board column is the compiler's bound alone.
+NOT_ON_BOARD = {
+    "AutoWah",
+    "ChipTune",
+    "ClipVariations",
+    "HardSync",
+    "LeanDrumKit",
+    "ReleaseSamples",
+    "ReverseSwell",
+    "RoundRobin",
+    "SmallRoom",
+    "Subpatches",
+    "TapeEcho",
+    "TempoRamp",
+    "TwoOperatorFm",
+}
 
 FRAME = 32
 RATE = 48000
@@ -284,6 +300,8 @@ def recipe_rows(
     for name, r in sorted(stereo["recipes"].items(), key=lambda item: -item[1]["peak"]):
         h = hosted[f"Recipe/{name}/manual_time"]
         verdict, share, voices = fit[name]
+        if name in NOT_ON_BOARD:
+            verdict += ", not measured on the board"
         bound = "" if math.isnan(share) else f"{share:.0%}"
         rows.append(
             f"| {name} | {groups[name]} | {r['image'] / 1024:.1f} | {(r['fast'] + r['bulk']) / 1024:.1f} | {r['voices']} "
@@ -418,6 +436,11 @@ def table(_: argparse.Namespace) -> None:
         f"{statistics.median(r['fast'] + r['bulk'] for r in recipes) / 1024:.1f} KB. Loading one takes "
         f"{min(r['load'] for r in recipes):,} to {max(r['load'] for r in recipes):,} instructions."
     )
+    if unmeasured := sorted(NOT_ON_BOARD & set(stereo["recipes"])):
+        summary += (
+            f" {len(unmeasured)} came after the board last timed every recipe, and are not measured on the board: "
+            f"{', '.join(unmeasured)}."
+        )
     columns = (
         "Instructions are per sample, stereo and scalar unless named. Peak is the worst frame of the whole recipe, played from "
         "start to end. Voices is the most that sounded at once on QEMU. Board is the compiler's bound on a frame for the "

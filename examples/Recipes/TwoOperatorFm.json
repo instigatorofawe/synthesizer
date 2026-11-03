@@ -1,0 +1,274 @@
+{
+ "patches": {
+  "p": {
+   "name": "p",
+   "graph": {
+    "nodes": [
+     {
+      "id": 1,
+      "type": "note"
+     },
+     {
+      "id": 2,
+      "type": "mtof"
+     },
+     {
+      "id": 3,
+      "type": "osc",
+      "wave": "sine"
+     },
+     {
+      "id": 4,
+      "type": "env",
+      "inputs": {
+       "attack": 0.001,
+       "decay": 0.22,
+       "sustain": 0.12,
+       "release": 0.12
+      }
+     },
+     {
+      "id": 5,
+      "type": "mul",
+      "inputs": {
+       "b": 0.42
+      }
+     },
+     {
+      "id": 6,
+      "type": "add",
+      "inputs": {
+       "b": 0.06
+      }
+     },
+     {
+      "id": 7,
+      "type": "mul"
+     },
+     {
+      "id": 8,
+      "type": "mul"
+     },
+     {
+      "id": 9,
+      "type": "osc",
+      "wave": "sine",
+      "mode": "mod"
+     },
+     {
+      "id": 10,
+      "type": "env",
+      "inputs": {
+       "attack": 0.001,
+       "decay": 1.1,
+       "sustain": 0.0,
+       "release": 0.09
+      }
+     },
+     {
+      "id": 11,
+      "type": "mul",
+      "inputs": {
+       "b": 0.8
+      }
+     },
+     {
+      "id": 12,
+      "type": "mul"
+     },
+     {
+      "id": 13,
+      "type": "out"
+     }
+    ],
+    "edges": [
+     {
+      "from": 1,
+      "port": "pitch",
+      "to": 2,
+      "input": "in"
+     },
+     {
+      "from": 2,
+      "to": 3,
+      "input": "freq"
+     },
+     {
+      "from": 1,
+      "port": "velocity",
+      "to": 5,
+      "input": "a"
+     },
+     {
+      "from": 5,
+      "to": 6,
+      "input": "a"
+     },
+     {
+      "from": 3,
+      "to": 7,
+      "input": "a"
+     },
+     {
+      "from": 4,
+      "to": 7,
+      "input": "b"
+     },
+     {
+      "from": 7,
+      "to": 8,
+      "input": "a"
+     },
+     {
+      "from": 6,
+      "to": 8,
+      "input": "b"
+     },
+     {
+      "from": 2,
+      "to": 9,
+      "input": "freq"
+     },
+     {
+      "from": 8,
+      "to": 9,
+      "input": "phase"
+     },
+     {
+      "from": 10,
+      "to": 11,
+      "input": "a"
+     },
+     {
+      "from": 9,
+      "to": 12,
+      "input": "a"
+     },
+     {
+      "from": 11,
+      "to": 12,
+      "input": "b"
+     },
+     {
+      "from": 12,
+      "to": 13,
+      "input": "l"
+     }
+    ]
+   }
+  }
+ },
+ "programs": [
+  {
+   "id": "p",
+   "name": "p",
+   "timeline": {
+    "ppq": 480,
+    "tempo": [
+     {
+      "tick": 0,
+      "bpm": 104
+     }
+    ],
+    "clips": [
+     {
+      "id": "bass",
+      "length": 3840,
+      "notes": [
+       {
+        "tick": 0,
+        "note": 40,
+        "vel": 120,
+        "dur": 220
+       },
+       {
+        "tick": 240,
+        "note": 40,
+        "vel": 70,
+        "dur": 100
+       },
+       {
+        "tick": 480,
+        "note": 52,
+        "vel": 100,
+        "dur": 200
+       },
+       {
+        "tick": 720,
+        "note": 40,
+        "vel": 60,
+        "dur": 100
+       },
+       {
+        "tick": 960,
+        "note": 43,
+        "vel": 115,
+        "dur": 220
+       },
+       {
+        "tick": 1200,
+        "note": 43,
+        "vel": 70,
+        "dur": 100
+       },
+       {
+        "tick": 1440,
+        "note": 55,
+        "vel": 95,
+        "dur": 200
+       },
+       {
+        "tick": 1680,
+        "note": 45,
+        "vel": 64,
+        "dur": 100
+       },
+       {
+        "tick": 1920,
+        "note": 38,
+        "vel": 124,
+        "dur": 340
+       },
+       {
+        "tick": 2400,
+        "note": 50,
+        "vel": 90,
+        "dur": 200
+       },
+       {
+        "tick": 2640,
+        "note": 38,
+        "vel": 70,
+        "dur": 100
+       },
+       {
+        "tick": 2880,
+        "note": 40,
+        "vel": 118,
+        "dur": 600
+       }
+      ]
+     }
+    ],
+    "tracks": [
+     {
+      "id": 1,
+      "voices": 2,
+      "slots": [
+       "p"
+      ],
+      "placements": [
+       {
+        "clip": "bass",
+        "tick": 0
+       }
+      ]
+     }
+    ],
+    "master": {
+     "gain": 0.5835
+    }
+   }
+  }
+ ]
+}

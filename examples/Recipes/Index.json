@@ -1,5 +1,19 @@
 [
  {
+  "name": "ClipVariations",
+  "file": "ClipVariations.json",
+  "seconds": 9.0,
+  "group": "arrangement",
+  "listen_for": "One bar of bass played five ways: as written, up a fourth, up a fifth and softer so the filter barely opens, then only its second half twice, an octave apart, all from one clip by placing it differently."
+ },
+ {
+  "name": "TempoRamp",
+  "file": "TempoRamp.json",
+  "seconds": 9.1,
+  "group": "arrangement",
+  "listen_for": "An arpeggio that speeds up smoothly to twice its tempo over two bars, then slows right down into its last note, because a tempo change can glide to the next one rather than jump."
+ },
+ {
   "name": "AdditiveBell",
   "file": "AdditiveBell.json",
   "seconds": 5.0,
@@ -42,11 +56,25 @@
   "listen_for": "Metallic, clangorous notes where the partials are sums and differences of two tones, not a scale of harmonics."
  },
  {
+  "name": "Subpatches",
+  "file": "Subpatches.json",
+  "seconds": 11.1,
+  "group": "combinations",
+  "listen_for": "A slow string chord made of three copies of one patch, a detuned pair of saws, at the note, an octave up and an octave down, each with its own width: a subpatch is written once and used as often as wanted."
+ },
+ {
   "name": "Trumpet",
   "file": "Trumpet.json",
   "seconds": 4.5,
   "group": "combinations",
   "listen_for": "A bright fanfare whose notes scoop up to pitch and open out as they get louder, with vibrato arriving late on the long notes."
+ },
+ {
+  "name": "TwoOperatorFm",
+  "file": "TwoOperatorFm.json",
+  "seconds": 5.1,
+  "group": "combinations",
+  "listen_for": "A plucked FM bass: one sine bends the phase of another at the same pitch, by an amount that dies away in a fifth of a second and grows with velocity, so hard notes snap bright and soft ones stay round."
  },
  {
   "name": "Clap",
@@ -77,11 +105,25 @@
   "listen_for": "A deep kick drum whose pitch dives in the first few tens of milliseconds, then rings as a low tone."
  },
  {
+  "name": "RoundRobin",
+  "file": "RoundRobin.json",
+  "seconds": 5.3,
+  "group": "drums",
+  "listen_for": "A snare roll played twice: first from one recording, which buzzes like a machine gun, then taking three recordings in turn, so no two hits in a row are the same and it sounds played."
+ },
+ {
   "name": "Snare",
   "file": "Snare.json",
   "seconds": 4.0,
   "group": "drums",
   "listen_for": "A snare hit that mixes a short pitched body with a burst of band-limited noise."
+ },
+ {
+  "name": "AutoWah",
+  "file": "AutoWah.json",
+  "seconds": 5.3,
+  "group": "effects",
+  "listen_for": "A funk clavinet through an envelope filter: the louder each note is played, the further a resonant filter opens and the more it quacks, as an insert follows its own input's level."
  },
  {
   "name": "ChebyshevWavefold",
@@ -180,6 +222,34 @@
   "seconds": 3.4,
   "group": "effects",
   "listen_for": "A chord speaking a sequence of vowel shapes, with eight filter bands imposing a second track's formants on a saw."
+ },
+ {
+  "name": "ChipTune",
+  "file": "ChipTune.json",
+  "seconds": 3.7,
+  "group": "embedded",
+  "listen_for": "A chiptune in three channels, as an old console made it: a narrow pulse lead with vibrato, a triangle bass and noise drums, from naive oscillators and control-rate modulation, one voice a channel."
+ },
+ {
+  "name": "LeanDrumKit",
+  "file": "LeanDrumKit.json",
+  "seconds": 5.1,
+  "group": "embedded",
+  "listen_for": "A drum kit at one voice a drum: a triangle kick whose pitch drops, a snare of a held sine and noise, and a hat that a new hit cuts off as a closed one does, with an open one now and then."
+ },
+ {
+  "name": "SmallRoom",
+  "file": "SmallRoom.json",
+  "seconds": 7.0,
+  "group": "embedded",
+  "listen_for": "Struck chimes in a small room, a mono reverb of four short combs and two allpasses whose lines take 31 KB, half of what the board has, where the Reverb recipe's take 188 KB."
+ },
+ {
+  "name": "TapeEcho",
+  "file": "TapeEcho.json",
+  "seconds": 5.9,
+  "group": "embedded",
+  "listen_for": "Plucked notes trailing echoes a dotted eighth apart, each one darker than the last, from a single comb whose line takes 36 KB: a feedback delay that fits the board."
  },
  {
   "name": "FormantVowels",
@@ -371,6 +441,13 @@
   "listen_for": "A wide, shimmering chord stack where seven detuned saws beat slowly against each other on every note."
  },
  {
+  "name": "HardSync",
+  "file": "HardSync.json",
+  "seconds": 7.3,
+  "group": "oscillators",
+  "listen_for": "A tearing lead whose every note starts as a bright, vocal rasp and settles into a plain saw, because a second oscillator restarts with each cycle of the first while its own pitch falls back toward it."
+ },
+ {
   "name": "LoopedSample",
   "file": "LoopedSample.json",
   "seconds": 3.0,
@@ -397,6 +474,20 @@
   "seconds": 4.75,
   "group": "oscillators",
   "listen_for": "A slow chord pad whose tone hollows and thickens as the pulse width sweeps."
+ },
+ {
+  "name": "ReleaseSamples",
+  "file": "ReleaseSamples.json",
+  "seconds": 5.1,
+  "group": "oscillators",
+  "listen_for": "A plucked keyboard whose every key coming up adds a soft wooden thunk, a recording the sampler plays only when a note is let go, whether it is short or held."
+ },
+ {
+  "name": "ReverseSwell",
+  "file": "ReverseSwell.json",
+  "seconds": 4.4,
+  "group": "oscillators",
+  "listen_for": "A cymbal sucked in backwards, swelling into a low boom where the same recording then crashes forwards, because a sampler can play a recording from its end to its start."
  },
  {
   "name": "StereoUnison",

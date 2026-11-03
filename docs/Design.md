@@ -850,11 +850,13 @@ a probe can look inside. Adding one copies its patches, assets and timeline into
 because together they hold about 600 KB of samples and the editor loads the library. Adding one twice changes nothing, so an edited copy survives. A test holds every
 recipe to compiling to the same bytes from the library as from its file, which is what shows the schema dropped nothing.
 
-**Pieces.** `examples/Pieces` holds four public-domain pieces arranged for the engine, two to three minutes each, and the browser lists them
+**Pieces.** `examples/Pieces` holds six public-domain pieces arranged for the engine, one to three minutes each, and the browser lists them
 first among the examples. In every other way they are recipes. `MakePieces.py` writes them from the Mutopia Project's public-domain
 editions: the notes are the score's, and the instruments, rubato, dynamics, pedalling and mix are a performance written in code. They sit
-outside `examples/Recipes` because the benchmarks render every recipe in full, three times over on QEMU, and the pieces are 9 minutes of
-music against 3.8 for all 61 recipes. Writing them tested what a timeline can say, and what it couldn't is in section 24, opens 26 to 31.
+outside `examples/Recipes` because the benchmarks render every recipe in full, three times over on QEMU, and the pieces are 13 minutes of
+music against 5.2 for all 74 recipes. Writing the first four tested what a timeline can say, and what it couldn't is in section 24, opens 26 to 31.
+Bach's Invention No. 8 is written for the board: a naive pulse for one hand and a triangle for the other, a voice each, in a mono room, with its
+closing slowdown written into where its last notes fall, since a tempo change would cut frames in two. Its bound is 61% of the board's frame.
 
 ## 20. Choosing what goes into an image
 
@@ -1002,7 +1004,8 @@ CI runs each target for a short time on a new seed. That is a smoke test, and th
 
 ## 24. Agreed work and open decisions
 
-Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in section 5, 5 and 6 in section 6, 7 in section 7 and 8 in section 9. Opens
+Opens keep the numbers they had in review. Opens 1 to 8 are closed: 1 to 4 in section 5, 5 and 6 in section 6, 7 in section 7 and 8 in section 9. Open 24
+closed as yes, with the embedded recipes below. Opens
 17 and 18 went with the target rule, so there is no per-tier golden contract and no patch form chosen by target.
 
 **Agreed, not built.**
@@ -1020,6 +1023,26 @@ Program whose dearest frame, with every voice sounding, could overrun its budget
   only to measure the ratios again.
 - **The gates:** counts may move 1% from the baseline before CI fails, and a board firmware 112 KB of flash.
 - **The scope:** the worklet sends the same message objects every time, rather than new ones.
+
+**Built for more examples**, as section 19 describes. The user asked for more recipes and pieces, and for recipes that the board plays with its
+cheapest steps, which closed open 24. There are 13 new recipes: HardSync, TwoOperatorFm, RoundRobin, ReleaseSamples, ReverseSwell, Subpatches,
+AutoWah, TempoRamp and ClipVariations each show a technique the first 61 didn't, and ChipTune, LeanDrumKit, SmallRoom and TapeEcho are the
+embedded group. There are also two new pieces, Bach's Invention No. 8 and Joplin's The Entertainer. Choices made there that the user hasn't
+weighed in on:
+- **Headroom:** the embedded recipes and the Invention compile for the board at 44% to 65% of a frame by the compiler's bound. For every Program the
+  board has played, that bound was 1.20 to 2.39 times its worst frame, section 15. None of the new examples has been measured on the board yet.
+- **One voice, no play mode:** a track with one voice takes it from the last note for the next, as a mono play mode would. But the bound counts a
+  play mode's held notes for every piece of every frame, so ChipTune needed 130% of a frame with mono tracks and needs 65% without them.
+- **A slowdown in the notes:** a tempo change can cut a frame in two, and the bound charges every track and voice for each piece, 6% of the
+  Invention's frame. So its last two bars slow down through where their notes fall, and its tempo map is one change.
+- **A reverb the board holds, from today's steps:** SmallRoom and the Invention use a mono room of four combs and two allpasses, whose lines are only
+  as long as their delays, 33 KB in all. If open 32 brings a cheaper one, they can take it. TapeEcho's repeats are one comb, 36 KB, a feedback delay
+  through a lowpass in one step.
+- **The Entertainer's form:** C plays once, the time that leads on, so the piece lasts three minutes. The repeat of B is an octave up, as marked.
+- **Groups:** the embedded recipes are a group of their own, and TempoRamp and ClipVariations start an "arrangement" group, for what a timeline does
+  rather than a patch.
+- **Recordings made in code:** RoundRobin, ReleaseSamples and ReverseSwell carry recordings synthesized when they were written, mono i16 at 22.05 or
+  24 kHz, from 5 KB to 50 KB an image.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.
@@ -1055,13 +1078,12 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 | 20 | Are mono builds an exception to the target rule? | Recommended yes, as section 10 has it, with channel count as an output format. Folding was chosen before the rule existed and hasn't been confirmed since. |
 | 21 | Does sample rate need the same treatment as frame size? | Recommended no: leave it at run time and document it. Frequencies stay correct, and only frame-timed behaviour shifts, such as control rate and the shortest feedback loop. |
 | 23 | What authenticates an image over BLE? | A hash doesn't, and anyone in range can connect. Validation protects memory, but a valid image can still be very loud or overload the CPU. Recommended: BLE bonding, or signed images. |
-| 24 | Is a set of embedded-friendly recipes wanted? | Floated, not decided. The board refuses 13 of the 61 recipes: 2 for memory, 6 that ran over budget, and 5 that ran within it but could exceed it with every voice sounding, and none of the four pieces [board]. `docs/Benchmarks.md` says how many voices each track of every recipe could have, which is most of what such a set would change, and open 32's reverb the rest. |
 | 25 | Does CMSIS-DSP save enough on this chip? | No [board]. Over 60 programs the median change in mean cycles is 0.0%, with Vocoder 9.9% slower and PhaseModElectricPiano 8.4% faster. Section 15's model had 10.8% for one voice. Recommended: keep it as a supported backend, since it passes the same checks, and don't make it any target's default. |
 | 26 | Time signatures and pickups? | The editor draws every timeline in 4/4 from tick 0. Für Elise, in 3/8 after an eighth's pickup, is in its third bar where the ruler shows bar 2, and the chorale's pickup puts every bar line a beat early. Recommended: a meter map and a pickup in the timeline document, which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change. |
 | 27 | A sustain pedal? | A timeline has none, so `MakePieces.py` writes Für Elise's pedalling into how long its notes are. The piano roll then shows the pedal's notes rather than the player's, and moving a pedal change means rewriting durations. Recommended: a pedal lane per track that the compiler applies to note lengths, as it writes a tempo ramp as steps, so the format and engine stay as they are. A key played live under the pedal would still need the engine to hold its voice. |
 | 28 | Importing MIDI files? | Every piece began as a MIDI file or LilyPond source, and the app imports only WAV. A Standard MIDI File reader is 45 lines of `MakePieces.py`. Recommended: import a file as a new timeline, a track for each of its tracks, with its tempo map, and its pedal once open 27 gives it somewhere to go. |
 | 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks open 21's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
 | 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
-| 31 | Should the benchmarks cover the pieces? | Partly done: `bench/ParallelBench.cpp` times the first 20 seconds of each on a host, serially and on a pool, section 18. On the board their bound, without their reverb, is 4 to 20 times a frame's budget [board]. Recommended: leave them out of the QEMU bench, whose full renders would take 9 minutes, as the bound already says they don't fit. |
-| 32 | Should there be a reverb an L476 can hold? | Every piece sends to a stereo reverb that needs 188 KB of bulk memory, and the board has 64 KB, so none of them plays there [board]. The demo's reverb fits, at 47 KB. Section 15 has the arithmetic: mono i16 lines take 27 KB. A reverb that fits wouldn't make the pieces play on an L476: without theirs, they run at 164% to 469% of the core [board]. Recommended: a mono reverb mode, or i16 lines as a new op, chosen by an author like any other cheaper feature, and the pieces left as they are. |
+| 31 | Should the benchmarks cover the pieces? | Partly done: `bench/ParallelBench.cpp` times the first 20 seconds of each on a host, serially and on a pool, section 18. On the board the first four's bound, without their reverb, is 4 to 20 times a frame's budget [board], and The Entertainer's 7.4 times. The Invention fits, room and all. Recommended: leave them out of the QEMU bench, whose full renders would take 9 minutes, as the bound already says they don't fit. |
+| 32 | Should there be a reverb an L476 can hold? | Every piece but the Invention sends to a stereo reverb that needs 188 KB of bulk memory, and the board has 64 KB, so none of those plays there [board]. The Invention and SmallRoom use a mono room of four combs and two allpasses, at 33 KB. The demo's reverb fits, at 47 KB. Section 15 has the arithmetic: mono i16 lines take 27 KB. A reverb that fits wouldn't make the pieces play on an L476: without theirs, they run at 164% to 469% of the core [board]. Recommended: a mono reverb mode, or i16 lines as a new op, chosen by an author like any other cheaper feature, and the pieces left as they are. |
 | 33 | Should the bound count a track's notes rather than its voices? | The compiler knows how many notes a track holds at once, but not how long each sounds after its release, which an envelope's time decides and a lane can move, so only the voice count bounds what sounds. Counting voices refuses some Programs that never use them all: PrecutGrainCloud has 12 voices for grains of which 2 sound at once, and would fit with 10. Recommended: keep counting voices, so a refusal is never wrong, and let the error and the report say how many fit, as they do. |

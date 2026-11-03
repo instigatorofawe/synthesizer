@@ -870,7 +870,7 @@ test('a track can play a built-in patch, and a duplicate of it takes its place t
 	await page.getByRole('button', { name: 'Open patch slot 1' }).click();
 	await expect(page).toHaveURL(/patch=builtin-OneShotSample/);
 	await expect(page.getByTestId('used-by')).toContainText('Borrowed');
-	await page.getByRole('button', { name: 'Duplicate to edit' }).click();
+	await page.getByRole('button', { name: 'Edit a copy' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('OneShotSample copy');
 	const copy = shownPatchId(page);
 	expect(copy).not.toContain('builtin');

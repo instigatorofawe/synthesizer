@@ -874,6 +874,13 @@ to.
   one picker filters as it is typed in, and lists what the song already plays, then the library's own patches, then the built-ins grouped
   as the browser groups the examples. Its last entry, New patch for this track, saves a new patch at once, the same sine and envelope the
   browser's New patch makes, and puts it on the track as an unsaved edit before opening it.
+- The Patch view's Controls move the sound where the patch is heard. On a track of a song that can change, a Control is the track's
+  value, as the mixer's knob for it is: it starts at what the track holds, or the patch's default, and let go, it is saved with the
+  song, as one step of the song's undo and one compile, even when it equals the default, so it is plain what the song holds. Without
+  that, the compile after a drag put the saved value back while the slider stayed where it was left. ↺ or its right-click menu takes
+  the track's value away, so the default plays again, and Make default writes the value into the patch, for every song, as one step
+  of the patch's undo, which leaves the track's own value as it is. Heard alone, or in an example, a Control moves the sound, saves
+  nothing, and says so.
 - One engine plays one image: the song, compiled from the drafts, or the Patch view's patch on its own. A patch a track plays
   is heard in the song, through that track's mix and inserts, so a patch edit is heard in context as it is made. A voice no
   track plays is compiled on its own as above, and its keys switch the engine to it. Play, a locate, or a note from the
@@ -912,6 +919,11 @@ to.
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
   piano, and a field being typed in or a key with a modifier keeps its own meaning, though a button or a slider with focus doesn't. A key
   let go while the page is in the background lets go of its note.
+- The keys play at the velocity in the field beside them, which is the roll's Vel, so what is heard is what step entry and a take
+  write, and C and V step it in either view. Hold, on their other side, latches what they play, from the computer keyboard or the
+  mouse: a key let go keeps sounding until it is played again, Esc, or Hold is turned off, which lets go of everything. It is the
+  page's and changes only what is heard. Step entry still writes as each key comes up, and a key a take records isn't latched, so
+  the take writes how long it was down.
 - The position and the tempo in the top bar are fields. A position typed as the ghost note reads, bar.beat.tick, or as a bar, moves
   the playhead. A tempo typed changes the tempo change in effect at the playhead and no other, so a song with several reads as each
   part of it plays, and the inspector lists them all. Inside a ramp the field shows how far the glide has got, and typed into, it
@@ -966,8 +978,8 @@ of them is let go, and the cursor then moves past it. → with keys held makes t
 takes the last step back, or with none behind the cursor moves it back and deletes nothing. While step entry is on, → and Backspace are its
 own rather than the roll's or the arrangement's, and Esc leaves it once nothing nearer is left to close. A step past the clip's end grows the
 clip as a clicked note does. The rules are pure functions over a clip and a cursor, in `StepEntry.ts`. The keys reach them through the page,
-which lets them write into a track the image leaves out for having no notes yet. C and V step the velocity of new notes, clicked or
-stepped, by 10, and Vel beside Draw shows it.
+which lets them write into a track the image leaves out for having no notes yet. C and V step the velocity of new notes, clicked,
+stepped or played, by 10, and Vel beside Draw and beside the keys shows it.
 
 Recording writes what the keys play while the song plays, as Live and Logic do with quantizing on. ● in the top bar, or Shift+R in the
 Song view, starts a take on the chosen track. With the song stopped, a bar is counted in with a click on each beat, and then the song
@@ -1005,7 +1017,7 @@ it was copied, and otherwise a copy of it under a name of its own. Notes a paste
 clip, as a note placed there does.
 
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
-a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
+a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A parameter's slider says its value, rounded as the inspector rounds and with the unit of the input it drives, and a double-click or Enter on the value types one. Over a range above zero whose ends are 100 times apart or more, such as a cutoff's, its travel is logarithmic (`Taper.ts`), so 900 Hz of 80 Hz to 12 kHz sits near the middle rather than at 7%. A fader keeps its own law. A compile error's `where` marks its track and clip. A fader's travel is cubic in
 gain, so 0 dB sits at 79% with +6 dB at the top, and the document still holds the gain. The piano roll ramps, scales, humanizes and quantizes chosen notes. What the page plays and Export WAV writes pass through a limiter after the
 engine, at full scale, and a light on the master meter says when it is limiting, with how much in its tooltip, section 24. It holds
 for a moment after the last time, as a clip light does, since the limiter comes and goes many times a second. Every meter and scope

@@ -236,24 +236,32 @@
 		background: #2ea043;
 	}
 	.hold {
-		padding: 0.15rem 0.4rem;
-		font-size: 0.75rem;
+		padding: 0.1rem 0.3rem;
+		font-size: 0.72rem;
 	}
 	.hold[aria-pressed='true'] {
 		color: var(--text);
 		background: #23863633;
 		border-color: #3fb950;
 	}
+	/* Narrow, as the top bar has to fit 1280 px: three digits and no spinner, since ↑ and ↓ step it, and C and V by tens. */
 	.velocity {
 		display: flex;
 		align-items: center;
-		gap: 0.2rem;
-		font-size: 0.75rem;
+		gap: 0.15rem;
+		font-size: 0.72rem;
 		color: var(--muted);
 	}
 	.velocity input {
-		width: 2.9rem;
-		padding: 0.1rem 0.2rem;
+		width: 2.1rem;
+		padding: 0.1rem 0.15rem;
 		font-variant-numeric: tabular-nums;
+		text-align: right;
+		appearance: textfield;
+	}
+	.velocity input::-webkit-inner-spin-button,
+	.velocity input::-webkit-outer-spin-button {
+		appearance: none;
+		margin: 0;
 	}
 </style>

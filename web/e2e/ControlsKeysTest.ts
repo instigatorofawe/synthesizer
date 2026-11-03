@@ -79,6 +79,8 @@ const filtered = {
 
 const masterPeak = (page: Page) =>
 	page.getByRole('meter', { name: 'Master level' }).getAttribute('data-peak').then(Number);
+// The loudest the master has been since Play, or since the image playing now began.
+const masterLoudest = (page: Page) => loudest(page.getByRole('meter', { name: 'Master level' }));
 const voices = (page: Page) => page.getByTestId('voices');
 const holdButton = (page: Page) => page.getByRole('button', { name: 'Hold', exact: true });
 const control = (page: Page, name: string) => page.getByRole('slider', { name: `Control ${name}`, exact: true });
@@ -180,7 +182,9 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	await toneSong(page, 'Control saved');
 	await loopButton(page).click();
 	await play(page);
-	await expect.poll(() => masterPeak(page), { timeout: 8000 }).toBeGreaterThan(0.9);
+	await expect.poll(() => masterPeak(page), { timeout: 8000 }).toBeGreaterThan(0.1);
+	await engineRenders(page, 0.3);
+	const full = await masterLoudest(page); // At a level of 1
 
 	await openView(page, 'patch');
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'song');
@@ -193,7 +197,8 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	const compiles = await page.getByTestId('compiles').textContent();
 	await slide(page, 'level', 125, false);
 	await expect(level).toHaveAttribute('aria-valuetext', '0.25');
-	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeLessThan(0.3);
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeLessThan(0.3 * full);
+	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
 	expect(await page.getByTestId('compiles').textContent()).toBe(compiles);
 
 	// Let go, the song holds it, and compiles once.
@@ -203,8 +208,8 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	await settled(page);
 	await expect(page.getByTestId('compiles')).toHaveText(String(Number(compiles) + 1));
 	await engineRenders(page, 0.3);
-	expect(await masterPeak(page)).toBeLessThan(0.3);
-	expect(await masterPeak(page)).toBeGreaterThan(0.2);
+	expect(await masterLoudest(page)).toBeLessThan(0.3 * full); // Since the new image began, which settled the song's value
+	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
 
 	// It is one step of the song's undo.
 	await openView(page, 'song');
@@ -224,9 +229,9 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	await openView(page, 'patch');
 	await expect(level).toHaveAttribute('aria-valuetext', '0.25');
 	await play(page);
-	await expect.poll(() => masterPeak(page), { timeout: 8000 }).toBeGreaterThan(0.2);
+	await expect.poll(() => masterPeak(page), { timeout: 8000 }).toBeGreaterThan(0.2 * full);
 	await engineRenders(page, 0.3);
-	expect(await loudest(page.getByRole('meter', { name: 'Master level' }))).toBeLessThan(0.3);
+	expect(await masterLoudest(page)).toBeLessThan(0.3 * full);
 });
 
 test('Make default writes the value into the patch, as a step of its undo, and the way back takes the track’s away', async ({
@@ -234,11 +239,12 @@ test('Make default writes the value into the patch, as a step of its undo, and t
 }) => {
 	await toneSong(page, 'Made default');
 	await openView(page, 'patch');
+	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'song'); // Once the song has compiled
 	const level = control(page, 'level');
 	const make = page.getByRole('button', { name: 'Make default for level' });
 	const reset = page.getByRole('button', { name: 'Reset level' });
 	await expect(make).toHaveCount(0);
-	await expect(reset).toBeDisabled();
+	await expect(reset).toBeHidden(); // There is nothing to go back from
 
 	// A double-click on the value types one, which is saved as a slider let go is.
 	await controlRow(page, 7).getByRole('button', { name: '1', exact: true }).dblclick();
@@ -248,7 +254,7 @@ test('Make default writes the value into the patch, as a step of its undo, and t
 	await typed.press('Enter');
 	await expect(level).toHaveAttribute('aria-valuetext', '0.6');
 	await expect(controlRow(page, 7)).toHaveAttribute('data-own', 'true');
-	await expect(reset).toBeEnabled();
+	await expect(reset).toBeVisible();
 
 	// Make default puts it in the patch, and the track keeps its own value, which is the same.
 	await make.click();
@@ -327,14 +333,23 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 	const key = (note: number) => page.getByRole('button', { name: String(note), exact: true });
 
 	// The keys play at the velocity by them: this tone is as loud as its velocity.
-	await page.getByLabel('Velocity of the keys').fill('32');
-	await page.getByLabel('Velocity of the keys').press('Enter');
-	await page.getByLabel('Patch name', { exact: true }).focus(); // Out of the field, which keeps the piano's keys
-	await page.getByLabel('Patch name', { exact: true }).blur();
+	const velocity = page.getByLabel('Velocity of the keys');
+	await velocity.fill('127');
+	await velocity.press('Enter');
+	await velocity.blur(); // A field keeps the piano's keys
 	await page.keyboard.down('a'); // C3, which starts audio
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
-	await expect.poll(() => masterPeak(page), { timeout: 8000 }).toBeGreaterThan(0.2);
-	expect(await masterPeak(page)).toBeLessThan(0.3);
+	await expect.poll(() => masterPeak(page), { timeout: 8000 }).toBeGreaterThan(0.1);
+	await engineRenders(page, 0.2);
+	const full = await masterLoudest(page); // Since this image began
+	await page.keyboard.up('a');
+	await expect(voices(page)).toHaveText('0');
+	await velocity.fill('32');
+	await velocity.press('Enter');
+	await velocity.blur();
+	await page.keyboard.down('a');
+	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeLessThan(0.3 * full);
+	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
 	await page.keyboard.up('a');
 	await expect(voices(page)).toHaveText('0');
 
@@ -347,7 +362,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 	await expect(holdButton(page)).toHaveAttribute('data-held', '1');
 	await engineRenders(page, 0.5);
 	await expect(voices(page)).toHaveText('1');
-	expect(await masterPeak(page)).toBeGreaterThan(0.2);
+	expect(await masterPeak(page)).toBeGreaterThan(0.2 * full);
 
 	// Played again, it goes.
 	await page.keyboard.press('a');
@@ -393,7 +408,7 @@ test("the keys' velocity is the roll's Vel: set in either view, it is what step 
 	await expect(roll).toHaveValue('64');
 	await keys.blur();
 	await page.keyboard.press('r');
-	await expect(page.getByTestId('step-cursor')).toBeVisible();
+	await expect(page.getByTestId('step-cursor')).toHaveAttribute('data-tick', '0');
 	await page.keyboard.press('a');
 	const notes = page.locator('[data-testid^="note-"]');
 	await expect(notes).toHaveCount(1);

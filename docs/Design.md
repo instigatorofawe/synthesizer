@@ -788,11 +788,11 @@ and hardware still only ever sees image bytes.
 
 **Tables.**
 
-    patches(id, name, graph JSON, revision, created_at, updated_at)
+    patches(id, name, graph JSON, revision, builtin, created_at, updated_at)
     timelines(id, name, doc JSON, revision, created_at, updated_at)
     timeline_patches(timeline_id, patch_id)      -- ON DELETE RESTRICT on patch_id
     patch_subpatches(patch_id, subpatch_id)      -- ON DELETE RESTRICT on subpatch_id
-    assets(id, name, encoding, channels, rate, frames, root_key, loop_start, loop_end, bytes BLOB)
+    assets(id, name, encoding, channels, rate, frames, root_key, loop_start, loop_end, bytes BLOB, builtin)
     patch_assets(patch_id, asset_id)             -- ON DELETE RESTRICT on asset_id
     bundles(id, name, revision, created_at, updated_at)
     bundle_timelines(bundle_id, timeline_id, position)
@@ -807,6 +807,8 @@ and hardware still only ever sees image bytes.
   keeps track of what it has seen.
 - `revision` is optimistic concurrency. A save names the revision it started from, and a stale save is refused rather
   than overwriting another tab.
+- `builtin` marks the examples' own patches and recordings, which only the server writes, from `examples/`. **Built-in
+  patches** below says what that means.
 - A timeline refers to a patch by `id` and follows its latest graph. Editing a shared patch therefore changes every
   timeline using it, which is what "global" means here, and the editor shows the affected timelines. Pinning a timeline
   to an older revision is deferred, and adding it needs only a revision history table.
@@ -820,7 +822,7 @@ and hardware still only ever sees image bytes.
 below, both resizable, and a browser down the side, which folds away, for the library and the examples. Its address says
 what is open: `?timeline=` or `?recipe=` below, and `?patch=` above, which otherwise shows the chosen track's patch, so
 choosing a track shows its patch. Only the lower panel's parameters reach the server: a load reruns for the parameters it
-reads, so choosing a patch costs no round trip, and the library, which carries every sample, loads only when an action
+reads, so choosing a patch costs no round trip, and the library, which carries every sample in use, loads only when an action
 changes it. A fresh visit opens the timeline saved last, and the old addresses redirect to the same views.
 
 - Edits to any number of patches and timelines are kept as drafts while other things are opened, and Save writes them all
@@ -837,6 +839,10 @@ changes it. A fresh visit opens the timeline saved last, and the old addresses r
   newest edit. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the
   image slot does, and the image before it plays on.
 - Keys belong to the panel used last, so Delete and undo act on the graph or the timeline, not both.
+- The computer keyboard plays the patch keys as most DAWs lay it out: the home row from A is the white keys from the lowest C shown, the row
+  above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
+  piano, and a field being typed in or a key with a modifier keeps its own meaning. A key let go while the page is in the background lets go
+  of its note.
 
 **The graph editor.** A graph's document is still what is saved and compiled. The editor adds `x` and `y` to its nodes, which the compiler ignores, so moving a node
 changes no hash. It takes its node table from the compiler's catalog, the table the compiler reads, so the two can't disagree. The compiler's report carries the debug sidecar
@@ -861,9 +867,24 @@ A file's sampler chunk gives its root and loop, and failing that a name like `Pi
 only their levels say which is which. A bad file refuses the whole import, and one larger than an image can hold is refused there rather than failing on load. An asset can't be deleted while a patch names it.
 
 **Recipes.** `examples/Recipes` ships with the app as the read-only examples in the editor's browser, where any of them plays as it is and shows how it is made, in the same editors with nothing that changes anything: its arrangement, notes, lanes, mix and each patch's graph, which
-a probe can look inside. Adding one copies its patches, assets and timeline into the library under ids made from its name, and they are then ordinary rows. They are copies so that an edit can't change what ships. A recipe isn't seeded,
-because together they hold about 600 KB of samples and the editor loads the library. Adding one twice changes nothing, so an edited copy survives. A test holds every
-recipe to compiling to the same bytes from the library as from its file, which is what shows the schema dropped nothing.
+a probe can look inside. Its patches are already in the library, as built-in patches, so adding one copies only its timeline, as `recipe-<name>`, which plays them, and Duplicate on any of them makes a copy that can change. Adding one
+twice changes nothing, so an edited copy survives. A library that added examples before keeps the copies of their patches it made then, as ordinary rows. A test holds every example to compiling to the same bytes from the library as from its file,
+which is what shows the schema dropped nothing.
+
+**Built-in patches.** Every example's patches are in every library from the start, so any timeline can play one in a slot or an insert. They are rows of `patches`, and their recordings rows of `assets`, marked `builtin`, so the delete
+guards, "used by", the timelines an edit affects and exports treat them as they treat any other.
+
+- Only the server writes them. At startup it makes them what `examples/` holds, in one transaction, and it refuses a save or a delete of one however it is asked. So nothing done in the app reaches what ships, and a row changed some other
+  way is put back at the next start. The browser lists them apart from the library's own patches, and leaves their recordings out of its samples.
+- A change goes to a copy. Duplicate makes an ordinary patch with the same graph, named "*name* copy", which names the same recordings rather than copying them. When the timeline open below plays the built-in, the copy takes its place
+  there, as an unsaved edit, so a change is heard where it plays. A copy compiles to the same bytes, because a patch's bytes depend only on its graph, section 20, and a test holds three examples to that, played entirely by copies.
+- An example with one patch names its built-in after itself, as `builtin-Kick808`, and one with several adds the part, as `builtin-PassionChorale-horn`, named "PassionChorale Horn". A graph several examples share is one built-in,
+  named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 61 recipes and 4 pieces make 107 built-ins from 111
+  patches, and 24 recordings from 25 [measured].
+- A built-in follows what ships, as any shared patch follows its latest graph: a version that changes an example changes every timeline playing that built-in, and its editor says which. One that no longer ships goes, unless something
+  uses it, and then it stays as it was, still read-only.
+- Every page carries the built-ins' graphs, which took the demo library's data from 32 KB to 223 KB [measured], but their recordings only once a saved timeline or one of the library's own patches uses them. A built-in opened, or put in an edit, before then fetches its recordings from
+  `/assets` by id, and nothing compiles until they have arrived. So a library that uses no built-in loads the same samples it did before there were any. Together they hold about 480 KB.
 
 **Pieces.** `examples/Pieces` holds four public-domain pieces arranged for the engine, two to three minutes each, and the browser lists them
 first among the examples. In every other way they are recipes. `MakePieces.py` writes them from the Mutopia Project's public-domain
@@ -887,7 +908,8 @@ Muted tracks stay in, because mute is a mixer parameter that can change during p
 which keeps every slot and track, so an empty track can still be played from the keyboard. A patch heard on its own is compiled with it, as one track
 with no notes, and the editor starts the transport for it, because a shared LFO waits for it. Exports never set it.
 
-Unused library patches cannot affect an image: changing them leaves its bytes identical, and CI asserts this.
+Unused library patches cannot affect an image: changing them leaves its bytes identical, and CI asserts this. That includes
+the built-in patches of section 19, which every library holds: a timeline reaches one as it reaches any other.
 
 **A Patch's bytes depend only on its graph**, and on the graphs of its subpatches. Voice count, track number, initial values and the target stay out of the Patch
 chunk. This is what makes sharing work: two Programs using one library patch reach one hash, and two library patches with
@@ -1047,6 +1069,17 @@ Choices made there that the user hasn't weighed in on:
   every tail reaches 0. The price is 12 dB of agreement with the f32 sound: the demo's reverb,
   halved going in, is 70.6 dB below its peak from it rather than 82.6 [measured], as the quietest part of a tail dies a little sooner.
 - **In a graph** the field is `"line": "i16"` on `delay`, `comb` and `allpass`, and the editor offers it from the compiler's catalog.
+
+**Built for the examples' patches in the library**, as section 19 describes. The user asked for every patch the recipes and pieces use to be in the library from the start, read-only, with a duplicate
+to change one. Choices made there that the user hasn't weighed in on:
+- **Rows, not a namespace:** a built-in is an ordinary row marked `builtin`, which the server writes from `examples/` at every start, rather than a patch the server and compiler look up in the files. So every guard, link and export
+  works on it unchanged, and the database holds a copy of the examples' recordings, about 480 KB.
+- **Add to library:** an example's timeline is copied and plays the built-ins, rather than copies of its patches. A library that added examples before keeps its copies.
+- **Duplicate:** copies what is saved, as "*name* copy", sharing its recordings. A copy of a built-in takes its place in the timeline open below as an unsaved edit, and a copy of an ordinary patch replaces nothing.
+- **Following what ships:** a version that changes an example's patch changes every timeline playing it, as an edit to any shared patch does. Keeping one as it was is a Duplicate, until revision pinning, section 21.
+- **Sharing:** identical graphs and recordings are one built-in, named after the example with fewer patches, then the first by name. Ids come from those names, so renaming an example retires its built-ins, which stay only while used.
+- **Names:** the recipes' parts that were called `p`, `fx`, `car` and so on are now "voice", "effect", "carrier" and the like, since a built-in is named after them.
+- **What a page carries:** every built-in's graph, about 190 KB of the library's data, and a built-in's recordings only once something saved uses it or it is opened.
 
 **Built for Milestone 7** (revision 19), as sections 10 and 15 describe. The user decided that a device refuses, at compile and at load, a
 Program whose dearest frame, with every voice sounding, could overrun its budget. Choices made there that the user hasn't weighed in on:

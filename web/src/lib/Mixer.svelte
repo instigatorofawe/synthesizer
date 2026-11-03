@@ -17,6 +17,7 @@
 		removeBus,
 		removeInsert,
 		removeSend,
+		byOwner,
 		setChain,
 		setGlobal,
 		setInsert,
@@ -58,7 +59,9 @@
 	const decibels = (gain: number) => (gain > 0 ? `${(20 * Math.log10(gain)).toFixed(1)} dB` : 'silent');
 
 	const patchOf = (id: string) => patches.find((patch) => patch.id === id);
-	const insertPatches = $derived(patches.filter((patch) => patch.graph.nodes.some((node) => node.type === 'in')));
+	const insertPatches = $derived(
+		byOwner(patches.filter((patch) => patch.graph.nodes.some((node) => node.type === 'in')))
+	);
 	const hasSidechain = (id: string) =>
 		patchOf(id)?.graph.nodes.some((node) => node.type === 'in' && node.index === 1) ?? false;
 	const chainNames = $derived([
@@ -169,7 +172,7 @@
 				value={insert.patch}
 				onchange={(e) => onchange(setInsertPatch(doc, key, index, e.currentTarget.value))}
 			>
-				{#each insertPatches as candidate (candidate.id)}<option value={candidate.id}>{candidate.name}</option>{/each}
+				{@render choices()}
 				{#if !patch}<option value={insert.patch}>{insert.patch}</option>{/if}
 			</select>
 			{#if !readonly}
@@ -229,7 +232,7 @@
 			{/each}
 		</div>
 	{/each}
-	{#if !readonly && insertPatches.length}
+	{#if !readonly && (insertPatches.own.length || insertPatches.builtin.length)}
 		<select
 			aria-label={`Add an insert to ${label}`}
 			value=""
@@ -239,8 +242,18 @@
 			}}
 		>
 			<option value="">Add an insert…</option>
-			{#each insertPatches as candidate (candidate.id)}<option value={candidate.id}>{candidate.name}</option>{/each}
+			{@render choices()}
 		</select>
+	{/if}
+{/snippet}
+
+{#snippet choices()}
+	{#each insertPatches.own as candidate (candidate.id)}<option value={candidate.id}>{candidate.name}</option>{/each}
+	{#if insertPatches.builtin.length}
+		<optgroup label="Built in">
+			{#each insertPatches.builtin as candidate (candidate.id)}<option value={candidate.id}>{candidate.name}</option
+				>{/each}
+		</optgroup>
 	{/if}
 {/snippet}
 

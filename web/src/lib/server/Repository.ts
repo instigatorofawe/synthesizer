@@ -18,6 +18,10 @@ import type { AssetEntry, PatchEntry, ProgramEntry } from '#lib/Request.ts';
 export class NotFound extends Error {}
 export class Conflict extends Error {}
 export class InUse extends Error {}
+export class ReadOnly extends Error {} // A built-in patch or its recording, which only the examples change
+
+const readOnly = (name: string) =>
+	new ReadOnly(`${name} is built in, so it can't be changed. Duplicate it to change a copy.`);
 
 function assetEntry(row: typeof assets.$inferSelect): AssetEntry {
 	return {
@@ -45,6 +49,7 @@ export function listPatches(db: Db) {
 		id: row.id,
 		name: row.name,
 		revision: row.revision,
+		builtin: row.builtin,
 		timelines: uses.filter((u) => u.patchId === row.id).length
 	}));
 }
@@ -174,6 +179,12 @@ export function createPatch(db: Db, name: string, graph: Graph, id: string = ran
 
 export function savePatch(db: Db, id: string, revision: number, name: string, graph: Graph) {
 	return db.transaction((tx) => {
+		const row = tx
+			.select({ name: patches.name, builtin: patches.builtin })
+			.from(patches)
+			.where(eq(patches.id, id))
+			.get();
+		if (row?.builtin) throw readOnly(row.name);
 		const result = tx
 			.update(patches)
 			.set({ name, graph, revision: revision + 1, updatedAt: new Date() })
@@ -187,6 +198,8 @@ export function savePatch(db: Db, id: string, revision: number, name: string, gr
 }
 
 export function deletePatch(db: Db, id: string) {
+	const row = db.select({ name: patches.name, builtin: patches.builtin }).from(patches).where(eq(patches.id, id)).get();
+	if (row?.builtin) throw readOnly(row.name);
 	const users = [...patchParents(db, id), ...patchUsers(db, id)];
 	if (users.length) throw new InUse(`used by ${users.map((u) => u.name).join(', ')}`);
 	db.transaction((tx) => {
@@ -305,7 +318,8 @@ export function listAssets(db: Db) {
 			channels: assets.channels,
 			rate: assets.rate,
 			frames: assets.frames,
-			encoding: assets.encoding
+			encoding: assets.encoding,
+			builtin: assets.builtin
 		})
 		.from(assets)
 		.orderBy(asc(assets.name))
@@ -315,6 +329,8 @@ export function listAssets(db: Db) {
 }
 
 export function deleteAsset(db: Db, id: string) {
+	const row = db.select({ name: assets.name, builtin: assets.builtin }).from(assets).where(eq(assets.id, id)).get();
+	if (row?.builtin) throw readOnly(row.name);
 	const users = db
 		.select({ name: patches.name })
 		.from(patchAssets)
@@ -326,21 +342,30 @@ export function deleteAsset(db: Db, id: string) {
 	db.delete(assets).where(eq(assets.id, id)).run();
 }
 
+function assetRow(entry: AssetEntry) {
+	return {
+		id: entry.id,
+		name: entry.name,
+		encoding: entry.encoding,
+		channels: entry.channels,
+		rate: entry.rate,
+		frames: entry.frames,
+		rootKey: entry.root_key,
+		loopStart: entry.loop_start,
+		loopEnd: entry.loop_end,
+		bytes: Buffer.from(entry.data, 'base64')
+	};
+}
+
 export function createAsset(db: Db, entry: AssetEntry) {
-	db.insert(assets)
-		.values({
-			id: entry.id,
-			name: entry.name,
-			encoding: entry.encoding,
-			channels: entry.channels,
-			rate: entry.rate,
-			frames: entry.frames,
-			rootKey: entry.root_key,
-			loopStart: entry.loop_start,
-			loopEnd: entry.loop_end,
-			bytes: Buffer.from(entry.data, 'base64')
-		})
-		.run();
+	db.insert(assets).values(assetRow(entry)).run();
+}
+
+// An ordinary patch with another's name and graph, which is how a built-in one is changed. Its recordings are shared rather
+// than copied, as two patches naming one asset always share it.
+export function duplicatePatch(db: Db, id: string): string {
+	const row = getPatch(db, id);
+	return createPatch(db, `${row.name} copy`, row.graph as Graph);
 }
 
 // The assets a set of patches needs, and no others.
@@ -364,6 +389,108 @@ export function assetsFor(db: Db, patchIds: string[]): AssetEntry[] {
 		.orderBy(asc(assets.id))
 		.all()
 		.map(assetEntry);
+}
+
+// The recordings an editor page carries: those of every patch someone made, and of every built-in one a timeline or one of
+// those patches uses. A built-in nobody uses costs the page nothing until it is opened, when `assetsById` sends its own.
+export function libraryAssets(db: Db): AssetEntry[] {
+	const own = db
+		.select({ id: patches.id })
+		.from(patches)
+		.where(eq(patches.builtin, false))
+		.all()
+		.map((row) => row.id);
+	const used = db
+		.selectDistinct({ id: timelinePatches.patchId })
+		.from(timelinePatches)
+		.all()
+		.map((row) => row.id);
+	return assetsFor(db, withSubpatches(db, [...new Set([...own, ...used])]));
+}
+
+export function assetsById(db: Db, ids: string[]): AssetEntry[] {
+	if (ids.length === 0) return [];
+	return db.select().from(assets).where(inArray(assets.id, ids)).orderBy(asc(assets.id)).all().map(assetEntry);
+}
+
+// Writes a built-in recording as it ships, unless it is already that. Says whether anything changed.
+export function putBuiltinAsset(db: Db, entry: AssetEntry): boolean {
+	const row = assetRow(entry);
+	const old = db.select().from(assets).where(eq(assets.id, entry.id)).get();
+	if (
+		old?.builtin &&
+		old.name === row.name &&
+		old.encoding === row.encoding &&
+		old.channels === row.channels &&
+		old.rate === row.rate &&
+		old.frames === row.frames &&
+		old.rootKey === row.rootKey &&
+		old.loopStart === row.loopStart &&
+		old.loopEnd === row.loopEnd &&
+		Buffer.from(old.bytes).equals(row.bytes)
+	)
+		return false;
+	db.insert(assets)
+		.values({ ...row, builtin: true })
+		.onConflictDoUpdate({ target: assets.id, set: { ...row, builtin: true, updatedAt: new Date() } })
+		.run();
+	return true;
+}
+
+// Writes a built-in patch as it ships, unless it is already that, and links what it names, which must be there first. A
+// change is a new revision, as a save would make, so an editor holding the old one knows.
+export function putBuiltinPatch(db: Db, id: string, name: string, graph: Graph): boolean {
+	const old = db.select().from(patches).where(eq(patches.id, id)).get();
+	if (old?.builtin && old.name === name && JSON.stringify(old.graph) === JSON.stringify(graph)) return false;
+	if (old) {
+		db.update(patches)
+			.set({ name, graph, builtin: true, revision: old.revision + 1, updatedAt: new Date() })
+			.where(eq(patches.id, id))
+			.run();
+	} else {
+		db.insert(patches).values({ id, name, graph, builtin: true }).run();
+	}
+	linkAssets(db, id, graph);
+	linkSubpatches(db, id, graph);
+	return true;
+}
+
+// Takes away the built-in patches and recordings that no longer ship, except those something still uses, which stay as they
+// were and still can't be changed. Returns the ids of those kept.
+export function retireBuiltins(db: Db, patchIds: Set<string>, assetIds: Set<string>): string[] {
+	const kept: string[] = [];
+	const oldPatches = db
+		.select({ id: patches.id })
+		.from(patches)
+		.where(eq(patches.builtin, true))
+		.all()
+		.filter((row) => !patchIds.has(row.id));
+	for (const { id } of oldPatches) {
+		const parents = db
+			.select({ id: patchSubpatches.patchId })
+			.from(patchSubpatches)
+			.where(eq(patchSubpatches.subpatchId, id))
+			.all()
+			.filter((parent) => parent.id !== id);
+		const users = db.select().from(timelinePatches).where(eq(timelinePatches.patchId, id)).all();
+		if (parents.length || users.length) {
+			kept.push(id);
+			continue;
+		}
+		db.delete(patchSubpatches).where(eq(patchSubpatches.patchId, id)).run();
+		db.delete(patches).where(eq(patches.id, id)).run();
+	}
+	const oldAssets = db
+		.select({ id: assets.id })
+		.from(assets)
+		.where(eq(assets.builtin, true))
+		.all()
+		.filter((row) => !assetIds.has(row.id));
+	for (const { id } of oldAssets) {
+		if (db.select().from(patchAssets).where(eq(patchAssets.assetId, id)).get()) kept.push(id);
+		else db.delete(assets).where(eq(assets.id, id)).run();
+	}
+	return kept;
 }
 
 export function listBundles(db: Db) {

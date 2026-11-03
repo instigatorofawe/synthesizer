@@ -1,7 +1,7 @@
 {
  "patches": {
   "car": {
-   "name": "car",
+   "name": "carrier",
    "graph": {
     "nodes": [
      {
@@ -104,7 +104,7 @@
    }
   },
   "voc": {
-   "name": "voc",
+   "name": "filter bank",
    "graph": {
     "nodes": [
      {
@@ -730,7 +730,7 @@
    }
   },
   "mod": {
-   "name": "mod",
+   "name": "modulator",
    "graph": {
     "nodes": [
      {

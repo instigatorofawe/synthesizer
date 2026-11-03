@@ -20,8 +20,16 @@
 		search: string; // The page's address now, which every link here changes a part of
 		examples: { name: string; recipes: { name: string; listen_for: string }[] }[];
 		timelines: { id: string; name: string }[];
-		patches: { id: string; name: string; graph: Graph; users: { id: string; name: string }[] }[];
-		samples: { id: string; name: string; frames: number; rate: number; channels: number; patches: number }[];
+		patches: { id: string; name: string; graph: Graph; builtin?: boolean; users: { id: string; name: string }[] }[];
+		samples: {
+			id: string;
+			name: string;
+			frames: number;
+			rate: number;
+			channels: number;
+			patches: number;
+			builtin?: boolean;
+		}[];
 		bundles: { id: string; name: string }[];
 		dirty: Set<string>; // Draft keys of what is unsaved
 		openTimeline: string | null;
@@ -39,8 +47,14 @@
 	const bundleHref = (id: string) => withParams(search, { bundle: id });
 
 	const shownTimelines = $derived(timelines.filter((t) => matches(t.name)));
-	const shownPatches = $derived(patches.filter((p) => matches(p.name)));
-	const shownSamples = $derived(samples.filter((s) => matches(s.name)));
+	// The built-in patches are every example's, which every library has and nobody can change, so they sit apart from the
+	// library's own. Their recordings are only theirs to use, so the samples list leaves them out.
+	const ownPatches = $derived(patches.filter((p) => !p.builtin));
+	const builtinPatches = $derived(patches.filter((p) => p.builtin));
+	const ownSamples = $derived(samples.filter((s) => !s.builtin));
+	const shownPatches = $derived(ownPatches.filter((p) => matches(p.name)));
+	const shownBuiltins = $derived(builtinPatches.filter((p) => matches(p.name)));
+	const shownSamples = $derived(ownSamples.filter((s) => matches(s.name)));
 	const shownBundles = $derived(bundles.filter((b) => matches(b.name)));
 	const shownExamples = $derived(
 		examples
@@ -51,6 +65,19 @@
 
 {#snippet unsaved(key: string)}
 	{#if dirty.has(key)}<span class="dot" title="Unsaved changes" aria-label="unsaved">•</span>{/if}
+{/snippet}
+
+{#snippet patchLink(patch: (typeof patches)[number])}
+	<li>
+		<a
+			href={patchHref(patch.id)}
+			aria-current={patch.id === shownPatch ? 'true' : undefined}
+			title={patch.users.length ? `Used by ${patch.users.map((u) => u.name).join(', ')}` : 'Not used by a timeline'}
+		>
+			{patch.name}{@render unsaved(draftKey('patch', patch.id))}
+			{#if isInsert(patch.graph)}<span class="tag">insert</span>{/if}
+		</a>
+	</li>
 {/snippet}
 
 <nav class="browser" aria-label="Browser">
@@ -78,22 +105,9 @@
 		</details>
 
 		<details open>
-			<summary>Patches <span class="count">{patches.length}</span></summary>
+			<summary>Patches <span class="count">{ownPatches.length}</span></summary>
 			<ul aria-label="Patches">
-				{#each shownPatches as patch (patch.id)}
-					<li>
-						<a
-							href={patchHref(patch.id)}
-							aria-current={patch.id === shownPatch ? 'true' : undefined}
-							title={patch.users.length
-								? `Used by ${patch.users.map((u) => u.name).join(', ')}`
-								: 'Not used by a timeline'}
-						>
-							{patch.name}{@render unsaved(draftKey('patch', patch.id))}
-							{#if isInsert(patch.graph)}<span class="tag">insert</span>{/if}
-						</a>
-					</li>
-				{/each}
+				{#each shownPatches as patch (patch.id)}{@render patchLink(patch)}{/each}
 			</ul>
 			<form method="POST" action={actionOn(search, 'createPatch')} use:enhance class="add">
 				<input type="hidden" name="back" value={search} />
@@ -103,7 +117,7 @@
 		</details>
 
 		<details open>
-			<summary>Samples <span class="count">{samples.length}</span></summary>
+			<summary>Samples <span class="count">{ownSamples.length}</span></summary>
 			<p class="muted note">
 				WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like
 				Piano_C4.wav says which key it was recorded at.
@@ -139,6 +153,19 @@
 			</form>
 		</details>
 
+		<details
+			open={filter.trim() !== '' || builtinPatches.some((p) => p.id === shownPatch) || undefined}
+			data-testid="builtins"
+		>
+			<summary>Built-in patches <span class="count">{builtinPatches.length}</span></summary>
+			<p class="muted note">
+				Every example's patches, for any timeline to play. They can't be changed: Duplicate makes a copy that can.
+			</p>
+			<ul aria-label="Built-in patches">
+				{#each shownBuiltins as patch (patch.id)}{@render patchLink(patch)}{/each}
+			</ul>
+		</details>
+
 		<details open>
 			<summary>Bundles <span class="count">{bundles.length}</span></summary>
 			<p class="muted note">Several timelines compiled into one image, for a device to choose between.</p>
@@ -156,7 +183,8 @@
 
 		<h2>Examples</h2>
 		<p class="muted note">
-			Short pieces that ship with the app. Each plays as it is, and adding one to the library makes copies to change.
+			Short pieces that ship with the app. Each plays as it is, its patches are built in, and adding one to the library
+			copies its timeline to change.
 		</p>
 		{#each shownExamples as group (group.name)}
 			<details open={filter.trim() !== '' || group.recipes.some((r) => r.name === openRecipe) || undefined}>

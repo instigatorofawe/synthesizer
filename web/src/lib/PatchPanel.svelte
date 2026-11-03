@@ -237,6 +237,7 @@
 	{#snippet json()}
 		<textarea
 			aria-label="Graph JSON"
+			wrap="off"
 			spellcheck="false"
 			{readonly}
 			value={text}

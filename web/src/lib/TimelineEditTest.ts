@@ -53,7 +53,6 @@ import {
 	removeNotes,
 	removePlacement,
 	removePlayChange,
-	removePoint,
 	removeSend,
 	removeTempo,
 	removeTrack,
@@ -78,7 +77,6 @@ import {
 	setPlacement,
 	setPlay,
 	setPlayChange,
-	setPoint,
 	settlingWrites,
 	setTempo,
 	setTrack,
@@ -94,6 +92,12 @@ import {
 	type PatchLike,
 	type Point
 } from '#lib/TimelineEdit.ts';
+
+// A point given a ramp as a document can hold it, for the lanes' own tests to draw.
+const ramped = (clip: Clip, index: number, change: { ramp: number; curve?: 'exp' }): Clip => ({
+	...clip,
+	automation: clip.automation.map((point, i) => (i === index ? { ...point, ...change } : point))
+});
 
 const clipNamed = (id: string, length = 1920, notes: Partial<Clip['notes'][number]>[] = []): Clip => ({
 	id,
@@ -491,7 +495,7 @@ describe('lanes', () => {
 	it('hold a value, then ramp from the next point for its own ticks', () => {
 		let clip = addPoint(clipNamed('c'), { param: 1 }, 0, 0);
 		clip = addPoint(clip, { param: 1 }, 480, 1);
-		clip = setPoint(clip, 1, { ramp: 480 });
+		clip = ramped(clip, 1, { ramp: 480 });
 		expect(laneCurve(lanesOf(clip)[0], 1920)).toEqual([
 			{ tick: 0, value: 0 },
 			{ tick: 480, value: 0 },
@@ -511,15 +515,9 @@ describe('lanes', () => {
 		]);
 	});
 
-	it('drop a ramp of nothing, so a document only says what it means', () => {
-		const clip = setPoint(addPoint(clipNamed('c'), { param: 1 }, 0, 0), 0, { ramp: 0 });
-		expect(clip.automation[0]).not.toHaveProperty('ramp');
-	});
-
-	it('come out a point or a lane at a time', () => {
+	it('come out a lane at a time', () => {
 		let clip = addPoint(clipNamed('c'), { param: 1 }, 0, 0);
 		clip = addPoint(clip, { param: 2 }, 0, 0);
-		expect(removePoint(clip, 0).automation.map((p) => p.param)).toEqual([2]);
 		expect(removeLane(clip, laneKey(2, undefined)).automation.map((p) => p.param)).toEqual([1]);
 	});
 
@@ -1013,12 +1011,11 @@ describe('the gaps the pieces found', () => {
 		expect(curveAt(1, 0, 1)).toBe(0);
 		let clip = addPoint(clipNamed('c'), { param: 1 }, 0, 1);
 		clip = addPoint(clip, { param: 1 }, 100, 0.01);
-		clip = setPoint(clip, 1, { ramp: 200, curve: 'exp' });
+		clip = ramped(clip, 1, { ramp: 200, curve: 'exp' });
 		clip = addPoint(clip, { param: 1 }, 200, 1);
 		const curve = laneCurve(lanesOf(clip)[0], 1920);
 		const middle = curve.find((p) => p.tick === 200 - 0 && p.value < 1);
 		expect(middle?.value).toBeCloseTo(0.1, 6); // Halfway along it when the next point cuts it off
-		expect(setPoint(clip, 1, { ramp: 0 }).automation[1].curve).toBeUndefined();
 	});
 
 	it('move a fader evenly through what is heard', () => {

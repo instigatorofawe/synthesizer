@@ -274,7 +274,11 @@ export const faderGain = (position: number) => (position * TOP) ** 3;
 export const faderPosition = (gain: number) => Math.cbrt(Math.max(0, gain)) / TOP;
 
 // A gain as a fader reads it, as the Mixer's and a track head's both do.
-export const decibels = (gain: number) => (gain > 0 ? `${(20 * Math.log10(gain)).toFixed(1)} dB` : 'silent');
+// Decibels, as every fader, meter and scope on the page writes them: one place, so they read alike everywhere. Silence is
+// "silent" in words and "-∞" where only a figure fits, a track head's, until decision 18 settles one word for it.
+export const toDecibels = (gain: number) => (gain > 0 ? 20 * Math.log10(gain) : -Infinity);
+export const decibels = (gain: number) => (gain > 0 ? `${toDecibels(gain).toFixed(1)} dB` : 'silent');
+export const decibelFigure = (gain: number) => (gain > 0 ? toDecibels(gain).toFixed(1) : '-∞');
 
 // A pan as a knob reads it: C in the middle, and L or R with how far, in percent.
 export const panText = (pan: number) =>
@@ -966,27 +970,10 @@ const fromChoice = (choice: Pick<LaneChoice, 'param' | 'target'>) => ({
 	...(choice.target === undefined ? {} : { target: choice.target })
 });
 
-// These three change the document's points as they are, each holding its value from its tick or ramping from there for its own
+// These change the document's points as they are, each holding its value from its tick or ramping from there for its own
 // ticks. What a lane's own gestures do, which keeps points joined by lines, is further down: `addLanePoint` and the rest.
 export function addPoint(clip: Clip, lane: Pick<LaneChoice, 'param' | 'target'>, tick: number, value: number): Clip {
 	return { ...clip, automation: [...clip.automation, { ...fromChoice(lane), tick, value }] };
-}
-
-export function setPoint(clip: Clip, index: number, change: Partial<Point>): Clip {
-	return {
-		...clip,
-		automation: clip.automation.map((point, i) => {
-			if (i !== index) return point;
-			const next: Point = { ...point, ...change };
-			if (next.ramp === 0 || next.ramp === undefined) delete next.ramp;
-			if (next.curve === 'linear' || next.curve === undefined || next.ramp === undefined) delete next.curve;
-			return next;
-		})
-	};
-}
-
-export function removePoint(clip: Clip, index: number): Clip {
-	return { ...clip, automation: clip.automation.filter((_, i) => i !== index) };
 }
 
 export function removeLane(clip: Clip, key: string): Clip {

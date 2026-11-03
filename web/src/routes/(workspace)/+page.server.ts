@@ -44,9 +44,10 @@ export const load = async ({ url }) => {
 				entry,
 				project,
 				// The same documents with their defaults filled in, for the editors to draw. What plays is `project`, as it ships.
-				patches: Object.entries(project.patches).map(([id, patch]) => ({
+				// An example's one patch is called after the example, as its built-in copy is: most call it "p", which says nothing.
+				patches: Object.entries(project.patches).map(([id, patch], _, all) => ({
 					id,
-					name: patch.name || id,
+					name: all.length === 1 ? recipe : patch.name || id,
 					graph: graphSchema.parse(patch.graph)
 				})),
 				timeline: timelineSchema.parse(project.programs[0].timeline),

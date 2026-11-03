@@ -1321,6 +1321,7 @@
 	.rollbar {
 		flex: 1;
 		min-width: 0;
+		overflow: hidden; /* What the toolbar can't fit scrolls inside it, and never runs over the inspector */
 		display: flex;
 		padding: 0.2rem 0 0 0.6rem;
 	}

@@ -2031,6 +2031,7 @@
 		{#if recipe}
 			<textarea
 				aria-label="Timeline JSON"
+				wrap="off"
 				spellcheck="false"
 				readonly
 				value={JSON.stringify(recipe.project.programs[0].timeline, null, 1)}></textarea>
@@ -2038,6 +2039,7 @@
 			<p class="muted">Edits compile as you type, and audio crossfades to them without stopping.</p>
 			<textarea
 				aria-label="Timeline JSON"
+				wrap="off"
 				spellcheck="false"
 				value={timelineText}
 				oninput={(e) => timelineEdited({ text: e.currentTarget.value }, 'typing')}

@@ -253,10 +253,6 @@ export function addNode(graph: Graph, type: GraphNode['type'], x: number, y: num
 	return { graph: { ...graph, nodes: [...graph.nodes, { id, type, x, y }] }, id };
 }
 
-export function removeNode(graph: Graph, id: number): Graph {
-	return removeNodes(graph, [id]);
-}
-
 // The nodes and every wire to or from them, as one edit.
 export function removeNodes(graph: Graph, ids: Iterable<number>): Graph {
 	const gone = new Set(ids);
@@ -273,10 +269,6 @@ export function removeNodes(graph: Graph, ids: Iterable<number>): Graph {
 // note node and a subpatch its out node.
 const PORT_TYPES: ReadonlySet<string> = new Set(['note', 'in', 'out', 'inlet', 'outlet']);
 export const isPort = (node: GraphNode) => PORT_TYPES.has(node.type);
-
-export function moveNode(graph: Graph, id: number, x: number, y: number): Graph {
-	return { ...graph, nodes: graph.nodes.map((node) => (node.id === id ? { ...node, x, y } : node)) };
-}
 
 const coordinate = (value: unknown) => (typeof value === 'number' ? value : 0);
 

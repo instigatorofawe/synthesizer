@@ -118,6 +118,24 @@ describe('the undo history', () => {
 		expect(doc.text).toBe('50');
 	});
 
+	it('forgets the oldest steps past its size, but never the last one', () => {
+		const history = new History<string>(HISTORY_LIMIT, 100); // 50 characters
+		const doc = opened(history, 'timeline:a', 'a'.repeat(20));
+		for (const next of ['b', 'c', 'd']) doc.edit(next.repeat(20));
+		let undone = 0;
+		while (doc.buttons.canUndo) {
+			doc.buttons.undo();
+			undone++;
+		}
+		expect(undone).toBe(2); // Two 20-character steps fit in 50, and the third doesn't
+		expect(doc.text).toBe('b'.repeat(20));
+
+		const big = opened(history, 'timeline:b', 'x'.repeat(80));
+		big.edit('y');
+		big.buttons.undo();
+		expect(big.text).toBe('x'.repeat(80)); // Bigger than it all, and still the one step back
+	});
+
 	it('forgets a document that was deleted, and only that one', () => {
 		const history = new History<string>();
 		const kept = opened(history, 'patch:a', 'a');

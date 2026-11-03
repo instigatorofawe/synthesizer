@@ -772,7 +772,9 @@ test('a recipe plays from the examples without touching the library', async ({ p
 	const problems: string[] = [];
 	page.on('pageerror', (e) => problems.push(e.message));
 	await page.goto('/');
-	await browser(page).getByText('drums').click();
+	await browser(page)
+		.locator('summary', { hasText: /^drums/ })
+		.click(); // The examples' group, not the built-ins' heading
 	await browser(page).getByRole('link', { name: 'Kick808' }).click();
 	await expect(page).toHaveURL(/recipe=Kick808/);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();

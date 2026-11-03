@@ -1419,6 +1419,7 @@
 	}
 	/* In the tab strip, it takes the strip's height and what width the tabs leave. */
 	.toolbar.top {
+		flex: 1 1 0;
 		height: 100%;
 		margin: 0;
 		min-width: 0;

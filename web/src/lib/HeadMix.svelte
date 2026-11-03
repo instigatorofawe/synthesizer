@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { matches } from '#lib/Shortcuts.ts';
-	import { decibels, faderGain, faderPosition, panText } from '#lib/TimelineEdit.ts';
+	import { decibelFigure, decibels, faderGain, faderPosition, panText } from '#lib/TimelineEdit.ts';
 
 	// A track head's volume fader and pan knob, so the mix's most used controls are in the Song view without opening the Mixer
 	// tab. They edit the track's own `gain` and `pan`, the ones the Mixer's fader and pan do: live while they are dragged,
@@ -49,7 +49,7 @@
 
 	const gainOf = (position: number) => Number(faderGain(position).toPrecision(4));
 	const panOf = (value: number) => Math.round(Math.max(-1, Math.min(1, value)) * 100) / 100;
-	const short = (gain: number) => (gain > 0 ? (20 * Math.log10(gain)).toFixed(1) : '-∞');
+	const short = decibelFigure;
 
 	// The knob's arc, from the top round to the pan, a quarter and a half of the way round at either end.
 	const knob = $derived.by(() => {

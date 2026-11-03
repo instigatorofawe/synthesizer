@@ -1,4 +1,4 @@
-# modsynth design, revision 22
+# modsynth design, revision 23
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -837,14 +837,26 @@ for each view, the transport and the loop, the position and the tempo, one Undo 
 the compile light and Save. There is no status bar. Under it one of two views has
 all the height: Song, with the arrangement, the notes, the mix, the JSON, the image and the inspector, and Patch, with one
 patch's graph. The two used to share the page, one above the other, which left the piano roll 102 px at 1280×800; apart, it
-is 408 px for a timeline of one track and 260 px for one of two tracks and a lane [measured]. The view not on screen stays on
-the page, hidden and inert, so its scroll, zoom and choices are there to come back to.
+is 426 px for a timeline of one track and 278 px for one of two tracks and a lane, and Expand makes those 528 and 440
+[measured]. The view not on screen stays on the page, hidden and inert, so its scroll, zoom and choices are there to come back
+to.
 
 - A tab or `` ` `` switches views. So does a patch opened from a track, the inspector or a mixer insert, and the Patch view's
   trail back to the song. A switch is a step in the browser's history, made without a navigation, which would move focus, so
   Back goes to the view before.
 - A browser down the side holds the library and the examples, and a timeline in it opens in Song and a patch in Patch. B
   folds it to a rail of icons. Below 1400 px wide it is always the rail, and opens over the page rather than pushing it aside.
+- In Song the arrangement is as tall as its ruler and tracks, up to about a third of the window, past which it scrolls, and the
+  notes have the rest, so the roll's room doesn't depend on a splitter dragged for another song. Expand, ⤢ at the right of the
+  tabs or a double-click on a clip, gives the notes the whole view, and ⤢ again or Esc brings the arrangement back. Esc closes
+  one thing at a time: a menu, then a drag, then a mode, step entry before Expand, and only then what is chosen. The inspector
+  is a column down the right of the arrangement and the notes, which I or its own control folds to a rail. Below 1400 px wide it
+  starts folded, as the browser does, and each side of 1400 remembers what it was left as, so opening it on a laptop leaves a
+  wide screen alone.
+- The roll scrolls as a page does, and Shift with the wheel scrolls it sideways. Mod with the wheel, or a pinch, zooms it where
+  the pointer is, and Mod and Shift with the wheel make its rows taller or shorter. `.` or Fit fits it to the clip's notes. Each
+  clip keeps its zoom and its rows' height across a reload, in localStorage under the timeline and the clip, and its scroll
+  while the page is open, so a clip comes back as it was left. None of it is in the document, which the compiler would refuse.
 - The address says what is open: `?timeline=` or `?recipe=` for the song, `?patch=` or `?part=` for the patch the Patch view
   shows, which otherwise is the chosen track's, so choosing a track shows its patch there, and `?view=patch`. An address that
   names a patch and no view opens Patch, as links did before there were views. Only the song's parameters reach the server: a
@@ -943,6 +955,17 @@ nothing: Delete or the right-click menu does. Mod-drag copies notes and clips, a
 end grows the clip to the bar that holds it, which says so with an Undo. Here the editor does decide what is legal: it won't grow a clip if that
 would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
 four bars past the end, so there is room to do it.
+
+Step entry writes notes from the keyboard with the song stopped, and is the way to write them without a mouse. R, or the Step toggle at the
+right of the roll's tabs, turns it on, and a line in the roll marks where the next step goes: where it was last in that clip, or else the
+clip's start, and a click moves it to the nearest line of the grid. The piano keys write notes there as long as the Draw length, so every start
+and length lands on the grid, and they sound as they always do. Keys held together make a chord, which is one edit, written once the last
+of them is let go, and the cursor then moves past it. → with keys held makes their notes a Snap step longer, → alone rests, and Backspace
+takes the last step back, or with none behind the cursor moves it back and deletes nothing. While step entry is on, → and Backspace are its
+own rather than the roll's or the arrangement's, and Esc leaves it once nothing nearer is left to close. A step past the clip's end grows the
+clip as a clicked note does. The rules are pure functions over a clip and a cursor, in `StepEntry.ts`. The keys reach them through the page,
+which lets them write into a track the image leaves out for having no notes yet. C and V step the velocity of new notes, clicked or
+stepped, by 10, and Vel beside Draw shows it.
 
 A fader moves the mix registers as it is dragged and compiles when it is let go, so the sound follows the hand and the document takes only the value settled on. The report says what each register pair holds,
 a stage's as well as a route's, and the page works out the same product the compiler does. Parameters and insert parameters move the same way. A compile error's `where` marks its track and clip. A fader's travel is cubic in
@@ -1225,6 +1248,45 @@ when it runs out of sight. Choices made there that the user hasn't weighed in on
   under the pointer holds still between turns.
 - **Scrolling away:** a view scrolled away from the playhead stays there until the playhead comes back into it, or Play starts the song again.
   The piano roll follows only while its own clip is playing.
+
+**Built for the UX sprint, wave 1** (revision 23), as section 19 describes. The user asked for a sprint on the editor's UX. They named three
+problems: notes are hard to put into a timeline, it's unclear where patches are edited, and there's too little room, vertical room most of
+all. A team proposed and reviewed changes, and the user took every recommendation. This wave builds:
+- one undo history for each patch and timeline, and one table of keys;
+- a click that adds a note, and clips that grow to hold it;
+- one picker for a track's patch;
+- a graph that stays readable, with a search for nodes;
+- separate Song and Patch views.
+
+The user ruled out Alt on every platform: Mod is ⌘ on a Mac and Ctrl elsewhere. Waves 2 and 3 follow: step entry, room for notes, the
+transport, a first song that sounds, and recording with snap. Choices made here that the user hasn't weighed in on:
+- **Undo:**
+  - A step is the document's whole text, and each document keeps 200 of them.
+  - A run of typing in the JSON is one step, and it ends when the field is left.
+  - Mod is strict: on a Mac, Ctrl+Z neither undoes nor saves.
+- **Space and Home:**
+  - A focused button or slider doesn't take Space or Home, so Space plays after a fader is dragged.
+  - While a patch plays on its own, Space plays the song instead, as Play does.
+- **Drawing notes:** a drawn note reaches the end of the Snap cell under the pointer. A drawn clip covers whole bars, inside the gap where it
+  was drawn.
+- **Lengthening anyway:** "Lengthen to N bars" and Duplicate after go ahead even when they cause an overlap. The compiler then reports the
+  overlap until the next clip is moved.
+- **Lanes:** a click past a clip's end in a lane does nothing, since lanes don't grow clips.
+- **A new patch for a track** is saved at once, and putting it on the track is a draft. Its name is what was typed in the picker, or else
+  "*Track name* patch".
+- **A track head's ▾** changes slot 1 only, and the inspector changes the others.
+- **Graph zoom:**
+  - Fit never goes below 100%, where a port label is 11 px, nor above 150%.
+  - Fit shows the top-left of a graph too big to read whole, since that's where signals start.
+  - A node's header is two lines, so existing drawings are a little taller.
+- **A subpatch from the search** starts as the first other patch in the library.
+- **The views:**
+  - The Patch view shows the patch the address names, or else the chosen track's.
+  - A change of view, or a patch chosen, moves the address without loading anything, and `?view=patch` survives a reload. Opening a
+    timeline or an example still loads the page.
+  - In Song the keys play the chosen track. They're off while it has no notes, since the preview leaves such a track out of the image.
+  - New patch, Import and Delete patch come back to the Patch view, and New timeline to Song.
+  - Below 1400 px wide the browser forgets whether it was open, and wider it remembers.
 
 **Built for the board** (revision 18), as section 10 and `docs/Board.md` describe. Choices made there that the user hasn't weighed in on:
 - **Storage:** open 22's two slots, closing it. The firmware takes the first 128 KB of flash, and each slot is 384 KB.

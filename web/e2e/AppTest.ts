@@ -938,7 +938,6 @@ test('a probe in a recipe reads the voice of the patch on screen', async ({ page
 });
 
 async function newTimeline(page: Page, name: string) {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
 	await page.getByLabel('New timeline name').fill(name);
@@ -1245,7 +1244,6 @@ test('an insert opens in the patch editor from the mixer', async ({ page }) => {
 });
 
 test('a fader is heard as it moves, and only compiles when let go', async ({ page }) => {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await startPlaying(page);
 	await loopButton(page).click();
 	await tab(page, 'Mixer');
@@ -1271,7 +1269,6 @@ test('a fader is heard as it moves, and only compiles when let go', async ({ pag
 });
 
 test('a mute silences a track, and buses, sends and inserts are wired from the mixer', async ({ page }) => {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await startPlaying(page);
 	await loopButton(page).click();
 	await tab(page, 'Mixer');
@@ -1348,7 +1345,6 @@ test('the velocities of chosen notes are ramped, scaled and quantized', async ({
 });
 
 test('a send goes before the fader from the mixer', async ({ page }) => {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await page.goto('/?timeline=song');
 	await tab(page, 'Mixer');
 	const pre = page.getByRole('button', { name: 'Send from Lead to room before the fader' });
@@ -1550,7 +1546,6 @@ test('a patch edit is heard in the song as it is made', async ({ page }) => {
 });
 
 test('a recipe shows its notes and mix, and none of it can be changed', async ({ page }) => {
-	await page.setViewportSize({ width: 1440, height: 1500 });
 	await page.goto('/?recipe=FrenchHorn');
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('note-0')).toBeAttached();

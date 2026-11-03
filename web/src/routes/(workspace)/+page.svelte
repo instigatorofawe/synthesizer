@@ -623,7 +623,15 @@
 	// Where each key held down went, so it is let go there though the view or the chosen track changed meanwhile.
 	const sounding = new Map<number, { source: Source; track: number }>();
 
+	// While step entry is on, the keys in the Song view also write into the clip in the roll, which they can do on a track
+	// that is silent because it has no notes yet.
+	let songEditor = $state<ReturnType<typeof TimelineEditor>>();
+	let stepWriting = $state(false);
+
 	function keyNote(note: number, on: boolean) {
+		// What is written doesn't change what is heard. A key let go goes to step entry whatever the view, since it may have
+		// started a chord there, which waits for it.
+		if (!on || (view === 'song' && stepWriting)) songEditor?.stepKey(note, on);
 		if (!on) {
 			const held = sounding.get(note);
 			sounding.delete(note);
@@ -723,7 +731,6 @@
 
 	// What the light lists. Each problem says where it is in words, and its link goes there: a node's opens the Patch view with the
 	// node chosen, and a track's, a clip's or the mix's opens the Song view with it chosen.
-	let editor = $state<ReturnType<typeof TimelineEditor>>();
 	let nodeAsked = $state.raw<{ node: number } | null>(null);
 
 	const names: Names = {
@@ -738,7 +745,7 @@
 
 	async function openSong(place: { track?: number | null; clip?: string | null; tab?: string }) {
 		await show('song');
-		editor?.reveal(place);
+		songEditor?.reveal(place);
 	}
 
 	function openNode(patch: string, node: number | null) {
@@ -985,6 +992,7 @@
 			event.preventDefault();
 			toggleBrowser();
 		} else if (matches(event, 'escape') && browserOver) {
+			event.preventDefault(); // Esc closes one thing at a time, and the browser over the views is the nearest
 			browserOver = false;
 		}
 	}
@@ -1174,7 +1182,7 @@
 				onclick={() => undoable?.redo()}><span aria-hidden="true">↷</span></button
 			>
 		</div>
-		<Keyboard disabled={!keysPlay} where={keysWhere} onnote={keyNote} />
+		<Keyboard disabled={!keysPlay && !stepWriting} writing={stepWriting} where={keysWhere} onnote={keyNote} />
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
 		<span class="grow"></span>
 		<CompileLight {busy} {problems} size={imageSize} details={engineDetails} />
@@ -1200,7 +1208,8 @@
 				{#if songDoc}
 					{#key openKey}
 						<TimelineEditor
-							bind:this={editor}
+							bind:this={songEditor}
+							id={openKey}
 							doc={songDoc}
 							patches={songPatches}
 							program={goodSong?.report.programs[0] ?? null}
@@ -1226,6 +1235,7 @@
 							ontrack={trackChosen}
 							onopen={patchOpened}
 							onnewpatch={newPatchForTrack}
+							onwriting={(writing) => (stepWriting = writing)}
 						/>
 					{/key}
 				{:else}

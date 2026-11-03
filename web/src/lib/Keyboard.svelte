@@ -12,12 +12,14 @@
 		low = 48,
 		octaves = 2,
 		disabled = false,
+		writing = false,
 		where = '',
 		onnote
 	}: {
 		low?: number;
 		octaves?: number;
 		disabled?: boolean;
+		writing?: boolean; // Whether step entry writes what the keys play, which they play as they otherwise would
 		where?: string; // Where the keys are heard, or why they can't be
 		onnote: (note: number, on: boolean) => void;
 	} = $props();
@@ -81,10 +83,11 @@
 
 <div
 	class="keyboard"
+	class:writing
 	style:width="{whites.length * WHITE}px"
 	role="group"
 	aria-label="Keys"
-	title={`${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up.`}
+	title={`${writing ? 'Step entry: keys write notes at the cursor in the roll. ' : ''}${where ? `${where} ` : ''}Play from the computer keyboard: A to ', with Z and X for an octave down or up.`}
 >
 	{#each notes as note (note)}
 		<button
@@ -112,6 +115,12 @@
 		height: 26px;
 		flex: none;
 		user-select: none;
+	}
+	/* Step entry is on, so what is played is written too. */
+	.keyboard.writing {
+		outline: 2px solid #3fb950;
+		outline-offset: 1px;
+		border-radius: 2px;
 	}
 	.key {
 		position: absolute;

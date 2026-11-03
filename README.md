@@ -59,12 +59,17 @@ the GIL, so engines on separate threads render at once.
     pnpm build
     pnpm start     # http://127.0.0.1:5321
 
-The editor is one page, laid out like a DAW: a transport along the top, the patch editor above, the timeline below, and a
-browser down the side, which folds away, for the library and the examples. A patch draws as a graph, with wires dragged
-between nodes, errors on the nodes they belong to, and scopes on any node, and its keys, or the computer keyboard from A to ' with Z
-and X for the octave, play it in the song, or on its own when no track plays it. Choosing a track shows its patch. A song stops at its end
-unless a loop is on, and the timeline follows the playhead. Edits to any number of patches and timelines stay while other
-things are opened, and Save writes them all at once. An example plays as it is, and adding one copies it into the library.
+The editor is laid out like a DAW, as two views under one top bar: Song, the arrangement with the notes of the chosen clip
+below it, and Patch, a patch's graph at full height. The top bar holds the transport, one Undo and Redo for the view on screen, the
+keys and Save, and a browser down the side, which folds to a rail, holds the library and the examples. A click in the roll adds a
+note, and a clip grows to hold one placed past its end. A track's patch is chosen from one searchable list, and its name in the
+track head opens it in the Patch view. A patch draws as a graph, with wires dragged between nodes, a node search on N or a
+double-click, errors on the nodes they belong to, and scopes on any node. The computer keyboard from A to ' with Z and X for the
+octave plays the chosen track, or in the Patch view the patch, on its own when no track plays it. Space plays and stops, and Home,
+or Stop pressed twice, goes back to the start. Shortcuts use ⌘ on a Mac and Ctrl elsewhere, and none uses Alt. A song stops at its
+end unless a loop is on, and the timeline follows the playhead. Edits to any number of patches and timelines stay, each with its
+own undo, while other things are opened, and Save writes them all at once. An example plays as it is, and adding one copies it into
+the library.
 An empty database fills itself with the demo project on first start. `pnpm test` runs the unit tests and `pnpm e2e` drives
 the built app in Chromium. There is no authentication, so keep it on loopback.
 

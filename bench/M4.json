@@ -90,6 +90,30 @@
     "Shape": 941.03
    },
    "recipes": {
+    "ClipVariations": {
+     "image": 1224,
+     "fast": 1952,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 13500,
+     "mean": 247.57,
+     "p999": 277.15,
+     "peak": 284.87,
+     "load": 32071,
+     "guards": 0
+    },
+    "TempoRamp": {
+     "image": 10872,
+     "fast": 2032,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 13650,
+     "mean": 339.61,
+     "p999": 450.02,
+     "peak": 457.99,
+     "load": 147797,
+     "guards": 0
+    },
     "AdditiveBell": {
      "image": 9680,
      "fast": 4560,
@@ -162,6 +186,18 @@
      "load": 105883,
      "guards": 0
     },
+    "Subpatches": {
+     "image": 1304,
+     "fast": 4848,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 16650,
+     "mean": 1351.12,
+     "p999": 1871.83,
+     "peak": 1940.52,
+     "load": 41219,
+     "guards": 0
+    },
     "Trumpet": {
      "image": 1320,
      "fast": 3904,
@@ -172,6 +208,18 @@
      "p999": 629.37,
      "peak": 673.43,
      "load": 38465,
+     "guards": 0
+    },
+    "TwoOperatorFm": {
+     "image": 9016,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7649,
+     "mean": 454.26,
+     "p999": 511.55,
+     "peak": 518.71,
+     "load": 110897,
      "guards": 0
     },
     "Clap": {
@@ -222,6 +270,18 @@
      "load": 107503,
      "guards": 0
     },
+    "RoundRobin": {
+     "image": 47832,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7950,
+     "mean": 221.55,
+     "p999": 335.75,
+     "peak": 351.5,
+     "load": 415020,
+     "guards": 0
+    },
     "Snare": {
      "image": 776,
      "fast": 2576,
@@ -234,6 +294,18 @@
      "load": 24750,
      "guards": 0
     },
+    "AutoWah": {
+     "image": 1232,
+     "fast": 2688,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7950,
+     "mean": 406.36,
+     "p999": 561.09,
+     "peak": 564.77,
+     "load": 37986,
+     "guards": 0
+    },
     "ChebyshevWavefold": {
      "image": 8944,
      "fast": 2112,
@@ -242,7 +314,7 @@
      "frames": 4275,
      "mean": 277.03,
      "p999": 330.28,
-     "peak": 351.03,
+     "peak": 351.02,
      "load": 109992,
      "guards": 0
     },
@@ -255,7 +327,7 @@
      "mean": 592.68,
      "p999": 629.43,
      "peak": 664.71,
-     "load": 36324,
+     "load": 36323,
      "guards": 0
     },
     "Compressor": {
@@ -315,7 +387,7 @@
      "mean": 246.43,
      "p999": 263.9,
      "peak": 297.24,
-     "load": 37857,
+     "load": 37858,
      "guards": 0
     },
     "ParametricEq": {
@@ -351,7 +423,7 @@
      "mean": 159.88,
      "p999": 209.68,
      "peak": 221.18,
-     "load": 27908,
+     "load": 27909,
      "guards": 0
     },
     "PrecutGrainCloud": {
@@ -362,7 +434,7 @@
      "frames": 4500,
      "mean": 124.2,
      "p999": 211.37,
-     "peak": 211.97,
+     "peak": 211.96,
      "load": 1824085,
      "guards": 0
     },
@@ -402,6 +474,54 @@
      "load": 63107,
      "guards": 0
     },
+    "ChipTune": {
+     "image": 1800,
+     "fast": 3216,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5550,
+     "mean": 302.08,
+     "p999": 397.12,
+     "peak": 410.71,
+     "load": 53267,
+     "guards": 0
+    },
+    "LeanDrumKit": {
+     "image": 1960,
+     "fast": 3600,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7649,
+     "mean": 260.68,
+     "p999": 361.46,
+     "peak": 398.84,
+     "load": 56979,
+     "guards": 0
+    },
+    "SmallRoom": {
+     "image": 1096,
+     "fast": 3040,
+     "bulk": 32992,
+     "voices": 3,
+     "frames": 10500,
+     "mean": 440.21,
+     "p999": 490.99,
+     "peak": 517.4,
+     "load": 35391,
+     "guards": 0
+    },
+    "TapeEcho": {
+     "image": 848,
+     "fast": 2096,
+     "bulk": 36240,
+     "voices": 2,
+     "frames": 8850,
+     "mean": 193.36,
+     "p999": 304.43,
+     "peak": 317.99,
+     "load": 28975,
+     "guards": 0
+    },
     "FormantVowels": {
      "image": 872,
      "fast": 1984,
@@ -410,8 +530,8 @@
      "frames": 5250,
      "mean": 181.81,
      "p999": 193.12,
-     "peak": 252.56,
-     "load": 24393,
+     "peak": 252.55,
+     "load": 24394,
      "guards": 0
     },
     "KeyboardTrackedFilter": {
@@ -434,8 +554,8 @@
      "frames": 4500,
      "mean": 277.48,
      "p999": 318.3,
-     "peak": 322.0,
-     "load": 22114,
+     "peak": 321.99,
+     "load": 22115,
      "guards": 0
     },
     "VelocityFilterAmp": {
@@ -447,7 +567,7 @@
      "mean": 209.33,
      "p999": 234.4,
      "peak": 234.4,
-     "load": 20425,
+     "load": 20426,
      "guards": 0
     },
     "Wind": {
@@ -726,6 +846,18 @@
      "load": 33152,
      "guards": 0
     },
+    "HardSync": {
+     "image": 824,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 10950,
+     "mean": 359.35,
+     "p999": 397.93,
+     "peak": 408.78,
+     "load": 25735,
+     "guards": 0
+    },
     "LoopedSample": {
      "image": 29904,
      "fast": 2240,
@@ -774,6 +906,30 @@
      "load": 19022,
      "guards": 0
     },
+    "ReleaseSamples": {
+     "image": 5384,
+     "fast": 2944,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7649,
+     "mean": 286.48,
+     "p999": 471.34,
+     "peak": 484.77,
+     "load": 65365,
+     "guards": 0
+    },
+    "ReverseSwell": {
+     "image": 49648,
+     "fast": 2496,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6600,
+     "mean": 197.0,
+     "p999": 307.06,
+     "peak": 335.77,
+     "load": 428044,
+     "guards": 0
+    },
     "StereoUnison": {
      "image": 1104,
      "fast": 3232,
@@ -795,7 +951,7 @@
      "mean": 251.81,
      "p999": 292.93,
      "peak": 293.62,
-     "load": 21193,
+     "load": 21192,
      "guards": 0
     },
     "VelocityLayers": {
@@ -831,7 +987,7 @@
      "mean": 185.67,
      "p999": 186.09,
      "peak": 227.03,
-     "load": 15930,
+     "load": 15929,
      "guards": 0
     },
     "OneVoice": {
@@ -843,7 +999,7 @@
      "mean": 87.68,
      "p999": 88.12,
      "peak": 100.28,
-     "load": 14127,
+     "load": 14126,
      "guards": 0
     },
     "Silent": {
@@ -865,9 +1021,9 @@
      "voices": 1,
      "frames": 1500,
      "mean": 56.11,
-     "p999": 88.33,
-     "peak": 101.78,
-     "load": 14126,
+     "p999": 88.34,
+     "peak": 101.77,
+     "load": 14127,
      "guards": 0
     },
     "IdleVoices": {
@@ -877,8 +1033,8 @@
      "voices": 1,
      "frames": 1500,
      "mean": 91.55,
-     "p999": 123.77,
-     "peak": 137.21,
+     "p999": 123.78,
+     "peak": 137.22,
      "load": 42161,
      "guards": 0
     },
@@ -913,7 +1069,7 @@
      "voices": 1,
      "frames": 1500,
      "mean": 88.19,
-     "p999": 93.25,
+     "p999": 93.24,
      "peak": 101.78,
      "load": 14126,
      "guards": 0
@@ -2123,6 +2279,30 @@
     "Shape": 941.03
    },
    "recipes": {
+    "ClipVariations": {
+     "image": 1224,
+     "fast": 1696,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 13500,
+     "mean": 215.42,
+     "p999": 244.5,
+     "peak": 252.21,
+     "load": 32071,
+     "guards": 0
+    },
+    "TempoRamp": {
+     "image": 10872,
+     "fast": 1776,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 13650,
+     "mean": 300.41,
+     "p999": 404.99,
+     "peak": 412.96,
+     "load": 147798,
+     "guards": 0
+    },
     "AdditiveBell": {
      "image": 9680,
      "fast": 4304,
@@ -2131,7 +2311,7 @@
      "frames": 7500,
      "mean": 1406.93,
      "p999": 1705.74,
-     "peak": 1731.74,
+     "peak": 1731.73,
      "load": 130495,
      "guards": 0
     },
@@ -2195,6 +2375,18 @@
      "load": 105883,
      "guards": 0
     },
+    "Subpatches": {
+     "image": 1304,
+     "fast": 4592,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 16650,
+     "mean": 1295.41,
+     "p999": 1802.05,
+     "peak": 1870.74,
+     "load": 41219,
+     "guards": 0
+    },
     "Trumpet": {
      "image": 1320,
      "fast": 3648,
@@ -2207,6 +2399,18 @@
      "load": 38465,
      "guards": 0
     },
+    "TwoOperatorFm": {
+     "image": 9016,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7649,
+     "mean": 422.91,
+     "p999": 478.9,
+     "peak": 486.05,
+     "load": 110897,
+     "guards": 0
+    },
     "Clap": {
      "image": 792,
      "fast": 2208,
@@ -2215,7 +2419,7 @@
      "frames": 6750,
      "mean": 161.46,
      "p999": 321.71,
-     "peak": 337.28,
+     "peak": 337.27,
      "load": 24716,
      "guards": 0
     },
@@ -2255,6 +2459,18 @@
      "load": 107503,
      "guards": 0
     },
+    "RoundRobin": {
+     "image": 47832,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7950,
+     "mean": 193.21,
+     "p999": 302.0,
+     "peak": 318.49,
+     "load": 415020,
+     "guards": 0
+    },
     "Snare": {
      "image": 776,
      "fast": 2320,
@@ -2265,6 +2481,18 @@
      "p999": 462.9,
      "peak": 481.55,
      "load": 24750,
+     "guards": 0
+    },
+    "AutoWah": {
+     "image": 1232,
+     "fast": 2432,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7950,
+     "mean": 370.69,
+     "p999": 516.55,
+     "peak": 520.24,
+     "load": 37986,
      "guards": 0
     },
     "ChebyshevWavefold": {
@@ -2435,6 +2663,54 @@
      "load": 63106,
      "guards": 0
     },
+    "ChipTune": {
+     "image": 1800,
+     "fast": 2704,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5550,
+     "mean": 243.92,
+     "p999": 333.03,
+     "peak": 346.62,
+     "load": 53267,
+     "guards": 0
+    },
+    "LeanDrumKit": {
+     "image": 1960,
+     "fast": 3088,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7649,
+     "mean": 209.19,
+     "p999": 303.55,
+     "peak": 340.93,
+     "load": 56980,
+     "guards": 0
+    },
+    "SmallRoom": {
+     "image": 1096,
+     "fast": 2656,
+     "bulk": 32992,
+     "voices": 3,
+     "frames": 10500,
+     "mean": 380.67,
+     "p999": 427.93,
+     "peak": 454.34,
+     "load": 35391,
+     "guards": 0
+    },
+    "TapeEcho": {
+     "image": 848,
+     "fast": 1840,
+     "bulk": 36240,
+     "voices": 2,
+     "frames": 8850,
+     "mean": 160.72,
+     "p999": 264.15,
+     "peak": 277.71,
+     "load": 28975,
+     "guards": 0
+    },
     "FormantVowels": {
      "image": 872,
      "fast": 1728,
@@ -2454,7 +2730,7 @@
      "voices": 2,
      "frames": 4500,
      "mean": 164.83,
-     "p999": 188.25,
+     "p999": 188.24,
      "peak": 189.09,
      "load": 19923,
      "guards": 0
@@ -2467,7 +2743,7 @@
      "frames": 4500,
      "mean": 245.81,
      "p999": 285.65,
-     "peak": 289.33,
+     "peak": 289.34,
      "load": 22114,
      "guards": 0
     },
@@ -2759,6 +3035,18 @@
      "load": 33152,
      "guards": 0
     },
+    "HardSync": {
+     "image": 824,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 10950,
+     "mean": 327.7,
+     "p999": 365.27,
+     "peak": 376.12,
+     "load": 25734,
+     "guards": 0
+    },
     "LoopedSample": {
      "image": 29904,
      "fast": 1984,
@@ -2766,7 +3054,7 @@
      "voices": 6,
      "frames": 4500,
      "mean": 422.75,
-     "p999": 505.11,
+     "p999": 505.12,
      "peak": 541.43,
      "load": 330384,
      "guards": 0
@@ -2805,6 +3093,30 @@
      "p999": 276.65,
      "peak": 309.34,
      "load": 19022,
+     "guards": 0
+    },
+    "ReleaseSamples": {
+     "image": 5384,
+     "fast": 2688,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7649,
+     "mean": 256.54,
+     "p999": 432.49,
+     "peak": 445.93,
+     "load": 65365,
+     "guards": 0
+    },
+    "ReverseSwell": {
+     "image": 49648,
+     "fast": 2112,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6600,
+     "mean": 159.43,
+     "p999": 262.74,
+     "peak": 291.46,
+     "load": 428044,
      "guards": 0
     },
     "StereoUnison": {
@@ -4156,6 +4468,30 @@
     "Shape": 943.02
    },
    "recipes": {
+    "ClipVariations": {
+     "image": 1224,
+     "fast": 1952,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 13500,
+     "mean": 245.63,
+     "p999": 275.15,
+     "peak": 282.87,
+     "load": 32071,
+     "guards": 0
+    },
+    "TempoRamp": {
+     "image": 10872,
+     "fast": 2032,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 13650,
+     "mean": 335.22,
+     "p999": 444.4,
+     "peak": 452.37,
+     "load": 147798,
+     "guards": 0
+    },
     "AdditiveBell": {
      "image": 9680,
      "fast": 4560,
@@ -4228,6 +4564,18 @@
      "load": 105883,
      "guards": 0
     },
+    "Subpatches": {
+     "image": 1304,
+     "fast": 4848,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 16650,
+     "mean": 1325.54,
+     "p999": 1836.02,
+     "peak": 1905.45,
+     "load": 41219,
+     "guards": 0
+    },
     "Trumpet": {
      "image": 1320,
      "fast": 3904,
@@ -4236,8 +4584,20 @@
      "frames": 6750,
      "mean": 444.39,
      "p999": 617.12,
-     "peak": 661.93,
+     "peak": 661.92,
      "load": 38465,
+     "guards": 0
+    },
+    "TwoOperatorFm": {
+     "image": 9016,
+     "fast": 1936,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7649,
+     "mean": 451.65,
+     "p999": 508.68,
+     "peak": 515.84,
+     "load": 110897,
      "guards": 0
     },
     "Clap": {
@@ -4260,7 +4620,7 @@
      "frames": 6450,
      "mean": 661.84,
      "p999": 1050.27,
-     "peak": 1081.67,
+     "peak": 1081.68,
      "load": 164989,
      "guards": 0
     },
@@ -4288,6 +4648,18 @@
      "load": 107503,
      "guards": 0
     },
+    "RoundRobin": {
+     "image": 47832,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7950,
+     "mean": 220.02,
+     "p999": 333.59,
+     "peak": 349.34,
+     "load": 415020,
+     "guards": 0
+    },
     "Snare": {
      "image": 776,
      "fast": 2576,
@@ -4300,6 +4672,18 @@
      "load": 24750,
      "guards": 0
     },
+    "AutoWah": {
+     "image": 1232,
+     "fast": 2688,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7950,
+     "mean": 402.17,
+     "p999": 555.02,
+     "peak": 558.71,
+     "load": 37986,
+     "guards": 0
+    },
     "ChebyshevWavefold": {
      "image": 8944,
      "fast": 2112,
@@ -4308,7 +4692,7 @@
      "frames": 4275,
      "mean": 271.03,
      "p999": 323.03,
-     "peak": 343.78,
+     "peak": 343.77,
      "load": 109992,
      "guards": 0
     },
@@ -4321,7 +4705,7 @@
      "mean": 583.5,
      "p999": 619.9,
      "peak": 655.74,
-     "load": 36323,
+     "load": 36324,
      "guards": 0
     },
     "Compressor": {
@@ -4331,8 +4715,8 @@
      "voices": 4,
      "frames": 5250,
      "mean": 425.62,
-     "p999": 490.12,
-     "peak": 490.8,
+     "p999": 490.11,
+     "peak": 490.81,
      "load": 35706,
      "guards": 0
     },
@@ -4343,7 +4727,7 @@
      "voices": 2,
      "frames": 5250,
      "mean": 208.9,
-     "p999": 243.02,
+     "p999": 243.03,
      "peak": 251.15,
      "load": 21127,
      "guards": 0
@@ -4466,6 +4850,54 @@
      "p999": 916.65,
      "peak": 1046.52,
      "load": 63106,
+     "guards": 0
+    },
+    "ChipTune": {
+     "image": 1800,
+     "fast": 3216,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5550,
+     "mean": 299.29,
+     "p999": 393.68,
+     "peak": 407.27,
+     "load": 53267,
+     "guards": 0
+    },
+    "LeanDrumKit": {
+     "image": 1960,
+     "fast": 3600,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7649,
+     "mean": 258.15,
+     "p999": 358.08,
+     "peak": 395.65,
+     "load": 56979,
+     "guards": 0
+    },
+    "SmallRoom": {
+     "image": 1096,
+     "fast": 3040,
+     "bulk": 32992,
+     "voices": 3,
+     "frames": 10500,
+     "mean": 435.68,
+     "p999": 485.71,
+     "peak": 512.12,
+     "load": 35392,
+     "guards": 0
+    },
+    "TapeEcho": {
+     "image": 848,
+     "fast": 2096,
+     "bulk": 36240,
+     "voices": 2,
+     "frames": 8850,
+     "mean": 191.25,
+     "p999": 300.62,
+     "peak": 314.18,
+     "load": 28975,
      "guards": 0
     },
     "FormantVowels": {
@@ -4792,6 +5224,18 @@
      "load": 33152,
      "guards": 0
     },
+    "HardSync": {
+     "image": 824,
+     "fast": 2240,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 10950,
+     "mean": 356.63,
+     "p999": 394.99,
+     "peak": 406.03,
+     "load": 25734,
+     "guards": 0
+    },
     "LoopedSample": {
      "image": 29904,
      "fast": 2240,
@@ -4801,7 +5245,7 @@
      "mean": 462.18,
      "p999": 548.46,
      "peak": 584.77,
-     "load": 330384,
+     "load": 330383,
      "guards": 0
     },
     "OneShotSample": {
@@ -4840,6 +5284,30 @@
      "load": 19023,
      "guards": 0
     },
+    "ReleaseSamples": {
+     "image": 5384,
+     "fast": 2944,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7649,
+     "mean": 282.48,
+     "p999": 464.21,
+     "peak": 477.83,
+     "load": 65365,
+     "guards": 0
+    },
+    "ReverseSwell": {
+     "image": 49648,
+     "fast": 2496,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6600,
+     "mean": 195.36,
+     "p999": 304.43,
+     "peak": 333.15,
+     "load": 428044,
+     "guards": 0
+    },
     "StereoUnison": {
      "image": 1104,
      "fast": 3232,
@@ -4849,7 +5317,7 @@
      "mean": 554.72,
      "p999": 598.24,
      "peak": 619.68,
-     "load": 33592,
+     "load": 33593,
      "guards": 0
     },
     "SubOscillator": {
@@ -6189,6 +6657,30 @@
     "Shape": 941.02
    },
    "recipes": {
+    "ClipVariations": {
+     "image": 1224,
+     "fast": 1696,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 13500,
+     "mean": 212.4,
+     "p999": 241.37,
+     "peak": 249.09,
+     "load": 32072,
+     "guards": 0
+    },
+    "TempoRamp": {
+     "image": 10872,
+     "fast": 1776,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 13650,
+     "mean": 294.46,
+     "p999": 397.3,
+     "peak": 405.28,
+     "load": 147797,
+     "guards": 0
+    },
     "AdditiveBell": {
      "image": 9680,
      "fast": 4304,
@@ -6261,6 +6753,18 @@
      "load": 105883,
      "guards": 0
     },
+    "Subpatches": {
+     "image": 1304,
+     "fast": 4592,
+     "bulk": 0,
+     "voices": 8,
+     "frames": 16650,
+     "mean": 1258.42,
+     "p999": 1750.48,
+     "peak": 1819.92,
+     "load": 41218,
+     "guards": 0
+    },
     "Trumpet": {
      "image": 1320,
      "fast": 3648,
@@ -6273,6 +6777,18 @@
      "load": 38465,
      "guards": 0
     },
+    "TwoOperatorFm": {
+     "image": 9016,
+     "fast": 1680,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 7649,
+     "mean": 419.31,
+     "p999": 474.9,
+     "peak": 482.05,
+     "load": 110897,
+     "guards": 0
+    },
     "Clap": {
      "image": 792,
      "fast": 2208,
@@ -6282,7 +6798,7 @@
      "mean": 157.9,
      "p999": 314.34,
      "peak": 330.09,
-     "load": 24717,
+     "load": 24716,
      "guards": 0
     },
     "DrumLoop": {
@@ -6292,9 +6808,9 @@
      "voices": 9,
      "frames": 6450,
      "mean": 575.93,
-     "p999": 940.8,
+     "p999": 940.81,
      "peak": 972.21,
-     "load": 164988,
+     "load": 164989,
      "guards": 0
     },
     "HiHat": {
@@ -6317,8 +6833,20 @@
      "frames": 7125,
      "mean": 177.01,
      "p999": 205.43,
-     "peak": 222.21,
+     "peak": 222.22,
      "load": 107503,
+     "guards": 0
+    },
+    "RoundRobin": {
+     "image": 47832,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7950,
+     "mean": 191.45,
+     "p999": 299.43,
+     "peak": 315.93,
+     "load": 415020,
      "guards": 0
     },
     "Snare": {
@@ -6330,7 +6858,19 @@
      "mean": 255.45,
      "p999": 449.18,
      "peak": 468.02,
-     "load": 24751,
+     "load": 24750,
+     "guards": 0
+    },
+    "AutoWah": {
+     "image": 1232,
+     "fast": 2432,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 7950,
+     "mean": 364.05,
+     "p999": 507.27,
+     "peak": 510.96,
+     "load": 37986,
      "guards": 0
     },
     "ChebyshevWavefold": {
@@ -6341,7 +6881,7 @@
      "frames": 4275,
      "mean": 239.32,
      "p999": 288.74,
-     "peak": 309.49,
+     "peak": 309.5,
      "load": 109992,
      "guards": 0
     },
@@ -6378,7 +6918,7 @@
      "mean": 177.35,
      "p999": 209.24,
      "peak": 217.37,
-     "load": 21127,
+     "load": 21128,
      "guards": 0
     },
     "Flanger": {
@@ -6412,9 +6952,9 @@
      "voices": 2,
      "frames": 4500,
      "mean": 210.84,
-     "p999": 228.69,
+     "p999": 228.68,
      "peak": 262.02,
-     "load": 37858,
+     "load": 37857,
      "guards": 0
     },
     "ParametricEq": {
@@ -6501,6 +7041,54 @@
      "load": 63107,
      "guards": 0
     },
+    "ChipTune": {
+     "image": 1800,
+     "fast": 2704,
+     "bulk": 0,
+     "voices": 4,
+     "frames": 5550,
+     "mean": 240.25,
+     "p999": 328.4,
+     "peak": 342.0,
+     "load": 53267,
+     "guards": 0
+    },
+    "LeanDrumKit": {
+     "image": 1960,
+     "fast": 3088,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7649,
+     "mean": 205.82,
+     "p999": 298.84,
+     "peak": 336.4,
+     "load": 56979,
+     "guards": 0
+    },
+    "SmallRoom": {
+     "image": 1096,
+     "fast": 2656,
+     "bulk": 32992,
+     "voices": 3,
+     "frames": 10500,
+     "mean": 373.53,
+     "p999": 419.74,
+     "peak": 446.15,
+     "load": 35392,
+     "guards": 0
+    },
+    "TapeEcho": {
+     "image": 848,
+     "fast": 1840,
+     "bulk": 36240,
+     "voices": 2,
+     "frames": 8850,
+     "mean": 157.28,
+     "p999": 258.43,
+     "peak": 271.99,
+     "load": 28975,
+     "guards": 0
+    },
     "FormantVowels": {
      "image": 872,
      "fast": 1728,
@@ -6510,7 +7098,7 @@
      "mean": 151.2,
      "p999": 162.96,
      "peak": 222.46,
-     "load": 24393,
+     "load": 24394,
      "guards": 0
     },
     "KeyboardTrackedFilter": {
@@ -6521,7 +7109,7 @@
      "frames": 4500,
      "mean": 162.62,
      "p999": 186.12,
-     "peak": 186.97,
+     "peak": 186.96,
      "load": 19923,
      "guards": 0
     },
@@ -6546,7 +7134,7 @@
      "mean": 173.96,
      "p999": 198.43,
      "peak": 198.43,
-     "load": 20425,
+     "load": 20426,
      "guards": 0
     },
     "Wind": {
@@ -6558,7 +7146,7 @@
      "mean": 111.64,
      "p999": 115.97,
      "peak": 131.34,
-     "load": 19693,
+     "load": 19692,
      "guards": 0
     },
     "Arpeggio": {
@@ -6570,7 +7158,7 @@
      "mean": 219.04,
      "p999": 248.47,
      "peak": 249.15,
-     "load": 26626,
+     "load": 26627,
      "guards": 0
     },
     "AutoPan": {
@@ -6581,7 +7169,7 @@
      "frames": 6000,
      "mean": 430.99,
      "p999": 437.56,
-     "peak": 479.34,
+     "peak": 479.33,
      "load": 108586,
      "guards": 0
     },
@@ -6825,6 +7413,18 @@
      "load": 33152,
      "guards": 0
     },
+    "HardSync": {
+     "image": 824,
+     "fast": 1984,
+     "bulk": 0,
+     "voices": 2,
+     "frames": 10950,
+     "mean": 323.37,
+     "p999": 360.58,
+     "peak": 371.62,
+     "load": 25734,
+     "guards": 0
+    },
     "LoopedSample": {
      "image": 29904,
      "fast": 1984,
@@ -6858,7 +7458,7 @@
      "mean": 400.83,
      "p999": 507.31,
      "peak": 528.84,
-     "load": 23660,
+     "load": 23659,
      "guards": 0
     },
     "PwmPad": {
@@ -6873,6 +7473,30 @@
      "load": 19022,
      "guards": 0
     },
+    "ReleaseSamples": {
+     "image": 5384,
+     "fast": 2688,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 7649,
+     "mean": 250.92,
+     "p999": 422.34,
+     "peak": 435.96,
+     "load": 65365,
+     "guards": 0
+    },
+    "ReverseSwell": {
+     "image": 49648,
+     "fast": 2112,
+     "bulk": 0,
+     "voices": 3,
+     "frames": 6600,
+     "mean": 157.63,
+     "p999": 259.77,
+     "peak": 288.49,
+     "load": 428044,
+     "guards": 0
+    },
     "StereoUnison": {
      "image": 1104,
      "fast": 2976,
@@ -6880,7 +7504,7 @@
      "voices": 2,
      "frames": 5250,
      "mean": 511.75,
-     "p999": 553.53,
+     "p999": 553.52,
      "peak": 574.96,
      "load": 33592,
      "guards": 0
@@ -6894,7 +7518,7 @@
      "mean": 215.88,
      "p999": 255.28,
      "peak": 255.96,
-     "load": 21192,
+     "load": 21193,
      "guards": 0
     },
     "VelocityLayers": {
@@ -6905,7 +7529,7 @@
      "frames": 5250,
      "mean": 232.7,
      "p999": 285.53,
-     "peak": 294.46,
+     "peak": 294.47,
      "load": 2861423,
      "guards": 0
     },
@@ -6954,7 +7578,7 @@
      "mean": 18.02,
      "p999": 18.47,
      "peak": 18.47,
-     "load": 5467,
+     "load": 5468,
      "guards": 0
     },
     "Idle": {
@@ -7000,7 +7624,7 @@
      "voices": 1,
      "frames": 1500,
      "mean": 38.62,
-     "p999": 64.47,
+     "p999": 64.46,
      "peak": 149.18,
      "load": 27425,
      "guards": 0
@@ -7012,7 +7636,7 @@
      "voices": 1,
      "frames": 1500,
      "mean": 61.26,
-     "p999": 66.31,
+     "p999": 66.3,
      "peak": 74.84,
      "load": 14126,
      "guards": 0
@@ -7025,7 +7649,7 @@
      "frames": 1500,
      "mean": 87.58,
      "p999": 95.18,
-     "peak": 110.24,
+     "peak": 110.25,
      "load": 14727,
      "guards": 0
     },
@@ -7072,7 +7696,7 @@
      "voices": 1,
      "frames": 1500,
      "mean": 111.48,
-     "p999": 120.52,
+     "p999": 120.53,
      "peak": 125.06,
      "load": 1883353,
      "guards": 0

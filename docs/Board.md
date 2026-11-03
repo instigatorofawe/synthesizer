@@ -184,13 +184,17 @@ rendered to its end and its tail, with the limit on. The budget is 51,944 cycles
 | FrenchHorn, LoopedSample, PrecutGrainCloud, SidechainDucking, Trumpet | Refused. They ran within budget in Milestone 5, at 25% to 75%, but could exceed it with every voice sounding. |
 | Reverb, PingPongDelay | Refused. They need 188 KB and 231 KB of bulk memory, and the board has 64 KB. |
 
+**Not measured on the board.** The 13 recipes and 2 pieces added since these measurements haven't been timed on it. The compiler's bound accepts
+11 of the recipes, at 44% to 82% of a frame, the four in the embedded group at 44% to 65%, and the Invention at 61%. It refuses ReleaseSamples and
+Subpatches, which could need more cycles than a frame has with every voice sounding, and The Entertainer, whose reverb needs 188 KB.
+
 The 48 cost 5.8% fewer cycles than in Milestone 5 at the median, and up to 13% fewer. Their bounds were 1.20 to 2.39 times their worst frames.
 `docs/Benchmarks.md` says how many voices each track of every recipe could have.
 
 - **One voice:** a naive saw's voice takes 1,276 cycles a frame on average, 40 a sample, mixer included, against 1,717 before this milestone's tuning. The
   bound allows 27 of them.
 - **The demo:** refused, at 173% of a frame. It ran at 106% on average and 128% in its worst frame in Milestone 5.
-- **The four pieces:** refused. Each sends to a stereo reverb that needs 188 KB of bulk memory, more than the chip's 128 KB of RAM.
+- **The first four pieces:** refused. Each sends to a stereo reverb that needs 188 KB of bulk memory, more than the chip's 128 KB of RAM.
   - **Without the reverb** they load, but they're too slow. In Milestone 5, over their first 30 s, the share of the core each took on average
     was:
     - BachPreludeInC: 164%, with 8 voices at most.

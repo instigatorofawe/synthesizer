@@ -502,6 +502,17 @@ export function removeZone(graph: Graph, id: number, index: number): Graph {
 		: graph;
 }
 
+// Room for a node between two that sit too close for one: every node from `x` rightwards moves `by` to the right, as a node
+// editor makes room for a node dropped onto a wire, so what is added sits between them in the signal's direction.
+export function makeRoom(graph: Graph, x: number, by: number): Graph {
+	return {
+		...graph,
+		nodes: graph.nodes.map((node) =>
+			placedAt(node) && (node.x as number) >= x ? { ...node, x: (node.x as number) + by } : node
+		)
+	};
+}
+
 // A snap on the wire into an input, which is what the compiler asks for when audio reaches an input it reads once a frame. The
 // snap takes the wire's source, and the input takes the snap. Only the patch's author knows whether reading once a frame is
 // right, section 5 of Design.md, so the editor offers this and never does it on its own.

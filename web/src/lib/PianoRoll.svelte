@@ -1280,8 +1280,7 @@
 						{height}
 						role="presentation"
 						data-testid={`velocity-${index}`}
-						data-vel={note.vel}
-						><title>{`Velocity ${note.vel}`}</title></rect
+						data-vel={note.vel}><title>{`Velocity ${note.vel}`}</title></rect
 					>
 					<rect class="cap" {x} y={VELOCITY - height} width={across} height="2" />
 				</g>

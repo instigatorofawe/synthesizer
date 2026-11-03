@@ -921,8 +921,7 @@ export function laneChoices(doc: Timeline, trackId: number | null, patches: Patc
 		}
 	}
 	for (const chain of eachChain(doc)) {
-		const on =
-			'slots' in chain ? chain.name || `Track ${chain.id}` : 'id' in chain ? `bus ${chain.id}` : 'the master';
+		const on = 'slots' in chain ? chain.name || `Track ${chain.id}` : 'id' in chain ? `bus ${chain.id}` : 'the master';
 		for (const insert of chain.inserts) {
 			if (insert.id === undefined) continue;
 			const patch = patches.find((p) => p.id === insert.patch);

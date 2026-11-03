@@ -52,6 +52,13 @@ export const SHORTCUTS = [
 	// Browsers open a menu for Shift+F10 on some systems and not on others, a Mac's among them, so the editor opens its own.
 	{ id: 'menu', code: 'F10', shift: true, scope: 'everywhere', description: 'Open the menu of what has focus' },
 	{ id: 'shortcuts', code: 'Slash', shift: true, scope: 'everywhere', description: 'Show these shortcuts' },
+	{
+		id: 'quick-open',
+		code: 'KeyK',
+		mod: true,
+		scope: 'everywhere',
+		description: 'Open a song, an example or a patch by name'
+	},
 
 	// What is chosen, in whichever editor is in use.
 	{ id: 'select-all', code: 'KeyA', mod: true, scope: 'everywhere', description: 'Choose everything' },

@@ -189,6 +189,26 @@ export function placeParams(place: SongPlace): Record<string, string | null> {
 // The address without a place, for opening another song, whose tracks and clips aren't this one's.
 export const withoutPlace = (search: string) => withParams(search, placeParams({ track: null, clip: null, tab: null }));
 
+// Where a link opens a timeline, an example or a patch, from the address now. Another song has its own tracks and clips, so the
+// place in this one stays behind, and the song open (`open`) goes back to where it is.
+export const timelineHref = (search: string, id: string, open: string | null) =>
+	withView(
+		withParams(id === open ? search : withoutPlace(search), { timeline: id, recipe: null, patch: null, part: null }),
+		'song'
+	);
+export const recipeHref = (search: string, name: string, open: string | null) =>
+	withView(
+		withParams(name === open ? search : withoutPlace(search), {
+			recipe: name,
+			timeline: null,
+			patch: null,
+			part: null
+		}),
+		'song'
+	);
+export const patchHref = (search: string, id: string) =>
+	withView(withParams(search, { patch: id, part: null }), 'patch');
+
 // Where the Song view lands when it is asked for a place, as it opens or as Back and Forward move the address under it: the
 // track, which of its placements is chosen, the clip the roll shows, and the tab. What the song doesn't have is ignored, and
 // the editor's own choice stands in: a clip asked for alone is chosen where it is first placed, a track alone on its first

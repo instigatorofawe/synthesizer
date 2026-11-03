@@ -24,8 +24,19 @@
 <script lang="ts">
 	import { enhance, type SubmitFunction } from '$app/forms';
 	import { tick, untrack } from 'svelte';
+	import { patchGroups } from '#lib/PatchGroups.ts';
 	import { matches as pressed } from '#lib/Shortcuts.ts';
-	import { actionOn, draftKey, isInsert, withoutPlace, withParams, withView } from '#lib/Workspace.ts';
+	import {
+		actionOn,
+		draftKey,
+		isInsert,
+		patchHref as patchHrefIn,
+		recipeHref as recipeHrefIn,
+		timelineHref as timelineHrefIn,
+		withoutPlace,
+		withParams,
+		withView
+	} from '#lib/Workspace.ts';
 	import type { Graph } from '#lib/Schema.ts';
 
 	// The sidebar: the library on top and the examples that ship with the app below. Everything in it is a link that changes what
@@ -145,27 +156,9 @@
 
 	// Another song has its own tracks and clips, so the place in this one stays behind. The song open goes back to where it is.
 	const inSong = $derived(withView(withoutPlace(search), 'song'));
-	const timelineHref = (id: string) =>
-		withView(
-			withParams(id === openTimeline ? search : withoutPlace(search), {
-				timeline: id,
-				recipe: null,
-				patch: null,
-				part: null
-			}),
-			'song'
-		);
-	const recipeHref = (name: string) =>
-		withView(
-			withParams(name === openRecipe ? search : withoutPlace(search), {
-				recipe: name,
-				timeline: null,
-				patch: null,
-				part: null
-			}),
-			'song'
-		);
-	const patchHref = (id: string) => withView(withParams(search, { patch: id, part: null }), 'patch');
+	const timelineHref = (id: string) => timelineHrefIn(search, id, openTimeline);
+	const recipeHref = (name: string) => recipeHrefIn(search, name, openRecipe);
+	const patchHref = (id: string) => patchHrefIn(search, id);
 	const bundleHref = (id: string) => withParams(search, { bundle: id });
 
 	const shownTimelines = $derived(timelines.filter((t) => matches(t.name)));
@@ -176,6 +169,8 @@
 	const ownSamples = $derived(samples.filter((s) => !s.builtin));
 	const shownPatches = $derived(ownPatches.filter((p) => matches(p.name)));
 	const shownBuiltins = $derived(builtinPatches.filter((p) => matches(p.name)));
+	// Under the examples' own headings, as the patch picker has them, so 136 of them read as a dozen families.
+	const builtinGroups = $derived(patchGroups(shownBuiltins, [], examples).filter((group) => group.builtin));
 	const shownSamples = $derived(ownSamples.filter((s) => matches(s.name)));
 	const shownBundles = $derived(bundles.filter((b) => matches(b.name)));
 	const shownExamples = $derived(
@@ -356,7 +351,10 @@
 			<div class="tools">{@render aboutButton('builtins', 'built-in patches', BUILTINS)}</div>
 			{@render aboutText('builtins', BUILTINS, false)}
 			<ul aria-label="Built-in patches">
-				{#each shownBuiltins as patch (patch.id)}{@render patchLink(patch)}{/each}
+				{#each builtinGroups as group (group.key)}
+					{#if group.label}<li class="family">{group.label}</li>{/if}
+					{#each group.patches as patch (patch.id)}{@render patchLink(patch)}{/each}
+				{/each}
 			</ul>
 		</details>
 
@@ -433,6 +431,12 @@
 		border: 1px solid var(--line);
 		border-radius: 4px;
 		font: inherit;
+	}
+	.family {
+		margin: 0.4rem 0 0.1rem;
+		font-size: 0.7rem;
+		color: var(--muted);
+		list-style: none;
 	}
 	.filter {
 		margin: 0.5rem;

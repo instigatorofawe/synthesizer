@@ -9,6 +9,7 @@ import {
 	edgeInto,
 	freeSpot,
 	insertSnap,
+	makeRoom,
 	inputsOf,
 	isPort,
 	layout,
@@ -361,6 +362,18 @@ describe('the snap a rate error offers', () => {
 
 	it('offers nothing for an input with no wire', () => {
 		expect(insertSnap(filtered, 7, 'q', 0, 0)).toBeNull();
+	});
+
+	it('has room made for it where the wire is too short, by moving what is from there rightwards', () => {
+		const placed: Graph = {
+			...filtered,
+			nodes: filtered.nodes.map((node, i) => ({ ...node, x: i * 100, y: 0 }))
+		};
+		const roomy = makeRoom(placed, 300, 200);
+		expect(roomy.nodes.map((node) => node.x)).toEqual([0, 100, 200, 500, 600, 700, 800]);
+		expect(roomy.nodes.map((node) => node.y)).toEqual(placed.nodes.map((node) => node.y));
+		const unplaced: Graph = { ...filtered, nodes: [{ id: 1, type: 'note' }] };
+		expect(makeRoom(unplaced, 0, 50).nodes).toEqual(unplaced.nodes); // A node the layout places is left to it
 	});
 
 	it('is what the compiler asked for', async () => {

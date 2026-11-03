@@ -18,6 +18,8 @@
 	import BrowserRail from '#lib/BrowserRail.svelte';
 	import BundleDialog from '#lib/BundleDialog.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import QuickOpen from '#lib/QuickOpen.svelte';
+	import type { Openable } from '#lib/QuickOpen.ts';
 	import ShortcutsSheet from '#lib/ShortcutsSheet.svelte';
 	import CompileLight from '#lib/CompileLight.svelte';
 	import { Compiler, type Compiled } from '#lib/Compiler.ts';
@@ -68,8 +70,11 @@
 		isInsert,
 		landing,
 		parseGraph,
+		patchHref,
 		placeParams,
+		recipeHref,
 		songPlaceOf,
+		timelineHref,
 		trackAlone,
 		viewOf,
 		withDrafts,
@@ -1405,6 +1410,30 @@
 	let browserOpen = $state(true); // On a wide screen, as last left
 	let browserOver = $state(false); // On a narrow one
 	let shortcutsShown = $state(false); // The sheet ? opens
+	let quickOpen = $state(false); // Mod+K's search
+
+	// What Mod+K finds: the library's timelines, the examples, and the patches, the library's own before the built-in ones.
+	const openables = $derived.by((): Openable[] => [
+		...data.library.timelines.map((t) => ({
+			kind: 'Timeline' as const,
+			name: t.name,
+			href: timelineHref(search, t.id, saved?.id ?? null)
+		})),
+		...data.examples.flatMap((group) =>
+			group.recipes.map((r) => ({
+				kind: 'Example' as const,
+				name: r.name,
+				href: recipeHref(search, r.name, recipe?.entry.name ?? null)
+			}))
+		),
+		...[...library]
+			.sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin))
+			.map((p) => ({
+				kind: p.builtin ? ('Built-in' as const) : ('Patch' as const),
+				name: p.name,
+				href: patchHref(search, p.id)
+			}))
+	]);
 	let reveal = $state<Section | null>(null);
 	const browserShown = $derived(wide ? browserOpen : browserOver);
 	let saveForm: HTMLFormElement;
@@ -1487,6 +1516,11 @@
 		if (matches(event, 'save')) {
 			event.preventDefault();
 			if (dirty.size) saveForm.requestSubmit();
+			return;
+		}
+		if (matches(event, 'quick-open')) {
+			event.preventDefault(); // Some browsers take Ctrl+K for their own search
+			if (!(event.target as Element | null)?.closest?.('dialog')) quickOpen = true;
 			return;
 		}
 		if (event.defaultPrevented || keptBy(event.target)) return;
@@ -1877,6 +1911,9 @@
 		items={tempoItems(songDoc)}
 		onclose={() => (tempoMenu = null)}
 	/>
+{/if}
+{#if quickOpen}
+	<QuickOpen items={openables} onclose={() => (quickOpen = false)} />
 {/if}
 {#if shortcutsShown}
 	<ShortcutsSheet onclose={() => (shortcutsShown = false)} />

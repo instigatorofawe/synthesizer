@@ -305,7 +305,9 @@
 	{#if ghost && !held}
 		<g class="ghost" data-testid={`${testid}-ghost`} data-tick={ghost.tick} data-value={ghost.value}>
 			<circle cx={ghost.tick * perTick} cy={yOf(ghost.value)} r="5" />
-			<text x={ghostX} y={yOf(ghost.value) < HEIGHT / 2 ? yOf(ghost.value) + 14 : yOf(ghost.value) - 7}>{ghostText}</text>
+			<text x={ghostX} y={yOf(ghost.value) < HEIGHT / 2 ? yOf(ghost.value) + 14 : yOf(ghost.value) - 7}
+				>{ghostText}</text
+			>
 		</g>
 	{/if}
 	{#each points as point (point.index)}

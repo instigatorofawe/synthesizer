@@ -15,6 +15,7 @@
 		freeSpot,
 		inputsOf,
 		insertSnap,
+		makeRoom,
 		isPort,
 		moveNodes,
 		NODE_HEADER,
@@ -125,6 +126,7 @@
 	const ZOOM_MAX = 3;
 	const ZOOM_STEP = 1.25;
 	const MARGIN = 40; // Around a fitted graph, which leaves room for a message under a node
+	const SNAP_ROOM = 24; // Kept clear either side of a snap put on a wire
 	const PALETTE_WIDTH = 300;
 	const PALETTE_HEIGHT = 340; // At most: the search and a list of 280 pixels
 	const DRAG = 3; // CSS pixels a press goes before it is a drag, so that a click doesn't move a node by a pixel
@@ -416,7 +418,9 @@
 
 	// All of the graph, if it can be read at that size, and otherwise its top left, where its signals start, at the smallest size
 	// that can be read.
-	function fit(shown: Graph = laid) {
+	// With `toOut`, a graph too wide to fit at the text's floor is shown from its out node leftwards rather than from its
+	// start, so what it all leads to stays in sight, as after Tidy.
+	function fit(shown: Graph = laid, toOut = false) {
 		if (!shown.nodes.length) return;
 		const left = Math.min(...shown.nodes.map((node) => node.x as number)) - MARGIN;
 		const top = Math.min(...shown.nodes.map((node) => node.y as number)) - MARGIN;
@@ -425,9 +429,15 @@
 		const scale = Math.max(FIT_FLOOR, Math.min(FIT_CEILING, size.width / (right - left), size.height / (bottom - top)));
 		const width = size.width / scale;
 		const height = size.height / scale;
+		const out = toOut ? shown.nodes.find((node) => node.type === 'out') : undefined;
+		const outRight = out ? (out.x as number) + NODE_WIDTH + MARGIN : left + width;
+		const outMiddle = out ? (out.y as number) + heightOf(out) / 2 : top + height / 2;
 		view = {
-			x: width >= right - left ? (left + right - width) / 2 : left,
-			y: height >= bottom - top ? (top + bottom - height) / 2 : top,
+			x: width >= right - left ? (left + right - width) / 2 : Math.max(left, outRight - width),
+			y:
+				height >= bottom - top
+					? (top + bottom - height) / 2
+					: Math.min(Math.max(top, outMiddle - height / 2), bottom - height),
 			scale
 		};
 	}
@@ -503,7 +513,7 @@
 	function tidyUp() {
 		const next = tidy(laid, heightOf);
 		commit(next);
-		fit(next);
+		fit(next, true);
 	}
 
 	// The input a node's error says can't take audio, where a snap on its wire would mend it. Inside a subpatch the wire is in
@@ -514,16 +524,21 @@
 		return input && edgeInto(laid, node.id, input) ? input : null;
 	}
 
-	// Halfway along the wire, or as near as is free.
+	// Halfway along the wire, or as near as is free. Where the two ends are too close for a node between them, what is from the
+	// input's node rightwards moves a column right first, so the snap sits between them and its wires run left to right.
 	function putSnap(node: GraphNode, input: string) {
 		const wire = edgeInto(laid, node.id, input);
 		const from = laid.nodes.find((candidate) => candidate.id === wire?.from);
 		if (!wire || !from) return;
 		const a = outputPoint(from, wire.port ?? 'out');
 		const b = inputPoint(node, input);
-		const want = { x: (a.x + b.x - NODE_WIDTH) / 2, y: (a.y + b.y) / 2 - inputY(0) };
-		const spot = freeSpot(laid, want, sizeOf({ id: 0, type: 'snap' }), sizeOf);
-		const fixed = insertSnap(laid, node.id, input, spot.x, spot.y);
+		const snap = sizeOf({ id: 0, type: 'snap' });
+		const cramped = b.x - a.x < snap.width + 2 * SNAP_ROOM;
+		const room = cramped ? makeRoom(laid, node.x as number, snap.width + 2 * SNAP_ROOM) : laid;
+		const at = cramped ? b.x + snap.width + 2 * SNAP_ROOM : b.x;
+		const want = { x: (a.x + at - NODE_WIDTH) / 2, y: b.y - inputY(0) };
+		const spot = freeSpot(room, want, snap, sizeOf);
+		const fixed = insertSnap(room, node.id, input, spot.x, spot.y);
 		if (fixed) commit(fixed.graph);
 	}
 

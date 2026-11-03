@@ -150,9 +150,11 @@ class Board:
     ) -> tuple[dict[str, str], array]:
         self.send("R", struct.pack("<IfB", frames, rate, 1 if stream else 0))
         audio = array("f", bytes(4 * FRAME * frames if stream else 0))
+        # Without the stream, nothing comes back until the last frame, so wait for a render at up to 8 times real time.
+        wait = 30.0 if stream else 30.0 + 8 * frames * FRAME / rate
         got = 0
         while True:
-            reply = self.frame(30.0)
+            reply = self.frame(wait)
             if reply is None:
                 raise SystemExit(f"render stopped after {got} frames")
             kind, payload = reply

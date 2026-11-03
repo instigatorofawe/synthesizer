@@ -163,7 +163,13 @@ VelocityFilterAmp, VelocityLayers, VibratoModWheel, VoiceStealing, WavetableMorp
 - **One voice:** a patch playing a single voice costs 203 to 400 cycles a sample, including the mixer. Section 15's model gave 160 to 200 for
   the voice alone.
 - **The demo:** 106% on average and 128% in its worst frame, so it doesn't play in real time.
-- **The four pieces:** none fits. Each sends to a stereo reverb that needs 188 KB of bulk memory.
+- **The four pieces:** none fits. Each sends to a stereo reverb that needs 188 KB of bulk memory, more than the chip's 128 KB of RAM.
+  - **Without the reverb** they load, but they're too slow. Over their first 30 s, the share of the core each takes on average is:
+    - BachPreludeInC: 164%, with 8 voices at most.
+    - HallOfTheMountainKing: 191%, with 14.
+    - PassionChorale: 195%, with 10.
+    - FurElise: 469%, with 20.
+  - **So a reverb that fits wouldn't be enough.** The pieces would also need fewer voices, or cheaper ones.
 
 **Live playback.** The DMA plays one half of its buffer while the main loop fills the other. A half is 16 frames, 10.7 ms. Over 6 s of each:
 - LoopedSample and Vocoder never ran late.

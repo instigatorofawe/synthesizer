@@ -410,7 +410,9 @@ These figures are early estimates. Tuning waits for Milestone 7.
   - The median takes 26% of the core.
 - **One voice:** a patch playing one voice costs 203 to 400 cycles a sample, mixer included. The model's 160 to 200 is for the voice alone.
 - **The demo:** it runs at 106% of the core on average, so it doesn't play in real time.
-- **The pieces:** none of them fits. Their stereo reverb needs 188 KB of bulk memory.
+- **The pieces:** none of them fits.
+  - Their stereo reverb needs 188 KB of bulk memory.
+  - Without it, their first 30 s run at 164% to 469% of the core on average, with 8 to 20 voices at once.
 
 Calibrating the model against these is still Milestone 7's.
 
@@ -981,4 +983,4 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 | 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks open 21's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
 | 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
 | 31 | Should the benchmarks cover the pieces? | They don't fit an L476, for memory alone, open 32 [board], so their cycles there are unknown. On a host they render 41 to 168 times faster than real time, from images of 10.6 to 93.3 KB [measured: Apple M4 Pro, Python binding]. Recommended: measure a window of each, such as its loudest 20 seconds, rather than all of it. |
-| 32 | Should there be a reverb an L476 can hold? | Every piece sends to a stereo reverb that needs 188 KB of bulk memory, and the board has 64 KB, so none of them plays there [board]. The demo's reverb fits, at 47 KB. Section 15 has the arithmetic: mono i16 lines take 27 KB. Recommended: a mono reverb mode, or i16 lines as a new op, chosen by an author like any other cheaper feature, and the pieces left as they are. |
+| 32 | Should there be a reverb an L476 can hold? | Every piece sends to a stereo reverb that needs 188 KB of bulk memory, and the board has 64 KB, so none of them plays there [board]. The demo's reverb fits, at 47 KB. Section 15 has the arithmetic: mono i16 lines take 27 KB. A reverb that fits wouldn't make the pieces play on an L476: without theirs, they run at 164% to 469% of the core [board]. Recommended: a mono reverb mode, or i16 lines as a new op, chosen by an author like any other cheaper feature, and the pieces left as they are. |

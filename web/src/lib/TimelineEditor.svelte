@@ -57,6 +57,7 @@
 		type Clip,
 		type PatchLike
 	} from '#lib/TimelineEdit.ts';
+	import { landing, type SongPlace } from '#lib/Workspace.ts';
 
 	let {
 		id = '',
@@ -78,9 +79,10 @@
 		heading,
 		examples = [],
 		solo = new Set(),
+		asked = null,
 		onchange,
 		onloop = () => {},
-		ontrack = () => {},
+		onplace = () => {},
 		onopen = () => {},
 		onnewpatch,
 		onwriting = () => {},
@@ -107,9 +109,11 @@
 		heading?: Snippet; // At the start of the toolbar
 		examples?: ExampleGroup[]; // How the browser groups the examples, which the patch pickers group built-in patches by
 		solo?: ReadonlySet<number>; // The tracks soloed, which the page keeps, since it is no part of the document
+		asked?: SongPlace | null; // Where the address asks the editor to be, as it opens and again when Back or Forward move it
 		onchange: (doc: Timeline) => void;
 		onloop?: (loop: Loop | null, on: boolean) => void; // A loop set or changed here, and whether it is on
-		ontrack?: (id: number | null, first: boolean) => void; // The chosen track, first as the editor opens and then as it changes
+		// The chosen track, clip and tab, as the editor opens and whenever one changes. A place it was asked for isn't chosen.
+		onplace?: (place: SongPlace, chosen: boolean) => void;
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
@@ -121,15 +125,11 @@
 	const MODES = ['poly', 'mono', 'legato'] as const;
 	const PRIORITIES = ['last', 'high', 'low'] as const;
 
-	function opening(): Selection {
-		const first = doc.tracks.find((track) => track.placements.length);
-		return first ? { track: first.id, placement: 0 } : { track: doc.tracks[0]?.id ?? null, placement: null };
-	}
-
-	let selection = $state<Selection>(untrack(opening));
-	let clipId = $state<string | null>(
-		untrack(() => doc.tracks.find((t) => t.id === selection.track)?.placements[selection.placement ?? -1]?.clip ?? null)
-	);
+	// The editor opens where the address says, or else on the first track with a clip, on its notes.
+	const tabIds = $derived(['notes', 'mixer', ...tabs.map((extra) => extra.id)]);
+	const opened = untrack(() => landing(doc, asked, tabIds));
+	let selection = $state<Selection>({ track: opened.track, placement: opened.placement });
+	let clipId = $state<string | null>(opened.clip);
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
@@ -145,7 +145,7 @@
 		return [...lengths, { label: noteValue(draw, doc.ppq), ticks: draw }].sort((a, b) => a.ticks - b.ticks);
 	});
 	let barWidth = $state(96);
-	let tab = $state('notes');
+	let tab = $state(opened.tab);
 
 	const track = $derived(doc.tracks.find((t) => t.id === selection.track));
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
@@ -201,13 +201,32 @@
 	// The roll's "Clip is now N bars · Undo" takes back the growing. The top bar has the Undo and Redo for everything else.
 	const undo = () => history?.undo();
 
-	// The page shows the chosen track's patch, so it hears about every choice of track.
-	let told = false;
+	// The page puts the chosen track, clip and tab in the address, and shows the chosen track's patch in the Patch view, so it
+	// hears of every change. Where the editor opened, or where the address took it, the address says already, so it isn't told
+	// as a choice. What it was taken to is kept until the next change, which is the next choice.
+	let landed: SongPlace | null = { track: opened.track, clip: opened.clip, tab: opened.tab };
 	$effect(() => {
-		const id = selection.track;
+		const now: SongPlace = { track: selection.track, clip: clipId, tab };
 		untrack(() => {
-			ontrack(id, !told);
-			told = true;
+			const chosen = !landed || now.track !== landed.track || now.clip !== landed.clip || now.tab !== landed.tab;
+			landed = null;
+			onplace(now, chosen);
+		});
+	});
+
+	// Back or Forward moved the address, and it asks for a place: the editor goes there, as it did when it opened. A place that is
+	// where the editor is already changes nothing, so a placement chosen among several of one clip stays chosen.
+	$effect(() => {
+		const wanted = asked;
+		untrack(() => {
+			const at = landing(doc, wanted, tabIds);
+			if (at.track === selection.track && at.clip === clipId && at.tab === tab) return;
+			landed = { track: at.track, clip: at.clip, tab: at.tab };
+			if (at.track !== selection.track || at.clip !== clipId) {
+				selection = { track: at.track, placement: at.placement };
+				clipId = at.clip;
+			}
+			tab = at.tab;
 		});
 	});
 

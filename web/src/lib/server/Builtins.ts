@@ -1,13 +1,20 @@
 // The examples' patches, as built-in patches that every library holds from the start, so any timeline can play one in a slot
 // or an insert. They are rows like any patch, so the delete guards, "used by" and exports treat them as they treat the rest,
 // but only `syncBuiltins` writes them, from examples/ as it ships, every time the server starts. Nothing anyone does in the
-// app reaches examples/ or changes these rows: a change goes to a copy, which Duplicate makes.
+// app reaches examples/ or changes these rows: a change goes to a copy, which Edit a copy makes.
 //
 // A graph several examples share, such as the drum loop's kick and the Kick808 recipe's, is one built-in patch, and so is a
 // recording. Their recordings are rows too, and a page loads one only once something uses it (`libraryAssets`).
 import type { Db } from '#lib/server/Db.ts';
 import { readRecipe, RECIPES, recipeInLibrary, recipeTimelineId, type RecipeProject } from '#lib/server/Recipes.ts';
-import { createTimeline, putBuiltinAsset, putBuiltinPatch, retireBuiltins } from '#lib/server/Repository.ts';
+import {
+	createTimeline,
+	duplicatePatch,
+	NotFound,
+	putBuiltinAsset,
+	putBuiltinPatch,
+	retireBuiltins
+} from '#lib/server/Repository.ts';
 import { graphSchema, referencedSubpatches, timelineSchema, type Graph, type Timeline } from '#lib/Schema.ts';
 import type { AssetEntry } from '#lib/Request.ts';
 
@@ -175,4 +182,23 @@ export function addRecipe(db: Db, name: string, project: RecipeProject, from: Ca
 	const parts = from.parts[name] ?? {};
 	const doc = renamedTimeline(timelineSchema.parse(project.programs[0].timeline), (key) => parts[key] ?? key);
 	return createTimeline(db, name, doc, id);
+}
+
+// Edit a copy: a built-in patch copied into the library, where it can be changed. From an example, which can't change either,
+// the example comes too, as its copy in the library, added as Add to library adds it, or the copy already there, so the page
+// can put the patch's copy in place of the original there. One transaction, so a copy that fails adds no timeline. Returns
+// the patch copied, its copy, and the timeline, if there was an example.
+export function editCopy(
+	db: Db,
+	id: string,
+	example: { name: string; project: RecipeProject; from: Catalogue } | null
+): { from: string; to: string; timeline: string | null } {
+	return db.transaction((tx) => {
+		const t = tx as unknown as Db;
+		if (!example) return { from: id, to: duplicatePatch(t, id), timeline: null };
+		if (!Object.values(example.from.parts[example.name] ?? {}).includes(id))
+			throw new NotFound(`${example.name} doesn't play ${id}`);
+		const timeline = addRecipe(t, example.name, example.project, example.from);
+		return { from: id, to: duplicatePatch(t, id), timeline };
+	});
 }

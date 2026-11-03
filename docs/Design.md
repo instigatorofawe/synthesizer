@@ -846,6 +846,9 @@ to.
   Back goes to the view before.
 - A browser down the side holds the library and the examples, and a timeline in it opens in Song and a patch in Patch. B
   folds it to a rail of icons. Below 1400 px wide it is always the rail, and opens over the page rather than pushing it aside.
+  It is 220 px wide, and what each list is for is behind a ? in its heading, which an empty list shows of itself, so with the
+  examples shut it fits a laptop's height. A + in a heading opens a field for a new timeline, patch or bundle, which Enter
+  makes and Esc closes, and the Samples + asks for WAV files and imports them as they are chosen.
 - In Song the arrangement is as tall as its ruler and tracks, up to about a third of the window, past which it scrolls, and the
   notes have the rest, so the roll's room doesn't depend on a splitter dragged for another song. Expand, ⤢ at the right of the
   tabs or a double-click on a clip, gives the notes the whole view, and ⤢ again or Esc brings the arrangement back. Esc closes
@@ -864,6 +867,11 @@ to.
   load reruns for the parameters it reads, so choosing a patch or a view costs no round trip, and the library, which carries
   every sample in use, loads only when an action changes it. A fresh visit opens the timeline saved last, and the old
   addresses redirect to the same views.
+- The address also says where the Song view is, as `track`, `clip` and `pane`, so
+  `?timeline=song&track=2&clip=pluck-a&pane=mixer` opens on Pluck, with its clip in the roll, on the Mixer tab, after a
+  reload or in a new tab. The server reads none of them either. A choice replaces the step of the browser's history it is
+  on, so Back goes to the view before rather than through every click, and Back or Forward put the Song view where that step
+  says. What the song hasn't got is passed over for the editor's own choice: the first track with a clip, on its notes.
 
 - Edits to any number of patches and timelines are kept as drafts while other things are opened, and Save writes them all
   in one transaction, patches first, so a timeline is never saved against a patch edit that was refused. Each draft names
@@ -1053,7 +1061,7 @@ A file's sampler chunk gives its root and loop, and failing that a name like `Pi
 only their levels say which is which. A bad file refuses the whole import, and one larger than an image can hold is refused there rather than failing on load. An asset can't be deleted while a patch names it.
 
 **Recipes.** `examples/Recipes` ships with the app as the read-only examples in the editor's browser, where any of them plays as it is and shows how it is made, in the same editors with nothing that changes anything: its arrangement, notes, lanes, mix and each patch's graph, which
-a probe can look inside. Its patches are already in the library, as built-in patches, so adding one copies only its timeline, as `recipe-<name>`, which plays them, and Duplicate on any of them makes a copy that can change. Adding one
+a probe can look inside. Its patches are already in the library, as built-in patches, so adding one copies only its timeline, as `recipe-<name>`, which plays them, and Edit a copy on any of them makes a copy that can change. Adding one
 twice changes nothing, so an edited copy survives. A library that added examples before keeps the copies of their patches it made then, as ordinary rows. A test holds every example to compiling to the same bytes from the library as from its file,
 which is what shows the schema dropped nothing.
 
@@ -1062,8 +1070,12 @@ guards, "used by", the timelines an edit affects and exports treat them as they 
 
 - Only the server writes them. At startup it makes them what `examples/` holds, in one transaction, and it refuses a save or a delete of one however it is asked. So nothing done in the app reaches what ships, and a row changed some other
   way is put back at the next start. The browser lists them apart from the library's own patches, and leaves their recordings out of its samples.
-- A change goes to a copy. Duplicate makes an ordinary patch with the same graph, named "*name* copy", which names the same recordings rather than copying them. When the open timeline plays the built-in, the copy takes its place
-  there, as an unsaved edit, so a change is heard where it plays. A copy compiles to the same bytes, because a patch's bytes depend only on its graph, section 20, and a test holds three examples to that, played entirely by copies.
+- A change goes to a copy. Edit a copy, in the header of a patch that can't change, makes an ordinary patch with the same graph, named "*name* copy", or "*name* copy 2" and on while that is taken, which names the same recordings rather
+  than copying them. The copy takes the original's place on every track and insert of the timeline it is heard in, as an unsaved edit, so a change is heard where it plays and Undo in the Song view takes it back. On an example, which
+  can't change either, that timeline is the example's copy in the library: one action adds it, or finds the one there, and copies the patch, and the page opens it in the Song view, on the track the keys played the original on,
+  with the copy in the Patch view. A built-in heard on its own is only copied. A copy compiles to the same bytes, because a patch's bytes depend only on its graph, section 20, and a test holds three examples to that, played entirely by copies.
+- The Patch view's header says which timelines use the patch, or which a save of it changes, counting the unsaved edits, so it agrees with where the keys play it: a timeline with a draft counts as the draft has it, and a patch reaches
+  a timeline through any patch that expands it, as the graphs are now. The library lists each timeline with the patches it plays as saved, for the rest.
 - An example with one patch names its built-in after itself, as `builtin-Kick808`, and one with several adds the part, as `builtin-PassionChorale-horn`, named "PassionChorale Horn". A graph several examples share is one built-in,
   named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 74 recipes and 6 pieces make 136 built-ins from 140
   patches, and 29 recordings from 30 [measured].

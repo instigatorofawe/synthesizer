@@ -303,7 +303,7 @@ test('a built-in can be chosen in and copied from, and nothing changes it', asyn
 	await expect(graph(page).locator('g.node.chosen')).toHaveCount(7);
 
 	// Into a patch of the library's own, which has an out node, so the built-in's isn't pasted.
-	await openPatch(page, /^Square/);
+	await openPatch(page, /^Square, /);
 	await expect(nodes(page)).toHaveCount(4);
 	await graph(page).focus();
 	await page.keyboard.press('ControlOrMeta+v');

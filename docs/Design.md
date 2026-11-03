@@ -824,6 +824,10 @@ changes it. A fresh visit opens the timeline saved last, and the old addresses r
   newest edit. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the
   image slot does, and the image before it plays on.
 - Keys belong to the panel used last, so Delete and undo act on the graph or the timeline, not both.
+- The computer keyboard plays the patch keys as most DAWs lay it out: the home row from A is the white keys from the lowest C shown, the row
+  above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
+  piano, and a field being typed in or a key with a modifier keeps its own meaning. A key let go while the page is in the background lets go
+  of its note.
 
 **The graph editor.** A graph's document is still what is saved and compiled. The editor adds `x` and `y` to its nodes, which the compiler ignores, so moving a node
 changes no hash. It takes its node table from the compiler's catalog, the table the compiler reads, so the two can't disagree. The compiler's report carries the debug sidecar

@@ -14,6 +14,7 @@
 		addSlot,
 		addTempo,
 		addTrack,
+		byOwner,
 		barOf,
 		grids,
 		laneChoices,
@@ -112,7 +113,9 @@
 	);
 	const reported = $derived(program?.tracks.find((t) => t.id === home?.id));
 	const uses = $derived(doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clipId).length);
-	const voicePatches = $derived(patches.filter((patch) => !patch.graph.nodes.some((node) => node.type === 'in')));
+	const voicePatches = $derived(
+		byOwner(patches.filter((patch) => !patch.graph.nodes.some((node) => node.type === 'in')))
+	);
 	const choices = $derived(laneChoices(doc, home?.id ?? null, patches));
 	const length = $derived(program?.length_ticks ?? songLength(doc));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
@@ -178,7 +181,7 @@
 	}
 
 	function newTrack() {
-		const added = addTrack(doc, voicePatches[0]?.id);
+		const added = addTrack(doc, (voicePatches.own[0] ?? voicePatches.builtin[0])?.id);
 		commit(added.doc);
 		selection = { track: added.id, placement: null };
 	}
@@ -422,8 +425,10 @@
 								value={slot}
 								onchange={(e) => commit(setSlot(doc, track.id, index, e.currentTarget.value))}
 							>
-								{#each voicePatches as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
-								{#if !voicePatches.some((patch) => patch.id === slot)}<option value={slot}>{slot}</option>{/if}
+								{@render voiceChoices()}
+								{#if ![...voicePatches.own, ...voicePatches.builtin].some((patch) => patch.id === slot)}<option
+										value={slot}>{slot}</option
+									>{/if}
 							</select>
 							{#if !readonly}
 								<button
@@ -440,7 +445,7 @@
 							{/if}
 						</div>
 					{/each}
-					{#if !readonly && voicePatches.length}
+					{#if !readonly && (voicePatches.own.length || voicePatches.builtin.length)}
 						<select
 							aria-label="Add a patch slot"
 							value=""
@@ -450,7 +455,7 @@
 							}}
 						>
 							<option value="">Add a patch…</option>
-							{#each voicePatches as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
+							{@render voiceChoices()}
 						</select>
 					{/if}
 					<label>
@@ -697,6 +702,15 @@
 		</div>
 	</div>
 </section>
+
+{#snippet voiceChoices()}
+	{#each voicePatches.own as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
+	{#if voicePatches.builtin.length}
+		<optgroup label="Built in">
+			{#each voicePatches.builtin as patch (patch.id)}<option value={patch.id}>{patch.name}</option>{/each}
+		</optgroup>
+	{/if}
+{/snippet}
 
 <style>
 	.short {

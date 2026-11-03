@@ -422,7 +422,9 @@ test('the browser folds away and stays that way', async ({ page }) => {
 test('the browser filters everything by name', async ({ page }) => {
 	await page.goto('/?timeline=song');
 	await browser(page).getByLabel('Filter the browser').fill('kick');
-	await expect(browser(page).getByRole('link', { name: 'Kick808' })).toBeVisible();
+	// The example, and its patch among the built-in ones
+	await expect(browser(page).getByRole('link', { name: 'Kick808' })).toHaveCount(2);
+	await expect(browser(page).getByTestId('builtins').getByRole('link', { name: 'Kick808' })).toBeVisible();
 	await expect(browser(page).getByRole('link', { name: 'Stereo lead' })).toHaveCount(0);
 });
 
@@ -480,6 +482,31 @@ test('a patch a track plays is heard in the song, through that track', async ({ 
 		.toBeGreaterThan(0.01);
 	await key.dispatchEvent('pointerup');
 	await expect(page.getByTestId('playing-alone')).toHaveCount(0);
+});
+
+test('the computer keyboard plays the patch, Z and X move its octave, and a field keeps its keys', async ({ page }) => {
+	await page.goto('/?timeline=song');
+	await expect(page.getByTestId('hearing')).toContainText('Keys play it on Lead, in the song');
+	const key = (note: number) => page.getByRole('button', { name: String(note), exact: true });
+	await expect(key(48)).toHaveAttribute('aria-keyshortcuts', 'A');
+	await page.keyboard.down('g'); // G, a fifth above the lowest C, which starts audio as a click on a key does
+	await expect(key(55)).toHaveClass(/down/);
+	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await expect
+		.poll(() => page.getByRole('meter', { name: 'Level of Lead' }).getAttribute('data-peak').then(Number))
+		.toBeGreaterThan(0.01);
+	await page.keyboard.press('x'); // An octave up while G is held, and letting go still lets go of the G it started
+	await expect(key(72)).toBeVisible();
+	await expect(key(48)).toHaveCount(0);
+	await page.keyboard.up('g');
+	await expect(page.locator('.key.down')).toHaveCount(0);
+	await page.keyboard.press('z');
+	await expect(key(48)).toBeVisible();
+
+	await page.getByLabel('Patch name', { exact: true }).focus();
+	await page.keyboard.down('a');
+	await expect(page.locator('.key.down')).toHaveCount(0);
+	await page.keyboard.up('a');
 });
 
 test('an edit to a patch the song does not use, or opening another, swaps nothing', async ({ page }) => {
@@ -681,7 +708,7 @@ test('the pieces come first among the examples, and play as they are', async ({ 
 	expect(problems).toEqual([]);
 });
 
-test('a recipe added to the library is an ordinary timeline and patch', async ({ page }) => {
+test('a recipe added to the library is an ordinary timeline that plays the built-in patch', async ({ page }) => {
 	await page.goto('/?recipe=PluckedString');
 	await page.getByRole('button', { name: 'Add to library' }).click();
 	await page.waitForURL('**/?timeline=recipe-PluckedString');
@@ -689,9 +716,11 @@ test('a recipe added to the library is an ordinary timeline and patch', async ({
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveValue('builtin-PluckedString');
 
-	await page.goto('/?patch=recipe-PluckedString-p');
+	await page.goto('/?patch=builtin-PluckedString');
 	await expect(page.locator('path.wire.audio').first()).toBeAttached();
+	await expect(page.getByTestId('used-by')).toContainText('PluckedString');
 
 	await page.goto('/?recipe=PluckedString');
 	await expect(page.getByRole('button', { name: 'Add to library' })).toHaveCount(0);
@@ -705,6 +734,67 @@ test('a recipe with recordings keeps them when it is added', async ({ page }) =>
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Start audio' }).click();
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+});
+
+test("every example's patches are in the library from the start, and can't be changed", async ({ page }) => {
+	await page.goto('/?timeline=song'); // The demo, which plays none of them, so their list starts folded
+	const builtins = browser(page).getByTestId('builtins');
+	await builtins.locator('summary').click();
+	await builtins.getByRole('link', { name: 'HallOfTheMountainKing Timpani' }).click();
+	await expect(page).toHaveURL(/patch=builtin-HallOfTheMountainKing-timpani/);
+	await expect(patchEditor(page).getByText('built in', { exact: true })).toBeVisible();
+	await expect(page.getByLabel('Patch name', { exact: true })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Delete patch' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Add node' })).toHaveCount(0);
+	await expect(await graphJson(page)).not.toBeEditable();
+	await expect(
+		browser(page)
+			.getByRole('list', { name: 'Patches', exact: true })
+			.getByRole('link', { name: 'HallOfTheMountainKing Timpani' })
+	).toHaveCount(0);
+	await expect(samples(page).getByText('OneShotSample soft')).toHaveCount(0);
+});
+
+test('a built-in patch with a recording plays on its own, though nothing in the library uses it yet', async ({
+	page
+}) => {
+	await page.goto('/?timeline=song&patch=builtin-LoopedSample');
+	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'alone');
+	const key = page.getByRole('button', { name: '60', exact: true });
+	await key.dispatchEvent('pointerdown');
+	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true', { timeout: 10000 });
+	await expect.poll(async () => Math.max(0, ...(await patchPeaks(page))), { timeout: 8000 }).toBeGreaterThan(0.05);
+	await key.dispatchEvent('pointerup');
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+});
+
+test('a track can play a built-in patch, and a duplicate of it takes its place to be changed', async ({ page }) => {
+	await trackWithClip(page, 'Borrowed');
+	await page.getByLabel('Patch slot 1', { exact: true }).selectOption('builtin-OneShotSample');
+	await addNoteAt(page, 0, 60);
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.getByTestId('unsaved')).toHaveCount(0);
+	await startAudio(page);
+	await settled(page);
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+
+	await page.getByRole('button', { name: 'Edit patch slot 1' }).click();
+	await expect(page).toHaveURL(/patch=builtin-OneShotSample/);
+	await expect(page.getByTestId('used-by')).toContainText('Borrowed');
+	await page.getByRole('button', { name: 'Duplicate to edit' }).click();
+	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('OneShotSample copy');
+	const copy = shownPatchId(page);
+	expect(copy).not.toContain('builtin');
+	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveValue(copy);
+	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
+	await page.getByLabel('Patch name', { exact: true }).fill('My piano');
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.getByTestId('unsaved')).toHaveCount(0);
+	await settled(page);
+	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	await expect(
+		browser(page).getByRole('list', { name: 'Patches', exact: true }).getByRole('link', { name: 'My piano' })
+	).toBeVisible();
 });
 
 test('a recipe shows the patch it is made of, with nothing to change', async ({ page }) => {

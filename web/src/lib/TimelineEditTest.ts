@@ -12,6 +12,7 @@ import {
 	addTrack,
 	barOf,
 	busKey,
+	byOwner,
 	describeLane,
 	duplicateClip,
 	duplicateNotes,
@@ -42,6 +43,7 @@ import {
 	removeTempo,
 	removeTrack,
 	renameClip,
+	replacePatch,
 	resizeNotes,
 	routeGains,
 	curveAt,
@@ -99,6 +101,38 @@ const song = (): Timeline =>
 	});
 
 const lane = (clip: Clip, target: LaneTarget) => addPoint(clip, { target }, 0, 1);
+
+describe('built-in patches', () => {
+	it('swaps a patch for its copy everywhere it plays, and keeps what it was set to', () => {
+		const doc = timelineSchema.parse({
+			...song(),
+			tracks: [
+				...song().tracks,
+				{ id: 3, slots: ['pluck', 'verb'], inserts: [{ id: 3, patch: 'verb', params: { 1: 0.5 } }] }
+			],
+			master: { inserts: [{ id: 4, patch: 'verb' }] }
+		});
+		const next = replacePatch(doc, 'verb', 'mine');
+		expect(next.buses[0].inserts[0]).toEqual({ id: 2, patch: 'mine' });
+		expect(next.tracks[2].slots).toEqual(['pluck', 'mine']);
+		expect(next.tracks[2].inserts[0]).toEqual({ id: 3, patch: 'mine', params: { 1: 0.5 } });
+		expect(next.master.inserts[0].patch).toBe('mine');
+		expect(next.tracks[0]).toEqual(doc.tracks[0]);
+		expect(replacePatch(doc, 'nothing', 'mine')).toEqual(doc);
+	});
+
+	it("lists a library's own patches apart from the built-in ones", () => {
+		const graph = { params: [], nodes: [], edges: [] };
+		const patches = [
+			{ id: 'a', name: 'A', graph, builtin: true },
+			{ id: 'b', name: 'B', graph },
+			{ id: 'c', name: 'C', graph, builtin: false }
+		];
+		const { own, builtin } = byOwner(patches);
+		expect(own.map((p) => p.id)).toEqual(['b', 'c']);
+		expect(builtin.map((p) => p.id)).toEqual(['a']);
+	});
+});
 
 describe('the grid', () => {
 	it('offers whole ticks at any ppq, down to one', () => {

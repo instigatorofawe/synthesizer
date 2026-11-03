@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { readCatalogue, syncBuiltins } from '#lib/server/Builtins.ts';
 import { seedDemo } from '#lib/server/Seed.ts';
 import * as tables from '#lib/server/Tables.ts';
 
@@ -25,6 +26,9 @@ export function db(): Db {
 	return database;
 }
 
-export function prepareDatabase() {
+// The demo goes into a library with nothing of its own, and the built-in patches are made what ships, every time.
+export async function prepareDatabase() {
 	if (process.env.SEED_DEMO !== '0') seedDemo(db());
+	const kept = syncBuiltins(db(), await readCatalogue());
+	if (kept.length) console.warn(`kept built-ins that no longer ship, because something uses them: ${kept.join(', ')}`);
 }

@@ -5,7 +5,8 @@ import { isError, parseDocument, toBase64 } from '#lib/Form.ts';
 import { compileSnapshot } from '#lib/server/Compile.ts';
 import { db } from '#lib/server/Db.ts';
 import { importInstrument, ImportError, type Upload } from '#lib/server/Import.ts';
-import { addRecipe, readRecipe, recipeInLibrary, recipeTimelineId, RECIPES } from '#lib/server/Recipes.ts';
+import { addRecipe, readCatalogue } from '#lib/server/Builtins.ts';
+import { readRecipe, recipeInLibrary, recipeTimelineId, RECIPES } from '#lib/server/Recipes.ts';
 import {
 	createBundle,
 	createPatch,
@@ -14,6 +15,7 @@ import {
 	deleteBundle,
 	deletePatch,
 	deleteTimeline,
+	duplicatePatch,
 	getBundle,
 	getTimeline,
 	latestTimeline,
@@ -46,6 +48,7 @@ export const load = async ({ url }) => {
 				})),
 				timeline: timelineSchema.parse(project.programs[0].timeline),
 				assets: Object.keys(project.assets ?? {}).map((id) => ({ id, name: id })),
+				builtins: (await readCatalogue()).parts[recipe] ?? {}, // Each patch's built-in id, which Duplicate copies
 				inLibrary: recipeInLibrary(db(), recipe) ? recipeTimelineId(recipe) : null
 			}
 		};
@@ -165,6 +168,12 @@ export const actions = {
 			deleteAsset(db(), id);
 		});
 	},
+	// An ordinary copy of any patch, which is how a built-in one is changed. The page opens it, and puts a built-in one's copy in
+	// its place in the timeline open below.
+	duplicatePatch: async ({ request }) => {
+		const id = field(await request.formData(), 'id');
+		return guarded(() => ({ duplicated: { from: id, to: duplicatePatch(db(), id) } }));
+	},
 	deletePatch: async ({ request }) => {
 		const form = await request.formData();
 		const result = guarded(() => {
@@ -193,9 +202,10 @@ export const actions = {
 		const name = field(await request.formData(), 'name');
 		const project = await readRecipe(name);
 		if (!project) return fail(404, { message: `no recipe ${name}` });
+		const catalogue = await readCatalogue();
 		let id = '';
 		const result = guarded(() => {
-			id = addRecipe(db(), name, project);
+			id = addRecipe(db(), name, project, catalogue);
 		});
 		if (result) return result;
 		redirect(303, `/?timeline=${encodeURIComponent(id)}`);

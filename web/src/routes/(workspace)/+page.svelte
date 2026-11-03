@@ -49,6 +49,7 @@
 	} from '#lib/TimelineEdit.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
 	import { gliding, parseBpm, parsePosition, shownTempo, tempoTyped, tempoWords, wholeSong } from '#lib/Transport.ts';
+	import { playedBy, playedOn, usedBy } from '#lib/UsedBy.ts';
 	import ViewTabs from '#lib/ViewTabs.svelte';
 	import {
 		actionOn,
@@ -150,10 +151,34 @@
 		shown && !shown.example ? data.library.patches.find((p) => p.id === shown.patch.id) : undefined
 	);
 	const shownBuiltin = $derived(savedPatch?.builtin ?? false);
-	// What Duplicate copies: the patch on screen, or for an example's patch, the built-in one it is in every library as.
+	// What Edit a copy or Duplicate copies: the patch on screen, or for an example's patch, the built-in one it is in every
+	// library as.
 	const duplicateId = $derived(
 		!shown ? null : shown.example ? (recipe?.builtins[shown.patch.id] ?? null) : savedPatch ? savedPatch.id : null
 	);
+	// Edit a copy puts the copy where the original plays. For an example's patch, or a built-in one the example plays, that is
+	// the example's copy in the library, which comes with the patch's copy if it isn't there yet.
+	const copyInto = $derived(
+		recipe && duplicateId && (shown?.example || Object.values(recipe.builtins).includes(duplicateId))
+			? { name: recipe.entry.name, inLibrary: recipe.inLibrary !== null }
+			: null
+	);
+	// What each timeline with unsaved edits plays now: the open one as drawn, and another as its text says, or as saved while
+	// that text isn't a timeline. The Patch view's "used by" counts them so, which agrees with what the keys play.
+	const draftPlays = new WeakMap<Draft, string[] | null>();
+	const nowPlaying = $derived.by(() => {
+		const now = new Map<string, { name: string; patches: string[] }>();
+		for (const draft of Object.values(drafts)) {
+			if (draft.kind !== 'timeline') continue;
+			const drawn = saved?.id === draft.id ? timelineDoc : null;
+			if (!drawn && !draftPlays.has(draft)) draftPlays.set(draft, playedBy(draft.text));
+			const patches = drawn ? referencedPatches(drawn) : draftPlays.get(draft);
+			const listed = data.library.timelines.find((t) => t.id === draft.id);
+			now.set(draft.id, { name: draft.name, patches: patches ?? listed?.patches ?? [] });
+		}
+		return now;
+	});
+	const shownUsers = $derived(savedPatch ? usedBy(savedPatch.id, library, data.library.timelines, nowPlaying) : []);
 	const savedPatchText = $derived(savedPatch ? JSON.stringify(savedPatch.graph, null, 1) : '');
 	const patchDraft = $derived(savedPatch ? drafts[draftKey('patch', savedPatch.id)] : undefined);
 	const patchName = $derived(shown?.patch.name ?? '');
@@ -262,21 +287,61 @@
 		};
 	};
 
-	// A copy of a built-in patch takes its place in the open timeline, as an unsaved edit, so that changing it is heard where
-	// it plays. Either way the copy is what the Patch view shows next.
+	// Edit a copy, and Duplicate. A copy of a built-in patch takes its place on every track and insert of the open timeline that
+	// played it, as an unsaved edit, so changing it is heard where it plays and Undo in the Song view takes it back. From an
+	// example, which can't change, that timeline is the example's copy in the library, which opens in the Song view on the track
+	// the keys played the original on. Either way the copy is what the Patch view shows next.
 	const duplicating: SubmitFunction = () => {
+		const preferred = selectedTrack; // The track chosen, which the keys play the patch on if it plays it
 		return async ({ result, update }) => {
-			await update({ reset: false });
-			if (result.type !== 'success') return;
-			const made = result.data?.duplicated as { from: string; to: string } | undefined;
+			const made =
+				result.type === 'success'
+					? (result.data?.duplicated as { from: string; to: string; timeline?: string | null } | undefined)
+					: undefined;
+			if (!made?.timeline) await update({ reset: false });
 			if (!made) return;
-			const original = data.library.patches.find((p) => p.id === made.from);
-			if (original?.builtin && saved && timelineDoc && referencedPatches(timelineDoc).includes(made.from)) {
-				timelineEdited({ text: JSON.stringify(replacePatch(timelineDoc, made.from, made.to), null, 1) });
+			if (made.timeline) {
+				await copyInLibrary(made.from, made.to, made.timeline, preferred);
+				return;
 			}
+			const original = data.library.patches.find((p) => p.id === made.from);
+			if (original?.builtin && saved && timelineDoc) swapIn(made.from, made.to);
 			void open({ patch: made.to, part: null }, false, 'patch');
 		};
 	};
+
+	// Puts a copy in place of the original in the open timeline, as one edit. Says whether it played the original at all.
+	function swapIn(from: string, to: string): boolean {
+		if (!timelineDoc || !referencedPatches(timelineDoc).includes(from)) return false;
+		timelineEdited({ text: JSON.stringify(replacePatch(timelineDoc, from, to), null, 1) });
+		return true;
+	}
+
+	// An example's patch copied: the example's copy in the library opens, with the patch's copy in place of the original, on
+	// the track the keys played it on, and the Patch view shows the copy. The library loads again, so the copy, the timeline
+	// and the copy's recordings are all there before anything compiles.
+	async function copyInLibrary(from: string, to: string, timeline: string, preferred: number | null) {
+		const opening = withParams(search, { timeline, recipe: null, part: null, patch: null });
+		await goto(withView(opening, 'patch'), { refreshAll: true });
+		await rendered();
+		if (saved?.id !== timeline || !timelineDoc) return;
+		const track = playedOn(timelineDoc, from, preferred);
+		if (!swapIn(from, to)) {
+			const original = data.library.patches.find((p) => p.id === from)?.name ?? from;
+			const listed = data.library.timelines.filter((t) => t.id === timeline);
+			say(
+				usedBy(from, library, listed, nowPlaying).length
+					? `The copy is on no track: ${timelineName} plays ${original} only inside another patch.`
+					: `The copy is on no track: ${timelineName} no longer plays ${original}.`
+			);
+		}
+		// Choosing a track shows its patch in the Patch view, so the copy is asked for once the track is chosen.
+		if (track !== null) {
+			songEditor?.reveal({ track, clip: timelineDoc.tracks.find((t) => t.id === track)?.placements[0]?.clip });
+			await rendered();
+		}
+		await open({ patch: to, part: null }, true, 'patch');
+	}
 
 	// ------------------------------------------------------------------------------------------------------- recordings
 
@@ -1558,7 +1623,8 @@
 					duplicate={duplicateId}
 					{duplicating}
 					dirty={patchDraft !== undefined}
-					users={savedPatch?.users ?? []}
+					users={shownUsers}
+					example={copyInto}
 					parts={recipe && shown?.example ? recipe.patches : []}
 					use={exampleUse}
 					{search}

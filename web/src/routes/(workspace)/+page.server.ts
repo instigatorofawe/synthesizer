@@ -5,7 +5,7 @@ import { isError, parseDocument, toBase64 } from '#lib/Form.ts';
 import { compileSnapshot } from '#lib/server/Compile.ts';
 import { db } from '#lib/server/Db.ts';
 import { importInstrument, ImportError, type Upload } from '#lib/server/Import.ts';
-import { addRecipe, readCatalogue } from '#lib/server/Builtins.ts';
+import { addRecipe, editCopy, readCatalogue } from '#lib/server/Builtins.ts';
 import { readRecipe, recipeInLibrary, recipeTimelineId, RECIPES } from '#lib/server/Recipes.ts';
 import {
 	createBundle,
@@ -49,7 +49,7 @@ export const load = async ({ url }) => {
 				})),
 				timeline: timelineSchema.parse(project.programs[0].timeline),
 				assets: Object.keys(project.assets ?? {}).map((id) => ({ id, name: id })),
-				builtins: (await readCatalogue()).parts[recipe] ?? {}, // Each patch's built-in id, which Duplicate copies
+				builtins: (await readCatalogue()).parts[recipe] ?? {}, // Each patch's built-in id, which Edit a copy copies
 				inLibrary: recipeInLibrary(db(), recipe) ? recipeTimelineId(recipe) : null
 			}
 		};
@@ -175,11 +175,23 @@ export const actions = {
 			deleteAsset(db(), id);
 		});
 	},
-	// An ordinary copy of any patch, which is how a built-in one is changed. The page opens it, and puts a built-in one's copy in
-	// its place in the timeline open below.
+	// Duplicate: an ordinary copy of any patch, which the page opens. A built-in one is copied by Edit a copy, below.
 	duplicatePatch: async ({ request }) => {
 		const id = field(await request.formData(), 'id');
 		return guarded(() => ({ duplicated: { from: id, to: duplicatePatch(db(), id) } }));
+	},
+	// Edit a copy, of a built-in patch or an example's. For an example's, `recipe` names it, and the example is added to the
+	// library, or its copy there is used, so the page can put the patch's copy in place of the original there. The page then
+	// opens that timeline and the copy, in one round trip.
+	editCopy: async ({ request }) => {
+		const form = await request.formData();
+		const id = field(form, 'id');
+		const name = field(form, 'recipe');
+		if (!name) return guarded(() => ({ duplicated: editCopy(db(), id, null) }));
+		const project = await readRecipe(name);
+		if (!project) return fail(404, { message: `no recipe ${name}` });
+		const from = await readCatalogue();
+		return guarded(() => ({ duplicated: editCopy(db(), id, { name, project, from }) }));
 	},
 	deletePatch: async ({ request }) => {
 		const form = await request.formData();

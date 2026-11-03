@@ -3,6 +3,7 @@ import {
 	addRecipe,
 	BUILTIN,
 	buildCatalogue,
+	editCopy,
 	readCatalogue,
 	syncBuiltins,
 	type Catalogue
@@ -24,6 +25,7 @@ import {
 	listAssets,
 	listPatches,
 	listTimelines,
+	NotFound,
 	patchUsers,
 	ReadOnly,
 	saveEdits,
@@ -244,5 +246,67 @@ describe('a duplicate of a built-in patch', () => {
 		savePatch(db, copy, row.revision, 'Mine', row.graph as Graph);
 		deletePatch(db, copy);
 		expect(libraryAssets(db)).toEqual([]);
+	});
+});
+
+describe('Edit a copy', () => {
+	const example = async (name: string) => ({ name, project: await project(name), from: catalogue });
+
+	it("of an example's patch adds the example, playing the original, and copies the patch, in one go", async () => {
+		const timelines = listTimelines(db).length;
+		const made = editCopy(db, `${BUILTIN}ReverseSwell-boom`, await example('ReverseSwell'));
+		expect(made.from).toBe(`${BUILTIN}ReverseSwell-boom`);
+		expect(made.timeline).toBe(recipeTimelineId('ReverseSwell'));
+		expect(listTimelines(db)).toHaveLength(timelines + 1);
+		// The page puts the copy in the original's place, as an edit, so the timeline as saved still plays the built-in.
+		const doc = timelineSchema.parse(getTimeline(db, made.timeline!).doc);
+		expect(doc.tracks.find((t) => t.id === 2)?.slots).toEqual([`${BUILTIN}ReverseSwell-boom`]);
+		const copy = getPatch(db, made.to);
+		expect(copy.builtin).toBe(false);
+		expect(copy.name).toBe('ReverseSwell boom copy');
+		expect(copy.graph).toEqual(getPatch(db, made.from).graph);
+	});
+
+	it('uses the copy of the example already in the library, so an edit to it survives', async () => {
+		const id = addRecipe(db, 'Kick808', await project('Kick808'), catalogue);
+		saveTimeline(db, id, getTimeline(db, id).revision, 'Mine now', getTimeline(db, id).doc as Timeline);
+		const timelines = listTimelines(db).length;
+		const made = editCopy(db, `${BUILTIN}Kick808`, await example('Kick808'));
+		expect(made.timeline).toBe(id);
+		expect(listTimelines(db)).toHaveLength(timelines);
+		expect(getTimeline(db, id).name).toBe('Mine now');
+	});
+
+	it("refuses a patch the example doesn't play, and adds nothing then", async () => {
+		const patches = listPatches(db).length;
+		expect(() =>
+			editCopy(db, `${BUILTIN}Snare`, { name: 'Kick808', project: {} as RecipeProject, from: catalogue })
+		).toThrow(NotFound);
+		expect(recipeInLibrary(db, 'Kick808')).toBe(false);
+		expect(listPatches(db)).toHaveLength(patches);
+	});
+
+	it('adds no timeline when the copy fails', async () => {
+		// The timeline adds, playing the built-in, and then the patch to copy isn't there.
+		const broken = {
+			...catalogue,
+			parts: { ...catalogue.parts, Kick808: { ...catalogue.parts.Kick808, x: 'no-such-patch' } }
+		};
+		const kick = { ...(await example('Kick808')), from: broken };
+		expect(() => editCopy(db, 'no-such-patch', kick)).toThrow(NotFound);
+		expect(recipeInLibrary(db, 'Kick808')).toBe(false);
+	});
+
+	it('of a built-in heard on its own is only a copy', () => {
+		const timelines = listTimelines(db).length;
+		const made = editCopy(db, `${BUILTIN}Snare`, null);
+		expect(made.timeline).toBeNull();
+		expect(getPatch(db, made.to).name).toBe('Snare copy');
+		expect(listTimelines(db)).toHaveLength(timelines);
+	});
+
+	it('numbers a copy whose name is taken', () => {
+		const names = [1, 2, 3].map(() => getPatch(db, editCopy(db, `${BUILTIN}Snare`, null).to).name);
+		expect(names).toEqual(['Snare copy', 'Snare copy 2', 'Snare copy 3']);
 	});
 });

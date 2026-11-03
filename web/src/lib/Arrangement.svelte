@@ -1,7 +1,9 @@
 <script lang="ts">
 	import {
 		barOf,
+		drawnClip,
 		movePlacement,
+		noteValue,
 		place,
 		placementIndex,
 		setPlacement,
@@ -12,14 +14,25 @@
 		type Clip,
 		type Track
 	} from '#lib/TimelineEdit.ts';
+	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import { followScroll } from '#lib/Follow.ts';
 	import Meter from '#lib/Meter.svelte';
+	import { isMod, onMac } from '#lib/Modifier.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 
 	export interface Selection {
 		track: number | null;
 		placement: number | null; // An index into that track's placements
+	}
+
+	// What a clip's right-click menu does, each to the placement it was opened on.
+	export interface PlacementActions {
+		open: (at: { track: number; placement: number }) => void;
+		duplicate: (at: { track: number; placement: number }) => void; // Another of it, where it ends
+		unique: (at: { track: number; placement: number }) => void;
+		remove: (at: { track: number; placement: number }) => void; // The placement, and not its clip
+		delete: (at: { track: number; placement: number }) => void; // The clip, and every placement of it
 	}
 
 	let {
@@ -38,7 +51,8 @@
 		onchange,
 		onnew,
 		onlocate,
-		onloop
+		onloop,
+		actions
 	}: {
 		doc: Timeline;
 		selection: Selection;
@@ -53,9 +67,10 @@
 		meter?: (track: number) => Ring | null; // What each track's level meter reads
 		onselect: (selection: Selection) => void;
 		onchange: (doc: Timeline, selection?: Selection) => void;
-		onnew: (track: number, tick: number) => void;
+		onnew: (track: number, tick: number, length?: number) => void; // A new clip there, a bar long unless it says
 		onlocate: (tick: number) => void;
 		onloop: (start: number, end: number) => void;
+		actions?: PlacementActions;
 	} = $props();
 
 	const ROW = 60;
@@ -64,18 +79,21 @@
 	const LOOP = 14;
 	const TOP = RULER + LOOP;
 	const HANDLE = 7;
+	const DRAG = 4; // Pixels a press moves before it is a drag rather than a click
 	const MOST_REPEATS_DRAWN = 32; // A placement can repeat 100,000 times, and past this it's only a texture
 	const MOST_BARS_DRAWN = 1000; // Each bar is a line and a number, so a song that long would stop the page
 
 	type Gesture =
 		| { kind: 'move'; track: number; index: number; grab: number; tick: number; row: number; copy: boolean }
 		| { kind: 'repeat'; track: number; index: number; start: number; length: number; repeat: number }
-		| { kind: 'loop'; from: number; to: number };
+		| { kind: 'loop'; from: number; to: number }
+		| { kind: 'draw'; track: number; row: number; x: number; from: number; to: number; drawn: boolean };
 
 	let svg: SVGSVGElement;
 	let view: HTMLDivElement; // What scrolls, with the track heads held at its left
 	let heads: HTMLDivElement;
 	let gesture = $state.raw<Gesture | null>(null);
+	let menu = $state.raw<{ x: number; y: number; track: number; placement: number; clip: string } | null>(null);
 
 	const perTick = $derived(barWidth / ticksPerBar(doc));
 	const bars = $derived(Math.min(MOST_BARS_DRAWN, Math.max(16, Math.ceil(songLength(doc) / ticksPerBar(doc)) + 8)));
@@ -123,7 +141,10 @@
 					transpose: placed.transpose ?? 0,
 					ghost: false
 				};
-				const held = gesture && gesture.kind !== 'loop' && gesture.track === track.id && gesture.index === index;
+				const held =
+					(gesture?.kind === 'move' || gesture?.kind === 'repeat') &&
+					gesture.track === track.id &&
+					gesture.index === index;
 				if (held && gesture?.kind === 'repeat') block.repeat = gesture.repeat;
 				if (held && gesture?.kind === 'move') {
 					if (gesture.copy)
@@ -172,10 +193,13 @@
 		return `${block.name}${shift}${block.repeat > 1 ? ` x${block.repeat}` : ''}`;
 	}
 
+	// A right-click chooses what it is on, and Ctrl-click is a right-click on a Mac, so neither starts a drag.
+	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && onMac());
+
 	function startMove(event: PointerEvent, block: Block) {
 		event.stopPropagation();
 		onselect({ track: block.track.id, placement: block.index });
-		if (readonly) return;
+		if (readonly || secondary(event)) return;
 		const grab = ticksAt(canvas(event).x) - block.tick;
 		gesture = {
 			kind: 'move',
@@ -184,14 +208,14 @@
 			grab,
 			tick: block.tick,
 			row: block.row,
-			copy: event.altKey
+			copy: isMod(event)
 		};
 	}
 
 	function startRepeat(event: PointerEvent, block: Block) {
 		event.stopPropagation();
 		onselect({ track: block.track.id, placement: block.index });
-		if (readonly || !block.clip || !block.length) return;
+		if (readonly || secondary(event) || !block.clip || !block.length) return;
 		gesture = {
 			kind: 'repeat',
 			track: block.track.id,
@@ -215,6 +239,9 @@
 		} else if (gesture.kind === 'repeat') {
 			const repeat = Math.round((ticksAt(at.x) - gesture.start) / gesture.length);
 			gesture = { ...gesture, repeat: Math.max(1, repeat) };
+		} else if (gesture.kind === 'draw') {
+			if (!gesture.drawn && Math.abs(at.x - gesture.x) < DRAG) return;
+			gesture = { ...gesture, to: Math.max(0, ticksAt(at.x)), drawn: true };
 		} else {
 			gesture = { ...gesture, to: snapTick(ticksAt(at.x), grid) };
 		}
@@ -241,13 +268,61 @@
 		if (!held) return;
 		if (held.kind === 'move') finishMove(held);
 		else if (held.kind === 'repeat') onchange(setPlacement(doc, held.track, held.index, { repeat: held.repeat }));
-		else if (held.from === held.to) onloop(0, 0);
+		else if (held.kind === 'draw') {
+			const drawn = held.drawn && drawnClip(doc, held.track, held.from, held.to);
+			if (drawn) onnew(held.track, drawn.tick, drawn.length);
+		} else if (held.from === held.to) onloop(0, 0);
 		else onloop(Math.min(held.from, held.to), Math.max(held.from, held.to));
 	}
 
+	// A press on an empty row chooses its track, and dragging across it draws a clip, whole bars long.
 	function rowPressed(event: PointerEvent) {
-		const row = rowAt(canvas(event).y);
-		if (doc.tracks[row]) onselect({ track: doc.tracks[row].id, placement: null });
+		const at = canvas(event);
+		const row = rowAt(at.y);
+		const track = doc.tracks[row];
+		if (!track) return;
+		onselect({ track: track.id, placement: null });
+		if (readonly || secondary(event)) return;
+		const tick = Math.max(0, ticksAt(at.x));
+		gesture = { kind: 'draw', track: track.id, row, x: at.x, from: tick, to: tick, drawn: false };
+	}
+
+	const drawing = $derived(
+		gesture?.kind === 'draw' && gesture.drawn ? drawnClip(doc, gesture.track, gesture.from, gesture.to) : null
+	);
+
+	function blockMenu(event: MouseEvent, block: Block) {
+		event.preventDefault();
+		event.stopPropagation();
+		gesture = null;
+		onselect({ track: block.track.id, placement: block.index });
+		if (readonly || !actions) return;
+		// The menu key and Shift+F10 open it at the clip rather than at a pointer.
+		const box = (event.currentTarget as Element).getBoundingClientRect();
+		const keyed = event.clientX === 0 && event.clientY === 0;
+		menu = {
+			x: keyed ? box.left : event.clientX,
+			y: keyed ? box.bottom : event.clientY,
+			track: block.track.id,
+			placement: block.index,
+			clip: block.name
+		};
+	}
+
+	const uses = (clip: string) => doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clip).length;
+
+	// The menu closes before an item acts, so each item holds the placement it is for rather than reading the menu.
+	function placementItems(opened: NonNullable<typeof menu>): MenuItem[] {
+		const at = { track: opened.track, placement: opened.placement };
+		if (!actions) return [];
+		const { open, duplicate, unique, remove, delete: deleteClip } = actions;
+		return [
+			{ label: 'Open notes', action: () => open(at) },
+			{ label: 'Duplicate after', action: () => duplicate(at) },
+			{ label: 'Make unique', action: () => unique(at), disabled: uses(opened.clip) < 2 },
+			{ label: 'Remove from track', action: () => remove(at) },
+			{ label: 'Delete clip', action: () => deleteClip(at) }
+		];
 	}
 
 	function rowDoubled(event: MouseEvent) {
@@ -373,6 +448,7 @@
 						tabindex="0"
 						aria-label={`${block.name} at bar ${barOf(block.tick, doc.ppq)}`}
 						onpointerdown={(event) => startMove(event, block)}
+						oncontextmenu={(event) => blockMenu(event, block)}
 						onkeydown={(event) => {
 							if (event.key === 'Enter') onselect({ track: block.track.id, placement: block.index });
 						}}
@@ -390,15 +466,33 @@
 							role="presentation"
 							data-testid={`repeat-${block.track.id}-${block.index}`}
 							onpointerdown={(event) => startRepeat(event, block)}
+							oncontextmenu={(event) => blockMenu(event, block)}
 						/>
 					{/if}
 				</g>
 			{/each}
 
+			{#if drawing && gesture?.kind === 'draw'}
+				<g class="drawn" transform={`translate(${drawing.tick * perTick} ${TOP + gesture.row * ROW + 4})`}>
+					<rect width={drawing.length * perTick} height={BLOCK} rx="3" data-testid="drawn-clip" />
+					<text x="5" y="12">{noteValue(drawing.length, doc.ppq)}</text>
+				</g>
+			{/if}
+
 			<line class="playhead" x1={tick * perTick} x2={tick * perTick} y1={0} y2={height} data-testid="playhead" />
 		</svg>
 	</div>
 </div>
+
+{#if menu}
+	<ContextMenu
+		x={menu.x}
+		y={menu.y}
+		label={`Clip ${menu.clip}`}
+		items={placementItems(menu)}
+		onclose={() => (menu = null)}
+	/>
+{/if}
 
 <style>
 	.arrangement {
@@ -552,5 +646,17 @@
 	.playhead {
 		stroke: #f0883e;
 		pointer-events: none;
+	}
+	.drawn {
+		pointer-events: none;
+	}
+	.drawn rect {
+		fill: #1f6feb30;
+		stroke: #79c0ff;
+		stroke-dasharray: 4 3;
+	}
+	.drawn text {
+		fill: var(--text);
+		font-size: 11px;
 	}
 </style>

@@ -61,11 +61,14 @@ def tracked(
     return clip(g, g.mul(octaves(g, pitch, rate), hz), low, high)
 
 
-def tilt(g: Graph, pitch: Ref, rate: float = -0.5, top: float = 96.0) -> Ref:
+def tilt(
+    g: Graph, pitch: Ref, rate: float = -0.5, top: float = 96.0, bottom: float = 0.0
+) -> Ref:
     """3 dB less for every octave the key is above middle C, and more below, within limits, or `rate` times 6 dB. Moving
     a noise's filters up lets more of it through, and the ear weighs the top more, so without this a high key is far
-    louder than a low one. Above `top` the filters have reached their limits and move no further, so neither does this."""
-    return clip(g, octaves(g, clip(g, pitch, 0.0, top), rate), 0.1, 4.0)
+    louder than a low one. Above `top` the filters have reached their limits and move no further, so neither does this,
+    and below `bottom` it would only make a click louder."""
+    return clip(g, octaves(g, clip(g, pitch, bottom, top), rate), 0.1, 4.0)
 
 
 def mix(g: Graph, parts: list[Ref]) -> Ref:
@@ -234,13 +237,16 @@ def seashore(v: Voice) -> tuple[Ref, Ref]:
     g = v.g
     sides = []
     for slow, fast in ((0.11, 0.19), (0.13, 0.23)):
-        surge = g.add(
-            g.add(
-                g.node("lfo", {"rate": slow, "depth": 0.3}),
-                g.node("lfo", {"rate": fast, "depth": 0.15}),
-            ),
-            0.55,
+        # Oscillators rather than LFOs, because an LFO that nothing in the voice moves is shared by the track and runs
+        # on between notes, so each note would start somewhere else in its swell, and a breath could be anything from
+        # loud to silent. An oscillator starts again with each note.
+        swells = g.add(
+            g.mul(g.snap(g.osc("sine", slow)), 0.25),
+            g.mul(g.snap(g.osc("sine", fast)), 0.125),
         )
+        surge = g.add(
+            swells, 0.625
+        )  # A quarter to 1, so that between waves the wash never quite stops
         cutoff = clip(
             g,
             g.mul(octaves(g, v.pitch), g.add(g.mul(surge, 3600.0), 450.0)),
@@ -326,19 +332,24 @@ def helicopter(v: Voice) -> tuple[Ref, Ref]:
     fall2 = g.mul(fall, fall)
     fall4 = g.mul(fall2, fall2)
     noise = g.node("noise")
-    whump = g.filter("lowpass", g.mul(noise, fall4), tracked(g, v.pitch, 320.0), 0.9)
-    slap = g.filter(
-        "bandpass", g.mul(noise, g.mul(fall4, fall4)), tracked(g, v.pitch, 1300.0), 1.2
-    )
+    whump = g.mul(noise, g.mul(fall2, fall))
+    whump = g.filter("lowpass", whump, tracked(g, v.pitch, 320.0), 0.9)
+    slap = g.mul(noise, g.mul(fall4, fall4))
+    slap = g.filter("bandpass", slap, tracked(g, v.pitch, 1300.0), 1.2)
     whine = g.mul(g.osc("sine", tracked(g, v.pitch, 2400.0)), 0.006)
     sound = g.add(g.add(whump, g.mul(slap, 0.35)), whine)
-    level = g.mul(
-        g.env(0.6, 0.1, 1.0, 0.2), g.mul(strength(g, v.velocity, 0.1), tilt(g, v.pitch))
+    # Beaten noise has peaks far above its level, and a few of them would reach full scale. So it is brought to a level
+    # of about a seventh of full scale, which the tilt keeps at every key, and the peaks are rounded off by a cubic that
+    # runs flat into 1 at 1.5, as the CubicSaturation recipe's does. Fewer than one sample in a thousand is past 1.
+    driven = clip(
+        g, g.mul(sound, g.mul(tilt(g, v.pitch, top=127.0, bottom=36.0), 8.0)), -1.5, 1.5
     )
+    rounded = g.add(driven, g.mul(g.mul(g.mul(driven, driven), driven), -1.0 / 6.75))
+    level = g.mul(g.env(0.6, 0.1, 1.0, 0.2), strength(g, v.velocity, 0.1))
     swing = g.node(
         "pan",
         {
-            "in": g.mul(sound, level),
+            "in": g.mul(rounded, level),
             "position": g.node("lfo", {"rate": 0.07, "depth": 0.5}),
         },
     )
@@ -407,7 +418,7 @@ def gunshot(v: Voice) -> tuple[Ref, Ref]:
     )
     # The tail comes back a little later on the right, as an echo does from somewhere off to one side.
     late = g.node("delay", {"in": tail, "time": 0.011}, max=0.02)
-    level = g.mul(strength(g, v.velocity, 0.1), tilt(g, v.pitch, -0.25))
+    level = g.mul(strength(g, v.velocity, 0.1), tilt(g, v.pitch, -0.25, bottom=24.0))
     return g.mul(g.add(near, tail), level), g.mul(g.add(near, late), level)
 
 

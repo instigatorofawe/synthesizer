@@ -362,8 +362,11 @@
 		width: auto;
 		padding: 0.25rem 0.5rem;
 	}
+	/* The list is as tall as its patches and shrinks to the panel's max-height. Its basis is its content, not flex: 1's 0%: the
+	   panel's height comes from its content, so a 0% has nothing to resolve against, and a browser that took it as 0 showed
+	   the field over a sliver of list. */
 	.options {
-		flex: 1;
+		flex: 0 1 auto;
 		min-height: 0;
 		overflow-y: auto;
 		list-style: none;

@@ -1545,7 +1545,6 @@
 		padding-left: 0.6rem;
 		border-style: dashed;
 	}
-	.newwords,
 	/* A MIDI file held over the song, which a drop imports as a song of its own. */
 	.arrangement.importing {
 		border-color: var(--accent);
@@ -1563,6 +1562,7 @@
 		color: var(--accent);
 		white-space: nowrap;
 	}
+	.newwords,
 	.dropwords {
 		font-size: 0.72rem;
 		color: var(--accent);

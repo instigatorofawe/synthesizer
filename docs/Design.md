@@ -1156,10 +1156,10 @@ the song, since the clip grows. While a take runs the song's image keeps every t
 yet plays in the song from its first one. The take waits for that image before it counts in.
 
 New timeline makes a song that sounds at once, as FL Studio's and Live's templates do (`Template.ts`): a track playing a
-built-in electric piano, Für Elise's, and an empty four-bar clip at bar 1, chosen and open in the roll around middle C. It is
-an ordinary timeline, saved as it is made, which undoes and compiles as any other. An electric piano is what Logic and
-GarageBand open a new song with: it sounds right with no insert or bus behind it, it has no recordings to fetch, and a
-four-note chord on it peaks near -5 dBFS, short of the limiter [measured].
+the standard set's electric piano, which Für Elise plays, and an empty four-bar clip at bar 1, chosen and open in the roll
+around middle C. It is an ordinary timeline, saved as it is made, which undoes and compiles as any other. An electric piano is
+what Logic and GarageBand open a new song with: it sounds right with no insert or bus behind it, it has no recordings to fetch,
+and a four-note chord on it peaks near -11 dBFS at the set's level, well short of the limiter [measured].
 
 Mod+C, Mod+V and Mod+D copy, paste and duplicate the chosen notes while the roll has focus, and the chosen clip in the
 arrangement otherwise, but not in a field. Outside a field Mod+D is always taken in the Song view, so the browser never
@@ -1930,7 +1930,16 @@ one module a family group, and merged here.
   every note a take writes, so every note of a clip on a kit track plays its key's slot, and a note on a key with no sound keeps
   its own. The roll names a kit's keys and dims the rest. "Use the standard kit" gives a track the set's drums, at least 32 voices
   for the cymbals' tails, and fading steals, and "Not a kit" drops it. Live notes on a kit track play their key's sound (section 11).
-PIECES
+- **The pieces play the set.** Each of their patches that is a set instrument or room is the set's graph exactly, so the library
+  holds it once, as `builtin-gm-<Name>`. Only the chorale's flugelhorn (GM has no program for it) and the Invention's console
+  channels and small room (the board's piece, byte-identical) are the pieces' own. The set plays each instrument 1 to 17 dB under
+  the pieces' old ones, so a piece of several instruments trims each part's fader and fader lanes to where it sat, measured with
+  each part alone, and the master gain makes up the common 12 or 14 dB, since a track's gain stops at 4. Each part's send keeps the
+  wet-to-dry balance it had in its piece's old room, to within 0.1 LU, which in the two halls takes a send for each part: sustained
+  low notes fall differently on the new combs. The chorale's church became MediumHall, whose early decay matches it (1.78 s against
+  1.79), and Für Elise's room is the one change to listen for: LargeRoom, the nearest, rings about 20% shorter. Most of what else
+  sets the brass and reeds apart from before is their vibrato, now each note's own from its start rather than one the whole track
+  shared. New timeline's template plays the set's ElectricPiano, about 6 dB quieter than the Für Elise piano it played.
 
 Choices made here that the user hasn't weighed in on:
 - **104 instruments rather than about 50.** The agents gave most programs their own, as cheap variants of shared builders. The
@@ -1948,6 +1957,9 @@ Choices made here that the user hasn't weighed in on:
 - **An LFO that only constants or track parameters drive is the track's,** shared by its voices and still while the transport is
   stopped, so a wheel vibrato doesn't move while keys are played on a stopped song. The winds made theirs each voice's own; the rest
   are as they are.
+- **Each part in the two halls has its own send,** rather than one factor for the piece, and the sends match total wet energy;
+  matching only the late tail would lower the hall sends by about 1 dB. The template is left at the set's level, 6 dB under the
+  old one, so a new song is as loud as an imported file.
 
 **Declined.** Importing PureData patches, which the user decided against in revision 20 after it was scoped: the graph already has PureData's
 nodes, wires, inlets and subpatches, but its control logic, message envelopes and voice idioms have no counterpart here, and many common

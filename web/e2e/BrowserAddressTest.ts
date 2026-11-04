@@ -1,27 +1,8 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, prepare, test, type Page } from './Fixtures.ts';
 import { openView } from './Views.ts';
-
-// A page load waits until the page has hydrated, as in AppTest.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
 
 // At a laptop's 1280 by 720 and 1280 by 800, the smallest screens the editor is laid out for: the two projects in
 // playwright.config.ts run this file at each.
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 const rail = (page: Page) => page.getByRole('toolbar', { name: 'Library and examples' });
@@ -140,9 +121,8 @@ test('a track, a clip and the Mixer tab chosen are in the address, and a reload 
 	// The same address in a new tab
 	await songTab(page, 'Mixer').click();
 	await expect(page).toHaveURL(/pane=mixer/);
-	const other = await context.newPage();
+	const other = prepare(await context.newPage());
 	await other.goto(page.url());
-	await other.locator('body[data-hydrated]').waitFor({ state: 'attached' });
 	await expect(songTab(other, 'Mixer')).toHaveAttribute('aria-selected', 'true');
 	await chosen(other, 2);
 	await other.close();

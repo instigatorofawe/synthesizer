@@ -1,30 +1,11 @@
-import { expect, test as base, type Page } from '@playwright/test';
-import { redoButton, startAudio, undoButton } from './Chrome.ts';
-import { settled } from './Engine.ts';
+import { expect, test, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
+import { redoButton, undoButton } from './Chrome.ts';
+import { startAudioNewest } from './Engine.ts';
 import { openView } from './Views.ts';
-
-// A page load waits until the page has hydrated, as AppTest's do.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
 
 // The browser beside the page, and the inspector open.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 const editCopy = (page: Page) => page.getByRole('button', { name: 'Edit a copy', exact: true });
@@ -52,9 +33,7 @@ async function newSong(page: Page, name: string) {
 
 // A click in the roll adds a note, which puts the track in the song.
 async function addNote(page: Page, note: number) {
-	const roll = (await page.getByTestId('roll').boundingBox())!;
-	const key = (await page.getByTestId(`key-${note}`).boundingBox())!;
-	await page.mouse.click(roll.x + 3, key.y + key.height / 2);
+	await clickStill(page, await rollPoint(page, 0, note));
 	await expect(page.getByTestId('note-0')).toBeVisible();
 }
 
@@ -68,9 +47,7 @@ async function slots(page: Page): Promise<Record<number, string[]>> {
 }
 
 async function playUntilHeard(page: Page) {
-	await settled(page);
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
+	await startAudioNewest(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect.poll(async () => Math.max(0, ...(await patchLoudest(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
 	await page.getByRole('button', { name: 'Stop', exact: true }).click();

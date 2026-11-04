@@ -1,3 +1,30 @@
+/* The app's own fonts, served with it, so text is the same width on every platform, and the layout the tests check on CI is
+   the one a Mac or Windows draws: DejaVu Sans and Sans Mono, which CI's Linux runner draws too (scripts/SubsetFonts.py makes
+   them). Text they lack falls back to the platform's own. */
+@font-face {
+	font-family: 'App Sans';
+	src: url('/fonts/DejaVuSans.woff2') format('woff2');
+	font-weight: 400;
+	font-display: block;
+}
+@font-face {
+	font-family: 'App Sans';
+	src: url('/fonts/DejaVuSans-Bold.woff2') format('woff2');
+	font-weight: 700;
+	font-display: block;
+}
+@font-face {
+	font-family: 'App Mono';
+	src: url('/fonts/DejaVuSansMono.woff2') format('woff2');
+	font-weight: 400;
+	font-display: block;
+}
+@font-face {
+	font-family: 'App Mono';
+	src: url('/fonts/DejaVuSansMono-Bold.woff2') format('woff2');
+	font-weight: 700;
+	font-display: block;
+}
 :root {
 	--bg: #0a0d12;
 	--panel: #11161d;
@@ -6,7 +33,7 @@
 	--muted: #848d97; /* 4.8:1 on a chosen track head's #1a212b, the darkest it sits on, and AA asks 4.5 */
 	--accent: #58a6ff;
 	color-scheme: dark;
-	font-family: system-ui, sans-serif;
+	font-family: 'App Sans', sans-serif;
 	font-size: 15px;
 }
 body {
@@ -66,7 +93,7 @@ input[type='range'] {
 textarea {
 	width: 100%;
 	box-sizing: border-box;
-	font-family: ui-monospace, monospace;
+	font-family: 'App Mono', monospace;
 	font-size: 0.8rem;
 	line-height: 1.35;
 }

@@ -9,6 +9,7 @@
 	import type { NodesReport } from '#lib/Request.ts';
 	import type { Graph, Param } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
+	import ScopePlaceholder from '#lib/ScopePlaceholder.svelte';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { actionOn, stay, withView, type Hearing } from '#lib/Workspace.ts';
 
@@ -274,11 +275,22 @@
 					>
 						{#snippet side()}
 							<p class="muted heard" data-testid="hearing" data-kind={hearing.kind}>{heard}</p>
-							{#if hearing.kind === 'song' && !probes.length && !readonly}
-								<p class="muted heard">Choose a node and probe an output to watch it inside a voice.</p>
+							<!-- The hint keeps its line while it doesn't apply, and a scope its room until the engine says what it
+							     watches, so the Controls below don't move as the song compiles and audio starts. -->
+							{#if !probes.length && !readonly}
+								<p class="muted heard" class:unseen={hearing.kind !== 'song'} aria-hidden={hearing.kind !== 'song'}>
+									Choose a node and probe an output to watch it inside a voice.
+								</p>
 							{/if}
 							{#each scopes as scope (scope.slot)}
 								<Scope label={scope.label} ring={scope.ring} compact />
+							{:else}
+								{#if playable}
+									<ScopePlaceholder
+										label={hearing.kind === 'song' ? hearing.name : 'On its own'}
+										message="No scope until it plays"
+									/>
+								{/if}
 							{/each}
 							{#each probes.filter((probe) => !scopes.some((scope) => scope.label === probe.label)) as probe (probe.label)}
 								<p class="muted waiting" data-testid="probe-waiting">
@@ -311,6 +323,9 @@
 </section>
 
 <style>
+	.unseen {
+		visibility: hidden;
+	}
 	.patch {
 		display: flex;
 		flex-direction: column;

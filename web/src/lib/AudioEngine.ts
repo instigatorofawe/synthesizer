@@ -166,6 +166,11 @@ export class AudioEngine {
 	private probed = ''; // The patch whose nodes those are
 	private voice: ProbedVoice = { track: 0, slot: 0 };
 
+	// The rate the audio runs at, which the browser chose: the device's own. 0 until audio has started.
+	get sampleRate() {
+		return this.context?.sampleRate ?? 0;
+	}
+
 	// Must be called from a user gesture, because browsers keep an AudioContext suspended until then.
 	start(): Promise<void> {
 		this.ready ??= this.connect();

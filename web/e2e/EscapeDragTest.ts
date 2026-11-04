@@ -1,28 +1,12 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
 
 // Esc cancels a drag in every editor, as Design §19's gesture table has it: pressed, moved, Esc, moved again and let go, what
 // was dragged is where it was, and nothing is kept. A press often leaves focus on the page rather than on what was pressed, so
 // Esc mustn't depend on where focus is. The lanes and the graph have tests of their own (SongLanesTest, GraphGesturesTest).
 
-// A page load waits until the page has hydrated, as AppTest's do.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
 // The browser sits beside the page at this width, where its New timeline field is.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 // A new song with one note in its clip, saved, so any edit kept shows as unsaved.
 async function savedSong(page: Page) {
@@ -32,11 +16,7 @@ async function savedSong(page: Page) {
 	await page.getByLabel('New song name').fill('Esc');
 	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	const roll = page.getByTestId('roll');
-	const box = (await roll.boundingBox())!;
-	const key = (await page.getByTestId('key-60').boundingBox())!;
-	const perTick = Number(await roll.getAttribute('data-per-tick'));
-	await page.mouse.click(box.x + 960 * perTick + 3, key.y + key.height / 2);
+	await clickStill(page, await rollPoint(page, 960, 60));
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-tick', '960');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);

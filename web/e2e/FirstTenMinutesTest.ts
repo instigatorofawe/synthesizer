@@ -1,27 +1,10 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
 import { loopButton, startAudio, undoButton } from './Chrome.ts';
 import { engineRenders, loudest, settled } from './Engine.ts';
 
-// A page load waits until the page has hydrated, as AppTest's do.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
 // The browser sits beside the page at this width, where its New timeline field is.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const BAR = 1920; // Ticks in a bar at a new timeline's 480 ppq
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
@@ -64,14 +47,6 @@ const level = (page: Page, name: string) => loudest(page.getByRole('meter', { na
 const stripPeak = async (page: Page, chain: string) =>
 	Number(await page.getByTestId(`strip-${chain}`).getByTestId('peak').getAttribute('data-peak'));
 
-// Where a note at this tick and pitch lands in the roll, a little inside its cell.
-async function rollPoint(page: Page, tick: number, note: number) {
-	const roll = page.getByTestId('roll');
-	const box = (await roll.boundingBox())!;
-	const key = (await page.getByTestId(`key-${note}`).boundingBox())!;
-	return { x: box.x + tick * Number(await roll.getAttribute('data-per-tick')) + 3, y: key.y + key.height / 2 };
-}
-
 // Whether the last key pressed was kept from the browser, which would bookmark the page for Mod+D. This listens after the page's
 // own handlers.
 async function watchPrevented(page: Page) {
@@ -112,7 +87,7 @@ test('a new timeline opens on a track with a built-in patch and a four-bar clip 
 
 	// A note in the roll puts the track in the song, where the keys then play it
 	const at = await rollPoint(page, 0, 60);
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	await expect(page.getByTestId('note-0')).toBeVisible();
 	await expect(keys(page)).toHaveAttribute('title', /^Keys play Track 1\./, { timeout: 8000 });
 	// The song's image is playing, and long enough that the meter holds only what it has played
@@ -178,8 +153,9 @@ test('M and S in the track heads and the Mixer agree: a mute is saved and undone
 	await tab(page, 'Mixer');
 	await headMute('Lead').click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 6000 }).toBeLessThan(0.002);
-	// Pluck plays, as its own scope shows, which is before its mute, and the master hears none of it
-	await expect.poll(() => stripPeak(page, 'track:2'), { timeout: 8000 }).toBeGreaterThan(0.01);
+	// Pluck plays, as its own scope shows, which is before its mute, and the master hears none of it. Its next note can be as
+	// far as the 7 s loop away, so the ceiling is sized from that, as engineRenders' are.
+	await expect.poll(() => stripPeak(page, 'track:2'), { timeout: 10000 + 2000 * 7 }).toBeGreaterThan(0.01);
 	await expect.poll(() => stripPeak(page, 'master')).toBeLessThan(0.002);
 	await headSolo('Lead').click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);
@@ -193,7 +169,7 @@ test('Mod+C, Mod+V and Mod+D copy, paste and duplicate notes in the roll', async
 		[480, 64]
 	]) {
 		const at = await rollPoint(page, tick, note);
-		await page.mouse.click(at.x, at.y);
+		await clickStill(page, at);
 	}
 	await expect(page.getByTestId('note-1')).toBeVisible();
 	await watchPrevented(page);
@@ -307,7 +283,7 @@ test('the keys leave the song stopped when it takes over from a track heard on i
 	await expect(state).toHaveAttribute('data-playing', 'true');
 
 	const at = await rollPoint(page, 0, 60);
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	await expect(keys(page)).toHaveAttribute('title', /^Keys play Track 1\./, { timeout: 8000 });
 	await page.getByTestId('roll').focus();
 	await page.keyboard.press('a'); // The song's image takes over
@@ -341,7 +317,7 @@ test("after + Track the roll is the new track's, and its notes go into a clip of
 	await expect(page.getByTestId('note-0')).toBeVisible();
 	await page.keyboard.press('Escape');
 	const at = await rollPoint(page, 1920, 64);
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	await expect(page.getByTestId('note-1')).toBeVisible();
 	expect((await noteTicks(page, own.clip)).length).toBe(2);
 	expect(await noteTicks(page)).toEqual([]);

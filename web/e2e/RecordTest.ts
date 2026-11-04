@@ -1,27 +1,9 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
 import { loopButton, undoButton } from './Chrome.ts';
 import { engineRenders, goesRound, loudest, settled } from './Engine.ts';
 
-// A page load waits until the page has hydrated, as AppTest's do.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
 // The browser sits beside the page at this width, where its New timeline field is.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const BAR = 1920; // Ticks in a bar at a new timeline's 480 ppq
 const QUARTER = 480; // A new timeline's Snap

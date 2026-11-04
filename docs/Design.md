@@ -1,4 +1,4 @@
-# modsynth design, revision 29
+# modsynth design, revision 30
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -842,7 +842,9 @@ all the height: Song, with the arrangement, the notes, the mix, the JSON, the im
 patch's graph. The two used to share the page, one above the other, which left the piano roll 102 px at 1280×800; apart, it
 is 445 px for a timeline of one track and 297 px for one of two tracks and a lane, under the Tempo lane's folded row, and Expand
 makes those 565 and 477 [measured]. The view not on screen stays on the page, hidden and inert, so its scroll, zoom and choices are there to come back
-to.
+to. Its text is set in DejaVu Sans and DejaVu Sans Mono, served with the page (`web/static/fonts`, cut to the characters it
+draws), so text is as wide on a Mac, on Windows and on CI's Linux, and the layout the tests check is the one everyone sees: with
+each platform's own `system-ui`, CI's text was 11% wider than a Mac's, which once put a click on another row of the roll.
 
 - A tab or `` ` `` switches views. So does a patch opened from a track, the inspector or a mixer insert, and the Patch view's
   trail back to the song. A switch is a step in the browser's history, made without a navigation, which would move focus, so
@@ -903,8 +905,12 @@ to.
   request that hasn't changed isn't compiled again, so opening something new swaps nothing. An insert has no keys and is
   compiled on its own only for its errors and dead nodes.
 - The compile light says Compiling from an edit until the image made from it is playing, so what is heard is known to be the
-  newest edit. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the
-  image slot does, and the image before it plays on.
+  newest edit, and goes out only once no compile is on its way, though one with nothing new to send (as Save starts) finishes
+  first. An image the engine fails while loading ends that too, with the engine's reason, as one too large for the image slot
+  does, and the image before it plays on. While an older image plays with nothing on its way, after a refused edit or a refused
+  image, its lamp is a ring rather than a dot, and its list says so. Play and moves of the playhead wait for an edit on its way,
+  as they wait for the song's first image, so a note drawn just before Play is heard; a refused edit lets them go at once. Keys
+  don't wait. An image of a song no longer open takes no Play or keys.
 - Otherwise the light says at a glance whether what is on screen compiles: green with the image's size, or a count of problems or
   of warnings. A click lists them, each saying where it is in words, "Stereo lead › Filter 13" rather than `patch:lead/node:13`, as a
   link: a node's opens the Patch view with the node chosen, and a track's, a clip's or the mix's opens the Song view with it chosen.
@@ -1123,8 +1129,11 @@ engine, at full scale, and a light on the master meter says when it is limiting,
 for a moment after the last time, as a clip light does, since the limiter comes and goes many times a second. Every meter and scope
 also holds the loudest it has been since Play or since the image playing began, in its tooltip, so a note shorter than a frame of the
 display still shows it sounded. Under the compile light's list, the engine says how many seconds of audio it has rendered, and the page
-how many compiles it has started. The e2e tests wait on these and on the light's busy state, never on time passing, so a slow machine
-makes them slower and no less sure. Export WAV renders the song as it compiles now, in a
+how many compiles it has started. The e2e tests wait on these and on the light's busy state and whether the newest image is heard,
+never on time passing, so a slow machine makes them slower and no less sure. Each test starts from the same library, copied back
+before it, so none depends on another or on their order; a click at a computed point is checked to land on what it was measured on;
+and what arrives late (a scope, the track a patch is heard on) keeps its room, so nothing moves under a pointer as the page
+settles. The rules are written in `web/e2e/Engine.ts`. Export WAV renders the song as it compiles now, in a
 worker with the worklet's engine, to its end and on until its voices stop and a tenth of a second stays below -100 dB, as the Python binding's render does.
 
 Each track head has M and S. M is the track's own `mute`, the Mixer's Mute, so it saves with the song and is one step of its
@@ -1634,6 +1643,25 @@ fixes without changing the format or the compiler. Choices made here that the us
   its release, both oscillators at zero phase, so a looped A4 at 120 BPM, a whole number of cycles a bar, adds in phase to 1.84 times at
   every wrap, in any image. A live swap adds nothing. The test's tone now has a 0.1 ms release. Whether the engine should reuse the
   releasing voice is the postmortem's decision 16, recommended no.
+
+**Built from the flake sprint** (revision 30). The user asked for e2e tests that don't depend on timing or on the platform. Five
+proposers and three reviewers found what made the five CI flakes, and the user took the reviewers' agreed recommendations and left
+the rest as it was. None of this changes the format, the compiler or the engine. What the user chose:
+- **Play waits** for an edit on its way to the song (the light's section above).
+- **The light shows an older image playing** as a ring, and says so in its list.
+- **The app serves DejaVu Sans** (the editor, above).
+- **CI retries a failed test once**, and a test that passes only on its retry still fails the run, so a flake is named, not merged.
+- Left as they were: the sample rate stays the device's, a meter's held peak has no reset of its own, the light doesn't cover the
+  server's work, and CI doesn't run a PR's tests again.
+
+Choices made here that the user hasn't weighed in on:
+- **Until the song has compiled once**, the Patch view says it is finding where the patch plays and shows no Controls, rather than
+  that no track plays it with the patch's defaults, which the track's values then replaced.
+- **What arrives late keeps its room:** a strip's scope and the Patch view's track scope are placeholders of their size until audio
+  starts, and the probe hint keeps its line while it doesn't apply.
+- **The fonts** are DejaVu 2.37 from Ubuntu 24.04, the version CI's runner has, cut to Latin, Greek and the blocks the app's symbols come
+  from (`web/scripts/SubsetFonts.py`), about 70 KB a face. The page waits for them before it counts as hydrated.
+- **The engine's rate and tick** are on the state indicator (`data-rate`, `data-tick`), and the rate is said under the light's list.
 
 **Built from the postmortem's next wave** (revision 29), as section 19 describes. The user took the postmortem's twelve decisions for
 the wave as it recommended: + Track makes a clip (1); audio starts on the first click or key, so Start audio goes (2); one Vel (3);

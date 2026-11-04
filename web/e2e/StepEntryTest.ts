@@ -1,28 +1,11 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
 import { oneBarClip } from './NewSong.ts';
-import { loudest } from './Engine.ts';
+import { loudest, newestPlays } from './Engine.ts';
 import { openView } from './Views.ts';
-
-// A page load waits until the page has hydrated, as AppTest.ts does: what is typed into it before then is lost.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
 
 // Wide enough that the browser, where a new timeline is made, sits beside the page.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const BAR = 1920; // Ticks in a bar at a new timeline's 480 ppq
 // The piano keys by where they are, as KeyboardKeys.ts has them, from the lowest C shown, which is C3.
@@ -57,14 +40,6 @@ async function stepClip(page: Page, name: string) {
 	await expect(page.getByTestId(`placement-${track}-0`)).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 	return track;
-}
-
-// Where a click at this tick lands in the roll, on the row of this pitch.
-async function rollPoint(page: Page, tick: number, note: number) {
-	const roll = page.getByTestId('roll');
-	const box = (await roll.boundingBox())!;
-	const key = (await page.getByTestId(`key-${note}`).boundingBox())!;
-	return { x: box.x + tick * Number(await roll.getAttribute('data-per-tick')) + 3, y: key.y + key.height / 2 };
 }
 
 test('R and the Step toggle turn step entry on and off, and a field or the Patch view keeps its R', async ({
@@ -201,7 +176,7 @@ test('→ alone rests, Backspace steps back, a click moves the cursor, and neith
 	// Draw length and deletes nothing.
 	await page.keyboard.press('a');
 	const at = await rollPoint(page, 1440, 60);
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	await expect(cursor(page)).toHaveAttribute('data-tick', '1440');
 	await expect(notes(page)).toHaveCount(1);
 	await page.keyboard.press('Backspace');
@@ -276,7 +251,7 @@ test('C and V set the velocity of new notes, stepped or clicked, and Mod with th
 
 	await page.keyboard.press('r');
 	const at = await rollPoint(page, 960, 60);
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	expect((await written(page)).at(-1)).toEqual([960, 60, 480, 80]);
 
 	// Typed, it stays from 1 to 127, and a field keeps its C and V.
@@ -337,7 +312,7 @@ test('the keys still sound on the chosen track while they write', async ({ page 
 	await page.keyboard.press('r');
 	await expect(cursor(page)).toHaveAttribute('data-tick', '0');
 	await page.keyboard.down('d'); // E3, which the clip hasn't at its start. It starts audio, as a click on a key does.
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await newestPlays(page);
 	// A pluck dies away while its key is held, and the meter holds the loudest since the image began.
 	await expect
 		.poll(() => loudest(page.getByRole('meter', { name: 'Level of Pluck' })), { timeout: 8000 })

@@ -45,13 +45,22 @@ class FakeEngine {
 const report = (ok: boolean, length = 1920): CompileReport =>
 	({ ok, programs: [{ length_ticks: length, tracks: [] }] }) as unknown as CompileReport;
 
-// A compiler that answers each request with a report made of it: a request with "bad" in it doesn't compile.
+// A compiler that answers each request with a report made of it: a request with "bad" in it doesn't compile. Held, it keeps
+// its answers until the test lets them go, so a test can order a compile against what happens meanwhile.
 class FakeCompiler implements Compiles {
 	asked: string[] = [];
+	hold = false;
+	#held: (() => void)[] = [];
 	compile = async (request: string): Promise<Compiled | null> => {
 		this.asked.push(request);
+		if (this.hold) await new Promise<void>((answer) => this.#held.push(answer));
 		return { report: report(!request.includes('bad')), image: new Uint8Array() };
 	};
+	answer() {
+		const held = this.#held;
+		this.#held = [];
+		for (const answer of held) answer();
+	}
 	close = () => {};
 }
 
@@ -112,6 +121,23 @@ describe('compiling', () => {
 		made.key = 'timeline:b';
 		await compiling;
 		expect(s.song).toBeNull();
+	});
+
+	it('keeps the light on while a compile is on its way, though a compile with nothing new to send finishes first', async () => {
+		const { it: s, compiler, made } = session();
+		compiler.hold = true;
+		made.song = 'song 2';
+		s.schedule('song');
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS); // Sent, and its answer held
+		expect(compiler.asked).toEqual(['song 2']);
+		s.schedule('song'); // As Save does: the request is the one already sent
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS);
+		expect(compiler.asked).toEqual(['song 2']);
+		expect(s.compiling.song).toBe(true);
+		compiler.answer();
+		await settled();
+		expect(s.compiling.song).toBe(false);
+		expect(s.song?.report.ok).toBe(true);
 	});
 
 	it('loads only once audio has started, and then what is wanted', async () => {
@@ -220,6 +246,89 @@ describe('what plays', () => {
 		expect(engine.calls).toContain('on 1 60');
 		expect(engine.calls).not.toContain('on 0 60');
 		expect(s.want).toBe('song');
+	});
+
+	it('waits with Play for an edit on its way, so the newest image plays from the start', async () => {
+		const { it: s, engine, made } = await songLive();
+		made.song = 'song 2';
+		s.schedule('song');
+		s.play();
+		expect(engine.calls).toEqual([]);
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS);
+		expect(engine.calls).toEqual([]); // Compiled and on its way to the engine
+		engine.goLive();
+		expect(engine.calls).toEqual(['play']);
+	});
+
+	it('lets Play go to the image playing once the edit is refused', async () => {
+		const { it: s, engine, made } = await songLive();
+		made.song = 'bad song';
+		s.schedule('song');
+		s.play();
+		expect(engine.calls).toEqual([]);
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS);
+		expect(engine.calls).toEqual(['play']);
+	});
+
+	it('sends keys at once while an edit compiles', async () => {
+		const { it: s, engine } = await songLive();
+		s.schedule('song');
+		s.controls.noteOn(0, 60, 100);
+		expect(engine.calls).toEqual(['on 0 60']);
+	});
+
+	it("doesn't let the last song's image take Play once another song opens", async () => {
+		const { it: s, engine, made } = await songLive();
+		made.key = 'timeline:b';
+		made.song = 'song b';
+		s.songChanged();
+		expect(s.live).toBeNull();
+		engine.calls = [];
+		s.play();
+		expect(engine.calls).toEqual([]);
+		s.schedule('song');
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS);
+		engine.goLive();
+		expect(s.live).toBe('song');
+		expect(engine.calls).toEqual(['play']);
+	});
+
+	it("doesn't count an image of the last song, arriving late, as the song open", async () => {
+		const { it: s, engine, made, compiler } = await songLive();
+		made.song = 'song a, edited';
+		s.schedule('song');
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS); // Song a's edit, on its way to the engine
+		made.key = 'timeline:b';
+		s.songChanged();
+		engine.goLive(); // Song a's image arrives after song b opened
+		expect(s.live).toBeNull();
+		expect(compiler.asked.at(-1)).toBe('song a, edited');
+	});
+
+	it('says whether what is heard is the newest edit', async () => {
+		const { it: s, engine, made } = session();
+		s.schedule('song');
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS);
+		expect(s.heard).toBe('none'); // No audio yet
+		s.use('song');
+		await settled();
+		expect(s.heard).toBe('none'); // On its way
+		engine.goLive();
+		expect(s.heard).toBe('newest');
+		made.song = 'song 2';
+		s.schedule('song');
+		expect(s.heard).toBe('older'); // An edit compiling
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS);
+		expect(s.heard).toBe('older'); // Its image on its way
+		engine.goLive();
+		expect(s.heard).toBe('newest');
+		made.song = 'bad song';
+		s.schedule('song');
+		await vi.advanceTimersByTimeAsync(COMPILE_WAIT_MS);
+		expect([s.busy, s.heard]).toEqual([false, 'older']); // Refused, so the image before it plays
+		made.key = 'timeline:b';
+		s.songChanged();
+		expect(s.heard).toBe('none');
 	});
 
 	it('forgets the last song when another opens', async () => {

@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page } from './Fixtures.ts';
 
 // The top bar's controls, which other tests reach for too.
 

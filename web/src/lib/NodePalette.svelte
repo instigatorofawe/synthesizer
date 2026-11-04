@@ -162,7 +162,7 @@
 	}
 	.type {
 		color: var(--muted);
-		font-family: ui-monospace, monospace;
+		font-family: 'App Mono', monospace;
 		font-size: 0.75rem;
 		align-self: center;
 	}

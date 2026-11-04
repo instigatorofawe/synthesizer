@@ -61,6 +61,8 @@ export const isInsert = (graph: Graph) => graph.nodes.some((node) => node.type =
 // Where the patch panel's keys play. A patch a track plays is heard there, in the song with its mix and inserts, and the
 // selected track wins when several play it. A track the image leaves out, because none of its notes are placed, can't be.
 // A voice no track plays is heard on its own. An insert has no notes of its own, so it is only heard on what it's inserted on.
+// Until the song has compiled once (`compiled`), which track plays a patch the song uses isn't known: the Patch view says so,
+// rather than that no track plays it, and shows no Controls, so it never shows the patch's defaults for the track's values.
 export type Hearing =
 	| { kind: 'song'; track: number; slot: number; id: number; name: string }
 	| { kind: 'alone'; track: string | null } // The track that plays it, which has no notes yet, if one does
@@ -71,11 +73,14 @@ export function hearing(
 	program: ProgramReport | null,
 	patch: PatchLike | null,
 	selected: number | null,
-	canBeAlone: boolean
+	canBeAlone: boolean,
+	compiled = true
 ): Hearing {
 	if (!patch) return { kind: 'none', why: 'No patch is open.' };
 	const uses = doc ? patchUses(doc, patch.id) : [];
 	const voices = uses.flatMap((use) => (use.kind === 'voice' ? [use] : []));
+	if (!program && !compiled && voices.length)
+		return { kind: 'none', why: 'The song is compiling, to find where it plays.' };
 	voices.sort((a, b) => Number(b.track.id === selected) - Number(a.track.id === selected));
 	for (const use of voices) {
 		const index = program?.tracks.find((t) => t.id === use.track.id)?.index;

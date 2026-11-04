@@ -1,27 +1,11 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
 import { openView } from './Views.ts';
 
 // What the views gained that needed no decision: the ruler and song lanes stay in sight, the roll has a ruler and triplets,
 // the strip and lanes fold, lanes show where a click adds, a patch goes on the chosen track, values show on nodes and drag,
 // the keys can go full width, and the address keeps Expand, the chosen node and the JSON tab. At 1280 by 800.
 
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
 test.use({ viewport: { width: 1280, height: 800 } });
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 const sideTab = (page: Page, name: 'Node' | 'Patch' | 'JSON') =>

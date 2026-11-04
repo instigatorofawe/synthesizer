@@ -42,5 +42,40 @@ export default defineConfig(
 	{
 		files: ['static/worklet/**/*.js'],
 		languageOptions: { globals: { ...globals.audioWorklet } }
+	},
+	{
+		// Every e2e file takes test and expect from Fixtures.ts, which gives each test a fresh library and a page that waits to
+		// hydrate. Only types may come from Playwright directly.
+		files: ['e2e/**/*.ts'],
+		ignores: ['e2e/Fixtures.ts', 'e2e/GlobalSetup.ts'],
+		rules: {
+			'no-restricted-syntax': [
+				'error',
+				{
+					// How many images or compiles an edit makes depends on how quickly things came (Engine.ts, rule 2).
+					selector:
+						"CallExpression[callee.property.name='toHaveText'][arguments.0.value=/^[0-9]+$/][callee.object.arguments.0.callee.property.name='getByTestId'][callee.object.arguments.0.arguments.0.value=/^(generation|compiles)$/]",
+					message:
+						'Counting images or compiles: read the count before, act, and wait for it to change (swappedFrom), or for newestPlays. Where the count is the claim, say why in a disable comment.'
+				},
+				{
+					// Ctrl on Linux and Windows, ⌘ on a Mac: a key named for one platform tests nothing on the other.
+					selector: 'Literal[value=/^(Control|Meta)\\+/]',
+					message: "Use 'ControlOrMeta+…', which is Mod on every platform."
+				}
+			],
+			'@typescript-eslint/no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: '@playwright/test',
+							message: "Import from './Fixtures.ts', which gives each test a fresh library.",
+							allowTypeImports: true
+						}
+					]
+				}
+			]
+		}
 	}
 );

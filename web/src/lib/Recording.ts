@@ -5,6 +5,7 @@
 // The worklet says when each key went down and came up, as the tick of the song that was being heard then, so the output's
 // latency and the time a key takes to reach it don't move a note. These are pure functions from those stamps and a document
 // to a document, so they can be tested without a page.
+import { withKitSlots } from '#lib/Kit.ts';
 import { barsOf, type Bars } from '#lib/TimeSignature.ts';
 import type { Timeline } from '#lib/Schema.ts';
 import {
@@ -89,8 +90,17 @@ function withNote(clip: Clip, note: Note): Clip {
 // clip it plays there, so a note in a repeat or round a loop goes into the clip once. Played past the end of the placement the
 // take wrote into last, it grows that clip to the bar that holds it, if nothing else plays it and growing runs into nothing,
 // as a clicked note does. Anywhere else it starts a clip of its own, of whole bars in the gap it was played in, which later
-// notes grow. Null if it has nowhere to go.
+// notes grow. Null if it has nowhere to go. On a kit track the note plays its key's slot, as every edit's notes do (Kit.ts).
 export function recordNote(
+	doc: Timeline,
+	take: Take,
+	note: { tick: number; note: number; vel: number; dur: number }
+): { doc: Timeline; take: Take; clip: string } | null {
+	const written = writeNote(doc, take, note);
+	return written && { ...written, doc: withKitSlots(written.doc) };
+}
+
+function writeNote(
 	doc: Timeline,
 	take: Take,
 	note: { tick: number; note: number; vel: number; dur: number }

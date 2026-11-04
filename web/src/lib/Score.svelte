@@ -2,6 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { on } from 'svelte/events';
 	import type { Key } from '#lib/KeySignature.ts';
+	import { kitKeys, type Kit } from '#lib/Kit.ts';
 	import {
 		signatureOf,
 		spell,
@@ -41,10 +42,15 @@
 	// length and on the notes' Snap, and a ghost under the pointer says what a click would add. A click on a note chooses it,
 	// ↑ and ↓ move what is chosen a semitone, or an octave with Shift, ← and → a Snap step, and Delete takes it away. Step entry
 	// writes at a cursor on the staff with the piano keys, as it does in the roll (StepEntry.ts), and a click there moves it.
+	//
+	// On a kit track the score does the least that is right, since the roll is where drums are written: it writes the keys as
+	// pitches, as a score does without a percussion staff, says so, and names each note's sound where it says what a note is.
+	// What it writes plays the kit's sounds, since the editor gives every edit's notes their kit's slots (Kit.ts).
 	let {
 		clip,
 		bars,
 		keyAt,
+		kit = null,
 		playhead = null,
 		playing = false,
 		chosen = new Set<number>(),
@@ -65,6 +71,7 @@
 		clip: Clip;
 		bars: Bars; // The song's bars in the clip's own ticks (TimeSignature.ts)
 		keyAt: (tick: number) => Key; // The key at a tick of the clip
+		kit?: Kit | null; // The kit the clip's notes play, on a kit track
 		playhead?: number | null; // In ticks from the clip's start
 		playing?: boolean; // Whether the song is playing, which the score follows while it plays this clip
 		chosen?: ReadonlySet<number>; // Indices into the clip's notes
@@ -480,8 +487,12 @@
 		setTimeout(() => onaudition(note, false), AUDITION_MS);
 	}
 
+	// A note's sound, on a kit track, after its pitch.
+	const sounds = $derived(kit ? kitKeys(kit) : null);
+	const soundOf = (note: number) => (sounds ? ` · ${sounds.get(note)?.name ?? 'no sound'}` : '');
+
 	const describe = (note: Pick<Note, 'tick' | 'note' | 'dur'>) =>
-		`${spellingText(spell(note.note, keyAt(note.tick)))} · ${noteValue(note.dur, bars.ppq)} · ${bars.position(note.tick)}`;
+		`${spellingText(spell(note.note, keyAt(note.tick)))}${soundOf(note.note)} · ${noteValue(note.dur, bars.ppq)} · ${bars.position(note.tick)}`;
 
 	// A note added where it was aimed, which grows the clip if it is past the end, unless that would run it into the next clip.
 	function addAt(target: Aim) {
@@ -660,7 +671,7 @@
 			.find((e) => e.pitches.some((p) => chosen.has(p.index)));
 		const pitch = event?.pitches.find((p) => chosen.has(p.index));
 		return pitch && event
-			? `${spellingText(pitch.spelling)} · ${noteValue(event.length, bars.ppq)} · ${bars.position(event.start)}`
+			? `${spellingText(pitch.spelling)}${soundOf(notes[0].note)} · ${noteValue(event.length, bars.ppq)} · ${bars.position(event.start)}`
 			: '';
 	});
 </script>
@@ -723,7 +734,18 @@
 			style:height="{head.height + 10}px"
 		></div>
 	{/if}
-	{#if told}<p class="told" data-testid="score-told">{told}</p>{/if}
+	<!-- Below the page, so the ghost, the caret and the playhead, which are placed from the page's top, stay where they are. -->
+	{#if told || kit}
+		<div class="foot">
+			{#if kit}
+				<p class="kit" data-testid="score-kit">
+					This track is a kit, so the score writes its keys as pitches. The roll names each key's sound, and is the
+					place to write drums.
+				</p>
+			{/if}
+			{#if told}<p class="told" data-testid="score-told">{told}</p>{/if}
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -777,16 +799,24 @@
 		background: var(--accent);
 		pointer-events: none;
 	}
-	.told {
+	.foot {
 		position: sticky;
 		bottom: 0;
+		background: var(--bg, #0d1117);
+	}
+	.told {
 		margin: 0;
 		padding: 0.2rem 0.6rem;
-		background: var(--bg, #0d1117);
 		font-size: 0.8rem;
 	}
 	.muted {
 		margin: 1rem;
 		color: var(--muted);
+	}
+	.kit {
+		margin: 0;
+		padding: 0.2rem 0.6rem;
+		color: var(--muted);
+		font-size: 0.8rem;
 	}
 </style>

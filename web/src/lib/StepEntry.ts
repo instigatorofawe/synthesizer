@@ -135,7 +135,7 @@ export function repitch(clip: Clip, cursor: Cursor, by: number): { clip: Clip; c
 	for (const written of last.notes) {
 		const at = notes.findIndex((note) => same(note, written));
 		if (at < 0) continue; // Changed since, so no longer the step's to fix
-		notes[at] = { ...written, note: written.note + by };
+		notes[at] = { ...notes[at], note: written.note + by }; // As the clip has it, with the slot a kit gave it (Kit.ts)
 		moved.push(notes[at]);
 	}
 	if (!moved.length) return { clip, cursor };

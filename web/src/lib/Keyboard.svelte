@@ -26,7 +26,8 @@
 		velocity = $bindable(100),
 		onhold = () => {},
 		onletgo = () => {},
-		stripIn = null
+		stripIn = null,
+		sounds = null
 	}: {
 		low?: number;
 		octaves?: number;
@@ -41,7 +42,12 @@
 		onhold?: (on: boolean) => void;
 		onletgo?: () => void; // Esc: let go of every note Latch keeps
 		stripIn?: HTMLElement | null; // The Patch view's strip, which the keys are drawn into, wider and bigger, while it is open
+		// Where the keys play a kit track: each key's sound, by name, as the roll names them. A key with none is dimmed.
+		sounds?: ReadonlyMap<number, string> | null;
 	} = $props();
+
+	// What a key is called where it is named: its note, and on a kit track its sound.
+	const named = (note: number) => (sounds ? `${noteName(note)}, ${sounds.get(note) ?? 'no sound'}` : noteName(note));
 
 	// In the strip, the keys are bigger and as many octaves as fit, with those the computer keys play in the middle.
 	let stripWidth = $state(0);
@@ -200,11 +206,12 @@
 				class:black={isBlackKey(note)}
 				class:down={held.has(note)}
 				class:latched={latched.has(note) && !held.has(note)}
+				class:nosound={!!sounds && !sounds.has(note)}
 				style:left="{isBlackKey(note) ? left(note) : whites.indexOf(note) * WHITE}px"
 				aria-label={noteName(note)}
 				aria-keyshortcuts={keyFor(note, base) || undefined}
 				tabindex={note === tabbable ? 0 : -1}
-				title={keyFor(note, base) ? `${noteName(note)} (${keyFor(note, base)})` : noteName(note)}
+				title={keyFor(note, base) ? `${named(note)} (${keyFor(note, base)})` : named(note)}
 				{disabled}
 				onpointerdown={(event) => press(note, event.timeStamp)}
 				onpointerup={(event) => release(note, event.timeStamp)}
@@ -305,6 +312,10 @@
 	}
 	.key:disabled {
 		opacity: 0.5;
+	}
+	/* A key the kit track has no sound for. */
+	.key.nosound:not(:disabled) {
+		opacity: 0.45;
 	}
 	/* In the Patch view's strip: bigger keys, their notes' names and the computer keys that play them. */
 	.keyboard.wide {

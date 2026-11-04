@@ -1,30 +1,89 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { on } from 'svelte/events';
 	import type { Key } from '#lib/KeySignature.ts';
-	import { transcribe, spellingText, type Clef, type Event, type Measure, type Score } from '#lib/Notation.ts';
+	import {
+		signatureOf,
+		spell,
+		spellingText,
+		transcribe,
+		type Clef,
+		type Event,
+		type Letter,
+		type Measure,
+		type Score
+	} from '#lib/Notation.ts';
+	import { matches, typingIn } from '#lib/Shortcuts.ts';
+	import {
+		START,
+		chordEnd,
+		lengthen as lengthenHeld,
+		moveTo,
+		press,
+		release,
+		repitch,
+		rest,
+		stepBack,
+		write,
+		type Chord,
+		type Cursor
+	} from '#lib/StepEntry.ts';
 	import type { Bars } from '#lib/TimeSignature.ts';
-	import type { Clip } from '#lib/TimelineEdit.ts';
+	import { addNote, growToHold, moveNotes, removeNotes, type Clip, type Note } from '#lib/TimelineEdit.ts';
 	import { noteValue } from '#lib/Units.ts';
 
 	// A clip's notes as a score, beside the roll as a view of the same notes: Notation.ts says what is written, and this draws
 	// it with VexFlow, which is loaded with its music font, Bravura, the first time a score is shown, from the app itself. Systems
 	// wrap to the width there is, each starting with its clefs and key, and a click on a note chooses it and says what it is. The
 	// score is a reading of the notes, so a note played a little early reads as on the beat, while the roll shows where it is.
+	//
+	// Notes go in as a score editor takes them. A click on a line or a space adds that note, in the key, as long as the Draw
+	// length and on the notes' Snap, and a ghost under the pointer says what a click would add. A click on a note chooses it,
+	// ↑ and ↓ move what is chosen a semitone, or an octave with Shift, ← and → a Snap step, and Delete takes it away. Step entry
+	// writes at a cursor on the staff with the piano keys, as it does in the roll (StepEntry.ts), and a click there moves it.
 	let {
 		clip,
 		bars,
 		keyAt,
 		playhead = null,
+		playing = false,
 		chosen = new Set<number>(),
-		onchoose = () => {}
+		draw = 480,
+		velocity = 100,
+		grid = 120,
+		readonly = false,
+		active = true,
+		stepping = $bindable(false),
+		cursors = new Map<string, Cursor>(),
+		canAudition = false,
+		cangrow = () => true,
+		onchoose = () => {},
+		onchange = () => {},
+		onaudition = () => {},
+		onsay = () => {}
 	}: {
 		clip: Clip;
 		bars: Bars; // The song's bars in the clip's own ticks (TimeSignature.ts)
 		keyAt: (tick: number) => Key; // The key at a tick of the clip
 		playhead?: number | null; // In ticks from the clip's start
+		playing?: boolean; // Whether the song is playing, which the score follows while it plays this clip
 		chosen?: ReadonlySet<number>; // Indices into the clip's notes
+		draw?: number; // How long a note added is, in ticks: the Draw length
+		velocity?: number;
+		grid?: number; // The notes' Snap, in ticks
+		readonly?: boolean;
+		active?: boolean; // Whether keys are for the score, which they are while the Song view is on screen
+		stepping?: boolean;
+		cursors?: Map<string, Cursor>; // Step entry's cursor in each clip, shared with the roll
+		canAudition?: boolean;
+		cangrow?: (length: number) => boolean; // Whether the clip can be this long without running into the clip after it
 		onchoose?: (indices: Set<number>) => void;
+		onchange?: (clip: Clip) => void;
+		onaudition?: (note: number, on: boolean) => void;
+		onsay?: (text: string) => void;
 	} = $props();
+
+	const AUDITION_MS = 250;
 
 	type VexFlow = typeof import('vexflow/bravura');
 
@@ -66,6 +125,7 @@
 		y: number;
 		height: number;
 		at: [number, number][];
+		staves: { clef: Clef; top: number; spacing: number }[]; // Each staff's top line, and the space between its lines
 	};
 	let placed = $state.raw<Placed[]>([]);
 	let height = $state(0);
@@ -90,7 +150,7 @@
 	// The page is VexFlow's to draw into, and is drawn again whenever what it shows changes.
 	function engrave(page: HTMLElement) {
 		if (!vexflow || width <= 0) return;
-		draw(page, vexflow, written, width, chosen);
+		engraveInto(page, vexflow, written, width, chosen);
 	}
 
 	// How wide a measure's notes want to be: room for its most crowded voice.
@@ -99,7 +159,7 @@
 		return 36 + 30 * most;
 	}
 
-	function draw(host: HTMLElement, vf: VexFlow, score: Score, available: number, picked: ReadonlySet<number>) {
+	function engraveInto(host: HTMLElement, vf: VexFlow, score: Score, available: number, picked: ReadonlySet<number>) {
 		const {
 			Renderer,
 			Stave,
@@ -155,7 +215,7 @@
 		});
 
 		height = TOP + rows.length * systemHeight;
-		const renderer = new Renderer(host, Renderer.Backends.SVG);
+		const renderer = new Renderer(host as HTMLDivElement, Renderer.Backends.SVG);
 		renderer.resize(available, height);
 		const context = renderer.getContext();
 		context.setFillStyle(colour);
@@ -284,7 +344,20 @@
 					}
 				}
 				at.sort((a, b) => a[0] - b[0]);
-				where.push({ start: measure.start, end: measure.end, x0: start, x1: x + w, y, height: STAFF * staves, at });
+				where.push({
+					start: measure.start,
+					end: measure.end,
+					x0: start,
+					x1: x + w,
+					y,
+					height: STAFF * staves,
+					at,
+					staves: measureStaves.map((stave, staff) => ({
+						clef: score.clefs[staff],
+						top: stave.getYForLine(0),
+						spacing: stave.getSpacingBetweenLines()
+					}))
+				});
 				x += w;
 			});
 		});
@@ -326,36 +399,260 @@
 		drawn = untrack(() => drawn) + 1;
 	}
 
-	// The playhead's place on the score: between the notes either side of it in its measure.
-	const head = $derived.by(() => {
-		if (playhead === null) return null;
-		const measure = placed.find((m) => playhead >= m.start && playhead < m.end) ?? null;
+	// Where a tick is across the score: between the notes either side of it in its measure, as they were spaced.
+	function xOf(tick: number): { x: number; measure: Placed } | null {
+		const measure = placed.find((m) => tick >= m.start && tick < m.end) ?? null;
 		if (!measure) return null;
 		const points: [number, number][] = [[measure.start, measure.x0], ...measure.at, [measure.end, measure.x1]];
-		let x = measure.x0;
 		for (let i = 0; i < points.length - 1; ++i) {
 			const [t0, x0] = points[i];
 			const [t1, x1] = points[i + 1];
-			if (playhead >= t0 && playhead <= t1) {
-				x = t1 > t0 ? x0 + ((playhead - t0) / (t1 - t0)) * (x1 - x0) : x0;
-				break;
-			}
+			if (tick >= t0 && tick <= t1) return { x: t1 > t0 ? x0 + ((tick - t0) / (t1 - t0)) * (x1 - x0) : x0, measure };
 		}
-		return { x, y: measure.y, height: measure.height };
+		return { x: measure.x0, measure };
+	}
+
+	// And back: the tick at a place across a measure.
+	function tickAt(measure: Placed, x: number): number {
+		const points: [number, number][] = [[measure.start, measure.x0], ...measure.at, [measure.end, measure.x1]];
+		if (x <= measure.x0) return measure.start;
+		for (let i = 0; i < points.length - 1; ++i) {
+			const [t0, x0] = points[i];
+			const [t1, x1] = points[i + 1];
+			if (x >= x0 && x <= x1) return x1 > x0 ? t0 + ((x - x0) / (x1 - x0)) * (t1 - t0) : t0;
+		}
+		return measure.end;
+	}
+
+	const head = $derived.by(() => {
+		if (playhead === null) return null;
+		const at = xOf(playhead);
+		return at && { x: at.x, y: at.measure.y, height: at.measure.height };
 	});
 
-	function click(event: MouseEvent) {
+	// While the song plays, the score keeps the playhead's system in sight, as the roll keeps the playhead.
+	$effect(() => {
+		if (!playing || !head || !scoreElement) return;
+		const { scrollTop, clientHeight } = untrack(() => ({
+			scrollTop: scoreElement!.scrollTop,
+			clientHeight: scoreElement!.clientHeight
+		}));
+		if (head.y - 20 < scrollTop || head.y + head.height + 20 > scrollTop + clientHeight) {
+			scoreElement.scrollTop = Math.max(0, head.y - 30);
+		}
+	});
+
+	// ------------------------------------------------------------------------------------------------------- adding notes
+
+	const LETTERS: Letter[] = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+	const NATURAL = [0, 2, 4, 5, 7, 9, 11];
+	// The line each clef's top line is, as a step of the scale counted from C0: F5 on the treble staff, A3 on the bass.
+	const TOP_LINE: Record<Clef, number> = { treble: 5 * 7 + 3, bass: 3 * 7 + 5 };
+
+	// What is under the pointer: the measure, the tick on Snap, the staff line or space, and the note it is in the key there.
+	type Aim = { measure: Placed; tick: number; note: number; x: number; y: number };
+	let aim = $state.raw<Aim | null>(null);
+
+	function aimAt(event: { clientX: number; clientY: number }, page: HTMLElement): Aim | null {
+		const box = page.getBoundingClientRect();
+		const [px, py] = [event.clientX - box.left, event.clientY - box.top];
+		const measure = placed.find((m) => px >= m.x0 - 6 && px < m.x1 && py >= m.y - 40 && py < m.y + m.height + 20);
+		if (!measure) return null;
+		// The staff nearest the pointer, and the line or space on it, a half space at a time.
+		const staff = measure.staves.reduce((a, b) =>
+			Math.abs(py - (a.top + 2 * a.spacing)) <= Math.abs(py - (b.top + 2 * b.spacing)) ? a : b
+		);
+		const steps = Math.round((py - staff.top) / (staff.spacing / 2));
+		const degree = TOP_LINE[staff.clef] - steps;
+		const letter = LETTERS[((degree % 7) + 7) % 7];
+		const octave = Math.floor(degree / 7);
+		const tick = Math.min(Math.max(measure.start, bars.snap(tickAt(measure, px), grid)), measure.end - 1);
+		const alter = signatureOf(keyAt(tick).fifths)[letter];
+		const note = (octave + 1) * 12 + NATURAL[LETTERS.indexOf(letter)] + alter;
+		if (note < 0 || note > 127) return null;
+		const x = xOf(tick)?.x ?? px;
+		return { measure, tick, note, x, y: staff.top + (steps * staff.spacing) / 2 };
+	}
+
+	function audition(note: number) {
+		if (!canAudition) return;
+		onaudition(note, true);
+		setTimeout(() => onaudition(note, false), AUDITION_MS);
+	}
+
+	const describe = (note: Pick<Note, 'tick' | 'note' | 'dur'>) =>
+		`${spellingText(spell(note.note, keyAt(note.tick)))} · ${noteValue(note.dur, bars.ppq)} · ${bars.position(note.tick)}`;
+
+	// A note added where it was aimed, which grows the clip if it is past the end, unless that would run it into the next clip.
+	function addAt(target: Aim) {
+		const note: Note = { tick: target.tick, note: target.note, vel: velocity, dur: draw };
+		const grown = growToHold(clip, note.tick, bars);
+		if (grown !== clip && !cangrow(grown.length)) {
+			onsay("The clip can't grow to hold that note without running into the next clip on its track.");
+			return;
+		}
+		onchange(addNote(grown, note));
+		onchoose(new Set([clip.notes.length]));
+		audition(note.note);
+	}
+
+	function click(event: MouseEvent & { currentTarget: HTMLElement }) {
+		scoreElement?.focus({ preventScroll: true });
 		const target = (event.target as Element).closest('[data-notes]');
-		if (!target) {
+		if (target) {
+			const indices = (target.getAttribute('data-notes') ?? '').split(' ').map(Number);
+			onchoose(event.shiftKey ? new Set([...chosen, ...indices]) : new Set(indices));
+			const first = clip.notes[indices[0]];
+			if (first) audition(first.note);
+			return;
+		}
+		const target2 = aimAt(event, event.currentTarget);
+		if (stepping && target2) {
+			moveCursor(moveTo(target2.tick));
+			return;
+		}
+		if (!target2 || readonly) {
 			onchoose(new Set());
 			return;
 		}
-		const indices = (target.getAttribute('data-notes') ?? '').split(' ').map(Number);
-		const next = event.shiftKey ? new Set([...chosen, ...indices]) : new Set(indices);
-		onchoose(next);
+		addAt(target2);
 	}
 
+	function hover(event: PointerEvent & { currentTarget: HTMLElement }) {
+		const over = (event.target as Element).closest('[data-notes]');
+		aim = over ? null : aimAt(event, event.currentTarget);
+	}
+
+	// --------------------------------------------------------------------------------------------------- what is chosen
+
+	let scoreElement = $state<HTMLDivElement>();
+
+	function keydown(event: KeyboardEvent) {
+		if (readonly && !matches(event, 'escape') && !matches(event, 'select-all')) return;
+		const by = (id: Parameters<typeof matches>[1]) => matches(event, id);
+		const picked = [...chosen].filter((i) => clip.notes[i]);
+		if (by('select-all')) onchoose(new Set(clip.notes.map((_, i) => i)));
+		else if (by('escape')) onchoose(new Set());
+		else if (!picked.length) return;
+		else if (by('roll.delete') || by('roll.backspace')) {
+			onchange(removeNotes(clip, new Set(picked)));
+			onchoose(new Set());
+		} else if (by('roll.up') || by('roll.down') || by('roll.octave-up') || by('roll.octave-down')) {
+			const semitones = (event.code === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1);
+			onchange(moveNotes(clip, new Set(picked), 0, semitones));
+			audition(Math.min(127, Math.max(0, clip.notes[picked[0]].note + semitones)));
+		} else if (by('roll.earlier') || by('roll.later')) {
+			const from = Math.min(...picked.map((i) => clip.notes[i].tick));
+			const step = bars.step(from, grid) * (event.code === 'ArrowLeft' ? -1 : 1);
+			onchange(moveNotes(clip, new Set(picked), Math.max(-from, step), 0));
+		} else return;
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
+	// ------------------------------------------------------------------------------------------------------- step entry
+
+	// Step entry writes as it does in the roll, at the same cursor, which each clip keeps. What can't be written, past the
+	// end of a clip that can't grow there, says so and is left unwritten.
+	let cursor = $state.raw<Cursor>(untrack(() => cursors.get(clip.id) ?? START));
+	let chord = $state.raw<Chord | null>(null);
+	const refused = new Set<number>();
+	$effect(() => {
+		cursor = cursors.get(clip.id) ?? START;
+	});
+
+	function moveCursor(next: Cursor) {
+		cursor = next;
+		cursors.set(clip.id, next);
+	}
+
+	function mayWrite(tick: number) {
+		const grown = growToHold(clip, tick, bars);
+		if (grown === clip || cangrow(grown.length)) return true;
+		onsay("The clip can't grow past here without running into the next clip on its track, so nothing was written.");
+		return false;
+	}
+
+	export function stepKey(note: number, on: boolean) {
+		if (!on) {
+			if (refused.delete(note) || !chord?.held.includes(note)) return;
+			chord = release(chord, note);
+			if (!chord.held.length) writeChord(chord);
+			return;
+		}
+		if (!stepping || readonly || !active) return;
+		if (!chord && !mayWrite(cursor.tick)) {
+			refused.add(note);
+			return;
+		}
+		chord = press(chord, cursor, note, draw, velocity);
+	}
+
+	function writeChord(done: Chord) {
+		chord = null;
+		if (!done.notes.length || !mayWrite(done.start)) return;
+		const written = write(clip, cursor, done, bars);
+		onchoose(new Set());
+		moveCursor(written.cursor);
+		onchange(written.clip);
+	}
+
+	function stepKeys(event: KeyboardEvent) {
+		if (!stepping || readonly || !active) return;
+		const target = event.target as Element | null;
+		if (typingIn(target, event.key) || target?.closest?.('[role="menu"], dialog, nav')) return;
+		if (matches(event, 'step.rest')) {
+			if (chord) chord = lengthenHeld(chord, bars.step(chordEnd(chord), grid));
+			else moveCursor(rest(cursor, draw));
+		} else if (matches(event, 'step.back')) {
+			if (chord) chord = null;
+			else {
+				const back = stepBack(clip, cursor, draw);
+				moveCursor(back.cursor);
+				if (back.clip !== clip) onchange(back.clip);
+			}
+		} else if (
+			matches(event, 'step.up') ||
+			matches(event, 'step.down') ||
+			matches(event, 'step.octave-up') ||
+			matches(event, 'step.octave-down')
+		) {
+			if (chord) return;
+			const semitones = matches(event, 'step.up')
+				? 1
+				: matches(event, 'step.down')
+					? -1
+					: matches(event, 'step.octave-up')
+						? 12
+						: -12;
+			const fixed = repitch(clip, cursor, semitones);
+			if (fixed.clip !== clip) {
+				moveCursor(fixed.cursor);
+				onchange(fixed.clip);
+				audition(Math.max(...fixed.cursor.steps.at(-1)!.notes.map((n) => n.note)));
+			}
+		} else if (matches(event, 'escape')) {
+			chord = null;
+			stepping = false;
+		} else return;
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
+	onMount(() => on(window, 'keydown', stepKeys, { capture: true }));
+
+	const caret = $derived.by(() => {
+		if (!stepping) return null;
+		const at = xOf(Math.min(cursor.tick, Math.max(0, clip.length - 1)));
+		if (!at) return null;
+		const past = cursor.tick >= clip.length;
+		return { x: past ? at.measure.x1 : at.x, y: at.measure.y, height: at.measure.height };
+	});
+
 	const told = $derived.by(() => {
+		if (stepping)
+			return `Step at ${bars.position(cursor.tick)}. The keys write there, as long as Draw; → rests, Backspace steps back, Esc leaves.`;
+		if (aim && !readonly) return `A click adds ${describe({ tick: aim.tick, note: aim.note, dur: draw })}`;
 		const notes = [...chosen].map((i) => clip.notes[i]).filter(Boolean);
 		if (notes.length !== 1) return notes.length ? `${notes.length} notes chosen` : '';
 		const event = written.measures
@@ -368,7 +665,17 @@
 	});
 </script>
 
-<div class="score" data-testid="score" bind:clientWidth={width}>
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+<div
+	class="score"
+	data-testid="score"
+	role="application"
+	aria-label="Score"
+	tabindex="0"
+	bind:this={scoreElement}
+	bind:clientWidth={width}
+	onkeydown={keydown}
+>
 	{#if failed}
 		<p class="muted" role="status">The score couldn't be drawn: {failed}</p>
 	{:else if !vexflow}
@@ -384,7 +691,29 @@
 		data-measures={written.measures.length}
 		data-staves={written.clefs.join(' ')}
 		onclick={click}
+		onpointermove={hover}
+		onpointerleave={() => (aim = null)}
 	></div>
+	{#if aim && !readonly && !stepping}
+		<div
+			class="ghost"
+			data-testid="score-ghost"
+			data-tick={aim.tick}
+			data-note={aim.note}
+			style:left="{aim.x - 6}px"
+			style:top="{aim.y - 5}px"
+		></div>
+	{/if}
+	{#if caret}
+		<div
+			class="caret"
+			data-testid="score-cursor"
+			data-tick={cursor.tick}
+			style:left="{caret.x - 1}px"
+			style:top="{caret.y - 14}px"
+			style:height="{caret.height + 28}px"
+		></div>
+	{/if}
 	{#if head}
 		<div
 			class="playhead"
@@ -422,6 +751,25 @@
 	}
 	.page :global([stroke='#444']) {
 		stroke: var(--muted);
+	}
+	.score:focus-visible {
+		outline: 1px solid var(--accent);
+		outline-offset: -1px;
+	}
+	.ghost {
+		position: absolute;
+		width: 12px;
+		height: 10px;
+		border-radius: 50%;
+		background: var(--accent);
+		opacity: 0.45;
+		pointer-events: none;
+	}
+	.caret {
+		position: absolute;
+		width: 3px;
+		background: #e3b341;
+		pointer-events: none;
 	}
 	.playhead {
 		position: absolute;

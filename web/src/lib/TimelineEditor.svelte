@@ -185,6 +185,7 @@
 	let stepping = $state(false);
 	const cursors = new Map<string, Cursor>();
 	let roll = $state<ReturnType<typeof PianoRoll>>();
+	let scoreView = $state<ReturnType<typeof Score>>();
 	let rollBar = $state<HTMLElement | null>(null); // Where in the tab strip the roll draws its toolbar
 	const drawChoices = $derived.by(() => {
 		const lengths = drawLengths(doc.ppq, true, clipBar);
@@ -246,7 +247,6 @@
 	});
 	function showNotes(as: 'roll' | 'score') {
 		noteView = as;
-		if (as === 'score') stepping = false;
 		localStorage.setItem(NOTE_VIEW_KEY, as);
 	}
 	let scoreChosen = $state.raw<Set<number>>(new Set());
@@ -256,13 +256,14 @@
 	});
 
 	// The piano keys write into the roll while step entry is on and the roll shows a clip. The page asks before it routes them.
-	const writing = $derived(stepping && active && !readonly && tab === 'notes' && !!clip && noteView === 'roll');
+	const writing = $derived(stepping && active && !readonly && tab === 'notes' && !!clip);
 	$effect(() => onwriting(writing));
 	$effect(() => () => onwriting(false));
 
 	// A piano key from the page, for step entry to write. The roll ignores it unless it is writing.
 	export function stepKey(note: number, on: boolean) {
-		roll?.stepKey(note, on);
+		if (noteView === 'score') scoreView?.stepKey(note, on);
+		else roll?.stepKey(note, on);
 	}
 
 	// What a take snaps to and writes at, as a clicked note does: the roll's Snap, and the Vel beside the keys.
@@ -1443,7 +1444,7 @@
 						>
 					</div>
 				{/if}
-				{#if tab === 'notes' && clip && !readonly && noteView === 'roll'}
+				{#if tab === 'notes' && clip && !readonly}
 					<button
 						type="button"
 						class="step"
@@ -1476,14 +1477,30 @@
 				{/if}
 				{#if clip && noteView === 'score'}
 					{@const from = rollPlaced?.tick ?? 0}
-					<Score
-						{clip}
-						bars={clipBars}
-						keyAt={(at) => keyAt(doc, from + at)}
-						{playhead}
-						chosen={scoreChosen}
-						onchoose={(indices) => (scoreChosen = indices)}
-					/>
+					{#key clip.id}
+						<Score
+							{clip}
+							bars={clipBars}
+							keyAt={(at) => keyAt(doc, from + at)}
+							{playhead}
+							{playing}
+							chosen={scoreChosen}
+							{draw}
+							{velocity}
+							{grid}
+							{readonly}
+							{active}
+							bind:stepping
+							bind:this={scoreView}
+							{cursors}
+							canAudition={reported !== undefined || auditionByKeys}
+							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
+							onchoose={(indices) => (scoreChosen = indices)}
+							onchange={clipChanged}
+							onaudition={audition}
+							{onsay}
+						/>
+					{/key}
 				{:else if clip}
 					{#key clip.id}
 						<PianoRoll

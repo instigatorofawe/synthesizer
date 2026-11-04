@@ -788,7 +788,8 @@
 		doc: (key) => (saved && timelineDoc && draftKey('timeline', saved.id) === key ? timelineDoc : null),
 		loop: () => (session.looping && timelineDoc ? (session.loop ?? wholeSong(timelineDoc)) : null),
 		write: (doc) => timelineEdited({ text: JSON.stringify(doc, null, 1) }, 'typing'),
-		shown: (track, clip) => void rendered().then(() => songEditor?.reveal({ track, clip }))
+		shown: (track, clip) => void rendered().then(() => songEditor?.reveal({ track, clip })),
+		say: (text) => say(text)
 	};
 	const keepTracks = $derived(take !== null);
 	const takeIndex = $derived(
@@ -1272,6 +1273,27 @@
 		return id;
 	}
 
+	// WAV files dropped on the song, which become an instrument in the library as the browser's Import makes one. The server
+	// answers with the address of the new patch, which is all of it this needs: the timeline editor puts it on a track.
+	async function importForTrack(files: File[]): Promise<string | null> {
+		const body = new FormData();
+		for (const file of files) body.append('files', file);
+		body.set('back', search);
+		const response = await fetch(actionOn(search, 'importSamples'), {
+			method: 'POST',
+			body,
+			headers: { accept: 'application/json', 'x-sveltekit-action': 'true' }
+		});
+		const result = deserialize(await response.text());
+		if (result.type !== 'redirect') {
+			if (result.type === 'failure') await applyAction(result);
+			return null;
+		}
+		const id = new URL(result.location, location.href).searchParams.get('patch');
+		await invalidateAll();
+		return id;
+	}
+
 	// The browser sits beside the views on a wide screen, and folds to a rail of icons when asked. Below 1400 px there isn't the
 	// room, so it is always the rail there, and opens over the views until something in it is chosen.
 	const WIDE = 1400;
@@ -1279,6 +1301,18 @@
 	const wide = $derived(windowWidth === undefined || windowWidth >= WIDE);
 	let browserOpen = $state(true); // On a wide screen, as last left
 	let browserOver = $state(false); // On a narrow one
+	// Over the views, the browser steps out of the way while a patch is dragged out of it, so the song is there to drop it on,
+	// and goes once the drag is over, as it does once a link in it is chosen.
+	let browserLifted = $state(false);
+	function browserDragging(on: boolean) {
+		if (wide) return;
+		if (on)
+			requestAnimationFrame(() => (browserLifted = true)); // Not as the drag starts, which a change to it would end
+		else {
+			browserLifted = false;
+			browserOver = false;
+		}
+	}
 	let shortcutsShown = $state(false); // The sheet ? opens
 	let quickOpen = $state(false); // Mod+K's search
 	let keyStrip = $state<HTMLElement | null>(null); // The Patch view's strip, where the keys are drawn while it is open
@@ -1361,12 +1395,13 @@
 	const undoable = $derived(view === 'patch' ? patchHistory : timelineHistory);
 
 	// A key a field takes, Mod+Z undoing what was typed into it among them, is the field's. So is one in a dialog.
-	const keptBy = (target: EventTarget | null) => typingIn(target) || !!(target as Element | null)?.closest?.('dialog');
+	const keptBy = (event: KeyboardEvent) =>
+		typingIn(event.target, event.key) || !!(event.target as Element | null)?.closest?.('dialog');
 
 	// Keys that move around the page: ` flips views, B folds the browser, and Esc closes a browser open over the views. They
 	// come before the window's keys, which leave a key alone once it has been used here.
 	function pageKeys(event: KeyboardEvent) {
-		if (event.repeat || keptBy(event.target)) return;
+		if (event.repeat || keptBy(event)) return;
 		if (matches(event, 'flip')) {
 			event.preventDefault();
 			void show(view === 'song' ? 'patch' : 'song');
@@ -1394,7 +1429,7 @@
 			if (!(event.target as Element | null)?.closest?.('dialog')) quickOpen = true;
 			return;
 		}
-		if (event.defaultPrevented || keptBy(event.target)) return;
+		if (event.defaultPrevented || keptBy(event)) return;
 		if (matches(event, 'play')) {
 			event.preventDefault(); // Or a button with focus is pressed, and the roll scrolls
 			if (event.repeat) return;
@@ -1419,7 +1454,7 @@
 
 	// Some browsers press a button when Space comes back up, so that is the transport's too.
 	function keyup(event: KeyboardEvent) {
-		if (matches(event, 'play') && !keptBy(event.target)) event.preventDefault();
+		if (matches(event, 'play') && !keptBy(event)) event.preventDefault();
 	}
 
 	function leaving(event: BeforeUnloadEvent) {
@@ -1637,7 +1672,7 @@
 			/>
 		{/if}
 		{#if !wide && browserOver}
-			<div class="side over">{@render browser()}</div>
+			<div class="side over" class:lifted={browserLifted}>{@render browser()}</div>
 		{/if}
 
 		<main class="views">
@@ -1674,6 +1709,7 @@
 							onplace={placeChosen}
 							onopen={patchOpened}
 							onnewpatch={newPatchForTrack}
+							onimport={importForTrack}
 							onwriting={(writing) => (stepWriting = writing)}
 							onsolo={(id) => session.toggleSolo(id, songDoc)}
 							ontempo={(tempo) => (draggedTempo = tempo)}
@@ -1801,6 +1837,7 @@
 		onshortcuts={() => (shortcutsShown = true)}
 		onmade={focusMade}
 		onescape={leaveBrowser}
+		ondragging={browserDragging}
 	/>
 {/snippet}
 
@@ -2107,6 +2144,11 @@
 		width: 220px;
 		z-index: 20;
 		box-shadow: 6px 0 18px #0009;
+	}
+	/* Out of sight and out of the pointer's way while a patch is dragged out of it, so the drop lands on what is beneath. */
+	.side.over.lifted {
+		opacity: 0;
+		pointer-events: none;
 	}
 	/* Both views take the same place, and the one not shown keeps its layout, so its scroll and sizes are there to come back to. */
 	.views {

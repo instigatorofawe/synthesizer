@@ -321,3 +321,25 @@ test('the keys still sound on the chosen track while they write', async ({ page 
 	await expect(notes(page)).toHaveCount(5);
 	await expect(cursor(page)).toHaveAttribute('data-tick', '480');
 });
+
+test('a Draw length chosen with the pointer gives the keys back, so R and the piano keys write at once', async ({
+	page
+}) => {
+	await stepClip(page, 'Chosen');
+	await page.getByTestId('roll').focus();
+	const draw = page.getByLabel('Draw length');
+	await draw.click(); // Focus goes to it, as a press does
+	await draw.selectOption({ label: '1/8' });
+	await expect(page.getByTestId('roll')).toBeFocused();
+	await page.keyboard.press('r');
+	await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+	await page.keyboard.press('a'); // C3
+	await expect(notes(page)).toHaveCount(1);
+	expect(await written(page)).toEqual([[0, C, 240, 100]]);
+
+	// Reached by the keys, it keeps the arrows, and a piano key still writes, leaving its choice as it was.
+	await draw.focus();
+	await page.keyboard.press('s'); // D3
+	await expect(notes(page)).toHaveCount(2);
+	await expect(draw).toHaveValue('240');
+});

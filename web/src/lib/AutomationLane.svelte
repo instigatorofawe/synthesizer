@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import ContextMenu, { EXAMPLE_NOTE, type MenuItem } from '#lib/ContextMenu.svelte';
 	import { matches, modKey } from '#lib/Shortcuts.ts';
 	import {
 		SHAPES,
@@ -61,7 +61,13 @@
 	// A point being dragged: `from` is its place in `base`, as it was pressed, and `index` its place in `clip`, as it is now. A
 	// new point is in `base` but not yet in the document, until it is let go.
 	let held = $state.raw<{ from: number; index: number; base: Clip; clip: Clip } | null>(null);
-	let menu = $state.raw<{ x: number; y: number; index: number } | null>(null);
+	// A point's menu, or with no index, the lane's own, for where it was opened.
+	let menu = $state.raw<{
+		x: number;
+		y: number;
+		index: number | null;
+		at: { tick: number; value: number; past: boolean };
+	} | null>(null);
 	// Where a click would add a point, under the pointer, and what it would be: as the roll's ghost note says what a click adds.
 	let ghost = $state.raw<{ tick: number; value: number } | null>(null);
 
@@ -191,7 +197,7 @@
 	// lane gets to the point, and a line or a curve needs room after the point before.
 	function pointItems(index: number): MenuItem[] {
 		const point = points.find((p) => p.index === index);
-		return [
+		const items: MenuItem[] = [
 			...SHAPES.map((shape) => ({
 				label: SHAPE_NAMES[shape],
 				action: () => change(index, { shape }),
@@ -199,6 +205,7 @@
 			})),
 			{ label: 'Delete', keys: 'roll.delete', action: () => removed(index) }
 		];
+		return readonly ? items.map((item) => ({ ...item, disabled: true })) : items;
 	}
 
 	function pointMenu(event: MouseEvent, index: number) {
@@ -206,7 +213,25 @@
 		event.stopPropagation();
 		held = null;
 		chosen = index;
-		if (!readonly) menu = { x: event.clientX, y: event.clientY, index };
+		menu = { x: event.clientX, y: event.clientY, index, at: pointer(event) };
+	}
+
+	// Where no point is: a point added there, as a click adds one, and the lane taken away, as its Remove does.
+	function laneMenu(event: MouseEvent) {
+		event.preventDefault();
+		held = null;
+		menu = { x: event.clientX, y: event.clientY, index: null, at: pointer(event) };
+	}
+
+	function laneItems(at: { tick: number; value: number; past: boolean }): MenuItem[] {
+		return [
+			{
+				label: 'Add a point here',
+				action: () => edited(addLanePoint(clip, lane, at.tick, at.value, start)),
+				disabled: readonly || at.past || points.some((point) => point.tick === at.tick)
+			},
+			{ label: 'Remove this lane', action: onremove, disabled: readonly }
+		];
 	}
 
 	function valueTyped(text: string) {
@@ -286,7 +311,7 @@
 	tabindex="-1"
 	data-testid={testid}
 	onkeydown={keydown}
-	oncontextmenu={(event) => event.preventDefault()}
+	oncontextmenu={laneMenu}
 >
 	<rect
 		class="ground"
@@ -331,8 +356,9 @@
 	<ContextMenu
 		x={menu.x}
 		y={menu.y}
-		label={`${label} point`}
-		items={pointItems(menu.index)}
+		label={menu.index === null ? `Lane ${label}` : `${label} point`}
+		items={menu.index === null ? laneItems(menu.at) : pointItems(menu.index)}
+		note={readonly ? EXAMPLE_NOTE : undefined}
 		onclose={() => (menu = null)}
 	/>
 {/if}

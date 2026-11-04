@@ -65,7 +65,7 @@ async function playKey(page: Page, code: string, seconds = 0.3) {
 	await page.keyboard.up(code);
 }
 
-test('Record counts a bar in, then writes what the keys play into the clip, snapped, as one step to undo', async ({
+test('Record counts a bar in, then writes what the keys play into the clip, its start snapped, as one step to undo', async ({
 	page
 }) => {
 	await newSong(page, 'Take one');
@@ -86,8 +86,9 @@ test('Record counts a bar in, then writes what the keys play into the clip, snap
 	expect(pitch).toBe(C3);
 	expect(vel).toBe(100);
 	expect(at % QUARTER).toBe(0);
-	expect(dur % QUARTER).toBe(0);
-	expect(dur).toBeGreaterThanOrEqual(QUARTER);
+	// As long as it was held: 0.3 s at 120 BPM is about 290 ticks, which no Snap rounds to a 1/4.
+	expect(dur).toBeGreaterThan(QUARTER / 4);
+	expect(dur).toBeLessThan(2 * QUARTER);
 	// Where it was heard, which latency puts no later than where the playhead had got to.
 	expect(at).toBeGreaterThanOrEqual(Math.floor(before / QUARTER) * QUARTER - QUARTER);
 	expect(at).toBeLessThanOrEqual(after + QUARTER);

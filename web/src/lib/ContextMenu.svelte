@@ -1,6 +1,5 @@
-<script lang="ts">
-	import { onMount, untrack } from 'svelte';
-	import { ariaKeys, label as keyLabel, type ShortcutId } from '#lib/Shortcuts.ts';
+<script lang="ts" module>
+	import type { ShortcutId } from '#lib/Shortcuts.ts';
 
 	export interface MenuItem {
 		label: string;
@@ -9,20 +8,38 @@
 		keys?: ShortcutId; // The key that does the same, shown at the item's right, as a desktop menu shows it
 	}
 
+	// A right-click on anything that is edited by pointing (a clip, a row, a head, a note, a point, a node, a wire, a ruler)
+	// opens its menu, in an example or a built-in patch too, so a right-click never does nothing. There the items that would
+	// change it are greyed out, and the menu says why. Fields, buttons, links and the panels of them keep the browser's menu.
+	export const EXAMPLE_NOTE = "An example can't be changed. Add to library, in the Song menu ▾, makes a copy that can.";
+	export const BUILTIN_NOTE = "A built-in patch can't be changed. Edit a copy makes one that can.";
+
+	// A menu the keyboard opened, by the menu key or Shift+F10, which has no pointer to open at.
+	export const byKeys = (event: MouseEvent) => event.clientX === 0 && event.clientY === 0;
+</script>
+
+<script lang="ts">
+	import { onMount, untrack } from 'svelte';
+	import { ariaKeys, label as keyLabel } from '#lib/Shortcuts.ts';
+
 	let {
 		x,
 		y,
 		label,
 		items,
+		note,
 		onclose
 	}: {
 		x: number; // Where it opens, in the window's pixels
 		y: number;
 		label: string;
 		items: MenuItem[];
+		note?: string; // Why some items are greyed out, above them
 		onclose: () => void;
 	} = $props();
 
+	const uid = $props.id();
+	const noteId = `${uid}-note`;
 	let menu: HTMLDivElement;
 	let left = $state(untrack(() => x));
 	let top = $state(untrack(() => y));
@@ -83,11 +100,14 @@
 	role="menu"
 	tabindex="-1"
 	aria-label={label}
+	aria-describedby={note ? noteId : undefined}
+	data-testid="context-menu"
 	style:left="{left}px"
 	style:top="{top}px"
 	onkeydown={keydown}
 	oncontextmenu={(event) => event.preventDefault()}
 >
+	{#if note}<p class="note" id={noteId}>{note}</p>{/if}
 	<!-- An item's key is drawn beside it rather than in it, so the item is called what it does, and says its key as
 		 `aria-keyshortcuts`. -->
 	{#each items as item, index (item.label)}
@@ -109,6 +129,12 @@
 </div>
 
 <style>
+	.note {
+		max-width: 16rem;
+		margin: 0.15rem 0.4rem 0.3rem;
+		font-size: 0.72rem;
+		color: var(--muted);
+	}
 	.menu {
 		position: fixed;
 		z-index: 100;

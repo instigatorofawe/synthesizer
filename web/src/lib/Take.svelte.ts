@@ -5,6 +5,7 @@
 import type { PlayedKey } from '#lib/AudioEngine.ts';
 import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
 import type { Timeline } from '#lib/Schema.ts';
+import { barOf } from '#lib/Units.ts';
 
 // What a take asks of the page.
 export interface TakeHost {
@@ -12,6 +13,7 @@ export interface TakeHost {
 	loop(): { start: number; end: number } | null; // The loop the take goes round, while one is on
 	write(doc: Timeline): void; // An edit of the take's run of edits, which undoes as one
 	shown(track: number, clip: string): void; // The take now writes into this clip, which the roll should show
+	say(text: string): void; // Why a note played wasn't written, where the page says such things
 }
 
 // Arming until an image that plays the track is playing, then started, then ending until the worklet says where it stopped.
@@ -75,7 +77,11 @@ export class TakeRun {
 		const snapped = snapPlayed({ note, vel: this.#velocity, on, off }, this.#grid, this.#host.loop());
 		if (!snapped) return;
 		const done = recordNote(doc, this.#write, snapped);
-		if (!done) return;
+		// A note never goes without a word. One with nowhere to go, such as on a track deleted while the take went on, says so.
+		if (!done) {
+			this.#host.say(`The note played at bar ${barOf(snapped.tick, doc.ppq)} had nowhere to go, so it wasn't written.`);
+			return;
+		}
 		this.#write = done.take;
 		this.#host.write(done.doc);
 		if (done.clip !== this.#shown) {

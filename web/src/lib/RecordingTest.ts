@@ -30,19 +30,20 @@ const clip = (doc: Timeline, id = 'clip'): Clip => doc.clips.find((c) => c.id ==
 const note = (tick: number, pitch = 60, dur = SIXTEENTH, vel = 100): Note => ({ tick, note: pitch, vel, dur });
 
 describe('snapping what was played', () => {
-	it('puts the start on the nearest line of the grid, and the length in whole steps', () => {
+	it('puts the start on the nearest line of the grid, and keeps the length it was played for', () => {
 		expect(snapPlayed(played(SIXTEENTH * 3 + 50, SIXTEENTH * 2 - 30), SIXTEENTH)).toEqual({
 			tick: SIXTEENTH * 3,
 			note: 60,
 			vel: 100,
-			dur: SIXTEENTH * 2
+			dur: SIXTEENTH * 2 - 30
 		});
 		expect(snapPlayed(played(SIXTEENTH * 3 + 70, SIXTEENTH), SIXTEENTH)?.tick).toBe(SIXTEENTH * 4);
 	});
 
-	it('makes no note shorter than a step', () => {
-		expect(snapPlayed(played(0, 5), SIXTEENTH)?.dur).toBe(SIXTEENTH);
-		expect(snapPlayed(played(0, 0), PPQ)?.dur).toBe(PPQ);
+	it('keeps a short note short, whatever the grid, and none is shorter than a tick', () => {
+		expect(snapPlayed(played(0, 50), PPQ)?.dur).toBe(50); // A quick tap with Snap at 1/4 is not a 1/4 note
+		expect(snapPlayed(played(0, 5), SIXTEENTH)?.dur).toBe(5);
+		expect(snapPlayed(played(0, 0), PPQ)?.dur).toBe(1);
 	});
 
 	it('takes the length from how far the song went, so a note held round a loop keeps it', () => {

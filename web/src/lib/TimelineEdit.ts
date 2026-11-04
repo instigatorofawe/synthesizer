@@ -385,6 +385,18 @@ export function removeTrack(doc: Timeline, id: number): Timeline {
 
 export const setTrack = (doc: Timeline, id: number, change: Partial<Track>) => setChain(doc, trackKey(id), change);
 
+// A track moved to another place in the list, which is where its head and its strip are drawn. Everything names a track by its
+// id, so nothing else changes.
+export function moveTrack(doc: Timeline, id: number, to: number): Timeline {
+	const from = doc.tracks.findIndex((track) => track.id === id);
+	const at = Math.max(0, Math.min(doc.tracks.length - 1, to));
+	if (from < 0 || from === at) return doc;
+	const tracks = [...doc.tracks];
+	const [moved] = tracks.splice(from, 1);
+	tracks.splice(at, 0, moved);
+	return { ...doc, tracks };
+}
+
 export function setTrackParam(doc: Timeline, id: number, param: number, value: number): Timeline {
 	return mapChain(doc, trackKey(id), (chain) => ({
 		...chain,

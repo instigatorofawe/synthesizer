@@ -58,6 +58,8 @@ export function keyFor(note: number, base: number): string {
 
 // Whether a key belongs to something else on the page: a field being typed in, or a shortcut with a modifier. A button or a
 // slider with focus leaves the keys to the piano, as it leaves Space to the transport.
-export function belongsElsewhere(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'target'>): boolean {
-	return event.metaKey || event.ctrlKey || event.altKey || typingIn(event.target);
+export function belongsElsewhere(
+	event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'target' | 'key'>
+): boolean {
+	return event.metaKey || event.ctrlKey || event.altKey || typingIn(event.target, event.key);
 }

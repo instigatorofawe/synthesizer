@@ -120,13 +120,14 @@ test('a right-click on a note opens its menu, which deletes and duplicates, and 
 	const menu = page.getByRole('menu', { name: 'Note' });
 	await page.mouse.click(at.x, at.y, { button: 'right' });
 	await expect(menu).toBeVisible();
-	await expect(menu.getByRole('menuitem')).toHaveText(['Delete', 'Duplicate']);
+	await expect(menu.getByRole('menuitem')).toHaveText(['Copy', 'Delete', 'Duplicate']);
 	await page.keyboard.press('Escape');
 	await expect(menu).toHaveCount(0);
 	await expect(notes(page)).toHaveCount(1);
 
-	// The arrows and Enter work in it.
+	// The arrows and Enter work in it: down past Delete to Duplicate.
 	await page.mouse.click(at.x, at.y, { button: 'right' });
+	await page.keyboard.press('ArrowDown');
 	await page.keyboard.press('ArrowDown');
 	await page.keyboard.press('Enter');
 	await expect(notes(page)).toHaveCount(2);
@@ -209,6 +210,7 @@ test('Mod-drag copies a placement, and its menu makes it unique and takes it awa
 	await expect(menu.getByRole('menuitem')).toHaveText([
 		'Open notes',
 		'Loop this clip',
+		'Copy',
 		'Duplicate after',
 		'Make unique',
 		'Remove from track',
@@ -249,4 +251,29 @@ test('a click on a lane adds a point, and Delete or its menu removes one, but a 
 	await page.mouse.click(added.x + 5, added.y + 5, { button: 'right' });
 	await page.getByRole('menu', { name: 'cutoff point' }).getByRole('menuitem', { name: 'Delete' }).click();
 	await expect(points).toHaveCount(1);
+});
+
+test('a clip taken off its track leaves the roll for what the track still plays, and one on no track says so', async ({
+	page
+}) => {
+	await page.goto('/?timeline=song');
+	await expect(page.getByTestId('roll')).toBeVisible();
+	await page.getByTestId('placement-2-0').locator('rect.body').click({ button: 'right' });
+	await page
+		.getByRole('menu', { name: /^Clip / })
+		.getByRole('menuitem', { name: 'Remove from track' })
+		.click();
+	await expect(page.getByTestId('placement-2-0')).toHaveCount(0);
+	// Pluck plays nothing now, so the roll offers it a clip rather than showing the one that went, where notes wouldn't be heard.
+	await expect(page.getByTestId('roll')).toHaveCount(0);
+	await expect(page.getByTestId('no-clip')).toBeVisible();
+
+	// The song's clip that no track plays, as an address can open it, says so, and is put on the chosen track at the playhead.
+	await page.goto('/?timeline=song&track=2&clip=never-placed');
+	await expect(page.getByTestId('clip-unplaced')).toBeVisible();
+	await page.getByTestId('clip-unplaced').getByRole('button', { name: 'Put it on Pluck' }).click();
+	await expect(page.getByTestId('clip-unplaced')).toHaveCount(0);
+	// Pluck's own clip is at the playhead, so it goes after it, on a bar.
+	await expect(page.getByRole('button', { name: /^never-placed at bar / })).toBeVisible();
+	await expect(page.locator('[data-testid^="placement-2-"]')).toHaveCount(2);
 });

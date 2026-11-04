@@ -159,7 +159,7 @@
 			window,
 			'keydown',
 			(event: KeyboardEvent) => {
-				if (latched.size && matches(event, 'escape') && !typingIn(event.target)) onletgo();
+				if (latched.size && matches(event, 'escape') && !typingIn(event.target, event.key)) onletgo();
 			},
 			{ capture: true }
 		)

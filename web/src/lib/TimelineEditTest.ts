@@ -31,6 +31,7 @@ import {
 	mixWrites,
 	moveInsert,
 	moveNotes,
+	moveTrack,
 	movePlacement,
 	noteSpan,
 	pasteAt,
@@ -706,6 +707,16 @@ describe('the mixer', () => {
 		expect(next.tracks.map((t) => t.id)).toEqual([1]);
 		expect(next.tracks[0].inserts[0]).not.toHaveProperty('key'); // The sidechain came from track 2
 		expect(next.clips[0].automation.map((p) => p.target)).toEqual([{ mix: 'fader', track: 1 }]);
+	});
+
+	it('moves a track to another place in the list, and nothing that names it changes', () => {
+		const doc = addTrack(song(), 'lead').doc;
+		expect(moveTrack(doc, 3, 0).tracks.map((t) => t.id)).toEqual([3, 1, 2]);
+		expect(moveTrack(doc, 1, 2).tracks.map((t) => t.id)).toEqual([2, 3, 1]);
+		expect(moveTrack(doc, 1, 9).tracks.map((t) => t.id)).toEqual([2, 3, 1]); // Past the end is the end
+		expect(moveTrack(doc, 2, 1)).toBe(doc); // Where it is already
+		expect(moveTrack(doc, 7, 0)).toBe(doc); // No such track
+		expect(moveTrack(doc, 3, 0).tracks[0]).toBe(doc.tracks[2]);
 	});
 
 	it('numbers a new track after the highest', () => {

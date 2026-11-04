@@ -279,7 +279,10 @@ test('a built-in can be chosen in and copied from, and nothing changes it', asyn
 	await page.keyboard.press('ControlOrMeta+d');
 	await title(page, 1).click({ button: 'right' });
 	const menu = page.getByRole('menu', { name: '7 nodes' });
-	await expect(menu.getByRole('menuitem')).toHaveText(['Copy']);
+	// What would change it is greyed out, and the menu says why.
+	await expect(menu.getByRole('menuitem', { name: 'Duplicate' })).toBeDisabled();
+	await expect(menu.getByRole('menuitem', { name: /^Delete/ })).toBeDisabled();
+	await expect(menu).toContainText("A built-in patch can't be changed");
 	await menu.getByRole('menuitem', { name: 'Copy' }).click();
 	await expect(nodes(page)).toHaveCount(7);
 	await expect(graph(page).locator('g.node.chosen')).toHaveCount(7);

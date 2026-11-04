@@ -70,13 +70,16 @@ makes a track with a clip of its own. A click in the roll adds a note, and a cli
 in bars and beats, note names and note values, and a bare number in a length is bars, as in Live and Logic. Velocity stems are as wide as
 their notes and a drag across them paints, and a lane's points join in lines. R turns on step entry, where the keys write notes and chords at a cursor, → rests and
 Backspace steps back, and C and V set the velocity of new notes. ● or Shift+R records: a bar is counted in with a click, and what the
-keys play while the song plays is written into the chosen track, snapped to the grid, adding to the clip on each pass round a loop.
+keys play while the song plays is written into the chosen track, each note's start snapped to the grid and its length as played, adding
+to the clip on each pass round a loop.
 The arrangement is only as tall as its tracks until the tab strip under it is dragged, and clips snap to bars apart from the notes'
 Snap. ⤢ or a double-click on a clip gives the notes the whole view, I folds the inspector,
 and each clip keeps its zoom. Track heads have mute and solo, a volume fader and a pan knob. Above the tracks, a Tempo lane unfolds
 into the song's tempo as a curve, where a click adds a change, a drag sets it and a click on a segment makes it glide. ⌘ or Ctrl with
-C, V and D copy, paste and duplicate notes, clips and nodes. A track's patch is chosen from one searchable list, and its name in the
-track head opens it in the Patch view. A patch draws as a graph, with wires dragged between nodes, which a click chooses and Delete removes, a
+C, V and D copy, paste and duplicate notes, clips and nodes. A track's patch is chosen from one searchable list, or dragged from the
+browser onto its track, or below the tracks for a new one, and its name in the track head opens it in the Patch view. An effect dragged
+onto a track or a Mixer strip joins its inserts, WAV files dropped on the song become an instrument on a track, and a track head drags
+up or down to move the track. A patch draws as a graph, with wires dragged between nodes, which a click chooses and Delete removes, a
 Shift-drag box to choose nodes, a node search on N or a double-click, errors on the nodes they belong to, scopes on any node, and
 its JSON in a tab beside it. Fit pressed again shows the whole patch, and Modulate this input, on an input's right-click menu, puts an
 envelope or another source on it, through a snap and a new Control, in one step. A lane in the Song view can move any input inside the
@@ -86,7 +89,8 @@ copy where the original played. The computer keyboard from A to ' with Z and X f
 octave plays the chosen track, or in the Patch view the patch, on its own when no track plays it, at the Vel beside the keys,
 which new notes take too, and Latch holds what they play. Space plays and stops, and Home,
 or Stop pressed twice, goes back to the start. ? shows every key, ⌘K or Ctrl+K opens a song, an example or a patch by name, and
-Shift+F10 or a right-click opens the menu of a clip, notes, a track head, an empty row or the roll. Snap and Draw have triplets, a
+Shift+F10 or a right-click opens the menu of whatever is edited by pointing, from a clip, a note or a lane to the ruler, a node or a
+wire, and in an example or a built-in patch it greys out what would change it and says why. Snap and Draw have triplets, a
 node shows its values, which a drag across changes, and Keys in the Patch view puts the keys across its foot, bigger.
 Shortcuts use ⌘ on a Mac and Ctrl elsewhere, and none uses Alt. A song stops at its
 end unless a loop is on, and the timeline follows the playhead. Edits to any number of patches and timelines stay, each with its

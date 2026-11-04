@@ -34,7 +34,16 @@ from pathlib import Path
 
 import modsynth
 import numpy as np
-from GeneralMidi import CHOKES, DRUM_KIT, DRUMS, EFFECTS, FAMILIES, PROGRAMS, family_of
+from GeneralMidi import (
+    CHOKES,
+    DRUM_KIT,
+    DRUMS,
+    EFFECTS,
+    FAMILIES,
+    HELD,
+    PROGRAMS,
+    family_of,
+)
 from Graph import Graph, dump
 from Instrument import EXPRESSION, PARAMS, Effect, Instrument, Phrase, Voice
 
@@ -357,6 +366,7 @@ def tables(instruments: list[Instrument], effects: list[Effect]) -> dict:
     return {
         "prefix": PREFIX,
         "params": {p["name"]: p["id"] for p in PARAMS},
+        "defaults": {p["name"]: p["default"] for p in PARAMS},
         "programs": [
             {
                 "program": p,
@@ -371,6 +381,7 @@ def tables(instruments: list[Instrument], effects: list[Effect]) -> dict:
             for k, name in DRUMS.items()
         ],
         "chokes": CHOKES,
+        "held": HELD,
         "effects": sends,
     }
 

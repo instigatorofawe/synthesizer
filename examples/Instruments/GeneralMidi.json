@@ -1,6 +1,7 @@
 {
  "prefix": "builtin-gm-",
  "params": {"bend": 1, "wheel": 2, "expression": 3, "pressure": 4},
+ "defaults": {"bend": 0.0, "wheel": 0.0, "expression": 1.0, "pressure": 0.0},
  "programs": [
   {"program": 0, "name": "Acoustic Grand Piano", "family": "Piano", "instrument": "GrandPiano"},
   {"program": 1, "name": "Bright Acoustic Piano", "family": "Piano", "instrument": "BrightPiano"},
@@ -181,5 +182,6 @@
   {"note": 81, "name": "Open Triangle", "instrument": "KitTriangle"}
  ],
  "chokes": {"hi-hat": [42, 44, 46], "whistle": [71, 72], "guiro": [73, 74], "cuica": [78, 79], "triangle": [80, 81]},
+ "held": [46, 72, 74, 79, 81],
  "effects": {"reverb": "LargeHall", "chorus": "Chorus"}
 }

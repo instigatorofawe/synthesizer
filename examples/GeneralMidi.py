@@ -238,3 +238,6 @@ CHOKES = {
     "cuica": [78, 79],
     "triangle": [80, 81],
 }
+# The longer sound of each group, which lasts only as long as its note: an importer holds such a note until the next note of its
+# group, since a file's drum notes are often a few ticks long.
+HELD = [46, 72, 74, 79, 81]

@@ -77,33 +77,32 @@ def mix(g: Graph, parts: list[Ref]) -> Ref:
 
 # Percussive ---------------------------------------------------------------------------------------------------------
 
-Partials = list[
-    tuple[float, float, float]
-]  # (ratio to the key, level, how much of that level velocity gives it)
+# Each is (its ratio to the key, its level, how much of that level velocity gives it).
+Partials = list[tuple[float, float, float]]
 
 
 def metal(
-    groups: list[tuple[float, Partials]],
+    groups: list[tuple[float, float, Partials]],
     at: int,
-    attack: float,
     release: float,
     beat: float,
     tick: float,
     tick_hz: float | None,
 ):
     """Struck metal: sines at the ratios of its modes, the high ones dying first, so the strike is bright and the ring
-        mellow. Each group of partials shares an envelope, ringing for its seconds at note `at`, and a hard strike rings the
-        upper ones more, so a loud note is brighter as well as louder. `beat` is a twin of the lowest a few Hz away, the slow
-        shimmer of a bell whose round isn't quite true. `tick` is the hammer's click, noise high-passed at `tick_hz` at middle
-    C, or left as it is, which suits a hard hammer on a small bell. It damps over `release` when the key
-        comes up, as a hand on a bell does."""
+    mellow. Each group of partials shares an envelope, (attack, seconds it rings at note `at`, partials), and a hard
+    strike rings the upper ones more, so a loud note is brighter as well as louder. A slow attack is a mode that blooms
+    after the strike, as a pan's octave does. `beat` is a twin of the lowest a few Hz away, the slow shimmer of a bell
+    whose round isn't quite true. `tick` is the hammer's click, noise high-passed at `tick_hz` at middle C, or left as it
+    is, which suits a hard hammer on a small bell. It damps over `release` when the key comes up, as a hand on a bell
+    does."""
 
     def build(v: Voice) -> Ref:
         g = v.g
         # Below the lowest C a bell's partials would be too low to hear at all, so the key's pitch stops there.
         f = g.mtof(g.node("math", {"a": v.pitch, "b": 24.0}, mode="max"))
         parts = []
-        for seconds, partials in groups:
+        for attack, seconds, partials in groups:
             tones = []
             for ratio, level, bright in partials:
                 freq = g.mul(f, ratio)
@@ -114,7 +113,7 @@ def metal(
                 tones.append(g.mul(g.osc("sine", freq), gain))
                 if beat and ratio == 1.0:
                     tones.append(
-                        g.mul(g.osc("sine", g.add(freq, beat)), g.mul(gain, 0.45))
+                        g.mul(g.osc("sine", g.add(freq, beat)), g.mul(gain, 0.3))
                     )
             ring = g.env(attack, keyed(g, v.key.pitch, seconds, at), 0.0, release)
             parts.append(g.mul(mix(g, tones), ring))
@@ -178,17 +177,21 @@ def membrane(
 
 
 def reverse_cymbal(v: Voice) -> tuple[Ref, Ref]:
-    """A crash played backwards: the cymbal's hiss swelling over a second and a half, brighter as it grows, and cut off
-    when the key comes up, as a reversed recording stops where the crash would have struck. A cymbal has no pitch to
-    speak of, so the key moves its colour at half the rate a tuned sound would move."""
+    """A crash played backwards: the cymbal's hiss swelling over 1.2 seconds, brighter as it grows, then still growing a
+    little to three seconds, and cut off when the key comes up, as a reversed recording stops where the crash would have
+    struck. A cymbal has no pitch to speak of, so the key moves its colour at half the rate a tuned sound would move."""
     g = v.g
-    swell = g.env(1.5, 0.1, 1.0, 0.06)
-    # Cubed, the swell keeps most of its growth for the end, as a crash's decay heard backwards does.
+    swell = g.env(1.2, 0.1, 1.0, 0.06)
+    # Cubed, the swell keeps most of its growth for the end, as a crash's decay heard backwards does. A reversed crash
+    # gains loudness so fast that a swell timed to a long note would leave a short one inaudible, and one timed to a
+    # short note would make a long one far too loud. So the steep part is the first 1.2 seconds, and a longer note
+    # keeps rising, by about 2 dB more, to three seconds.
     grow = g.mul(g.mul(swell, swell), swell)
+    grow = g.mul(grow, g.add(g.mul(g.env(3.0, 0.1, 1.0, 0.06), 0.4), 0.6))
     hiss = g.filter(
         "highpass",
         g.node("noise"),
-        tracked(g, v.pitch, 5000.0, 400.0, 12000.0, rate=0.5),
+        tracked(g, v.pitch, 5000.0, 400.0, 9000.0, rate=0.5),
     )
     hiss = g.add(
         hiss,
@@ -202,7 +205,7 @@ def reverse_cymbal(v: Voice) -> tuple[Ref, Ref]:
     # The right side is the left a few milliseconds late: noise that far apart is unrelated, so the cymbal is wide.
     late = g.node("delay", {"in": tone, "time": 0.0071}, max=0.01)
     level = g.mul(
-        grow, g.mul(strength(g, v.velocity, 0.08), tilt(g, v.pitch, -0.25, 90.0))
+        grow, g.mul(strength(g, v.velocity, 0.08), tilt(g, v.pitch, -0.25, 72.0))
     )
     return g.mul(tone, level), g.mul(late, level)
 
@@ -311,8 +314,9 @@ def telephone_ring(v: Voice) -> Ref:
 
 
 def helicopter(v: Voice) -> tuple[Ref, Ref]:
-    """A helicopter going over: the rotor's whump, noise beaten at eleven blades a second at middle C, with the slap of
-    the blade tips on top and the turbine's whine under it, swinging slowly across. The key sets the rotor's speed."""
+    """A helicopter going over: the rotor's whump, noise beaten eleven times a second at middle C as each blade passes,
+    with the slap of the blade tips on top and the turbine's whine under it, swinging slowly across. The key sets the
+    rotor's speed."""
     g = v.g
     rotor = g.osc(
         "saw", clip(g, g.mul(octaves(g, v.pitch), 11.0), 0.5, 400.0), mode="naive"
@@ -347,29 +351,32 @@ def applause(v: Voice) -> tuple[Ref, Ref]:
     g = v.g
     hands = g.node("noise")
     other = g.node("noise")
-    claps = []
     # Noise passes a threshold about forty times a second, at random, and each time, by how far it passed, is a clap of
-    # that strength, which the follower holds and lets die. One noise gives two layers, by its peaks and its troughs.
-    for source, centre, per_second, seconds in (
-        (other, 1100.0, 40.0, 0.011),
-        (hands, 1700.0, 45.0, 0.009),
-        (other, 2500.0, 40.0, 0.007),
+    # that strength, which the follower holds and lets die. One noise gives two layers, by its peaks and its troughs,
+    # since the follower follows the size of what it is given whatever its sign.
+    edge = 1.0 - 80.0 / RATE
+    peaks = g.node("math", {"a": g.add(other, -edge), "b": 0.0}, mode="max")
+    troughs = g.node("math", {"a": g.add(other, edge), "b": 0.0}, mode="min")
+    others = g.node("math", {"a": g.add(hands, -edge), "b": 0.0}, mode="max")
+    rings, claps = [], []
+    for strikes, centre, seconds in (
+        (peaks, 1100.0, 0.011),
+        (others, 1700.0, 0.009),
+        (troughs, 2500.0, 0.007),
     ):
-        edge = 1.0 - 2.0 * per_second / RATE
-        if centre == 2500.0:
-            strike = g.node("math", {"a": g.add(source, edge), "b": 0.0}, mode="min")
-        else:
-            strike = g.node("math", {"a": g.add(source, -edge), "b": 0.0}, mode="max")
-        clap = g.node("follow", {"in": strike, "release": seconds})
+        rings.append(g.filter("bandpass", hands, tracked(g, v.pitch, centre), 1.1))
         claps.append(
-            g.mul(g.filter("bandpass", hands, tracked(g, v.pitch, centre), 1.1), clap)
+            g.mul(rings[-1], g.node("follow", {"in": strikes, "release": seconds}))
         )
     low, middle, high = claps
-    centre = g.mul(middle, 0.5)
+    # The rest of the room, too many and too far away to hear one by one. A clap is at most as strong as the threshold
+    # is far from 1, and the level below brings that up to 1, so the wash is brought down by as much.
+    centre = g.add(g.mul(middle, 0.5), g.mul(rings[1], 0.05 * (1.0 - edge)))
     left = mix(g, [low, centre, g.mul(high, 0.25)])
     right = mix(g, [high, centre, g.mul(low, 0.25)])
-    # A clap is at most as strong as the threshold is far from 1, so this brings it up to about 1.
-    loud = g.mul(g.mul(strength(g, v.velocity, 0.1), tilt(g, v.pitch)), RATE / 80.0)
+    loud = g.mul(
+        g.mul(strength(g, v.velocity, 0.1), tilt(g, v.pitch)), 1.0 / (1.0 - edge)
+    )
     level = g.mul(g.env(0.25, 0.1, 1.0, 0.2), loud)
     return g.mul(left, level), g.mul(right, level)
 
@@ -407,21 +414,20 @@ def gunshot(v: Voice) -> tuple[Ref, Ref]:
 # The set ------------------------------------------------------------------------------------------------------------
 
 TINKLE = [  # A small bell: inharmonic modes, the upper ones short and brought out by a hard strike
-    (1.3, [(1.0, 1.0, 0.2)]),
-    (0.6, [(2.43, 0.5, 0.5)]),
-    (0.25, [(4.05, 0.32, 0.7), (5.97, 0.22, 0.8), (8.36, 0.14, 0.9)]),
+    (0.0004, 1.3, [(1.0, 1.0, 0.2)]),
+    (0.0004, 0.6, [(2.43, 0.5, 0.5)]),
+    (0.0004, 0.25, [(4.05, 0.32, 0.7), (5.97, 0.22, 0.8), (8.36, 0.14, 0.9)]),
 ]
-STEEL = [  # A pan's note: tuned near its octave and twelfth, a little stretched, over two modes that aren't tuned at all
-    (1.4, [(1.0, 1.0, 0.15)]),
-    (0.55, [(2.005, 0.85, 0.4)]),
-    (0.22, [(3.01, 0.4, 0.6), (4.16, 0.15, 0.8), (5.45, 0.08, 1.0)]),
+# A pan's note: tuned near its octave and twelfth, a little stretched, over two modes that aren't tuned at all. The
+# mallet is soft, and the octave takes a moment to bloom as the note's energy passes into it.
+STEEL = [
+    (0.0015, 1.4, [(1.0, 1.0, 0.15)]),
+    (0.025, 0.55, [(2.005, 0.85, 0.4)]),
+    (0.0015, 0.22, [(3.01, 0.4, 0.6), (4.16, 0.15, 0.8), (5.45, 0.08, 1.0)]),
 ]
-TAIKO = [
-    (1.594, 0.4, 0.4),
-    (2.136, 0.25, 0.5),
-    (2.296, 0.18, 0.6),
-    (2.653, 0.1, 0.7),
-]  # A round head's modes
+# A round head's modes above its lowest, at the ratios a stretched membrane's take
+TAIKO = [(1.594, 0.4, 0.4), (2.136, 0.25, 0.5), (2.296, 0.18, 0.6), (2.653, 0.1, 0.7)]
+# A block's few modes above its knock, far apart and quickly gone, which is what makes it sound hollow and wooden
 WOOD = [(2.65, 0.35, 0.5), (4.4, 0.12, 0.7)]
 
 INSTRUMENTS = [
@@ -432,7 +438,6 @@ INSTRUMENTS = [
         metal(
             TINKLE,
             at=90,
-            attack=0.0004,
             release=0.35,
             beat=3.1,
             tick=0.25,
@@ -465,7 +470,6 @@ INSTRUMENTS = [
         metal(
             STEEL,
             at=73,
-            attack=0.0015,
             release=0.45,
             beat=0.0,
             tick=0.12,
@@ -614,7 +618,7 @@ INSTRUMENTS = [
         72,
         programs=[119],
         voices=2,
-        phrase=[(0.0, 60, 100, 2.5), (4.0, 64, 110, 1.5)],
+        phrase=[(0.0, 60, 100, 3.5), (5.0, 64, 110, 2.0)],
         listen_for="A cymbal sucked in backwards, swelling and brightening until it stops dead, twice.",
     ),
     Instrument(

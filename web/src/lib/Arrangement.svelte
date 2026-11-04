@@ -5,6 +5,7 @@
 		copiedSpan,
 		drawnClip,
 		movePlacement,
+		moveTrack,
 		pasteAt,
 		pastePlacement,
 		place,
@@ -22,11 +23,12 @@
 	import { wholeSong } from '#lib/Transport.ts';
 	import { barOf, noteValue, snapTick, ticksPerBar } from '#lib/Units.ts';
 	import { clipboard } from '#lib/Clipboard.ts';
-	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import ContextMenu, { EXAMPLE_NOTE, byKeys, type MenuItem } from '#lib/ContextMenu.svelte';
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { followScroll } from '#lib/Follow.ts';
 	import HeadMix from '#lib/HeadMix.svelte';
 	import Meter from '#lib/Meter.svelte';
+	import { bringing, patchDrag, wavFiles, type DraggedPatch } from '#lib/PatchDrag.svelte.ts';
 	import { anchored, wheelAction } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
@@ -45,6 +47,11 @@
 		start: number;
 		end: number;
 	}
+
+	// What was dropped on the arrangement, and where: on a track, or on the row below the tracks for a new one, at a bar.
+	export type Dropped =
+		| { kind: 'patch'; patch: DraggedPatch; track: number | null; tick: number }
+		| { kind: 'files'; files: File[]; track: number | null; tick: number };
 
 	// What a clip's right-click menu does, each to the placement it was opened on.
 	export interface PlacementActions {
@@ -88,6 +95,7 @@
 		ontempo = () => {},
 		onmix = () => {},
 		onzoom = () => {},
+		ondropped = () => {},
 		actions
 	}: {
 		id?: string; // Which timeline this is, for what the arrangement keeps about it between visits: which song lanes are open
@@ -121,6 +129,7 @@
 		ontempo?: (tempo: Tempo[] | null) => void; // The tempo while the Tempo lane is dragged, and null once the drag is over
 		onmix?: (track: number, change: { gain?: number; pan?: number }, done: boolean) => void; // A head's fader or pan
 		onzoom?: (by: number) => void; // Mod with the wheel, or a pinch: bars this many times as wide
+		ondropped?: (drop: Dropped) => void; // A patch from the browser, or WAV files from the desktop, let go of here
 		actions?: PlacementActions;
 	} = $props();
 
@@ -148,7 +157,8 @@
 				now: Loop;
 				moved: boolean;
 		  }
-		| { kind: 'draw'; track: number; row: number; x: number; from: number; to: number; drawn: boolean };
+		| { kind: 'draw'; track: number; row: number; x: number; from: number; to: number; drawn: boolean }
+		| { kind: 'track'; track: number; from: number; y: number; to: number; moved: boolean };
 
 	let svg: SVGSVGElement;
 	let view: HTMLDivElement; // What scrolls, with the track heads held at its left
@@ -164,7 +174,14 @@
 	let unfolded = $state<ReadonlySet<string>>(new Set());
 	const layer = $derived(layerHeight(unfolded));
 	const tracksTop = $derived(TOP + layer);
-	const height = $derived(tracksTop + Math.max(doc.tracks.length, 1) * ROW);
+	// While a patch that plays notes is dragged out of the browser, or WAV files are held over the arrangement, a row below the
+	// tracks takes them for a new track. It is there from the start of a patch's drag, so where it can go is in sight.
+	let dropAt = $state.raw<{ track: number | null; tick: number; kind: 'patch' | 'files' } | null>(null);
+	const newRow = $derived(
+		!readonly && ((patchDrag.patch !== null && !patchDrag.patch.insert) || dropAt?.kind === 'files')
+	);
+	const rows = $derived(doc.tracks.length + (newRow ? 1 : 0));
+	const height = $derived(tracksTop + Math.max(rows, 1) * ROW);
 	const ticksAt = (x: number) => x / perTick;
 
 	function canvas(event: { clientX: number; clientY: number }) {
@@ -314,7 +331,7 @@
 	// turns the loop on or off, as a cycle strip's does. Until a loop is drawn it is the whole song, which a drag anywhere
 	// replaces.
 	function startLoop(event: PointerEvent) {
-		if (event.button !== 0) return;
+		if (secondary(event)) return;
 		const x = canvas(event).x;
 		if (loop) {
 			const [left, right] = [loop.start * perTick, loop.end * perTick];
@@ -361,6 +378,9 @@
 		} else if (gesture.kind === 'loop-change') {
 			if (!gesture.moved && Math.abs(at.x - gesture.x) < DRAG) return;
 			gesture = { ...gesture, now: changeLoop(gesture, at.x), moved: true };
+		} else if (gesture.kind === 'track') {
+			if (!gesture.moved && Math.abs(event.clientY - gesture.y) < DRAG) return;
+			gesture = { ...gesture, to: rowAt(at.y), moved: true };
 		} else {
 			if (!gesture.drawn && Math.abs(at.x - gesture.x) < DRAG) return;
 			gesture = { ...gesture, to: snapTick(ticksAt(at.x), grid), drawn: true };
@@ -386,7 +406,9 @@
 		const held = gesture;
 		gesture = null;
 		if (!held) return;
-		if (held.kind === 'move') finishMove(held);
+		if (held.kind === 'track') {
+			if (held.moved && held.to !== held.from) onchange(moveTrack(doc, held.track, held.to));
+		} else if (held.kind === 'move') finishMove(held);
 		else if (held.kind === 'repeat') onchange(setPlacement(doc, held.track, held.index, { repeat: held.repeat }));
 		else if (held.kind === 'draw') {
 			const drawn = held.drawn && drawnClip(doc, held.track, held.from, held.to);
@@ -409,6 +431,80 @@
 		if (dragging) return escapeCancels(() => (gesture = null));
 	});
 
+	// A track head dragged up or down moves the track, which a line between the heads shows the place of. Its buttons, fields
+	// and fader are its own, so a press on them doesn't drag.
+	function startTrack(event: PointerEvent, track: Track) {
+		if (readonly || secondary(event)) return;
+		if ((event.target as Element).closest('input, select, .toggles, .patch, .mix, .meter')) return;
+		const from = doc.tracks.findIndex((t) => t.id === track.id);
+		gesture = { kind: 'track', track: track.id, from, y: event.clientY, to: from, moved: false };
+	}
+
+	// Where the line goes while a track is dragged: above the head it would take the place of.
+	const trackLine = $derived.by(() => {
+		if (gesture?.kind !== 'track' || !gesture.moved || gesture.to === gesture.from) return null;
+		const below = gesture.to > gesture.from;
+		return tracksTop + (gesture.to + (below ? 1 : 0)) * ROW;
+	});
+
+	// A drop's place: the track under the pointer, by its head or its row, or the row below the tracks for a new one, at the
+	// bar under the pointer, or the playhead's bar from the heads. An insert has no notes to play, so it goes only on a track.
+	// Nothing goes in an example, which can't change, or on the ruler, the loop strip or the song's lanes.
+	function dropPlace(event: DragEvent) {
+		const what = bringing(event);
+		if (!what || readonly || (event.target as Element).closest('.band, .corner')) return null;
+		const box = svg.getBoundingClientRect();
+		const row = Math.floor((event.clientY - box.top - tracksTop) / ROW);
+		const bar = ticksPerBar(doc);
+		const onHeads = !!(event.target as Element).closest('.heads');
+		const over = onHeads ? tick : Math.max(0, ticksAt(event.clientX - box.left));
+		const at = { tick: Math.floor(over / bar) * bar, kind: what.kind };
+		if (row >= 0 && row < doc.tracks.length) return { ...at, track: doc.tracks[row].id };
+		const insert = what.kind === 'patch' && what.patch.insert;
+		return row >= doc.tracks.length && !insert ? { ...at, track: null } : null;
+	}
+
+	function dragOver(event: DragEvent) {
+		const place = dropPlace(event);
+		if (!place) {
+			dropAt = null;
+			return;
+		}
+		event.preventDefault();
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+		if (place.track !== dropAt?.track || place.tick !== dropAt?.tick || place.kind !== dropAt?.kind) dropAt = place;
+	}
+
+	function drop(event: DragEvent) {
+		const place = dropPlace(event);
+		dropAt = null;
+		const what = bringing(event);
+		if (!place || !what) return;
+		event.preventDefault();
+		const at = { track: place.track, tick: place.tick };
+		if (what.kind === 'patch') ondropped({ kind: 'patch', patch: what.patch, ...at });
+		else {
+			const files = wavFiles(event);
+			if (files.length) ondropped({ kind: 'files', files, ...at });
+		}
+	}
+
+	// A drag that leaves for elsewhere on the page, or ends, takes the place it showed with it.
+	function dragElsewhere(event: DragEvent) {
+		if (dropAt && !view.contains(event.target as Node)) dropAt = null;
+	}
+
+	// What a head shows a drop would do to its track.
+	const dropWords = $derived.by(() => {
+		if (dropAt === null || dropAt.track === null) return null;
+		if (dropAt.kind === 'files') return 'plays the WAV files';
+		const patch = patchDrag.patch;
+		return patch ? (patch.insert ? `+ ${patch.name}` : `plays ${patch.name}`) : null;
+	});
+	const newWords = $derived(
+		dropAt?.kind === 'files' ? 'New track for the WAV files' : `New track: ${patchDrag.patch?.name ?? ''}`
+	);
+
 	// A press on an empty row chooses its track, and dragging across it draws a clip, whole bars long.
 	function rowPressed(event: PointerEvent) {
 		const at = canvas(event);
@@ -427,27 +523,40 @@
 
 	// A track head's menu, and an empty row's: what is done to the track, and a clip made or pasted where the row was pressed.
 	// They are the clip's menu's neighbours, so one is open at a time.
-	let other = $state.raw<{ x: number; y: number; label: string; items: MenuItem[] } | null>(null);
+	let other = $state.raw<{ x: number; y: number; label: string; items: MenuItem[]; note?: string } | null>(null);
+	const note = $derived(readonly ? EXAMPLE_NOTE : undefined); // Why an example's menus grey out what would change it
 	let renaming = $state<number | null>(null); // The track whose name is being typed in its head
 
 	function headItems(track: Track): MenuItem[] {
 		const bar = ticksPerBar(doc);
-		const soloItem = { label: solo.has(track.id) ? 'Unsolo' : 'Solo', action: () => onsolo(track.id) };
-		if (readonly) return [soloItem];
+		const index = doc.tracks.findIndex((t) => t.id === track.id);
 		return [
-			{ label: 'Rename…', action: () => (renaming = track.id) },
+			{ label: 'Rename…', action: () => (renaming = track.id), disabled: readonly },
 			{
 				label: 'New clip at the playhead',
-				action: () => onnew(track.id, Math.floor(tick / bar) * bar, TEMPLATE_BARS * bar)
+				action: () => onnew(track.id, Math.floor(tick / bar) * bar, TEMPLATE_BARS * bar),
+				disabled: readonly
 			},
-			{ label: track.mute ? 'Unmute' : 'Mute', action: () => onmute(track.id) },
-			soloItem,
+			// Its head drags up or down too.
+			{
+				label: 'Move up',
+				action: () => onchange(moveTrack(doc, track.id, index - 1)),
+				disabled: readonly || index <= 0
+			},
+			{
+				label: 'Move down',
+				action: () => onchange(moveTrack(doc, track.id, index + 1)),
+				disabled: readonly || index >= doc.tracks.length - 1
+			},
+			{ label: track.mute ? 'Unmute' : 'Mute', action: () => onmute(track.id), disabled: readonly },
+			{ label: solo.has(track.id) ? 'Unsolo' : 'Solo', action: () => onsolo(track.id) },
 			{
 				label: 'Delete track',
 				action: () => {
 					onselect({ track: null, placement: null });
 					onchange(removeTrack(doc, track.id));
-				}
+				},
+				disabled: readonly
 			}
 		];
 	}
@@ -461,15 +570,15 @@
 			x: at?.x ?? box.left,
 			y: at?.y ?? box.bottom,
 			label: `Track ${trackName(track)}`,
-			items: headItems(track)
+			items: headItems(track),
+			note
 		};
 	}
 
 	function headMenu(event: MouseEvent, track: Track) {
 		if ((event.target as Element).closest('input, .mix')) return; // A field's own menu, and the fader's
 		event.preventDefault();
-		const keyed = event.clientX === 0 && event.clientY === 0;
-		openHeadMenu(track, event.currentTarget as Element, keyed ? null : { x: event.clientX, y: event.clientY });
+		openHeadMenu(track, event.currentTarget as Element, byKeys(event) ? null : { x: event.clientX, y: event.clientY });
 	}
 
 	function headKeys(event: KeyboardEvent, track: Track) {
@@ -485,14 +594,15 @@
 		menu = null;
 		const at = canvas(event);
 		const track = doc.tracks[rowAt(at.y)];
-		if (!track || readonly) return;
+		if (!track) return;
 		const tick = Math.floor(ticksAt(at.x) / grid) * grid;
 		const copied = clipboard.placement;
-		const items: MenuItem[] = [{ label: 'New clip here', action: () => onnew(track.id, tick) }];
+		const items: MenuItem[] = [{ label: 'New clip here', action: () => onnew(track.id, tick), disabled: readonly }];
 		if (copied) {
 			items.push({
 				label: 'Paste here',
 				keys: 'paste',
+				disabled: readonly,
 				action: () => {
 					const pasted = pastePlacement(doc, track.id, tick, copied.what);
 					if (pasted.index < 0) return;
@@ -503,7 +613,45 @@
 				}
 			});
 		}
-		other = { x: event.clientX, y: event.clientY, label: `Row of ${trackName(track)}`, items };
+		items.push(locateItem(at.x));
+		other = { x: event.clientX, y: event.clientY, label: `Row of ${trackName(track)}`, items, note };
+	}
+
+	// What can be done anywhere along the song: the playhead, and the loop, which are the editor's, so an example has them too.
+	const locateItem = (x: number): MenuItem => ({
+		label: 'Move the playhead here',
+		action: () => onlocate(snapTick(Math.max(0, ticksAt(x)), grid))
+	});
+	function barLoop(x: number): Loop {
+		const bar = ticksPerBar(doc);
+		const start = Math.floor(Math.max(0, ticksAt(x)) / bar) * bar;
+		return { start, end: start + bar };
+	}
+
+	// The ruler's menu and the loop strip's. A right-click there doesn't move the playhead or the loop as a click does.
+	function bandMenu(event: MouseEvent, strip: 'ruler' | 'loop') {
+		event.preventDefault();
+		gesture = null;
+		menu = null;
+		const x = canvas(event).x;
+		const loopItems: MenuItem[] = [
+			{ label: 'Loop this bar', action: () => onloop(barLoop(x), true) },
+			{ label: 'Loop the whole song', action: () => onloop(null, true), disabled: loop === null && looping }
+		];
+		const items =
+			strip === 'ruler'
+				? [locateItem(x), ...loopItems]
+				: [{ label: looping ? 'Turn the loop off' : 'Turn the loop on', action: toggleLoop }, ...loopItems];
+		other = { x: event.clientX, y: event.clientY, label: strip === 'ruler' ? 'Ruler' : 'Loop', items };
+	}
+
+	// Anywhere else on the tracks' canvas, such as a song with no tracks yet.
+	function canvasMenu(event: MouseEvent) {
+		if (event.defaultPrevented) return;
+		event.preventDefault();
+		gesture = null;
+		menu = null;
+		other = { x: event.clientX, y: event.clientY, label: 'Arrangement', items: [locateItem(canvas(event).x)] };
 	}
 
 	function renamed(track: Track, name: string) {
@@ -520,8 +668,7 @@
 	function blockMenu(event: MouseEvent, block: Block) {
 		event.preventDefault();
 		event.stopPropagation();
-		const keyed = event.clientX === 0 && event.clientY === 0;
-		openBlockMenu(block, event.currentTarget as Element, keyed ? null : { x: event.clientX, y: event.clientY });
+		openBlockMenu(block, event.currentTarget as Element, byKeys(event) ? null : { x: event.clientX, y: event.clientY });
 	}
 
 	// The menu key and Shift+F10 open it at the clip rather than at a pointer.
@@ -529,7 +676,7 @@
 		gesture = null;
 		other = null;
 		onselect({ track: block.track.id, placement: block.index });
-		if (readonly || !actions) return;
+		if (!actions) return;
 		const box = on.getBoundingClientRect();
 		menu = {
 			x: at?.x ?? box.left,
@@ -559,11 +706,22 @@
 		return [
 			{ label: 'Open notes', action: () => open(at) },
 			{ label: 'Loop this clip', action: () => loopThis(at) },
-			{ label: 'Duplicate after', keys: 'duplicate', action: () => duplicate(at) },
-			{ label: 'Make unique', action: () => unique(at), disabled: uses(opened.clip) < 2 },
-			{ label: 'Remove from track', keys: 'arrangement.delete', action: () => remove(at) },
-			{ label: 'Delete clip', action: () => deleteClip(at) }
+			{ label: 'Copy', keys: 'copy', action: () => copyPlacement(at) },
+			{ label: 'Duplicate after', keys: 'duplicate', action: () => duplicate(at), disabled: readonly },
+			{ label: 'Make unique', action: () => unique(at), disabled: readonly || uses(opened.clip) < 2 },
+			{ label: 'Remove from track', keys: 'arrangement.delete', action: () => remove(at), disabled: readonly },
+			{ label: 'Delete clip', action: () => deleteClip(at), disabled: readonly }
 		];
+	}
+
+	// Mod+C, or Copy in the clip's menu: the placement and its clip, for a paste in this song or another.
+	function copyPlacement(at: { track: number; placement: number }) {
+		const placed = doc.tracks.find((t) => t.id === at.track)?.placements[at.placement];
+		const clip = placed && doc.clips.find((c) => c.id === placed.clip);
+		if (!placed || !clip) return false;
+		const what = { placement: placed, clip };
+		clipboard.placement = { what, from: at.track, at: placed.tick, span: copiedSpan(what), pasted: null };
+		return true;
 	}
 
 	function rowDoubled(event: MouseEvent) {
@@ -578,7 +736,7 @@
 	// on the chosen track, where `pasteAt` says.
 	function keydown(event: KeyboardEvent) {
 		const target = event.target as Element | null;
-		const elsewhere = typingIn(target) || !!target?.closest?.('[data-testid="roll"], dialog');
+		const elsewhere = typingIn(target, event.key) || !!target?.closest?.('[data-testid="roll"], dialog');
 		if (!active || event.defaultPrevented || elsewhere) return;
 		const track = selection.track;
 		const at = track !== null && selection.placement !== null ? { track, placement: selection.placement } : null;
@@ -586,12 +744,7 @@
 			event.preventDefault();
 			if (at && !readonly) actions?.duplicate(at);
 		} else if (matches(event, 'copy') && at) {
-			const placed = doc.tracks.find((t) => t.id === at.track)?.placements[at.placement];
-			const clip = placed && doc.clips.find((c) => c.id === placed.clip);
-			if (!placed || !clip) return;
-			event.preventDefault();
-			const what = { placement: placed, clip };
-			clipboard.placement = { what, from: at.track, at: placed.tick, span: copiedSpan(what), pasted: null };
+			if (copyPlacement(at)) event.preventDefault();
 		} else if (matches(event, 'paste') && clipboard.placement && !readonly) {
 			const copied = clipboard.placement;
 			const to = track ?? (doc.tracks.some((t) => t.id === copied.from) ? copied.from : doc.tracks[0]?.id);
@@ -648,8 +801,17 @@
 	);
 </script>
 
-<svelte:window onpointermove={pointerMove} onpointerup={pointerUp} onkeydown={keydown} />
+<svelte:window
+	onpointermove={pointerMove}
+	onpointerup={pointerUp}
+	onkeydown={keydown}
+	ondragover={dragElsewhere}
+	ondrop={() => (dropAt = null)}
+	ondragend={() => (dropAt = null)}
+/>
 
+<!-- A drop from the browser has its keys too: a head's ▾ and + Track. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="arrangement"
 	class:sized={dragged !== null}
@@ -657,6 +819,8 @@
 	bind:this={view}
 	data-testid="arrangement-view"
 	onwheel={wheel}
+	ondragover={dragOver}
+	ondrop={drop}
 >
 	<div class="heads" bind:this={heads}>
 		<!-- The ruler's corner and the song layer's heads, which stay at the top as the tracks scroll under them. ▸ or a
@@ -693,8 +857,12 @@
 				class="head"
 				class:chosen={selection.track === track.id}
 				class:silent={track.mute || (soloing && !soloed)}
+				class:dropping={dropAt?.track === track.id}
+				class:lifted={gesture?.kind === 'track' && gesture.moved && gesture.track === track.id}
 				style:height="{ROW}px"
+				data-testid={`head-${track.id}`}
 				oncontextmenu={(event) => headMenu(event, track)}
+				onpointerdown={(event) => startTrack(event, track)}
 			>
 				<div class="namerow">
 					{#if renaming === track.id}
@@ -755,7 +923,9 @@
 				</div>
 				<!-- The track plays its patch: its name opens it, and ▾ chooses another. -->
 				<div class="patch">
-					{#if names.length}
+					{#if dropAt?.track === track.id && dropWords}
+						<span class="dropwords" data-testid={`drop-words-${track.id}`}>{dropWords}</span>
+					{:else if names.length}
 						<button
 							type="button"
 							class="patchname"
@@ -794,9 +964,20 @@
 				/>
 				<Meter ring={meter(track.id)} label={`Level of ${trackName(track)}`} />
 			</div>
-		{:else}
-			<p class="muted empty">No tracks yet.</p>
 		{/each}
+		{#if trackLine !== null}<div class="headline" style:top="{trackLine - 1}px"></div>{/if}
+		{#if newRow}
+			<div
+				class="head newtrack"
+				class:dropping={dropAt !== null && dropAt.track === null}
+				style:height="{ROW}px"
+				data-testid="new-track-head"
+			>
+				<span class="newwords">{newWords}</span>
+			</div>
+		{:else if !doc.tracks.length}
+			<p class="muted empty">No tracks yet.</p>
+		{/if}
 	</div>
 
 	<div class="scroller">
@@ -812,7 +993,10 @@
 					height={RULER}
 					role="presentation"
 					data-testid="ruler"
-					onpointerdown={(event) => onlocate(snapTick(ticksAt(canvas(event).x), grid))}
+					onpointerdown={(event) => {
+						if (!secondary(event)) onlocate(snapTick(ticksAt(canvas(event).x), grid));
+					}}
+					oncontextmenu={(event) => bandMenu(event, 'ruler')}
 				/>
 				<rect
 					class="loopstrip"
@@ -822,6 +1006,7 @@
 					role="presentation"
 					data-testid="loop-strip"
 					onpointerdown={startLoop}
+					oncontextmenu={(event) => bandMenu(event, 'loop')}
 					><title
 						>Drag for a loop. A click turns it on or off, and a drag on it moves it, or by an end stretches it.</title
 					></rect
@@ -870,12 +1055,14 @@
 			role="application"
 			aria-label="Arrangement"
 			data-testid="arrangement"
+			oncontextmenu={canvasMenu}
 		>
 			{#each doc.tracks as track, row (track.id)}
 				<rect
 					class="row"
 					class:odd={row % 2 === 1}
 					class:chosen={selection.track === track.id}
+					class:dropping={dropAt?.track === track.id}
 					y={tracksTop + row * ROW}
 					{width}
 					height={ROW}
@@ -886,6 +1073,17 @@
 					oncontextmenu={rowMenu}
 				/>
 			{/each}
+
+			{#if newRow}
+				<rect
+					class="row newrow"
+					class:dropping={dropAt !== null && dropAt.track === null}
+					y={tracksTop + doc.tracks.length * ROW}
+					{width}
+					height={ROW}
+					data-testid="new-track-row"
+				/>
+			{/if}
 
 			{#each { length: bars + 1 }, bar}
 				<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={tracksTop} y2={height} />
@@ -942,13 +1140,37 @@
 				</g>
 			{/if}
 
+			{#if dropAt !== null && dropAt.track === null}
+				<!-- The clip the new track starts with, where it would go. -->
+				<g class="drawn" transform={`translate(${dropAt.tick * perTick} ${tracksTop + doc.tracks.length * ROW + 4})`}>
+					<rect
+						width={TEMPLATE_BARS * barWidth}
+						height={BLOCK}
+						rx="3"
+						data-testid="dropped-clip"
+						data-tick={dropAt.tick}
+					/>
+					<text x="5" y="12">{newWords}</text>
+				</g>
+			{/if}
+			{#if trackLine !== null}
+				<line class="trackline" x1={0} x2={width} y1={trackLine} y2={trackLine} data-testid="track-line" />
+			{/if}
+
 			<line class="playhead" x1={tick * perTick} x2={tick * perTick} y1={0} y2={height} data-testid="playhead" />
 		</svg>
 	</div>
 </div>
 
 {#if other}
-	<ContextMenu x={other.x} y={other.y} label={other.label} items={other.items} onclose={() => (other = null)} />
+	<ContextMenu
+		x={other.x}
+		y={other.y}
+		label={other.label}
+		items={other.items}
+		note={other.note}
+		onclose={() => (other = null)}
+	/>
 {/if}
 {#if menu}
 	<ContextMenu
@@ -956,6 +1178,7 @@
 		y={menu.y}
 		label={`Clip ${menu.clip}`}
 		items={placementItems(menu)}
+		{note}
 		onclose={() => (menu = null)}
 	/>
 {/if}
@@ -992,6 +1215,7 @@
 	.head {
 		display: flex;
 		flex-direction: column;
+		user-select: none;
 		box-sizing: border-box;
 		border-top: 1px solid var(--line);
 		padding: 0 0.4rem 0.35rem 0;
@@ -1107,6 +1331,35 @@
 		background: #1a212b;
 		box-shadow: inset 3px 0 0 var(--accent);
 	}
+	/* A drop's track, and the row a new one would take. */
+	.head.dropping,
+	.head.newtrack.dropping {
+		box-shadow: inset 0 0 0 2px var(--accent);
+	}
+	.headline {
+		position: absolute;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background: var(--accent);
+		pointer-events: none;
+	}
+	.head.lifted {
+		opacity: 0.6;
+	}
+	.head.newtrack {
+		justify-content: center;
+		padding-left: 0.6rem;
+		border-style: dashed;
+	}
+	.newwords,
+	.dropwords {
+		font-size: 0.72rem;
+		color: var(--accent);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
 	.head .select.problem {
 		box-shadow: inset 3px 0 0 #f85149;
 	}
@@ -1210,6 +1463,18 @@
 	}
 	.row.chosen {
 		fill: #58a6ff0d;
+	}
+	.row.dropping {
+		fill: #58a6ff26;
+	}
+	.newrow {
+		stroke: #58a6ff60;
+		stroke-dasharray: 4 3;
+	}
+	.trackline {
+		stroke: var(--accent);
+		stroke-width: 2;
+		pointer-events: none;
 	}
 	.bar {
 		stroke: var(--line);

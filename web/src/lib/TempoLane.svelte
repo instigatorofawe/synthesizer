@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import ContextMenu, { EXAMPLE_NOTE, byKeys, type MenuItem } from '#lib/ContextMenu.svelte';
 	import type { Timeline } from '#lib/Schema.ts';
 	import { matches, modKey } from '#lib/Shortcuts.ts';
 	import { FOLDED, UNFOLDED } from '#lib/SongLayer.ts';
@@ -78,7 +78,8 @@
 	let svg: SVGSVGElement;
 	let gesture = $state.raw<Gesture | null>(null);
 	let chosen = $state<number | null>(null); // An index into the song's tempo
-	let menu = $state.raw<{ x: number; y: number; index: number } | null>(null);
+	// A change's menu, or with no index, the lane's own, at the tick it was opened at.
+	let menu = $state.raw<{ x: number; y: number; index: number | null; tick: number } | null>(null);
 
 	const height = $derived(open ? UNFOLDED : FOLDED);
 	const shown = $derived(gesture?.kind === 'point' ? gesture.now : doc);
@@ -260,22 +261,41 @@
 	function openMenu(event: MouseEvent, index: number | null) {
 		event.preventDefault();
 		event.stopPropagation();
-		if (index === null) return;
 		gesture = null;
-		chosen = index;
-		if (!readonly) menu = { x: event.clientX, y: event.clientY, index };
+		if (index !== null) chosen = index;
+		menu = { x: event.clientX, y: event.clientY, index, tick: snapTick(canvas(event).x / perTick, grid) };
 	}
 
-	// The menu key and Shift+F10 open the chosen change's menu, at its point.
+	// The lane's own menu, where no change is. The menu key and Shift+F10 open the chosen change's, at its point.
 	function laneMenu(event: MouseEvent) {
-		event.preventDefault();
-		if (event.clientX === 0 && event.clientY === 0) menuAtChosen();
+		if (byKeys(event)) {
+			event.preventDefault();
+			menuAtChosen();
+		} else openMenu(event, null);
 	}
 
 	function menuAtChosen() {
-		if (readonly || !open || chosen === null) return;
+		if (!open || chosen === null) return;
 		const point = svg.querySelector(`[data-testid="tempo-point-${chosen}"]`)?.getBoundingClientRect();
-		if (point) menu = { x: point.left, y: point.bottom, index: chosen };
+		if (point) menu = { x: point.left, y: point.bottom, index: chosen, tick: doc.tempo[chosen]?.tick ?? 0 };
+	}
+
+	// Where no change is: one added there, at the tempo the song has there, which is what a click on the open lane adds.
+	function laneItems(tick: number): MenuItem[] {
+		if (!open) return [{ label: 'Unfold the Tempo lane', action: onunfold }];
+		const there = doc.tempo.some((change) => change.tick === tick);
+		return [
+			{
+				label: 'Add a tempo change here',
+				action: () => {
+					const added = addTempoAt(doc, tick, tempoThere(doc.tempo, tick));
+					if (added.index < 0) return;
+					chosen = added.index;
+					commit(added.doc);
+				},
+				disabled: readonly || there
+			}
+		];
 	}
 
 	// The menu closes before an item acts, so each item holds the change it is for rather than reading the menu.
@@ -286,11 +306,11 @@
 			{
 				label: change.ramp && canGlide(doc.tempo, index) ? 'Hold until the next change' : 'Glide to the next tempo',
 				action: () => commit(toggleGlide(doc, index)),
-				disabled: !canGlide(doc.tempo, index)
+				disabled: readonly || !canGlide(doc.tempo, index)
 			}
 		];
 		if (!isFirstTempo(doc.tempo, index))
-			items.push({ label: 'Delete', keys: 'tempo.delete', action: () => remove(index) });
+			items.push({ label: 'Delete', keys: 'tempo.delete', action: () => remove(index), disabled: readonly });
 		return items;
 	}
 
@@ -457,11 +477,13 @@
 </svg>
 
 {#if menu}
+	{@const at = menu.index === null ? menu.tick : (doc.tempo[menu.index]?.tick ?? 0)}
 	<ContextMenu
 		x={menu.x}
 		y={menu.y}
-		label={`Tempo at bar ${barOf(doc.tempo[menu.index]?.tick ?? 0, doc.ppq)}`}
-		items={changeItems(menu.index)}
+		label={menu.index === null ? 'Tempo lane' : `Tempo at bar ${barOf(at, doc.ppq)}`}
+		items={menu.index === null ? laneItems(menu.tick) : changeItems(menu.index)}
+		note={readonly && (open || menu.index !== null) ? EXAMPLE_NOTE : undefined}
 		onclose={() => (menu = null)}
 	/>
 {/if}

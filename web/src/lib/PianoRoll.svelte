@@ -3,7 +3,7 @@
 	import { on } from 'svelte/events';
 	import AutomationLane from '#lib/AutomationLane.svelte';
 	import { clipboard } from '#lib/Clipboard.ts';
-	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import ContextMenu, { EXAMPLE_NOTE, type MenuItem } from '#lib/ContextMenu.svelte';
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { FOLLOW_MARGIN, followScroll } from '#lib/Follow.ts';
 	import { ROW, ROWS, anchored, clampBeat, fitRoll, wheelAction, type RollView } from '#lib/RollView.ts';
@@ -164,7 +164,8 @@
 	}
 
 	// The chosen notes' menu, or with `ground` the roll's own, for a right-click where there is no note.
-	let menu = $state.raw<{ x: number; y: number; ground?: true } | null>(null);
+	// The chosen notes' menu, or the roll's own, which from the keys column also chooses every note of its key.
+	let menu = $state.raw<{ x: number; y: number; ground?: true; key?: number } | null>(null);
 	let notice = $state<string | null>(null); // Said after a clip grows, with an Undo beside it
 	// A note that would have grown the clip into the next, clicked or from step entry
 	let offer = $state.raw<{ note: Note; length: number; step?: true } | null>(null);
@@ -686,7 +687,7 @@
 	function stepKeys(event: KeyboardEvent) {
 		if (!stepping || readonly || !active) return;
 		const target = event.target as Element | null;
-		if (typingIn(target) || target?.closest?.('[role="menu"], dialog, nav')) return;
+		if (typingIn(target, event.key) || target?.closest?.('[role="menu"], dialog, nav')) return;
 		if (matches(event, 'step.rest')) {
 			offer = null;
 			if (chord) chord = lengthenHeld(chord, grid);
@@ -735,7 +736,7 @@
 		event.stopPropagation();
 		gesture = null;
 		if (!chosen.has(index)) chosen = new Set([index]);
-		if (!readonly) menu = { x: event.clientX, y: event.clientY };
+		menu = { x: event.clientX, y: event.clientY };
 	}
 
 	// Shift+F10 or the menu key opens the chosen notes' menu, at the first of them.
@@ -746,8 +747,32 @@
 		menu = { x: event.clientX, y: event.clientY, ground: true };
 	}
 
-	const groundItems = (): MenuItem[] => [
-		...(readonly ? [] : [{ label: 'Paste', keys: 'paste' as const, action: paste, disabled: !clipboard.notes }]),
+	// The ruler's and the key column's, which are the roll's too. A key's also chooses every note of it.
+	function sideMenu(event: MouseEvent, key?: number) {
+		event.preventDefault();
+		gesture = null;
+		menu = { x: event.clientX, y: event.clientY, ground: true, key };
+	}
+
+	// A velocity stem's is its note's, and the lane's own, where no stem is, the roll's.
+	function velocityMenu(event: MouseEvent) {
+		const stem = (event.target as Element).closest('[data-index]');
+		if (!stem) return sideMenu(event);
+		event.preventDefault();
+		gesture = null;
+		const index = Number(stem.getAttribute('data-index'));
+		if (!chosen.has(index)) chosen = new Set([index]);
+		menu = { x: event.clientX, y: event.clientY };
+	}
+
+	const keyItems = (key: number): MenuItem[] => {
+		const all = new Set(clip.notes.flatMap((note, index) => (note.note === key ? [index] : [])));
+		return [{ label: `Choose every ${noteName(key)}`, action: () => (chosen = all), disabled: !all.size }];
+	};
+
+	const groundItems = (key?: number): MenuItem[] => [
+		...(key === undefined ? [] : keyItems(key)),
+		{ label: 'Paste', keys: 'paste' as const, action: paste, disabled: readonly || !clipboard.notes },
 		{
 			label: 'Choose all',
 			keys: 'select-all',
@@ -759,13 +784,14 @@
 
 	function menuAtChosen() {
 		gesture = null;
-		if (readonly || !chosen.size) return;
+		if (!chosen.size) return;
 		const first = roll.querySelector(`[data-testid="note-${Math.min(...chosen)}"] .body`);
 		const box = (first ?? roll).getBoundingClientRect();
 		menu = { x: box.left, y: box.bottom };
 	}
 
 	const noteItems = (): MenuItem[] => [
+		{ label: 'Copy', keys: 'copy', action: copy },
 		{
 			label: 'Delete',
 			keys: 'roll.delete',
@@ -773,9 +799,10 @@
 				const gone = chosen;
 				chosen = new Set();
 				onchange(removeNotes(clip, gone));
-			}
+			},
+			disabled: readonly
 		},
-		{ label: 'Duplicate', keys: 'duplicate', action: duplicate }
+		{ label: 'Duplicate', keys: 'duplicate', action: duplicate, disabled: readonly }
 	];
 
 	function pressKey(event: PointerEvent, note: number) {
@@ -1082,7 +1109,14 @@
 			<!-- The clip's bars, counted from its start, over the rows and staying there as they scroll. -->
 			<div class="rule">
 				<div class="corner" style:width="{KEYS}px"></div>
-				<svg class="ruler" {width} height={RULER} aria-hidden="true" data-testid="roll-ruler">
+				<svg
+					class="ruler"
+					{width}
+					height={RULER}
+					aria-hidden="true"
+					data-testid="roll-ruler"
+					oncontextmenu={(event) => sideMenu(event)}
+				>
 					<rect class="ground" {width} height={RULER} />
 					<rect
 						class="past"
@@ -1120,6 +1154,7 @@
 							role="presentation"
 							data-testid={`key-${note}`}
 							onpointerdown={(event) => pressKey(event, note)}
+							oncontextmenu={(event) => sideMenu(event, note)}
 						/>
 						{#if note % 12 === 0}<text class="octave" x="4" y={row * rowHeight + rowHeight - 2}>{noteName(note)}</text
 							>{/if}
@@ -1299,7 +1334,8 @@
 		x={menu.x}
 		y={menu.y}
 		label={menu.ground ? 'Piano roll' : chosen.size > 1 ? `${chosen.size} notes` : 'Note'}
-		items={menu.ground ? groundItems() : noteItems()}
+		items={menu.ground ? groundItems(menu.key) : noteItems()}
+		note={readonly ? EXAMPLE_NOTE : undefined}
 		onclose={() => (menu = null)}
 	/>
 {/if}
@@ -1314,6 +1350,7 @@
 				aria-label="Velocity"
 				data-testid="velocity"
 				onpointerdown={pressStrip}
+				oncontextmenu={velocityMenu}
 			>
 				<rect class="strip" {width} height={VELOCITY} />
 				{#each stems as { note, index } (index)}

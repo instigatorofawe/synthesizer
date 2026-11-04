@@ -2,6 +2,7 @@
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import { rangeEscape } from '#lib/Drag.ts';
 	import ParamSlider from '#lib/ParamSlider.svelte';
+	import { bringing } from '#lib/PatchDrag.svelte.ts';
 	import { unitOf } from '#lib/ParamValues.ts';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Param, Timeline } from '#lib/Schema.ts';
@@ -12,6 +13,7 @@
 		addBus,
 		decibels,
 		addInsert,
+		addSlot,
 		addSend,
 		busKey,
 		faderGain,
@@ -28,6 +30,7 @@
 		setInsert,
 		setInsertPatch,
 		setSend,
+		setSlot,
 		setTrackParam,
 		soloed,
 		trackKey,
@@ -64,6 +67,34 @@
 	} = $props();
 
 	let newBus = $state('');
+
+	// A patch dragged from the browser onto a strip: an insert joins the strip's effects, after those it has, and a patch that
+	// plays notes plays on a track's strip, as one chosen by its head's ▾ does. Nothing changes an example.
+	let dropping = $state<string | null>(null); // The strip a drop would go on
+	function takes(event: DragEvent, track: Track | null) {
+		const what = bringing(event);
+		return !readonly && what?.kind === 'patch' && (what.patch.insert || track !== null) ? what.patch : null;
+	}
+	const dropOn = (key: string, track: Track | null = null) => ({
+		ondragover: (event: DragEvent) => {
+			if (!takes(event, track)) return;
+			event.preventDefault();
+			if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+			dropping = key;
+		},
+		ondragleave: (event: DragEvent) => {
+			if (!(event.currentTarget as Element).contains(event.relatedTarget as Node | null)) dropping = null;
+		},
+		ondrop: (event: DragEvent) => {
+			dropping = null;
+			const patch = takes(event, track);
+			if (!patch) return;
+			event.preventDefault();
+			if (patch.insert) onchange(addInsert(doc, key, patch.id));
+			else if (track)
+				onchange(track.slots.length ? setSlot(doc, track.id, 0, patch.id) : addSlot(doc, track.id, patch.id));
+		}
+	});
 
 	const number = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
 
@@ -357,11 +388,14 @@
 	{/if}
 {/snippet}
 
+<!-- A drag let go of elsewhere, or given up, leaves no strip lit. -->
+<svelte:window ondragend={() => (dropping = null)} ondrop={() => (dropping = null)} />
+
 <div class="mixer" data-testid="mixer">
 	{#each doc.tracks as track (track.id)}
 		{@const key = trackKey(track.id)}
 		{@const label = track.name || `Track ${track.id}`}
-		<section class="strip" data-testid={`strip-${key}`}>
+		<section class="strip" class:dropping={dropping === key} data-testid={`strip-${key}`} {...dropOn(key, track)}>
 			<div class="title">
 				<h4>{label}</h4>
 				<!-- Outside the fieldset: a solo changes nothing saved, so an example can be soloed too. -->
@@ -399,7 +433,7 @@
 
 	{#each doc.buses as bus (bus.id)}
 		{@const key = busKey(bus.id)}
-		<section class="strip bus" data-testid={`strip-${key}`}>
+		<section class="strip bus" class:dropping={dropping === key} data-testid={`strip-${key}`} {...dropOn(key)}>
 			<h4>{bus.id}</h4>
 			{@render scope(key, bus.id)}
 			<fieldset disabled={readonly}>
@@ -413,7 +447,7 @@
 		</section>
 	{/each}
 
-	<section class="strip master" data-testid="strip-master">
+	<section class="strip master" class:dropping={dropping === MASTER} data-testid="strip-master" {...dropOn(MASTER)}>
 		<h4>Master</h4>
 		{@render scope(MASTER, 'Master')}
 		<fieldset disabled={readonly}>
@@ -460,6 +494,9 @@
 		overflow-x: auto;
 		padding-bottom: 0.4rem;
 		align-items: flex-start;
+	}
+	.strip.dropping {
+		box-shadow: inset 0 0 0 2px var(--accent);
 	}
 	.strip {
 		flex: none;

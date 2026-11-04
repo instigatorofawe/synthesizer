@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick as settle, untrack, type Snippet } from 'svelte';
 	import { clipboard } from '#lib/Clipboard.ts';
-	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
+	import ContextMenu, { BUILTIN_NOTE, type MenuItem } from '#lib/ContextMenu.svelte';
 	import {
 		addNode,
 		addZone,
@@ -740,7 +740,7 @@
 	// Esc lets go of one thing at a time: a drag, then what is chosen. Mod with A, V or D is kept from the browser, which would
 	// choose the page's text or bookmark the page, and so is Mod+C when there is something chosen to copy.
 	function keydown(event: KeyboardEvent) {
-		if (!active || typingIn(event.target)) return;
+		if (!active || typingIn(event.target, event.key)) return;
 		if (matches(event, 'escape')) {
 			if (event.defaultPrevented) return; // Something nearer the top of the page let go of something
 			if (gesture) cancelGesture();
@@ -793,30 +793,26 @@
 			open(picked.length > 1 ? `${picked.length} nodes` : `${friendlyName(node.type)} ${node.id}`, nodeItems());
 		} else if (wire) {
 			select([], { to: wire.to, input: wire.input });
-			if (!readonly) open('Wire', wireItems());
-		} else if (!readonly) {
+			open('Wire', wireItems());
+		} else {
 			const at = toCanvas(event);
 			const client = { x: event.clientX, y: event.clientY };
 			open('Graph', [
-				{ label: 'Paste', disabled: !clipboard.nodes, action: () => paste(clipboard.nodes, at) },
-				{ label: 'Add a node…', action: () => openPalette(client) }
+				{ label: 'Paste', disabled: readonly || !clipboard.nodes, action: () => paste(clipboard.nodes, at) },
+				{ label: 'Add a node…', action: () => openPalette(client), disabled: readonly }
 			]);
 		}
 	}
 
 	const nodeItems = (): MenuItem[] => [
 		{ label: 'Copy', keys: 'copy', action: copyChosen },
-		...(readonly
-			? []
-			: ([
-					{ label: 'Duplicate', keys: 'duplicate', action: duplicateChosen },
-					{
-						label: deletable.length > 1 ? `Delete ${deletable.length} nodes` : 'Delete',
-						keys: 'graph.delete',
-						disabled: !deletable.length,
-						action: removeChosen
-					}
-				] satisfies MenuItem[]))
+		{ label: 'Duplicate', keys: 'duplicate', action: duplicateChosen, disabled: readonly },
+		{
+			label: deletable.length > 1 ? `Delete ${deletable.length} nodes` : 'Delete',
+			keys: 'graph.delete',
+			disabled: readonly || !deletable.length,
+			action: removeChosen
+		}
 	];
 
 	function wireItems(): MenuItem[] {
@@ -831,11 +827,12 @@
 						}
 					]
 				: [];
-		return [
+		const items: MenuItem[] = [
 			{ label: 'Delete', keys: 'graph.delete', action: removeChosen },
 			...(snap ? [{ label: 'Put a snap on this wire', action: () => putSnap(snap.to, snap.input) }] : []),
 			...modulated
 		];
+		return readonly ? items.map((item) => ({ ...item, disabled: true })) : items;
 	}
 
 	const probed = (node: number, port: string) => probes.some((probe) => probe.node === node && probe.port === port);
@@ -1199,7 +1196,14 @@
 			</svg>
 			{#if menu}
 				{#key menu}
-					<ContextMenu x={menu.x} y={menu.y} label={menu.label} items={menu.items} onclose={() => (menu = null)} />
+					<ContextMenu
+						x={menu.x}
+						y={menu.y}
+						label={menu.label}
+						items={menu.items}
+						note={readonly ? BUILTIN_NOTE : undefined}
+						onclose={() => (menu = null)}
+					/>
 				{/key}
 			{/if}
 			{#if palette}

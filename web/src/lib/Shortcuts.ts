@@ -251,11 +251,30 @@ export function sheet(mod = modKey()): { scope: Scope; name: string; rows: Sheet
 // Inputs that are pressed or dragged rather than typed into. Space and the table's keys go past them, as they go past a button.
 const PRESSED = new Set(['button', 'submit', 'reset', 'image', 'range']);
 
+// The keys a select uses, which a chooser (`chooser` in Fields.ts) keeps, and leaves the rest to the page.
+const CHOOSING = new Set([
+	'ArrowUp',
+	'ArrowDown',
+	'ArrowLeft',
+	'ArrowRight',
+	'Home',
+	'End',
+	'PageUp',
+	'PageDown',
+	'Enter',
+	' ',
+	'Tab',
+	'Escape'
+]);
+
 // Whether focus is in something that takes keys as its own: a text field, a textarea, a select, a checkbox or a radio
-// button, or editable text. A key pressed there is left to it, and a button or a slider leaves Space to the transport.
-export function typingIn(target: EventTarget | null): boolean {
+// button, or editable text. A key pressed there is left to it, and a button or a slider leaves Space to the transport. A
+// toolbar's chooser, such as Snap or Draw, is a setting rather than a field, so it keeps only the keys it uses: the piano keys,
+// R, [ and ] and Mod+Z still work while it has focus. Without the key, a chooser is taken to keep it.
+export function typingIn(target: EventTarget | null, key?: string): boolean {
 	const field = (target as Element | null)?.closest?.('input, textarea, select, [contenteditable="true"]') as
-		{ tagName?: string; type?: string } | null | undefined;
+		(Element & { type?: string }) | null | undefined;
 	if (!field) return false;
+	if (key !== undefined && field.tagName === 'SELECT' && field.hasAttribute('data-chooser')) return CHOOSING.has(key);
 	return !(field.tagName === 'INPUT' && PRESSED.has(field.type ?? ''));
 }

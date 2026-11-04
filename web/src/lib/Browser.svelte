@@ -13,7 +13,7 @@
 
 	// What each list is for.
 	const SAMPLES =
-		"WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like Piano_C4.wav says which key it was recorded at.";
+		"WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like Piano_C4.wav says which key it was recorded at. Drop them here, or on the song for a track that plays them.";
 	const BUILTINS =
 		"Every example's patches, for any song to play. They can't be changed: Edit a copy makes one that can.";
 	const BUNDLES = 'Several songs compiled into one image, for a device to choose between.';
@@ -24,6 +24,7 @@
 <script lang="ts">
 	import { enhance, type SubmitFunction } from '$app/forms';
 	import { tick, untrack } from 'svelte';
+	import { bringing, endPatchDrag, startPatchDrag, wavFiles } from '#lib/PatchDrag.svelte.ts';
 	import { patchGroups } from '#lib/PatchGroups.ts';
 	import { matches as pressed } from '#lib/Shortcuts.ts';
 	import {
@@ -58,7 +59,8 @@
 		reveal = null,
 		onshortcuts,
 		onmade = () => {},
-		onescape = () => {}
+		onescape = () => {},
+		ondragging = () => {}
 	}: {
 		search: string; // The page's address now, which every link here changes a part of
 		examples: { name: string; recipes: { name: string; listen_for: string }[] }[];
@@ -85,6 +87,7 @@
 		onshortcuts: () => void; // Opens the sheet of keyboard shortcuts
 		onmade?: (what: 'timeline' | 'patch' | 'bundle') => void; // Once a new one is open, to give it focus
 		onescape?: () => void; // Esc in an empty filter: the browser is done with, and focus goes back
+		ondragging?: (on: boolean) => void; // A patch is being dragged out of it, or no longer is
 	} = $props();
 
 	let filter = $state('');
@@ -93,6 +96,44 @@
 
 	const usedWords = (users: { name: string }[]) =>
 		users.length ? `Used by ${users.map((u) => u.name).join(', ')}` : 'Not used by a song';
+
+	// A patch drags onto the song: onto a track to play it there, or below the tracks for a new one. An insert drags onto a
+	// track or a Mixer strip, whose effects it joins.
+	const dragWords = (patch: { graph: Graph }) =>
+		isInsert(patch.graph)
+			? 'Drag it onto a track or a Mixer strip to add it there.'
+			: 'Drag it onto the song to play it.';
+
+	function dragStart(event: DragEvent, patch: (typeof patches)[number]) {
+		startPatchDrag(event, { id: patch.id, name: patch.name, insert: isInsert(patch.graph) });
+		ondragging(true);
+	}
+
+	function dragEnd() {
+		endPatchDrag();
+		ondragging(false);
+	}
+
+	// WAV files dropped anywhere on the browser are imported, as its Samples + does.
+	let taking = $state(false);
+	function filesOver(event: DragEvent) {
+		if (bringing(event)?.kind !== 'files') return;
+		event.preventDefault();
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+		taking = true;
+	}
+
+	function filesDropped(event: DragEvent) {
+		taking = false;
+		if (bringing(event)?.kind !== 'files') return;
+		event.preventDefault();
+		const wavs = wavFiles(event);
+		if (!wavs.length || !files || !importForm) return;
+		const chosen = new DataTransfer();
+		for (const wav of wavs) chosen.items.add(wav);
+		files.files = chosen.files;
+		importForm.requestSubmit();
+	}
 
 	// The list whose name field is open, from the + in its heading. It takes focus as it opens, Enter makes the thing, and Esc
 	// or leaving it empty closes it.
@@ -191,9 +232,12 @@
 		<a
 			href={patchHref(patch.id)}
 			aria-current={patch.id === shownPatch ? 'true' : undefined}
-			title={usedWords(pointing === patch.id && usersOf ? usersOf(patch.id) : patch.users)}
+			title={`${usedWords(pointing === patch.id && usersOf ? usersOf(patch.id) : patch.users)}. ${dragWords(patch)}`}
+			data-patch={patch.id}
 			onpointerenter={() => (pointing = patch.id)}
 			onpointerleave={() => (pointing = null)}
+			ondragstart={(event) => dragStart(event, patch)}
+			ondragend={dragEnd}
 		>
 			{patch.name}{@render unsaved(draftKey('patch', patch.id))}
 			{#if isInsert(patch.graph)}<span class="tag">insert</span>{/if}
@@ -252,7 +296,16 @@
 	{/if}
 {/snippet}
 
-<nav class="browser" aria-label="Browser">
+<nav
+	class="browser"
+	class:taking
+	aria-label="Browser"
+	ondragover={filesOver}
+	ondragleave={(event) => {
+		if (!event.currentTarget.contains(event.relatedTarget as Node | null)) taking = false;
+	}}
+	ondrop={filesDropped}
+>
 	<input
 		class="filter"
 		type="search"
@@ -404,6 +457,10 @@
 </nav>
 
 <style>
+	/* WAV files held over it, which a drop imports. */
+	.browser.taking {
+		box-shadow: inset 0 0 0 2px var(--accent);
+	}
 	.browser {
 		display: flex;
 		flex-direction: column;

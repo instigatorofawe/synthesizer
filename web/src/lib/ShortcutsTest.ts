@@ -216,6 +216,17 @@ describe('where keys are typed', () => {
 		expect(typingIn(element('SELECT') as never)).toBe(true);
 	});
 
+	it("leaves a toolbar's chooser only the keys a select uses, so the piano keys and R still work there", () => {
+		const found = { tagName: 'SELECT', hasAttribute: (name: string) => name === 'data-chooser' };
+		const chooser = { closest: (selector: string) => (selector.includes('select') ? found : null) };
+		for (const key of ['ArrowDown', 'ArrowRight', 'Enter', ' ', 'Tab', 'Escape'])
+			expect(typingIn(chooser as never, key)).toBe(true);
+		for (const key of ['a', 'r', '[', 'z', '1']) expect(typingIn(chooser as never, key)).toBe(false);
+		expect(typingIn(chooser as never)).toBe(true); // Without the key, it keeps it
+		const plain = { closest: () => ({ tagName: 'SELECT', hasAttribute: () => false }) };
+		expect(typingIn(plain as never, 'a')).toBe(true); // A select in a form keeps every key
+	});
+
 	it('takes them from buttons, sliders and the rest of the page', () => {
 		expect(typingIn(element('INPUT', 'range') as never)).toBe(false);
 		expect(typingIn(element('INPUT', 'button') as never)).toBe(false);

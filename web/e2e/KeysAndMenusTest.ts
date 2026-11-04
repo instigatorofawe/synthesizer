@@ -47,6 +47,8 @@ test('a track head, an empty row and the empty roll each have a menu, and the me
 	await expect(head.getByRole('menuitem')).toHaveText([
 		'Rename…',
 		'New clip at the playhead',
+		'Move up',
+		'Move down',
 		'Mute',
 		'Solo',
 		'Delete track'

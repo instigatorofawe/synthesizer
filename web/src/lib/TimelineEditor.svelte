@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount, tick as settle, untrack, type Snippet } from 'svelte';
 	import { on } from 'svelte/events';
-	import Arrangement, { type Loop, type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
+	import Arrangement, { type Dropped, type Loop, type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import { escapeCancels } from '#lib/Drag.ts';
-	import { leavesFields } from '#lib/Fields.ts';
+	import { chooser, leavesFields } from '#lib/Fields.ts';
 	import type { CatalogEntry } from '#lib/GraphEdit.ts';
 	import { patchInputChoices } from '#lib/Modulate.ts';
 	import { SPLIT_KEY, keepSplit, keptSplit, splitAt } from '#lib/Split.ts';
@@ -17,6 +17,7 @@
 	import { addTempo, removeTempo, setTempo, tempoAt } from '#lib/Tempo.ts';
 	import {
 		addClip,
+		addInsert,
 		addPlayChange,
 		addSlot,
 		addTrack,
@@ -96,6 +97,7 @@
 		onplace = () => {},
 		onopen = () => {},
 		onnewpatch,
+		onimport,
 		onwriting = () => {},
 		onsolo = () => {},
 		ontempo = () => {},
@@ -131,6 +133,7 @@
 		onplace?: (place: SongPlace, chosen: boolean) => void;
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
+		onimport?: (files: File[]) => Promise<string | null>; // Makes an instrument of WAV files, and gives its id once it's there
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
 		ontempo?: (tempo: Timeline['tempo'] | null) => void; // The tempo while the Tempo lane is dragged, then null
@@ -311,10 +314,9 @@
 
 	// A new track comes with a clip as long as a new song's, at the bar the playhead is in, and the roll opens on it, so what
 	// the keys and step entry write goes into the track they play.
-	function newTrack(patch: string) {
+	function newTrack(patch: string, at = Math.floor(tick / ticksPerBar(doc)) * ticksPerBar(doc)) {
 		const added = addTrack(doc, patch);
 		const bar = ticksPerBar(doc);
-		const at = Math.floor(tick / bar) * bar;
 		const made = addClip(added.doc, TEMPLATE_BARS * bar);
 		const next = place(made.doc, added.id, made.id, at);
 		commit(next);
@@ -331,6 +333,25 @@
 		commit(index < track.slots.length ? setSlot(doc, id, index, patch) : addSlot(doc, id, patch));
 		if (selection.track !== id) selection = { track: id, placement: null };
 		return true;
+	}
+
+	// A patch dragged from the browser plays on the track it is let go of on, as one chosen by its ▾ does, or on a new track whose
+	// clip starts at the bar it was let go of at. An insert joins the track's effects, after those it has. WAV files dropped
+	// become an instrument in the library first, which then goes where a patch would.
+	async function dropped(drop: Dropped) {
+		if (readonly) return;
+		const patch = drop.kind === 'patch' ? drop.patch : null;
+		const id = patch ? patch.id : await onimport?.(drop.kind === 'files' ? drop.files : []);
+		if (!id) return;
+		if (drop.track === null) {
+			if (!patch?.insert) newTrack(id, drop.tick);
+			return;
+		}
+		if (!doc.tracks.some((t) => t.id === drop.track)) return; // It went while the files were imported
+		if (patch?.insert) {
+			commit(addInsert(doc, trackKey(drop.track), id));
+			selection = { track: drop.track, placement: null };
+		} else putPatch(drop.track, 0, id);
 	}
 
 	function picked(target: Picking, patch: string) {
@@ -513,7 +534,7 @@
 	// I folds the inspector, `.` fits the roll to its clip's notes, and Esc leaves Expand once nothing nearer has taken it: a
 	// menu, a drag, or what the roll is doing. They have their own listener, so the editor's `keydown` stays as it is.
 	function viewKeys(event: KeyboardEvent) {
-		if (!active || event.defaultPrevented || typingIn(event.target)) return;
+		if (!active || event.defaultPrevented || typingIn(event.target, event.key)) return;
 		if (matches(event, 'inspector')) {
 			event.preventDefault();
 			if (!event.repeat) toggleInspector();
@@ -640,7 +661,7 @@
 	// [ and ] step the Draw length. They go by where the keys are, as the piano keys do, and a field keeps them. They have
 	// their own listener, so the editor's `keydown` stays as it is.
 	function stepDraw(event: KeyboardEvent) {
-		if (readonly || !active || typingIn(event.target)) return;
+		if (readonly || !active || typingIn(event.target, event.key)) return;
 		const by = matches(event, 'draw-shorter') ? -1 : matches(event, 'draw-longer') ? 1 : 0;
 		if (!by) return;
 		event.preventDefault();
@@ -651,7 +672,7 @@
 	// in, and with no clip there is nothing to write into. C and V, which step the velocity of new notes, are the page's.
 	function noteKeys(event: KeyboardEvent) {
 		const target = event.target as Element | null;
-		if (readonly || !active || typingIn(target) || target?.closest?.('dialog')) return;
+		if (readonly || !active || typingIn(target, event.key) || target?.closest?.('dialog')) return;
 		if (matches(event, 'step-entry')) {
 			event.preventDefault();
 			if (event.repeat || !clip) return;
@@ -725,14 +746,14 @@
 				title="How long a clicked note is. [ and ] step it, and it follows the last note added, resized or chosen."
 			>
 				Draw
-				<select aria-label="Draw length" bind:value={draw}>
+				<select aria-label="Draw length" bind:value={draw} use:chooser>
 					{#each drawChoices as choice (choice.ticks)}<option value={choice.ticks}>{choice.label}</option>{/each}
 				</select>
 			</label>
 		{/if}
 		<label title="Where a clicked note starts, and the step a dragged note's length goes by">
 			Snap
-			<select aria-label="Snap" bind:value={grid}>
+			<select aria-label="Snap" bind:value={grid} use:chooser>
 				{#each grids(doc.ppq) as choice (choice.label)}<option value={choice.ticks}>{choice.label}</option>{/each}
 			</select>
 		</label>
@@ -741,7 +762,7 @@
 			title="Where a clip drawn, moved or repeated in the arrangement starts and ends, and where a tempo change goes"
 		>
 			Clips
-			<select aria-label="Clip snap" bind:value={clipGrid}>
+			<select aria-label="Clip snap" bind:value={clipGrid} use:chooser>
 				{#each grids(doc.ppq) as choice (choice.label)}<option value={choice.ticks}>{choice.label}</option>{/each}
 			</select>
 		</label>
@@ -795,6 +816,7 @@
 			{ontempo}
 			onmix={mixed}
 			onzoom={zoomBars}
+			ondropped={(drop) => void dropped(drop)}
 		/>
 
 		<aside class="inspector" id="inspector">

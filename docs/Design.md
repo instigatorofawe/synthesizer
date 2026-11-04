@@ -1,4 +1,4 @@
-# modsynth design, revision 34
+# modsynth design, revision 35
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -1228,6 +1228,19 @@ that an export refuses, and an editor that previews one thing and exports anothe
 A file's sampler chunk gives its root and loop, and failing that a name like `Piano_C4.wav` gives the root, and failing that it is 60. Keys split halfway between recordings, and several at one key become velocity layers, quietest first by peak, because
 only their levels say which is which. A bad file refuses the whole import, and one larger than an image can hold is refused there rather than failing on load. An asset can't be deleted while a patch names it.
 
+**MIDI import.** Import MIDI file…, on a song's or an example's menu, or a `.mid` file dropped on the arrangement, makes a new song
+of a Standard MIDI File, played on the standard set (`Midi.ts` reads it, `MidiImport.ts` arranges it). It reads formats 0 and 1 and
+refuses 2, whose tracks are sequences played one after another. It keeps the file's ticks, tempo map, and time and key signatures; a
+file timed in SMPTE frames plays at the tempo that makes its ticks last as long as they did. Each channel becomes a track (in format
+1, each file track's channel), whose slots are the programs it plays, and channel 10 a kit track holding the standard kit's sounds
+for the keys the file plays. The longer sound of each choke group rings on to the group's next note, or for 1.5 s, since a file's
+drum notes are often a few ticks long. The sustain pedal is folded into note lengths, as the user chose, and a key struck again ends
+the earlier note. Volume and pan set the fader and pan, CC 91 and CC 93 the reverb and chorus sends, and expression, the mod wheel,
+channel pressure and the pitch wheel the set's four parameters. Values in force when a track starts set it up, and later changes
+become lanes in its one clip, which runs from its first note's bar to the end of its last note's. The master gain is the smaller of 1
+and 2/√tracks. What the song can't hold, such as a key the kit has no sound for, is listed in a summary at the page's foot until it
+is dismissed [measured: the five Mutopia scores' 6,126 notes equal those `MakePieces.py`'s reader finds, with the pedal off].
+
 **Recipes.** `examples/Recipes` ships with the app as the read-only examples in the editor's browser, where any of them plays as it is and shows how it is made, in the same editors with nothing that changes anything: its arrangement, notes, lanes, mix and each patch's graph, which
 a probe can look inside. Its patches are already in the library, as built-in patches, so adding one copies only its timeline, as `recipe-<name>`, which plays them, and Edit a copy on any of them makes a copy that can change. Adding one
 twice changes nothing, so an edited copy survives. A library that added examples before keeps the copies of their patches it made then, as ordinary rows. A test holds every example to compiling to the same bytes from the library as from its file,
@@ -1810,8 +1823,7 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 | 15 | A live arpeggiator? | Recommended: leave it to the host, so the engine holds no keys. |
 | 16 | Clap, wavetable scanning, granular and shared LFO shapes? | Recommended: keep the workarounds until a real patch needs more. |
 | 23 | What authenticates an image over BLE? | A hash doesn't, and anyone in range can connect. Validation protects memory, but a valid image can still be very loud or overload the CPU. Recommended: BLE bonding, or signed images. |
-| 27 | A sustain pedal? | A timeline has none, so `MakePieces.py` writes Für Elise's pedalling into how long its notes are. The piano roll then shows the pedal's notes rather than the player's, and moving a pedal change means rewriting durations. Recommended: a pedal lane per track that the compiler applies to note lengths, as it writes a tempo ramp as steps, so the format and engine stay as they are. A key played live under the pedal would still need the engine to hold its voice. |
-| 28 | Importing MIDI files? | Every piece began as a MIDI file or LilyPond source, and the app imports only WAV. A Standard MIDI File reader is 45 lines of `MakePieces.py`. Recommended: import a file as a new timeline, a track for each of its tracks, with its tempo map, and its pedal once open 27 gives it somewhere to go. |
+| 27 | A sustain pedal? | A timeline has none, so `MakePieces.py` writes Für Elise's pedalling into how long its notes are, and MIDI import a file's. The piano roll then shows the pedal's notes rather than the player's, and moving a pedal change means rewriting durations. Recommended: a pedal lane per track that the compiler applies to note lengths, as it writes a tempo ramp as steps, so the format and engine stay as they are. A key played live under the pedal would still need the engine to hold its voice. |
 | 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks section 9's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
 | 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
 
@@ -1960,6 +1972,19 @@ Choices made here that the user hasn't weighed in on:
 - **Each part in the two halls has its own send,** rather than one factor for the piece, and the sends match total wet energy;
   matching only the late tail would lower the hall sends by about 1 dB. The template is left at the set's level, 6 dB under the
   old one, so a new song is as loud as an imported file.
+
+**Built from MIDI import** (revision 35), the second of the two PRs the user asked for, on the standard set of revision 34, with the
+sustain pedal folded into note lengths as they chose. It closes open 28 (above, with the editor's other imports). Nothing in the
+format, the compiler or the engine changes. Each of the five Mutopia scores imports and plays with nothing left out, every track on
+GM's program 0, Grand piano, which only the Grieg's file names and the rest leave as GM's default.
+
+Choices made here that the user hasn't weighed in on:
+- **One clip per track,** from its first note's bar to the end of its last note's, rather than a clip for each phrase.
+- **The master gain is the smaller of 1 and 2/√tracks,** so a file of all 16 channels starts at 0.5, short of the limiter.
+- **A held drum sound rings at most 1.5 s** when its group plays no further note.
+- **The song's ticks are the file's,** split in two, four or eight only where a time signature's beat isn't a whole number of them.
+- **Each track starts as GM says a channel does:** volume 100 (fader 0.62), centre pan, reverb send 40 (0.315 to LargeHall) and
+  chorus 0, with the set's defaults for the four parameters.
 
 **Declined.** Importing PureData patches, which the user decided against in revision 20 after it was scoped: the graph already has PureData's
 nodes, wires, inlets and subpatches, but its control logic, message envelopes and voice idioms have no counterpart here, and many common

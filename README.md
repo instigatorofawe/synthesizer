@@ -143,6 +143,9 @@ and **Patch**, a patch's graph at full height.
 - Edits to any number of patches and timelines stay, each with its own undo, while other things are opened, and Save writes them
   all at once.
 - An example plays as it is, and adding one copies it into the library.
+- **MIDI files:** Import MIDI file…, on a song's menu, or a `.mid` file dropped on the arrangement, makes a new song on the standard
+  set, with a track for each channel, a kit for channel 10, and the sustain pedal folded into note lengths. A summary at the foot of
+  the page says what it couldn't keep.
 
 ## Firmware
 

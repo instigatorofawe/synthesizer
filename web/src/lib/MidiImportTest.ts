@@ -23,8 +23,9 @@ import {
 } from '#lib/MidiWriter.ts';
 import { timelineSchema, type Timeline } from '#lib/Schema.ts';
 
-// A set of a few instruments, so the tests don't depend on how far the real one has got: pianos for GM's first family,
-// organs for its third, a violin, and five drums, two of which share a patch. Its names are GM's.
+// A set of a few instruments, so the tests say what the import does with a table rather than what the real set holds: pianos
+// for GM's first family, organs for its third, a violin, and five drums, two of which share a patch, and nothing for the rest,
+// so a program or a key with no sound can be tried. Its names are GM's.
 const PATCHES: Record<number, string> = { 40: 'Violin' };
 for (let p = 0; p < 8; ++p) PATCHES[p] = 'Piano';
 for (let p = 16; p < 24; ++p) PATCHES[p] = 'Organ';
@@ -34,10 +35,11 @@ const TABLE: GeneralMidi = {
 	params: { bend: 1, wheel: 2, expression: 3, pressure: 4 },
 	programs: GM.programs.map((p) => ({ ...p, instrument: PATCHES[p.program] ?? null })),
 	drums: GM.drums.map((d) => ({ ...d, instrument: DRUMS[d.note] ?? null })),
+	defaults: { bend: 0, wheel: 0, expression: 1, pressure: 0 },
 	chokes: { 'hi-hat': [42, 44, 46] },
+	held: [46],
 	effects: { reverb: 'Hall', chorus: 'Chorus' }
 };
-const BARE: GeneralMidi = { ...TABLE, effects: { reverb: null, chorus: null } };
 
 const PIANO = 'builtin-gm-Piano';
 const ORGAN = 'builtin-gm-Organ';
@@ -216,7 +218,7 @@ describe('a MIDI file as a song: programs', () => {
 		expect(played(doc)[0].slot).toBeUndefined();
 	});
 
-	it('leaves out the notes of a program the set has no instrument for yet, and says so', () => {
+	it('leaves out the notes of a program the set has no instrument for, and says so', () => {
 		const { doc, summary } = one([
 			program(0, 0, 104),
 			on(0, 0, 60),
@@ -235,8 +237,8 @@ describe('a MIDI file as a song: programs', () => {
 		expect(doc.tracks[0].slots).toEqual([PIANO]);
 		expect(summary.left).toEqual(
 			expect.arrayContaining([
-				'2 notes for Sitar, which the set has no instrument for yet',
-				'1 note for Banjo, which the set has no instrument for yet'
+				'2 notes for Sitar, which the set has no instrument for',
+				'1 note for Banjo, which the set has no instrument for'
 			])
 		);
 	});
@@ -267,7 +269,7 @@ describe('a MIDI file as a song: drums', () => {
 			[480, 38, 1],
 			[960, 35, 0]
 		]);
-		expect(summary.left).toContain('1 drum note on Cowbell, which the kit has no sound for yet');
+		expect(summary.left).toContain('1 drum note on Cowbell, which the kit has no sound for');
 	});
 
 	it('ends a note in a choke group when another of its group starts, and ignores program changes and the pedal', () => {
@@ -312,6 +314,16 @@ describe('a MIDI file as a song: the long sounds of choke groups', () => {
 		expect(lengths(short)).toEqual([[0, 46, 1200]]); // A second at 120 is 960 ticks, and half of one at 60 is 240 more
 		const long = one([on(0, 9, 46), off(4800, 9, 46)]).doc;
 		expect(lengths(long)).toEqual([[0, 46, 4800]]);
+	});
+
+	it("takes which keys ring on from the table's held keys", () => {
+		const { doc } = one([on(0, 9, 46), off(10, 9, 46), on(960, 9, 42), off(970, 9, 42)], {
+			gm: { ...TABLE, held: [] }
+		});
+		expect(lengths(doc)).toEqual([
+			[0, 46, 10],
+			[960, 42, 10]
+		]);
 	});
 
 	it('gives a kit track 32 voices, for the cymbals that ring on whatever their notes', () => {
@@ -518,6 +530,17 @@ describe('a MIDI file as a song: controllers', () => {
 		expect(doc.tracks[0].gain).toBe(1);
 	});
 
+	it("takes where the set's parameters start from the table", () => {
+		const gm = { ...TABLE, defaults: { bend: 0, wheel: 0.5, expression: 0.8, pressure: 0 } };
+		const { doc } = one([cc(0, 0, 1, 64), on(0, 0, 60), cc(480, 0, 121, 0), off(960, 0, 60)], { gm });
+		expect(doc.tracks[0].params).toEqual({ '2': 0.5039 }); // Expression starts where the table says, so it isn't written
+		expect(lane(doc, (a) => a.param === 2)).toEqual([
+			[0, 0.5039],
+			[480, 0.5] // Reset All Controllers puts it back where the table says it starts
+		]);
+		expect(lane(doc, (a) => a.param === 3)).toEqual([]);
+	});
+
 	it('takes what is in force where the clip starts as where it starts', () => {
 		const { doc } = one([cc(0, 0, 7, 50), cc(960, 0, 7, 127), on(1920, 0, 60), off(2400, 0, 60)]);
 		expect(doc.tracks[0].placements[0].tick).toBe(1920);
@@ -571,14 +594,12 @@ describe('a MIDI file as a song: sends', () => {
 		expect(doc.tracks[0].sends).toEqual([]);
 	});
 
-	it('leaves the sends out while the set has no effect for them, and says so', () => {
-		const { doc, summary } = one([cc(0, 0, 93, 100), on(0, 0, 60), off(480, 0, 60)], { gm: BARE });
+	it('sends nowhere when the table has no effect to send to', () => {
+		const gm = { ...TABLE, effects: { reverb: null, chorus: null } };
+		const { doc, summary } = one([cc(0, 0, 93, 100), on(0, 0, 60), off(480, 0, 60)], { gm });
 		expect(doc.buses).toEqual([]);
 		expect(doc.tracks[0].sends).toEqual([]);
-		expect(summary.left).toEqual([
-			'the reverb sends, since the set has no reverb yet',
-			'the chorus sends, since the set has no chorus yet'
-		]);
+		expect(summary.left).toEqual([]);
 	});
 });
 

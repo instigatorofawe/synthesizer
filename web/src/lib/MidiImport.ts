@@ -11,14 +11,14 @@
 //   is in force as a track starts is where its fader, pan, sends and parameters are set, and what changes after that is a lane
 //   in its clip.
 // What a song can't hold is left out and said: system exclusive messages, controllers nothing here answers, and the notes of a
-// program or a drum the set has no sound for yet.
+// key the kit has no sound for.
 //
 // Each track gets one clip, from the bar its first note is in to the end of the bar its last note ends in, placed where it
 // starts, so a part that comes in late is seen coming in, and Split cuts it into sections. Format 1 keeps the file's tracks
 // apart: a track there is one file track's notes on one channel, named after that track. The state a channel's messages set
 // (its program, its pedal, its controllers) is the channel's, whichever track sent them, as it is for a synthesizer that plays
 // every track at once.
-import { DRUM_CHANNEL, GM, type GeneralMidi, type KitKey } from '#lib/GeneralMidi.ts';
+import { DRUM_CHANNEL, GM, programPatch, standardKit, type GeneralMidi, type KitKey } from '#lib/GeneralMidi.ts';
 import { MidiError, readMidi, type MidiEvent, type MidiFile } from '#lib/Midi.ts';
 import { timelineSchema, type Timeline } from '#lib/Schema.ts';
 import { MOST_BEATS, UNITS, barsOf, holds } from '#lib/TimeSignature.ts';
@@ -54,12 +54,7 @@ const MOST_VOICES = 64;
 // A kit's cymbals ring on for 9 to 14 seconds whatever their notes' lengths, each holding a voice, so a kit track has this many
 // rather than as many as its notes sound at once.
 const KIT_VOICES = 32;
-// The long sound of each pair a choke group stops: an open hi-hat, a long whistle, a long guiro, an open cuica and an open
-// triangle. The set's sound for each stops soon after its note ends, as every other drum of the kit doesn't, and a file gives
-// a drum a note of a few ticks, so each rings on to the next note of its group, as a closed hi-hat stops an open one, or
-// for as long as one rings out when nothing stops it.
-const LONG_KEYS = new Set([46, 72, 74, 79, 81]);
-const RINGS = 1.5; // Seconds
+const RINGS = 1.5; // Seconds a held drum rings when nothing stops it (`ringOn`)
 const MOST_BEND = 24; // Semitones either way, the set's bend parameter's range
 const NAME_LENGTH = 100;
 const DEFAULT_TEMPO = 120; // What a file plays at until it says otherwise
@@ -96,18 +91,15 @@ const tidy = (value: number) => Math.round(value * 1e4) / 1e4;
 // GM's curve for volume: the fader's gain is the controller's share of full, squared.
 const gainOf = (cc: number) => (cc / 127) ** 2;
 
-// What each is before a file says: GM's volume of 100, its reverb send of 40, and the rest at rest. The set's parameters'
-// defaults are Instrument.py's: no bend, no wheel or pressure, and full expression.
-const DEFAULTS: Record<Lane, number> = {
+// What each is before a file says: GM's volume of 100, its reverb send of 40, no chorus, the pan in the middle, and the set's
+// parameters as the table says they start.
+const defaultsOf = (gm: GeneralMidi): Record<Lane, number> => ({
 	volume: tidy(gainOf(100)),
 	pan: 0,
 	reverb: tidy(40 / 127),
 	chorus: 0,
-	expression: 1,
-	wheel: 0,
-	pressure: 0,
-	bend: 0
-};
+	...gm.defaults
+});
 
 interface Change {
 	tick: number;
@@ -140,29 +132,6 @@ interface Group {
 	notes: Played[];
 	sounding: Map<number, { note: Played; released: boolean }>; // By key: released means only the pedal holds it
 	credits: Map<number, number>; // Note-offs on their way for notes that already ended, by key, which end nothing more
-}
-
-// ------------------------------------------------------------------------------------------------------------- the set
-
-// The set's patch for a program, and its kit for some keys, from a table, as GeneralMidi.ts's programPatch and standardKit
-// give them from GM's.
-function programPatch(gm: GeneralMidi, program: number): string | null {
-	const instrument = gm.programs[program]?.instrument;
-	return instrument ? `${gm.prefix}${instrument}` : null;
-}
-
-function kitOf(gm: GeneralMidi, keys: Iterable<number>): { slots: string[]; kit: KitKey[] } {
-	const wanted = new Set(keys);
-	const slots: string[] = [];
-	const kit: KitKey[] = [];
-	for (const drum of gm.drums) {
-		if (!drum.instrument || !wanted.has(drum.note)) continue;
-		const patch = `${gm.prefix}${drum.instrument}`;
-		let slot = slots.indexOf(patch);
-		if (slot < 0) slot = slots.push(patch) - 1;
-		kit.push({ note: drum.note, name: drum.name, slot });
-	}
-	return { slots, kit };
 }
 
 // ------------------------------------------------------------------------------------------------------------- time
@@ -281,7 +250,14 @@ interface Left {
 	drums: Map<number, number>; // And by key on the drum channel
 }
 
-function play(file: MidiFile, scale: number, pedalFolds: boolean, gm: GeneralMidi, left: Left) {
+function play(
+	file: MidiFile,
+	scale: number,
+	pedalFolds: boolean,
+	gm: GeneralMidi,
+	defaults: Record<Lane, number>,
+	left: Left
+) {
 	const channels: Channel[] = Array.from({ length: 16 }, () => ({
 		program: 0,
 		pedal: false,
@@ -394,9 +370,7 @@ function play(file: MidiFile, scale: number, pedalFolds: boolean, gm: GeneralMid
 				return silence(c, tick, true);
 			case CC.reset:
 				// GM's Reset All Controllers leaves volume, pan, the sends and the program as they are.
-				set(c, 'expression', tick, 1);
-				set(c, 'wheel', tick, 0);
-				set(c, 'pressure', tick, 0);
+				for (const lane of ['expression', 'wheel', 'pressure'] as const) set(c, lane, tick, defaults[lane]);
 				c.bend = 0;
 				set(c, 'bend', tick, 0);
 				if (c.pedal) lift(c, tick);
@@ -483,14 +457,17 @@ function ticksLasting(tempo: Timeline['tempo'], ppq: number, from: number, secon
 	}
 }
 
-// The long sound of a choke group's pair rings on to the next note of its group, or for as long as it rings when nothing
-// stops it, unless its own note is longer than that.
+// The longer sound of each choke group, an open hi-hat, a long whistle and so on, lasts only as long as its note, as every
+// other drum of the kit, which rings out whatever its length, doesn't. A file gives a drum a note of a few ticks, so each of
+// these rings on to the next note of its group, as a closed hi-hat stops an open one, or for as long as one rings out when
+// nothing stops it, unless its own note is longer than that.
 function ringOn(group: Group, gm: GeneralMidi, rings: (tick: number) => number) {
+	const held = new Set(gm.held);
 	const chokes = new Map<number, Set<number>>();
 	for (const keys of Object.values(gm.chokes)) for (const key of keys) chokes.set(key, new Set(keys));
 	const notes = group.notes.filter((note) => !note.doubled).sort((a, b) => a.tick - b.tick);
 	notes.forEach((note, index) => {
-		if (!LONG_KEYS.has(note.key)) return;
+		if (!held.has(note.key)) return;
 		const stoppers = chokes.get(note.key) ?? new Set([note.key]);
 		let next: Played | undefined;
 		for (let i = index + 1; i < notes.length && !next; ++i)
@@ -542,7 +519,8 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 	const gm = options.gm ?? GM;
 	const clock = time(file);
 	const left: Left = { controllers: new Map(), keyPressure: 0, programs: new Map(), drums: new Map() };
-	const { channels, groups } = play(file, clock.scale, options.pedal ?? true, gm, left);
+	const defaults = defaultsOf(gm);
+	const { channels, groups } = play(file, clock.scale, options.pedal ?? true, gm, defaults, left);
 	const rings = (tick: number) => ticksLasting(clock.tempo, clock.ppq, tick, RINGS);
 	for (const group of groups) if (group.channel === DRUM_CHANNEL) ringOn(group, gm, rings);
 	const bars = barsOf({ ppq: clock.ppq, meter: clock.meter.length ? clock.meter : undefined });
@@ -556,7 +534,6 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 	const tracks: Track[] = [];
 	const clips: Clip[] = [];
 	const clipIds = new Set<string>();
-	const sends = { reverb: false, chorus: false };
 	let imported = 0;
 
 	for (const group of groups) {
@@ -566,16 +543,16 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 		let slotOf: (note: Played) => number | null;
 		let kit: KitKey[] | undefined;
 		if (drums) {
-			({ slots, kit } = kitOf(
-				gm,
-				played.map((note) => note.key)
+			({ slots, kit } = standardKit(
+				played.map((note) => note.key),
+				gm
 			));
 			const byKey = new Map(kit.map((key) => [key.note, key.slot]));
 			slotOf = (note) => byKey.get(note.key) ?? null;
 		} else {
 			slots = [];
 			slotOf = (note) => {
-				const patch = programPatch(gm, note.program);
+				const patch = programPatch(note.program, gm);
 				if (!patch) return null;
 				const slot = slots.indexOf(patch);
 				return slot < 0 ? slots.push(patch) - 1 : slot;
@@ -617,7 +594,7 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 
 		const channel = channels[group.channel];
 		const lanes = Object.fromEntries(
-			LANES.map((lane) => [lane, window(channel.lanes[lane], DEFAULTS[lane], start, finish)])
+			LANES.map((lane) => [lane, window(channel.lanes[lane], defaults[lane], start, finish)])
 		) as Record<Lane, ReturnType<typeof window>>;
 		const automation: Automation[] = [];
 		const lane = (values: ReturnType<typeof window>, at: { param: number } | { target: Target }) => {
@@ -633,15 +610,14 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 			['pressure', gm.params.pressure],
 			['bend', gm.params.bend]
 		] as const) {
-			if (lanes[which].initial !== DEFAULTS[which]) params[String(param)] = lanes[which].initial;
+			if (lanes[which].initial !== defaults[which]) params[String(param)] = lanes[which].initial;
 			lane(lanes[which], { param });
 		}
 		const trackSends: Track['sends'] = [];
 		for (const bus of ['reverb', 'chorus'] as const) {
 			const values = lanes[bus];
-			if (values.initial === 0 && !values.points.length) continue;
-			sends[bus] = true;
-			if (!gm.effects[bus]) continue;
+			// A table without the effect has nowhere to send to, as a test's may not.
+			if ((values.initial === 0 && !values.points.length) || !gm.effects[bus]) continue;
 			trackSends.push({ bus, gain: values.initial });
 			lane(values, { target: { mix: 'send', track: id, to: bus } });
 		}
@@ -696,7 +672,7 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 		globals: {}
 	});
 
-	const summary = summarise(file, gm, left, clock, sends, tracks.length, imported);
+	const summary = summarise(file, gm, left, clock, tracks.length, imported);
 	return { doc, summary };
 }
 
@@ -708,26 +684,18 @@ const isCommon = (m: { tick: number; beats: number; unit: number }) => m.tick ==
 // and what still goes over meets the browser's limiter.
 const masterGain = (tracks: number) => tidy(Math.min(1, 2 / Math.sqrt(Math.max(1, tracks))));
 
-function summarise(
-	file: MidiFile,
-	gm: GeneralMidi,
-	left: Left,
-	clock: Time,
-	sends: { reverb: boolean; chorus: boolean },
-	tracks: number,
-	notes: number
-): Summary {
+function summarise(file: MidiFile, gm: GeneralMidi, left: Left, clock: Time, tracks: number, notes: number): Summary {
 	const out: string[] = [];
 	for (const [program, count] of [...left.programs].sort((a, b) => a[0] - b[0])) {
 		const name = gm.programs[program]?.name ?? `program ${program + 1}`;
-		out.push(`${plural(count, 'note')} for ${name}, which the set has no instrument for yet`);
+		out.push(`${plural(count, 'note')} for ${name}, which the set has no instrument for`);
 	}
 	if (left.drums.size) {
 		const count = [...left.drums.values()].reduce((a, b) => a + b, 0);
 		const keys = [...left.drums.keys()]
 			.sort((a, b) => a - b)
 			.map((key) => gm.drums.find((drum) => drum.note === key)?.name ?? `key ${key}`);
-		out.push(`${plural(count, 'drum note')} on ${listed(keys)}, which the kit has no sound for yet`);
+		out.push(`${plural(count, 'drum note')} on ${listed(keys)}, which the kit has no sound for`);
 	}
 	if (file.skipped.sysex) out.push(plural(file.skipped.sysex, 'system exclusive message'));
 	if (left.controllers.size) {
@@ -738,8 +706,6 @@ function summarise(
 		);
 	}
 	if (left.keyPressure) out.push(plural(left.keyPressure, 'polyphonic key pressure message'));
-	for (const bus of ['reverb', 'chorus'] as const)
-		if (sends[bus] && !gm.effects[bus]) out.push(`the ${bus} sends, since the set has no ${bus} yet`);
 	out.push(...clock.left);
 
 	const said = [`Imported ${plural(tracks, 'track')} with ${plural(notes, 'note')}.`, ...clock.said];

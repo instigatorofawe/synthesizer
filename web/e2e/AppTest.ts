@@ -827,8 +827,8 @@ test("every example's patches are in the library from the start, and can't be ch
 	await page.goto('/?timeline=song'); // The demo, which plays none of them, so their list starts folded
 	const builtins = browser(page).getByTestId('builtins');
 	await builtins.locator('summary').click();
-	await builtins.getByRole('link', { name: 'HallOfTheMountainKing Timpani' }).click();
-	await expect(page).toHaveURL(/patch=builtin-HallOfTheMountainKing-timpani/);
+	await builtins.getByRole('link', { name: 'PassionChorale Flugelhorn' }).click();
+	await expect(page).toHaveURL(/patch=builtin-PassionChorale-flugelhorn/);
 	await expect(patchEditor(page).getByText('built in', { exact: true })).toBeVisible();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Delete patch' })).toHaveCount(0);
@@ -837,7 +837,7 @@ test("every example's patches are in the library from the start, and can't be ch
 	await expect(
 		browser(page)
 			.getByRole('list', { name: 'Patches', exact: true })
-			.getByRole('link', { name: 'HallOfTheMountainKing Timpani' })
+			.getByRole('link', { name: 'PassionChorale Flugelhorn' })
 	).toHaveCount(0);
 	await expect(samples(page).getByText('OneShotSample soft')).toHaveCount(0);
 });

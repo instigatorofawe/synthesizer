@@ -1,4 +1,4 @@
-# modsynth design, revision 33
+# modsynth design, revision 34
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -144,6 +144,9 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
 - A timeline's `meter`, `pickup` and `key` are the editor's: where its bars fall and how its notes are spelled. The compiler checks
   their fields for misspellings, as it does every field, and otherwise ignores them, so a song compiles to the same bytes with them or
   without, as it does wherever its nodes are drawn [measured: the compiler's test, and the six pieces regenerated with theirs].
+- A track's `kit` is the editor's too: which of the track's slots each key plays, and the key's name (a drum kit's). The compiler
+  checks it and ignores it, since each note's own `slot` says what it plays, and the editor keeps the two in step (section 19,
+  revision 34) [measured: the compiler's test, the same bytes with a kit or without].
 - A mix register holds the product of its factors: fader with mute, pan, a send's gain, and the master fader on the way into master. A lane
   writes that product with the others' fixed values in it, so two factors that move can't share a register. When a song would make them, the
   compiler moves one to a **stage**, a Gather of one input that scales the chain's bus by a pair of its own: the master fader first, before
@@ -363,6 +366,12 @@ Any other edit to the mixer returns its registers to the document's values. Inse
 The engine can't tell a value moved by hand from one a lane left behind, and carrying is right for both while a lane is still there: a fader automated down would otherwise jump back up on every edit.
 So the editor settles after each swap to a song's image, writing the document's value to every mix register, parameter and global that no placed lane moves. Without that, a deleted lane's last value stays until
 the page reloads, even across a locate, and a value changed in the document is ignored because the old one carries over it. The engine's rule stays as it is, and only an editor that holds a document can do this.
+
+A live note can name the slot it plays in, as a drum kit's key does: a NoteOn event's `param` is 0, or a slot plus one, and the
+note plays there as if a SetPatch came just before it, after which the track's own slot is put back, since its stream sets one only
+when it changes. An image holds only the slots a track's notes play, renumbered from 0, unless it was compiled `live`, so the
+compile report gives each track's `slots`, the song's slot each image slot is, and the editor names a slot as the image numbers it.
+A key whose sound the image doesn't hold yet isn't heard, rather than heard as another drum [measured: the engine's test].
 
 ## 12. Browser load path
 
@@ -1147,10 +1156,10 @@ the song, since the clip grows. While a take runs the song's image keeps every t
 yet plays in the song from its first one. The take waits for that image before it counts in.
 
 New timeline makes a song that sounds at once, as FL Studio's and Live's templates do (`Template.ts`): a track playing a
-built-in electric piano, Für Elise's, and an empty four-bar clip at bar 1, chosen and open in the roll around middle C. It is
-an ordinary timeline, saved as it is made, which undoes and compiles as any other. An electric piano is what Logic and
-GarageBand open a new song with: it sounds right with no insert or bus behind it, it has no recordings to fetch, and a
-four-note chord on it peaks near -5 dBFS, short of the limiter [measured].
+the standard set's electric piano, which Für Elise plays, and an empty four-bar clip at bar 1, chosen and open in the roll
+around middle C. It is an ordinary timeline, saved as it is made, which undoes and compiles as any other. An electric piano is
+what Logic and GarageBand open a new song with: it sounds right with no insert or bus behind it, it has no recordings to fetch,
+and a four-note chord on it peaks near -11 dBFS at the set's level, well short of the limiter [measured].
 
 Mod+C, Mod+V and Mod+D copy, paste and duplicate the chosen notes while the roll has focus, and the chosen clip in the
 arrangement otherwise, but not in a field. Outside a field Mod+D is always taken in the Song view, so the browser never
@@ -1869,6 +1878,88 @@ Choices made here that the user hasn't weighed in on:
 - **The score's step entry says what it can't write,** past the end of a clip that can't grow, rather than offering to lengthen the
   clip as the roll does.
 - **Bar numbers** begin each system, counted from the clip's first bar, as the roll counts them.
+
+**Built from the standard instrument set** (revision 34). The user asked to clean up and standardise the content library for
+MIDI import, with standard instruments for General MIDI's programs and the example pieces reworked around them, and took the
+recommendations: about 50 distinct synthesised sounds, roughly three per GM family, with every program pointing at the nearest; about
+20 drum sounds for the 47 percussion keys; no samples; the recipes' patches under one Techniques heading, the recipes unchanged; the
+Bach invention keeping its console channels; the sustain pedal folded into note lengths on import. The work was split across agents,
+one module a family group, and merged here.
+
+- **The contract,** `examples/Instrument.py`. An instrument is a function from a voice to its sound. Every one takes four parameters
+  at fixed ids, so a file's channel messages reach any of them alike: 1 bend in semitones, 2 the mod wheel, 3 expression, which the
+  generator applies after the instrument as gain squared (GM's curve), and 4 channel pressure. An instrument makes no `note`, `out`
+  or parameter node of its own. `examples/Graph.py` is the graph builder MakePieces.py had, so the set and the pieces build alike.
+- **The generator,** `examples/MakeInstruments.py`, loads `examples/Sounds/*.py`, checks the set (each program played once, by an
+  instrument of its own family; each percussion key once), and sets each instrument's level so a velocity-100 note in the middle of
+  its range peaks at -24 LUFS momentary. It reports the levels of the range's ends against the middle, the peak at full velocity, how
+  long a note rings after it ends and the cost of a voice, and writes one example per family whose tracks play its instruments in
+  turn, `Index.json`, and `GeneralMidi.json`: which instrument plays each program and key, the parameters and their defaults, the
+  choke groups, and the effects CC 91 and CC 93 reach. `web/src/lib/GeneralMidi.ts` reads it.
+- **The set:** 104 instruments for the 128 programs, most of them variants of a few builders per family (the keyboards' 24 come from
+  eight, the orchestra's 16 from ten, the winds' 19 from six), since a variant that differs only in numbers costs nothing and GM's
+  programs differ audibly (Bright from Acoustic Grand, Muted from open Trumpet); a drum kit of 23 sounds playing all
+  47 keys; and GM2's six reverb types, a chorus and the pieces' stereo tremolo. Every voice costs 9 to 23 ns a sample on this
+  machine [measured], and velocity 64 plays about 10 dB under 127, apart from the ports of the pieces' instruments, which keep their
+  own curves so the pieces' dynamics stand.
+  - The keyboards are eight builders: a grand is three pulse strings per note at the hammer's strike width, one dying fast and two
+    ringing on, for the prompt sound and the beating aftersound; struck bars, plates and tubes are a sine per mode.
+  - The plucked strings are oscillators at the note's exact pitch, not Karplus-Strong lines: a comb holds a whole number of samples,
+    which put notes 84 to 96 up to a third of a semitone sharp at 48 kHz [measured]. A pulse's width stands for where the string was
+    plucked. The overdriven guitars carry their amplifier inside, since GM has none.
+  - The winds port the pieces' `brass()` and `reed()` exactly, with filters that follow the pitch only above a knee, so every note
+    the pieces play renders bit for bit [measured]. Velocity is breath.
+  - The solo strings are a saw through fixed body resonances with a vibrato that waits about 0.3 s; the choirs are saws through three
+    formants. The synths use no phase modulation, which costs about 18 ns a voice by itself [measured]: ring modulation and additive
+    partials give the bells and metal.
+  - The percussive and sound-effect programs are pitched by the key, as a file plays them; noises move their filters and rhythm
+    with it, level tilted -3 dB an octave.
+  - A drum that serves several keys is one patch tuned by its key, never by the bend. Struck drums ring the same however short their
+    note, and the longer sound of each choke group (open hi-hat, long whistle, long guiro, open cuica, open triangle) stops 20 to
+    40 ms after its note, so an importer chokes it by shortening the note. Crash cymbal 1 is the Grieg's cymbal.
+  - The reverbs are the pieces' hall with GM2's types as arguments, size, feedback, damping, predelay, early reflections and
+    diffusers, ringing 0.4 to 2.5 s [measured]. Each returns only its wet sound, 13.5 dB under the dry at GM's default send of 40
+    (11.5 for the rooms). Large hall is CC 91's. The chorus copies only the sound below 6 kHz, because a whole-sample delay roughens
+    what it copies.
+- **The library.** Each family's example is in `examples/Instruments`, catalogued before the pieces and recipes, and its patches are
+  built-in patches named `builtin-gm-<Name>` and called by the instrument's title. A piece or recipe whose patch graph is identical
+  to a set instrument's plays the set's patch. The patch picker lists the set under its GM families in GM order, then Drum kit and
+  Effects, and every other built-in under one Techniques heading, which a search still reaches by name, family or example group;
+  the Mixer's inserts and Mod+K follow. The browser lists the families as a group of their own after the pieces.
+- **Kit tracks.** A track's `kit` is kept by one function, `withKitSlots` (Kit.ts), applied to every edit the Song view commits and
+  every note a take writes, so every note of a clip on a kit track plays its key's slot, and a note on a key with no sound keeps
+  its own. The roll names a kit's keys and dims the rest. "Use the standard kit" gives a track the set's drums, at least 32 voices
+  for the cymbals' tails, and fading steals, and "Not a kit" drops it. Live notes on a kit track play their key's sound (section 11).
+- **The pieces play the set.** Each of their patches that is a set instrument or room is the set's graph exactly, so the library
+  holds it once, as `builtin-gm-<Name>`. Only the chorale's flugelhorn (GM has no program for it) and the Invention's console
+  channels and small room (the board's piece, byte-identical) are the pieces' own. The set plays each instrument 1 to 17 dB under
+  the pieces' old ones, so a piece of several instruments trims each part's fader and fader lanes to where it sat, measured with
+  each part alone, and the master gain makes up the common 12 or 14 dB, since a track's gain stops at 4. Each part's send keeps the
+  wet-to-dry balance it had in its piece's old room, to within 0.1 LU, which in the two halls takes a send for each part: sustained
+  low notes fall differently on the new combs. The chorale's church became MediumHall, whose early decay matches it (1.78 s against
+  1.79), and Für Elise's room is the one change to listen for: LargeRoom, the nearest, rings about 20% shorter. Most of what else
+  sets the brass and reeds apart from before is their vibrato, now each note's own from its start rather than one the whole track
+  shared. New timeline's template plays the set's ElectricPiano, about 6 dB quieter than the Für Elise piano it played.
+
+Choices made here that the user hasn't weighed in on:
+- **104 instruments rather than about 50.** The agents gave most programs their own, as cheap variants of shared builders. The
+  reports list merges that would bring it nearer 50 (Viola into Violin, Bright into Grand, Recorder into Flute, Jazz into Clean
+  guitar and so on); merging is only repointing programs, and is safest before songs use the patches.
+- **The ports keep the pieces' velocity curves,** narrower than the set's 10 dB (String Ensemble 1's velocity 64 plays 4 to 5 dB
+  under 127, the brass and reeds 2 to 7). Widening them would widen the pieces' dynamics by about 9 dB, so their velocities or faders
+  would need resetting.
+- **The large hall's numbers:** the pieces' halls ring at most 2 s, short of a GM large hall's 2.5, so the set's halls keep the
+  pieces' feedback and damping in bigger rooms, and the pieces' rooms map to the nearest of them.
+- **Kit names start with Kit,** so they can't clash with the percussive family's woodblock and agogo.
+- **A clip on two kit tracks** plays the first one's slots on both, and a placement's transpose moves the pitch each drum hears, not
+  which drum plays.
+- **The bagpipe's drone is fixed at A,** so it clashes in keys far from A and D.
+- **An LFO that only constants or track parameters drive is the track's,** shared by its voices and still while the transport is
+  stopped, so a wheel vibrato doesn't move while keys are played on a stopped song. The winds made theirs each voice's own; the rest
+  are as they are.
+- **Each part in the two halls has its own send,** rather than one factor for the piece, and the sends match total wet energy;
+  matching only the late tail would lower the hall sends by about 1 dB. The template is left at the set's level, 6 dB under the
+  old one, so a new song is as loud as an imported file.
 
 **Declined.** Importing PureData patches, which the user decided against in revision 20 after it was scoped: the graph already has PureData's
 nodes, wires, inlets and subpatches, but its control logic, message envelopes and voice idioms have no counterpart here, and many common

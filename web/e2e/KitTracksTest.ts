@@ -54,7 +54,7 @@ async function kitSong(
 	await tabs.getByRole('tab', { name: /^JSON/ }).click();
 	const json = page.getByLabel('Song JSON');
 	const doc = JSON.parse(await json.inputValue());
-	doc.tracks[0] = { ...doc.tracks[0], name: 'Drums', slots: ['builtin-FurElise-piano', 'lead'], kit: KIT };
+	doc.tracks[0] = { ...doc.tracks[0], name: 'Drums', slots: ['builtin-gm-ElectricPiano', 'lead'], kit: KIT };
 	more(doc);
 	await json.fill(JSON.stringify(doc, null, 1));
 	await tabs.getByRole('tab', { name: /^Notes/ }).click();
@@ -196,7 +196,7 @@ test('Use the standard kit sets the track’s slots and kit and reslots its note
 	await expect(page.getByTestId('note-1')).toHaveAttribute('data-sound', '');
 	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveAttribute(
 		'data-patch',
-		'builtin-FurElise-piano'
+		'builtin-gm-ElectricPiano'
 	);
 	await expect(page.getByLabel('Patch slot 3', { exact: true })).toHaveCount(0);
 	await expect(page.getByLabel('Voices', { exact: true })).toHaveValue('8');
@@ -229,7 +229,7 @@ test('a clip on a kit track and an ordinary one plays the kit’s slots on both,
 	page
 }) => {
 	await kitSong(page, 'Kit shared', (doc) => {
-		doc.tracks.push({ ...doc.tracks[0], id: 2, name: 'Keys', slots: ['lead', 'builtin-FurElise-piano'] });
+		doc.tracks.push({ ...doc.tracks[0], id: 2, name: 'Keys', slots: ['lead', 'builtin-gm-ElectricPiano'] });
 		delete doc.tracks[1].kit;
 	});
 	await expect(page.getByTestId('clip-kit-shared')).toHaveText(

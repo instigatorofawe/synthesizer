@@ -143,17 +143,17 @@ test('a lane on an input inside a built-in patch copies the patch, gives the inp
 	await page.getByLabel('New song name').fill('Inside the patch');
 	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByTestId('track-patch-1')).toHaveText('FurElise Electric piano');
+	await expect(page.getByTestId('track-patch-1')).toHaveText('Electric piano');
 
 	const add = page.getByLabel('Add a lane');
-	const inside = add.locator('optgroup[label="In FurElise Electric piano"] option');
+	const inside = add.locator('optgroup[label="In Electric piano"] option');
 	await expect(inside.first()).toBeAttached();
 	const option = (await inside.first().textContent())!;
 	const input = option.split(' · ')[1];
 	await add.selectOption({ label: option });
 	await expect(page.getByRole('button', { name: `Remove lane ${input}` })).toBeVisible();
 	await expect(page.getByTestId('lane-0')).toBeVisible();
-	await expect(page.getByTestId('track-patch-1')).toHaveText(/FurElise Electric piano.*copy/i);
+	await expect(page.getByTestId('track-patch-1')).toHaveText(/Electric piano.*copy/i);
 	await expect(page.getByTestId('unsaved')).toHaveText('2 unsaved'); // The song, and the copy's new parameter
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);

@@ -63,7 +63,7 @@ test('a new timeline opens on a track with a built-in patch and a four-bar clip 
 	await newSong(page, 'First minutes');
 	await expect(page.getByTestId('track-1')).toBeVisible();
 	await expect(page.getByTestId('track-2')).toHaveCount(0);
-	await expect(page.getByTestId('track-patch-1')).toHaveText('FurElise Electric piano');
+	await expect(page.getByTestId('track-patch-1')).toHaveText('Electric piano');
 	// Its clip is chosen and open in the roll, around middle C
 	await expect(page.getByTestId('placement-1-0')).toHaveClass(/chosen/);
 	await expect(page.getByTestId('placement-1-0')).toHaveAttribute('data-tick', '0');
@@ -80,7 +80,7 @@ test('a new timeline opens on a track with a built-in patch and a four-bar clip 
 
 	// It is an ordinary timeline: one track, its patch, and an empty clip four bars long at bar 1
 	const doc = await timelineDoc(page);
-	expect(doc.tracks.map((t: { slots: string[] }) => t.slots)).toEqual([['builtin-FurElise-piano']]);
+	expect(doc.tracks.map((t: { slots: string[] }) => t.slots)).toEqual([['builtin-gm-ElectricPiano']]);
 	expect(doc.tracks[0].placements).toEqual([{ clip: 'clip', tick: 0, repeat: 1 }]);
 	expect(doc.clips).toEqual([{ id: 'clip', length: 4 * BAR, notes: [], automation: [], play: [] }]);
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);

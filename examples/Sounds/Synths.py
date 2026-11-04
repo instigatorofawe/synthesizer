@@ -406,7 +406,7 @@ INSTRUMENTS = [
         programs=[80],
         voices=4,
         phrase=line(72),
-        listen_for="A hollow square-wave lead that brightens at each attack and beats slowly against itself.",
+        listen_for="A hollow square-wave lead that brightens at each attack, its tone turning slowly as its width drifts.",
     ),
     Instrument(
         "SawLead",
@@ -497,7 +497,7 @@ INSTRUMENTS = [
         103,
         programs=[96, 98],
         phrase=sparse(60),
-        listen_for="Glassy bells over a soft tone, with sparkles that fall again and again, wandering side to side as they fade.",
+        listen_for="Glassy bells that settle to a soft tone, with sparkles that fall again and again, wandering side to side as they fade.",
     ),
     Instrument(
         "Atmosphere",

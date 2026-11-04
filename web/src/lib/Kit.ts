@@ -20,6 +20,22 @@ import { noteName } from '#lib/Units.ts';
 export type Kit = NonNullable<Track['kit']>;
 export type KitKey = Kit[number];
 
+// The slot a live note on `note` plays in, on a kit track, as its image numbers slots: `slots` is the track's compile report's
+// (Request.ts), since an image holds only the slots notes play, and an image that holds them all (a `live` one) needs none.
+// Undefined when the key has no sound, so the note plays the track's own slot, and null when the image doesn't hold the
+// sound yet, because no note plays it: then it is better not heard than heard as another drum.
+export function liveSlot(
+	kit: Kit | null | undefined,
+	slots: number[] | undefined,
+	note: number
+): number | null | undefined {
+	const key = kit?.find((k) => k.note === note);
+	if (!key) return undefined;
+	if (!slots) return key.slot;
+	const at = slots.indexOf(key.slot);
+	return at < 0 ? null : at;
+}
+
 // A kit by key, for looking keys up in.
 export const kitKeys = (kit: Kit): Map<number, KitKey> => new Map(kit.map((key) => [key.note, key]));
 

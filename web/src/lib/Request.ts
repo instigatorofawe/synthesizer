@@ -99,6 +99,9 @@ export interface ChainReport {
 	mix: MixRoute[];
 	stages?: MixPair[]; // A factor applied to the whole chain by a step of its own, once a lane on it would share a pair
 	notes_at_once?: number; // The most notes a track holds at once while it plays poly
+	// A track's: the song's slot each of the image's slots is, in order. The image holds only the slots notes play, unless it
+	// was compiled `live`, so a live note naming a slot names it as the image numbers it.
+	slots?: number[];
 }
 
 // Something that compiles but may not sound as meant, such as a track with too few voices for what it holds.

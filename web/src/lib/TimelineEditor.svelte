@@ -12,6 +12,7 @@
 		clipKit,
 		dropKit,
 		kitStrangers,
+		liveSlot,
 		soundsText,
 		standardKitWhy,
 		useKit,
@@ -840,8 +841,10 @@
 	function audition(note: number, on: boolean) {
 		if (auditionByKeys) return onkey?.(note, on);
 		if (reported?.index === undefined) return;
-		if (on) engine.noteOn(reported.index, note);
-		else engine.noteOff(reported.index, note);
+		if (!on) return engine.noteOff(reported.index, note);
+		// On a kit track the key plays its own sound, unless the image doesn't hold it yet.
+		const slot = liveSlot(kit, reported.slots, note);
+		if (slot !== null) engine.noteOn(reported.index, note, undefined, undefined, slot);
 	}
 
 	function locate(at: number) {

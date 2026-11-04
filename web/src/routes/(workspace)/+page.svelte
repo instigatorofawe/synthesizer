@@ -788,7 +788,8 @@
 		doc: (key) => (saved && timelineDoc && draftKey('timeline', saved.id) === key ? timelineDoc : null),
 		loop: () => (session.looping && timelineDoc ? (session.loop ?? wholeSong(timelineDoc)) : null),
 		write: (doc) => timelineEdited({ text: JSON.stringify(doc, null, 1) }, 'typing'),
-		shown: (track, clip) => void rendered().then(() => songEditor?.reveal({ track, clip }))
+		shown: (track, clip) => void rendered().then(() => songEditor?.reveal({ track, clip })),
+		say: (text) => say(text)
 	};
 	const keepTracks = $derived(take !== null);
 	const takeIndex = $derived(

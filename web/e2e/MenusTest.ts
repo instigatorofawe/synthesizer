@@ -82,9 +82,10 @@ test('in an example every menu opens too, with what would change it greyed out a
 	await expect(head.getByRole('menuitem', { name: 'Solo' })).toBeEnabled();
 	await closes(page);
 
-	const row = (await page.getByTestId('row-1').boundingBox())!;
-	const view = (await page.getByTestId('arrangement-view').boundingBox())!;
-	await page.mouse.click(view.x + view.width - 30, row.y + row.height / 2, { button: 'right' });
+	// Past the song's end, where the row has no clip.
+	const row = page.getByTestId('row-1');
+	const width = Number(await row.getAttribute('width'));
+	await opens(page, row, /^Row of /, { x: width - 30, y: 30 });
 	await expect(menu(page)).toContainText(why);
 	await expect(menu(page).getByRole('menuitem', { name: 'New clip here' })).toBeDisabled();
 	await expect(menu(page).getByRole('menuitem', { name: 'Move the playhead here' })).toBeEnabled();

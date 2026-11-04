@@ -1,6 +1,6 @@
 // Recording with snap, as Live and Logic have it: the song plays, and what the piano keys play is written into the chosen
-// track as it is played. Each note's start goes to the nearest line of the grid and its length to whole grid steps, never less
-// than one, so a phrase played in lands on the grid as step entry's notes do.
+// track as it is played. Each note's start goes to the nearest line of the grid, so a phrase played in lands on the grid as step
+// entry's notes do, and it keeps the length it was played for, as theirs do, so a short note stays short whatever Snap is.
 //
 // The worklet says when each key went down and came up, as the tick of the song that was being heard then, so the output's
 // latency and the time a key takes to reach it don't move a note. These are pure functions from those stamps and a document
@@ -47,7 +47,7 @@ export function snapPlayed(
 	let tick = Math.round(played.on.tick / step) * step + 0; // + 0 so a key just before the start writes 0, not -0
 	if (loop && loop.end > loop.start && played.on.tick < loop.end && tick >= loop.end) tick -= loop.end - loop.start;
 	if (tick < 0) return null;
-	const dur = Math.max(step, Math.round((played.off.elapsed - played.on.elapsed) / step) * step);
+	const dur = Math.max(1, Math.round(played.off.elapsed - played.on.elapsed));
 	return { tick, note: played.note, vel: played.vel, dur };
 }
 

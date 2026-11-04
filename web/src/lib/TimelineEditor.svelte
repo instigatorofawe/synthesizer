@@ -554,10 +554,31 @@
 		return target ? rings[target.slot] : null;
 	};
 
+	// The clip stays in the song, for another placement, but the roll goes on to what the track still plays: what is written in
+	// the roll goes where it is heard.
 	function deletePlacement() {
 		if (selection.track === null || selection.placement === null) return;
-		commit(removePlacement(doc, selection.track, selection.placement));
+		const next = removePlacement(doc, selection.track, selection.placement);
+		commit(next);
 		selection = { ...selection, placement: null };
+		const still = next.tracks.find((t) => t.id === selection.track);
+		if (!still?.placements.some((p) => p.clip === clipId)) clipId = still?.placements[0]?.clip ?? null;
+	}
+
+	// A clip the roll shows that is on no track, which only the address or an undo leaves it on: put on the chosen track, or the
+	// first, at the bar the playhead is in, or if a clip is there, after the track's last, so what is written in it is heard.
+	const placeFor = $derived(selection.track === null ? doc.tracks[0] : track);
+	function placeShown() {
+		if (!clip || !placeFor) return;
+		const bar = ticksPerBar(doc);
+		const span = Math.max(clip.length, 1);
+		const ends = placeFor.placements.map((p) => ({ start: p.tick, end: p.tick + placementSpan(doc, p) }));
+		const free = (at: number) => ends.every((p) => at + span <= p.start || at >= p.end);
+		let at = Math.floor(tick / bar) * bar;
+		if (!free(at)) at = Math.ceil(Math.max(...ends.map((p) => p.end)) / bar) * bar;
+		const next = place(doc, placeFor.id, clip.id, at);
+		commit(next);
+		selection = { track: placeFor.id, placement: placementIndex(next, placeFor.id, clip.id, at) };
 	}
 
 	// A track head's M is the track's own mute, as the Mixer's Mute is: saved with the song, one step of its undo, and heard at
@@ -1235,6 +1256,14 @@
 		</div>
 		<div class="pane" class:notes={tab === 'notes'} role="tabpanel">
 			{#if tab === 'notes'}
+				{#if clip && uses === 0}
+					<p class="unplaced" role="status" data-testid="clip-unplaced">
+						{clip.id} is on no track, so the notes written in it aren't heard or seen in the song.
+						{#if placeFor && !readonly}
+							<button type="button" onclick={placeShown}>Put it on {trackName(placeFor)}</button> at the playhead.
+						{/if}
+					</p>
+				{/if}
 				{#if clip}
 					{#key clip.id}
 						<PianoRoll
@@ -1552,6 +1581,16 @@
 	}
 	.empty {
 		font-size: 0.85rem;
+	}
+	/* A clip on no track, whose notes would be written where nothing plays them. */
+	.unplaced {
+		flex: none;
+		margin: 0 0 0.3rem;
+		padding: 0.3rem 0.5rem;
+		font-size: 0.8rem;
+		background: #d2992222;
+		border: 1px solid #d29922;
+		border-radius: 4px;
 	}
 	fieldset {
 		border: 0;

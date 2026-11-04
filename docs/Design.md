@@ -1090,7 +1090,7 @@ stepped or played, by 10, and Vel beside the keys shows it.
 Recording writes what the keys play while the song plays, as Live and Logic do with quantizing on. ● in the top bar, or Shift+R in the
 Song view, starts a take on the chosen track. With the song stopped, a bar is counted in with a click on each beat, and then the song
 plays from the playhead, or with a loop on from the loop's start. With it playing, the take starts at once. Each note is written as its
-key comes up: its start at the nearest line of Snap, its length in whole Snap steps and never less than one, at the Vel velocity. It goes
+key comes up: its start at the nearest line of Snap, and the length it was played for, as Live and Logic keep it, at the Vel velocity. It goes
 into the clip placed where it was played, back through the placement's transpose and velocity. In a repeat or round a loop that is the
 same clip, so each pass adds to it, and a note at the start and pitch of one already there replaces it. One that snaps to a loop's end
 goes at its start, where the take goes on from. Past the end of the clip it was writing into, the take grows that clip as a clicked note

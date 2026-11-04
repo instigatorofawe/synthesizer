@@ -7,12 +7,15 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 const BAR = 1920; // At the demo song's 480 ppq
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
-const patchLink = (page: Page, name: string) =>
-	browser(page).getByRole('list', { name: 'Patches' }).getByRole('link', { name, exact: true });
+// An insert's link says so after its name.
+const patchLink = (page: Page, name: string | RegExp) =>
+	browser(page)
+		.getByRole('list', { name: 'Patches' })
+		.getByRole('link', { name, exact: typeof name === 'string' });
 
 // A drag the way a hand makes one: pressed on the patch, moved a little, which starts it, then let go of over `to`. The place
 // to let go is found once the drag has started, since a patch's drag opens the row for a new track.
-async function dragPatch(page: Page, name: string, to: () => Promise<{ x: number; y: number }>) {
+async function dragPatch(page: Page, name: string | RegExp, to: () => Promise<{ x: number; y: number }>) {
 	const from = (await patchLink(page, name).boundingBox())!;
 	await page.mouse.move(from.x + 10, from.y + from.height / 2);
 	await page.mouse.down();
@@ -59,23 +62,22 @@ test('an insert dragged onto a track joins its effects, and onto a Mixer strip j
 	page
 }) => {
 	await page.goto('/?timeline=song');
-	await dragPatch(page, 'Room', async () => {
+	await dragPatch(page, /^Room/, async () => {
 		await expect(page.getByTestId('new-track-row')).toHaveCount(0); // An insert plays no notes
 		return middleOf(page, 'row-2');
 	});
 	await expect(page.getByTestId('drop-words-2')).toHaveCount(0);
 	await page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: 'Mixer' }).click();
-	await expect(page.getByLabel('Insert 1 on Pluck')).toHaveValue('reverb');
+	await expect(page.getByLabel('Insert 1 on Pluck', { exact: true })).toHaveValue('reverb');
 
-	await dragPatch(page, 'Room', () => middleOf(page, 'strip-master'));
-	await expect(page.getByLabel('Insert 1 on Master')).toHaveValue('reverb');
+	await dragPatch(page, /^Room/, () => middleOf(page, 'strip-master'));
+	await expect(page.getByLabel('Insert 1 on Master', { exact: true })).toHaveValue('reverb');
 	await expect(page.getByTestId('head-3')).toHaveCount(0);
 });
 
 test('a track head dragged down moves the track below the next, and its menu moves it back', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	const heads = page.locator('[data-testid^="head-"]');
-	await expect(heads).toHaveAttribute('data-testid', /./);
+	const heads = page.getByTestId(/^head-\d+$/);
 	const order = () => heads.evaluateAll((all) => all.map((head) => head.getAttribute('data-testid')));
 	expect(await order()).toEqual(['head-1', 'head-2']);
 
@@ -84,7 +86,7 @@ test('a track head dragged down moves the track below the next, and its menu mov
 	await page.mouse.move(lead.x + 20, lead.y + lead.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(lead.x + 20, pluck.y + pluck.height - 5, { steps: 6 });
-	await expect(page.getByTestId('track-line')).toBeVisible();
+	await expect(page.getByTestId('track-line')).toBeAttached(); // A line across, with no height to be visible by
 	await page.mouse.up();
 	await expect.poll(order).toEqual(['head-2', 'head-1']);
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
@@ -164,7 +166,7 @@ test.describe('at a laptop width, where the browser opens over the page', () => 
 		page
 	}) => {
 		await page.goto('/?timeline=song');
-		await page.getByRole('button', { name: 'Patches' }).click(); // The rail's icon opens the browser at its list
+		await page.getByRole('button', { name: 'Patches', exact: true }).click(); // The rail's icon opens the browser at its list
 		await expect(patchLink(page, 'Stereo lead')).toBeVisible();
 		await dragPatch(page, 'Square, in the library but on no timeline', async () => {
 			await expect(page.locator('.side.over')).toHaveCSS('opacity', '0');

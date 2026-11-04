@@ -91,7 +91,7 @@ def grand(
     thump: float = 1.0,
     damp: float = 0.09,
     unisons: int = 3,
-    thin: float = 0.0,
+    thin: float = 40.0,
     width: float = 0.5,
 ):
     """A grand piano: three strings a note, struck where the hammer leaves a notch in their harmonics, a cent or so
@@ -119,8 +119,10 @@ def grand(
         },
         mode="select",
     )
-    fast = g.env(0.0006, keyed(g, key.pitch, prompt, 1.5), 0.0, damper)
-    slow = g.env(0.0006, keyed(g, key.pitch, after, 1.5), 0.0, damper)
+    # A soft blow leaves the hammer on the strings longer, so the note takes a few milliseconds to sound.
+    contact = g.add(g.mul(vel, -0.0028), 0.0034)
+    fast = g.env(contact, keyed(g, key.pitch, prompt, 1.5), 0.0, damper)
+    slow = g.env(contact, keyed(g, key.pitch, after, 1.5), 0.0, damper)
     strings = g.add(g.mul(sharp, fast), g.mul(centre, slow))
     # The hammer's felt on the strings, a burst of noise that goes through the strings' filter, so it is as bright as
     # the blow, and the knock the hammer gives the soundboard, both louder for a harder blow.
@@ -251,7 +253,7 @@ def clavinet(v: Voice):
     harmonics = g.add(g.mul(snap, g.add(g.mul(vel, 22.0), 4.0)), 3.5)
     cutoff = lowest(g, g.add(g.mul(f, harmonics), 300.0), 14000.0)
     tone = g.filter(
-        "highpass", g.filter("lowpass", string, cutoff, 2.2), lowest(g, f, 400.0), 0.7
+        "highpass", g.filter("lowpass", string, cutoff, 1.3), lowest(g, f, 400.0), 0.7
     )
     tangent = g.mul(
         g.filter("highpass", g.node("noise"), 2500.0), g.env(0.0002, 0.003, 0.0, 0.003)
@@ -422,8 +424,8 @@ def drawbar(
 
 
 def pipes(v: Voice):
-    """A church organ's full chorus: an open diapason at 8', a stopped bourdon an octave below, an octave and a
-    fifteenth above, each rank a little out with the others. The pipes speak slowly, the bass slowest, with a chiff of
+    """A church organ's full chorus: an open diapason at 8', a stopped bourdon an octave below, and an octave, a
+    twelfth and a fifteenth above, each rank a little out with the others. The pipes speak slowly, the bass slowest, with a chiff of
     wind at the mouth, and stop when the key comes up, leaving the church to ring."""
     g, key = v.g, v.key
     f = vibrato(v, 5.5, 0.2)
@@ -438,16 +440,17 @@ def pipes(v: Voice):
         lowest(g, g.mul(f, 7.0), 14000.0),
         0.6,
     )
+    twelfth = g.osc("sine", g.mul(f, 3 * (1 - 0.7 * CENT)))
     fifteenth = g.osc("sine", g.mul(f, 4 * (1 + 2.2 * CENT)))
     ranks = g.add(
         g.add(principal, g.mul(bourdon, 0.7)),
-        g.add(g.mul(octave, 0.5), g.mul(fifteenth, 0.22)),
+        g.add(g.mul(octave, 0.5), g.add(g.mul(twelfth, 0.15), g.mul(fifteenth, 0.22))),
     )
     chiff = g.mul(
         g.filter("bandpass", g.node("noise"), lowest(g, g.mul(f, 4.0), 9000.0), 2.0),
         g.env(0.002, g.mul(speech, 0.8), 0.0, 0.05),
     )
-    wind = g.env(speech, 0.2, 1.0, keyed(g, key.pitch, 0.12, 3.0))
+    wind = g.env(speech, 0.2, 1.0, keyed(g, key.pitch, 0.07, 3.0))
     sound = g.add(g.mul(ranks, wind), g.mul(chiff, 0.35))
     return g.mul(sound, g.mul(loudness(g, key.velocity), tilt(g, key.pitch, below=1.5)))
 
@@ -730,7 +733,7 @@ INSTRUMENTS = [
         "DrawbarOrgan",
         "Drawbar organ",
         "Organ",
-        lambda v: drawbar(v, "888400200"),
+        lambda v: drawbar(v, "888600000"),
         36,
         96,
         programs=[16],
@@ -811,7 +814,7 @@ INSTRUMENTS = [
             formant=1300.0,
             breath=0.12,
             attack=0.05,
-            scoop=0.25,
+            scoop=0.15,
         ),
         60,
         96,

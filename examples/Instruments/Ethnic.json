@@ -200,7 +200,7 @@
      {"id": 41, "type": "add", "inputs": {"b": 90.0}},
      {"id": 42, "type": "ratio", "root": 60},
      {"id": 43, "type": "mul", "inputs": {"b": 0.9}},
-     {"id": 44, "type": "env", "inputs": {"attack": 0.0005, "sustain": 0.0, "release": 0.1}},
+     {"id": 44, "type": "env", "inputs": {"attack": 0.0005, "sustain": 0.0, "release": 0.12}},
      {"id": 45, "type": "mul", "inputs": {"b": 0.7}},
      {"id": 46, "type": "mul", "inputs": {"b": 0.3}},
      {"id": 47, "type": "add"},
@@ -345,7 +345,7 @@
      {"id": 45, "type": "add", "inputs": {"b": 90.0}},
      {"id": 46, "type": "ratio", "root": 60},
      {"id": 47, "type": "mul", "inputs": {"b": 2.2}},
-     {"id": 48, "type": "env", "inputs": {"attack": 0.0005, "sustain": 0.0, "release": 0.1}},
+     {"id": 48, "type": "env", "inputs": {"attack": 0.0005, "sustain": 0.0, "release": 0.25}},
      {"id": 49, "type": "mul", "inputs": {"b": 0.55}},
      {"id": 50, "type": "mul", "inputs": {"b": 0.45}},
      {"id": 51, "type": "add"},
@@ -479,13 +479,13 @@
      {"id": 30, "type": "mul", "inputs": {"b": -0.5}},
      {"id": 31, "type": "add", "inputs": {"b": 90.0}},
      {"id": 32, "type": "ratio", "root": 60},
-     {"id": 33, "type": "mul", "inputs": {"b": 0.25}},
-     {"id": 34, "type": "env", "inputs": {"attack": 0.0004, "sustain": 0.0, "release": 0.25}},
+     {"id": 33, "type": "mul", "inputs": {"b": 0.15}},
+     {"id": 34, "type": "env", "inputs": {"attack": 0.0004, "sustain": 0.0, "release": 0.5}},
      {"id": 35, "type": "mul", "inputs": {"b": -0.5}},
      {"id": 36, "type": "add", "inputs": {"b": 90.0}},
      {"id": 37, "type": "ratio", "root": 60},
-     {"id": 38, "type": "mul", "inputs": {"b": 1.6}},
-     {"id": 39, "type": "env", "inputs": {"attack": 0.0004, "sustain": 0.0, "release": 0.25}},
+     {"id": 38, "type": "mul", "inputs": {"b": 0.8}},
+     {"id": 39, "type": "env", "inputs": {"attack": 0.0004, "sustain": 0.0, "release": 0.5}},
      {"id": 40, "type": "mul", "inputs": {"b": 0.4}},
      {"id": 41, "type": "mul", "inputs": {"b": 0.6}},
      {"id": 42, "type": "add"},
@@ -497,7 +497,7 @@
      {"id": 48, "type": "biquad", "mode": "highpass", "inputs": {"cutoff": 100.0, "q": 0.707}},
      {"id": 49, "type": "param", "param": 3},
      {"id": 50, "type": "mul"},
-     {"id": 51, "type": "mul", "inputs": {"b": 0.151}},
+     {"id": 51, "type": "mul", "inputs": {"b": 0.1816}},
      {"id": 52, "type": "mul"},
      {"id": 53, "type": "out"}
     ],
@@ -1146,13 +1146,13 @@
      }
     ],
     "tracks": [
-     {"id": 1, "name": "Sitar", "voices": 4, "slots": ["Sitar"], "placements": [{"clip": "Sitar", "tick": 0}]},
-     {"id": 2, "name": "Banjo", "voices": 5, "slots": ["Banjo"], "placements": [{"clip": "Banjo", "tick": 9600}]},
-     {"id": 3, "name": "Koto", "voices": 6, "slots": ["Koto"], "placements": [{"clip": "Koto", "tick": 17280}]},
+     {"id": 1, "name": "Sitar", "voices": 8, "slots": ["Sitar"], "placements": [{"clip": "Sitar", "tick": 0}]},
+     {"id": 2, "name": "Banjo", "voices": 8, "slots": ["Banjo"], "placements": [{"clip": "Banjo", "tick": 9600}]},
+     {"id": 3, "name": "Koto", "voices": 8, "slots": ["Koto"], "placements": [{"clip": "Koto", "tick": 17280}]},
      {
       "id": 4,
       "name": "Kalimba",
-      "voices": 8,
+      "voices": 12,
       "slots": ["Kalimba"],
       "placements": [{"clip": "Kalimba", "tick": 24960}]
      },
@@ -1167,7 +1167,7 @@
      {"id": 7, "name": "Shanai", "voices": 4, "slots": ["Shanai"], "placements": [{"clip": "Shanai", "tick": 49920}]}
     ],
     "buses": [],
-    "master": {"gain": 1.1413}
+    "master": {"gain": 1.1361}
    }
   }
  ]

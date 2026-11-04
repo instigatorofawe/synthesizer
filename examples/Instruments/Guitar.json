@@ -51,7 +51,7 @@
      {"id": 39, "type": "add", "inputs": {"b": 90.0}},
      {"id": 40, "type": "ratio", "root": 60},
      {"id": 41, "type": "mul", "inputs": {"b": 2.6}},
-     {"id": 42, "type": "env", "inputs": {"attack": 0.004, "sustain": 0.0, "release": 0.12}},
+     {"id": 42, "type": "env", "inputs": {"attack": 0.004, "sustain": 0.0, "release": 0.25}},
      {"id": 43, "type": "biquad", "mode": "bandpass", "inputs": {"cutoff": 98.0, "q": 1.6}},
      {"id": 44, "type": "mul", "inputs": {"b": 0.8}},
      {"id": 45, "type": "add"},
@@ -199,7 +199,7 @@
      {"id": 39, "type": "add", "inputs": {"b": 90.0}},
      {"id": 40, "type": "ratio", "root": 60},
      {"id": 41, "type": "mul", "inputs": {"b": 3.2}},
-     {"id": 42, "type": "env", "inputs": {"attack": 0.0008, "sustain": 0.0, "release": 0.12}},
+     {"id": 42, "type": "env", "inputs": {"attack": 0.0008, "sustain": 0.0, "release": 0.2}},
      {"id": 43, "type": "biquad", "mode": "bandpass", "inputs": {"cutoff": 110.0, "q": 1.6}},
      {"id": 44, "type": "mul", "inputs": {"b": 0.6}},
      {"id": 45, "type": "add"},
@@ -1341,12 +1341,12 @@
      {"id": 34, "type": "add", "inputs": {"b": 90.0}},
      {"id": 35, "type": "ratio", "root": 60},
      {"id": 36, "type": "mul", "inputs": {"b": 0.4}},
-     {"id": 37, "type": "env", "inputs": {"attack": 0.002, "sustain": 0.0, "release": 0.15}},
+     {"id": 37, "type": "env", "inputs": {"attack": 0.002, "sustain": 0.0, "release": 0.35}},
      {"id": 38, "type": "mul", "inputs": {"b": -0.5}},
      {"id": 39, "type": "add", "inputs": {"b": 90.0}},
      {"id": 40, "type": "ratio", "root": 60},
      {"id": 41, "type": "mul", "inputs": {"b": 2.5}},
-     {"id": 42, "type": "env", "inputs": {"attack": 0.002, "sustain": 0.0, "release": 0.15}},
+     {"id": 42, "type": "env", "inputs": {"attack": 0.002, "sustain": 0.0, "release": 0.35}},
      {"id": 43, "type": "mul", "inputs": {"b": 0.4}},
      {"id": 44, "type": "mul", "inputs": {"b": 0.6}},
      {"id": 45, "type": "add"},
@@ -1681,28 +1681,28 @@
      {
       "id": 1,
       "name": "Nylon guitar",
-      "voices": 6,
+      "voices": 14,
       "slots": ["NylonGuitar"],
       "placements": [{"clip": "NylonGuitar", "tick": 0}]
      },
      {
       "id": 2,
       "name": "Steel guitar",
-      "voices": 6,
+      "voices": 24,
       "slots": ["SteelGuitar"],
       "placements": [{"clip": "SteelGuitar", "tick": 7680}]
      },
      {
       "id": 3,
       "name": "Jazz guitar",
-      "voices": 6,
+      "voices": 8,
       "slots": ["JazzGuitar"],
       "placements": [{"clip": "JazzGuitar", "tick": 15360}]
      },
      {
       "id": 4,
       "name": "Clean guitar",
-      "voices": 6,
+      "voices": 8,
       "slots": ["CleanGuitar"],
       "placements": [{"clip": "CleanGuitar", "tick": 23040}]
      },
@@ -1730,7 +1730,7 @@
      {
       "id": 8,
       "name": "Guitar harmonics",
-      "voices": 6,
+      "voices": 12,
       "slots": ["GuitarHarmonics"],
       "placements": [{"clip": "GuitarHarmonics", "tick": 59520}]
      }

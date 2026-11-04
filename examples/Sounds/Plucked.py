@@ -169,9 +169,11 @@ def acoustic(
     body: Body,
     pick: float,
     second: tuple[float, float, float] | None,
+    release: float,
 ):
     """An acoustic guitar: a string and a second beside it, the nail or the pick, and the box: its top and the air in
-    it. The pluck's bright part dies first and then the string rings on for `after` seconds at middle C."""
+    it. The pluck's bright part dies first and then the string rings on for `after` seconds at middle C, and for
+    `release` more once the note is let go, as the fingers come down on it."""
 
     def build(v: Voice) -> Sound:
         g = v.g
@@ -187,7 +189,7 @@ def acoustic(
             attack=attack,
             pick=scratch(g, v, pick),
         )
-        rings = g.env(attack, g.keyed(v.key.pitch, after), 0.0, 0.12)
+        rings = g.env(attack, g.keyed(v.key.pitch, after), 0.0, release)
         sound = g.mul(resonate(g, tone, body), g.add(g.mul(pluck, 1.2), rings))
         return g.filter("highpass", g.mul(sound, loudness(v, 0.06)), 70.0)
 
@@ -277,7 +279,7 @@ def harmonics(v: Voice) -> Sound:
     )
     sound = g.add(tone, g.mul(glass, g.add(g.mul(v.velocity, 0.2), 0.08)))
     touch = g.mul(burst(g, 3500.0, 1.0, 0.004), 0.12)
-    sound = g.mul(g.add(sound, touch), ring(g, v.key.pitch, 0.002, 0.4, 2.5, 0.6, 0.15))
+    sound = g.mul(g.add(sound, touch), ring(g, v.key.pitch, 0.002, 0.4, 2.5, 0.6, 0.35))
     return g.filter("highpass", g.mul(sound, loudness(v, 0.06)), 80.0)
 
 
@@ -334,9 +336,10 @@ def bass(
 
 def synth_bass(v: Voice) -> Sound:
     """The ResonantSawBass recipe with an octave below it, as the SubOscillator recipe's: a saw, a square an octave
-    down, and a resonant low-pass that opens at each note and quickly closes, from higher as it is played harder."""
+    down, and a resonant low-pass that opens at each note and quickly closes, from higher as it is played harder. It
+    sustains, so the mod wheel brings in a vibrato."""
     g = v.g
-    f = g.mtof(v.pitch)
+    f = g.mtof(wheel_pitch(v, 5.5, 0.4))
     tone = g.add(g.osc("saw", f), g.mul(g.osc("square", g.mul(f, 0.5)), 0.5))
     sweep = stepped(g, g.env(0.001, 0.12, 0.0, 0.05), 128.0)
     opened = g.mul(sweep, g.add(g.mul(v.velocity, 3000.0), 800.0))
@@ -391,6 +394,7 @@ def banjo(
     head: float,
     twang: float,
     pick: float,
+    release: float,
 ):
     """A string over a drum's skin: very bright at the pick, quickly dull, and quickly gone, through the head's nasal
     resonance at `head` Hz. `twang` is how much the pitch starts sharp, as a string pulled hard does before it
@@ -414,7 +418,7 @@ def banjo(
             pick=scratch(g, v, pick, 0.004),
         )
         tone = resonate(g, tone, [(head, 1.6, 1.4), (head * 2.7, 2.0, 0.5)])
-        rings = g.env(0.0005, g.keyed(v.key.pitch, after), 0.0, 0.1)
+        rings = g.env(0.0005, g.keyed(v.key.pitch, after), 0.0, release)
         sound = g.mul(tone, g.add(g.mul(pluck, 1.0 - share), g.mul(rings, share)))
         return g.filter("highpass", g.mul(sound, loudness(v, 0.06)), 120.0)
 
@@ -442,7 +446,8 @@ def kalimba(v: Voice) -> Sound:
     tick = g.mul(tick, g.env(0.0002, 0.008, 0.0, 0.008))
     sound = g.add(g.add(tine, g.mul(first, g.add(g.mul(v.velocity, 0.4), 0.15))), tick)
     sound = resonate(g, sound, [(420.0, 1.5, 0.8)])
-    sound = g.mul(sound, ring(g, v.key.pitch, 0.0004, 0.25, 1.6, 0.6, 0.25))
+    # The thumb leaves the tine at once, so a note let go rings on, only a little shorter.
+    sound = g.mul(sound, ring(g, v.key.pitch, 0.0004, 0.15, 0.8, 0.6, 0.5))
     return g.filter("highpass", g.mul(sound, loudness(v, 0.06)), 100.0)
 
 
@@ -847,11 +852,12 @@ INSTRUMENTS = [
             body=[(98.0, 1.6, 0.8), (205.0, 2.0, 0.6)],
             pick=0.05,
             second=(1.2, 0.24, 0.35),
+            release=0.25,
         ),
         40,
         83,
         programs=[24],
-        voices=6,
+        voices=14,
         phrase=NYLON,
         listen_for="A classical guitar picked with the fingers: warm and round, a soft start, and a wooden box under it.",
     ),
@@ -869,11 +875,12 @@ INSTRUMENTS = [
             body=[(110.0, 1.6, 0.6), (3200.0, 1.2, 0.45)],
             pick=0.12,
             second=(3.5, 0.18, 0.6),
+            release=0.2,
         ),
         40,
         86,
         programs=[25],
-        voices=6,
+        voices=24,
         phrase=STEEL,
         listen_for="A flat-picked steel-string guitar strumming: bright and jangly, its strings shimmering against each other.",
     ),
@@ -895,7 +902,7 @@ INSTRUMENTS = [
         40,
         84,
         programs=[26],
-        voices=6,
+        voices=8,
         phrase=JAZZ,
         listen_for="An archtop on its neck pickup with the tone turned down: mellow, round chords and a warm single line.",
     ),
@@ -917,7 +924,7 @@ INSTRUMENTS = [
         40,
         88,
         programs=[27],
-        voices=6,
+        voices=8,
         phrase=CLEAN,
         listen_for="A solid-body electric through a clean amplifier: glassy and clear, ringing long.",
     ),
@@ -975,7 +982,7 @@ INSTRUMENTS = [
         52,
         88,
         programs=[31],
-        voices=6,
+        voices=12,
         phrase=HARMONICS,
         listen_for="Harmonics touched on the strings: bell-like octaves and fifths, glassy and pure.",
     ),
@@ -1093,7 +1100,7 @@ INSTRUMENTS = [
         48,
         84,
         programs=[104],
-        voices=4,
+        voices=8,
         phrase=SITAR,
         listen_for="A sitar: a buzzing, bright string whose tone sweeps as it rings, and a shimmer of sympathetic strings after it.",
     ),
@@ -1111,11 +1118,12 @@ INSTRUMENTS = [
             head=1100.0,
             twang=0.0,
             pick=0.15,
+            release=0.12,
         ),
         50,
         86,
         programs=[105],
-        voices=5,
+        voices=8,
         phrase=BANJO,
         listen_for="A five-string banjo rolling: bright, metallic and nasal, each note quickly gone.",
     ),
@@ -1133,11 +1141,12 @@ INSTRUMENTS = [
             head=750.0,
             twang=0.35,
             pick=0.1,
+            release=0.25,
         ),
         48,
         86,
         programs=[106, 107],
-        voices=6,
+        voices=8,
         phrase=KOTO,
         listen_for="A koto or a shamisen: a twangy pluck that starts sharp and settles, ringing out, plain and dry.",
     ),
@@ -1149,7 +1158,7 @@ INSTRUMENTS = [
         60,
         88,
         programs=[108],
-        voices=8,
+        voices=12,
         phrase=KALIMBA,
         listen_for="A thumb piano: soft, bell-like tines with a metallic tick as each is struck, in a small wooden box.",
     ),

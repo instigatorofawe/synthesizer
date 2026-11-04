@@ -143,7 +143,7 @@ test('Edit a copy on a built-in that a library timeline plays swaps the copy in 
 	await expect(page.getByTestId('view-patch')).toHaveAttribute('aria-selected', 'true');
 	await editCopy(page).click();
 
-	await expect(patchName(page)).toHaveValue(/^FurElise Electric piano copy/);
+	await expect(patchName(page)).toHaveValue(/^Electric piano copy/);
 	const copy = shownPatch(page)!;
 	const name = await patchName(page).inputValue();
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved'); // The copy is saved, and the swap is the timeline's edit
@@ -153,9 +153,9 @@ test('Edit a copy on a built-in that a library timeline plays swaps the copy in 
 
 	// One step of the timeline's undo, which leaves the note
 	await undoButton(page).click();
-	await expect(page.getByTestId('track-patch-1')).toHaveText('FurElise Electric piano');
+	await expect(page.getByTestId('track-patch-1')).toHaveText('Electric piano');
 	await expect(page.getByTestId('note-0')).toBeVisible();
-	expect((await slots(page))[1]).toEqual(['builtin-FurElise-piano']);
+	expect((await slots(page))[1]).toEqual(['builtin-gm-ElectricPiano']);
 	await redoButton(page).click();
 	await expect(page.getByTestId('track-patch-1')).toHaveText(name);
 });
@@ -187,7 +187,7 @@ test('the header counts an unsaved use of a built-in, and agrees with where the 
 	// And a use taken away, unsaved, is counted no more
 	await openView(page, 'song');
 	await undoButton(page).click();
-	await expect(page.getByTestId('track-patch-1')).toHaveText('FurElise Electric piano');
+	await expect(page.getByTestId('track-patch-1')).toHaveText('Electric piano');
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 	await browser(page).getByLabel('Filter the browser').fill('DrawbarOrgan');
 	await browser(page).getByTestId('builtins').getByRole('link', { name: 'DrawbarOrgan' }).click();

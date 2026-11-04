@@ -1385,6 +1385,34 @@ TEST(Timeline, MetersAndKeysAreTheEditorsAndChangeNoByte) {
     }
 }
 
+TEST(Timeline, TheReportSaysWhichSlotsATrackKept) {
+    json request = lane_project(json::array());
+    json& timeline = request["programs"][0]["timeline"];
+    timeline["tracks"][0]["slots"] = {"tone", "tone", "tone"};
+    timeline["clips"][0]["notes"] =
+        json::parse(R"([{"tick": 0, "note": 60, "dur": 100, "slot": 2}, {"tick": 480, "note": 62, "dur": 100}])");
+    const auto slots_of = [](const json& report) {
+        for (const json& t : report.at("programs")[0].at("tracks"))
+            if (t.at("id") == 1) return t.at("slots");
+        return json();
+    };
+    EXPECT_EQ(slots_of(compile_image(request).report), json::array({0, 2}));  // Slot 1 plays no note
+    request["live"] = true;
+    EXPECT_EQ(slots_of(compile_image(request).report), json::array({0, 1, 2}));
+}
+
+TEST(Timeline, AKitIsTheEditorsAndChangesNoByte) {
+    const json plain = lane_project(json::parse(R"([{"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5}])"));
+    json kitted = plain;
+    kitted["programs"][0]["timeline"]["tracks"][0]["kit"] = json::parse(
+        R"([{"note": 36, "name": "Bass Drum 1", "slot": 0}, {"note": 38, "name": "Acoustic Snare", "slot": 0}])");
+    EXPECT_EQ(lane_error(kitted), "");
+    EXPECT_EQ(compile_image(plain).image, compile_image(kitted).image);
+    json bad = kitted;
+    bad["programs"][0]["timeline"]["tracks"][0]["kit"][1]["key"] = 38;
+    EXPECT_NE(lane_error(bad).find("a kit key has no 'key'"), std::string::npos) << lane_error(bad);
+}
+
 namespace {
 
 // One track playing one clip through a placement the test describes.

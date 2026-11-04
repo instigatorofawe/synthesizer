@@ -1569,10 +1569,12 @@ inline void check_timeline(const json& doc, const std::string& where) {
     };
     for (const json& t : list(doc, "tracks", where)) {
         const std::string at = where + "/track:" + (t.is_object() && t.contains("id") ? t.at("id").dump() : "");
+        // `kit` is the editor's too: which sound each key of a drum track plays, which it writes into each note's slot.
         check_keys(t,
                    {"id", "name", "voices", "slots", "params", "placements", "play", "steal", "gain", "pan", "mute",
-                    "output", "sends", "inserts"},
+                    "output", "sends", "inserts", "kit"},
                    at, "a track");
+        for (const json& k : list(t, "kit", at)) check_keys(k, {"note", "name", "slot"}, at, "a kit key");
         for (const json& p : list(t, "placements", at)) {
             check_keys(p, {"clip", "tick", "repeat", "transpose", "velocity", "start", "length"}, at, "a placement");
         }
@@ -1814,6 +1816,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
     };
 
     std::map<std::string, int> compiled_track_index;
+    std::map<std::string, std::vector<int>> slots_kept;  // The song's slot each of a track's image slots is, in order
     // A clip can name an insert or a mix register, and those exist only once the mixer has compiled. So tracks stop
     // here with what the mixer needs, and their clips and streams follow it, in this same order.
     struct TrackWork {
@@ -1865,6 +1868,7 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
         desc.slot_begin = slot_begin;
         desc.slot_count = static_cast<u16>(slots.size()) - slot_begin;
         compiled_track_index[key] = static_cast<int>(track_table.size());
+        slots_kept[key] = std::vector<int>(used.begin(), used.end());
         add_inits(d, 0, static_cast<u16>(track_table.size()));
         track_work.push_back({key, track_where, std::move(slot_map), std::move(track_patches), track_table.size()});
         track_table.push_back(desc);
@@ -2867,6 +2871,9 @@ inline json compile_program(detail::ImageContext& image, const json& entry, std:
             t["id"] = c.doc->at("id");
             t["name"] = c.doc->value("name", std::string{});
             t["index"] = compiled_track_index.at(key);
+            // Only the slots notes play are compiled, so a live note naming a slot (a drum kit's key) names it as the
+            // image numbers it: the image's slot i is the song's slots[i].
+            t["slots"] = slots_kept.at(key);
             t["step"] = c.step;
             t["bus"] = c.pre_reg;
             t["mix"] = c.mix;

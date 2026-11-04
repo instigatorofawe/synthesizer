@@ -78,8 +78,10 @@ test('in an example every menu opens too, with what would change it greyed out a
 	await closes(page);
 
 	const head = await opens(page, page.getByTestId('track-1'), /^Track /);
+	await expect(head).toContainText(why);
 	await expect(head.getByRole('menuitem', { name: 'Rename…' })).toBeDisabled();
 	await expect(head.getByRole('menuitem', { name: 'Solo' })).toBeEnabled();
+	await expect(head.getByRole('menuitem', { name: 'Use the standard kit' })).toBeDisabled();
 	await closes(page);
 
 	// Past the song's end, where the row has no clip.

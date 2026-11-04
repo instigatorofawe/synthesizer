@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { newTake, recordNote, snapPlayed, type Played } from '#lib/Recording.ts';
 import { EMPTY_TIMELINE, type Timeline } from '#lib/Schema.ts';
-import { addClip, addTrack, place, setPlacement, type Clip, type Note } from '#lib/TimelineEdit.ts';
+import { addClip, addTrack, place, setPlacement, setTrack, type Clip, type Note } from '#lib/TimelineEdit.ts';
 
 const PPQ = 480;
 const BAR = 4 * PPQ;
@@ -159,5 +159,22 @@ describe('writing a note into the track', () => {
 	it('writes nothing for a track that has gone', () => {
 		const { doc } = song(1, [0]);
 		expect(recordNote(doc, newTake(99), { tick: 0, note: 60, vel: 100, dur: SIXTEENTH })).toBeNull();
+	});
+
+	it("plays a kit's sound on a kit track, into a clip there or one it starts, and keeps no slot for a key with none", () => {
+		const { doc, track } = song(1, [0]);
+		const kit = setTrack(doc, track, {
+			slots: ['kick', 'snare'],
+			kit: [
+				{ note: 36, name: 'Kick', slot: 0 },
+				{ note: 38, name: 'Snare', slot: 1 }
+			]
+		});
+		const snare = recordNote(kit, newTake(track), { tick: 0, note: 38, vel: 100, dur: SIXTEENTH })!;
+		expect(clip(snare.doc).notes).toEqual([{ ...note(0, 38), slot: 1 }]);
+		const later = recordNote(snare.doc, newTake(track), { tick: 3 * BAR, note: 38, vel: 100, dur: SIXTEENTH })!;
+		expect(clip(later.doc, later.clip).notes).toEqual([{ ...note(0, 38), slot: 1 }]);
+		const none = recordNote(kit, newTake(track), { tick: 0, note: 50, vel: 100, dur: SIXTEENTH })!;
+		expect(clip(none.doc).notes).toEqual([note(0, 50)]);
 	});
 });

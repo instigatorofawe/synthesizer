@@ -5,8 +5,22 @@
 //
 // A graph several examples share, such as the drum loop's kick and the Kick808 recipe's, is one built-in patch, and so is a
 // recording. Their recordings are rows too, and a page loads one only once something uses it (`libraryAssets`).
+//
+// The standard set's patches are named for what they are rather than where they come from: its instrument GrandPiano is
+// `builtin-gm-GrandPiano`, whichever of the set's examples plays it, so MIDI import can name the patch a program plays. The
+// set's examples come first, so a piece or a recipe whose graph is one of the set's plays the set's patch.
+import { setPatch } from '#lib/GeneralMidi.ts';
 import type { Db } from '#lib/server/Db.ts';
-import { readRecipe, RECIPES, recipeInLibrary, recipeTimelineId, type RecipeProject } from '#lib/server/Recipes.ts';
+import {
+	GROUPS,
+	inSet,
+	readRecipe,
+	RECIPES,
+	recipeInLibrary,
+	recipeTimelineId,
+	type RecipeEntry,
+	type RecipeProject
+} from '#lib/server/Recipes.ts';
 import {
 	createTimeline,
 	duplicatePatch,
@@ -28,23 +42,32 @@ export interface BuiltinPatch {
 export interface Catalogue {
 	patches: BuiltinPatch[]; // A patch comes after any it expands, so each can be written in order
 	assets: AssetEntry[];
-	parts: Record<string, Record<string, string>>; // Each example's own patch ids, as built-in ones
+	// Each example's own patch ids, as built-in ones, in the order the example lists its patches
+	parts: Record<string, Record<string, string>>;
 }
 
 export interface Example {
 	name: string;
 	project: RecipeProject;
+	set?: boolean; // One of the standard set's, from examples/Instruments
 }
 
 export const BUILTIN = 'builtin-';
 
-// An example with one patch names it after itself, and one with several adds the patch's own name.
+// An example with one patch names it after itself, and one with several adds the patch's own name. The set's are the
+// instrument's, by its key and its title.
 const patchId = (example: Example, key: string) =>
-	Object.keys(example.project.patches).length === 1 ? `${BUILTIN}${example.name}` : `${BUILTIN}${example.name}-${key}`;
+	example.set
+		? setPatch(key)
+		: Object.keys(example.project.patches).length === 1
+			? `${BUILTIN}${example.name}`
+			: `${BUILTIN}${example.name}-${key}`;
 const patchName = (example: Example, key: string) =>
-	Object.keys(example.project.patches).length === 1
-		? example.name
-		: `${example.name} ${example.project.patches[key].name || key}`;
+	example.set
+		? example.project.patches[key].name || key
+		: Object.keys(example.project.patches).length === 1
+			? example.name
+			: `${example.name} ${example.project.patches[key].name || key}`;
 
 function renamed(graph: Graph, assets: Record<string, string>, parts: Record<string, string>): Graph {
 	const asset = (id: string) => assets[id] ?? id;
@@ -79,17 +102,24 @@ export function renamedTimeline(doc: Timeline, part: (key: string) => string): T
 	};
 }
 
-// The built-in patches and recordings the examples make. An example with fewer patches names what it shares, and then the
-// first by name, so the kick that the drum loop and Kick808 share is Kick808's.
+// The built-in patches and recordings the examples make. The set's examples come first, in the order given, and the same
+// key in two of them is one patch, as the effects' example plays the piano family's grand piano. Then an example with fewer
+// patches names what it shares, and then the first by name, so the kick that the drum loop and Kick808 share is Kick808's.
 export function buildCatalogue(examples: Example[]): Catalogue {
-	const order = [...examples].sort(
-		(a, b) =>
-			Object.keys(a.project.patches).length - Object.keys(b.project.patches).length ||
-			(a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
-	);
+	const order = [
+		...examples.filter((example) => example.set),
+		...examples
+			.filter((example) => !example.set)
+			.sort(
+				(a, b) =>
+					Object.keys(a.project.patches).length - Object.keys(b.project.patches).length ||
+					(a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+			)
+	];
 	const assets: AssetEntry[] = [];
 	const assetByContent = new Map<string, string>();
 	const patches: BuiltinPatch[] = [];
+	const made = new Set<string>();
 	const patchByGraph = new Map<string, string>();
 	const parts: Catalogue['parts'] = {};
 
@@ -136,19 +166,22 @@ export function buildCatalogue(examples: Example[]): Catalogue {
 			for (const key of cycle ? waiting : ready) {
 				const graph = renamed(graphs[key], assetIds, own);
 				const same = JSON.stringify(graph);
-				const known = cycle ? undefined : patchByGraph.get(same);
+				// Every instrument of the set is a patch of its own, even one whose graph another has, since a program names it.
+				const known = cycle || example.set ? undefined : patchByGraph.get(same);
 				if (known) {
 					own[key] = known;
 					continue;
 				}
 				const id = patchId(example, key);
 				own[key] = id;
-				if (!cycle) patchByGraph.set(same, id);
+				if (made.has(id)) continue; // The set's, in an earlier example of the set
+				made.add(id);
+				if (!cycle && !patchByGraph.has(same)) patchByGraph.set(same, id);
 				patches.push({ id, name: patchName(example, key), graph, example: example.name });
 			}
 			waiting = cycle ? [] : waiting.filter((key) => !ready.includes(key));
 		}
-		parts[example.name] = own;
+		parts[example.name] = Object.fromEntries(Object.keys(graphs).map((key) => [key, own[key]]));
 	}
 	return { patches, assets, parts };
 }
@@ -158,9 +191,28 @@ let catalogue: Promise<Catalogue> | undefined;
 // Every example's file, read once.
 export function readCatalogue(): Promise<Catalogue> {
 	catalogue ??= Promise.all(
-		RECIPES.map(async (entry) => ({ name: entry.name, project: (await readRecipe(entry.name)) as RecipeProject }))
+		RECIPES.map(async (entry) => ({
+			name: entry.name,
+			project: (await readRecipe(entry.name)) as RecipeProject,
+			set: inSet(entry)
+		}))
 	).then(buildCatalogue);
 	return catalogue;
+}
+
+// The examples as the browser lists them, in their groups. The set's examples name their family and the built-in patches
+// they play, in the order they list them, which the patch pickers list the set's patches by.
+export function exampleGroups(from: Catalogue, groups = GROUPS, entries: RecipeEntry[] = RECIPES) {
+	return groups.map((group) => ({
+		name: group,
+		recipes: entries
+			.filter((entry) => entry.group === group)
+			.map(({ name, listen_for, family }) =>
+				family === undefined
+					? { name, listen_for }
+					: { name, listen_for, family, patches: Object.values(from.parts[name] ?? {}) }
+			)
+	}));
 }
 
 // Makes the library's built-in patches and recordings what ships, in one transaction. Those that no longer ship go, unless

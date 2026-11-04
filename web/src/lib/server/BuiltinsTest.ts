@@ -4,13 +4,23 @@ import {
 	BUILTIN,
 	buildCatalogue,
 	editCopy,
+	exampleGroups,
 	readCatalogue,
 	syncBuiltins,
 	type Catalogue
 } from '#lib/server/Builtins.ts';
 import { compileRequest, compileSnapshot } from '#lib/server/Compile.ts';
 import { openDatabase, type Db } from '#lib/server/Db.ts';
-import { readRecipe, RECIPES, recipeInLibrary, recipeTimelineId, type RecipeProject } from '#lib/server/Recipes.ts';
+import { GM, setPatch } from '#lib/GeneralMidi.ts';
+import {
+	GROUPS,
+	inSet,
+	readRecipe,
+	RECIPES,
+	recipeInLibrary,
+	recipeTimelineId,
+	type RecipeProject
+} from '#lib/server/Recipes.ts';
 import {
 	assetsById,
 	assetsFor,
@@ -77,11 +87,13 @@ describe('the built-in patches', () => {
 		expect(JSON.stringify(layers.graph)).toContain(`${BUILTIN}VelocityLayers-loud`);
 	});
 
-	it('are named after their example, with the part for one of several', () => {
+	it("are named after their example, with the part for one of several, except the set's", () => {
 		const byId = new Map(catalogue.patches.map((patch) => [patch.id, patch]));
 		expect(byId.get(`${BUILTIN}Kick808`)?.name).toBe('Kick808');
-		expect(byId.get(`${BUILTIN}PassionChorale-horn`)?.name).toBe('PassionChorale Horn');
-		for (const patch of catalogue.patches) expect(patch.name.startsWith(patch.example)).toBe(true);
+		expect(byId.get(`${BUILTIN}PassionChorale-flugelhorn`)?.name).toBe('PassionChorale Flugelhorn');
+		for (const patch of catalogue.patches) {
+			if (!patch.id.startsWith(GM.prefix)) expect(patch.name.startsWith(patch.example)).toBe(true);
+		}
 	});
 
 	it('are in a library from the start, and syncing again changes nothing', () => {
@@ -151,6 +163,119 @@ describe('the built-in patches', () => {
 		expect(built.patches.find((p) => p.id === built.parts.Big.a)?.graph.nodes[0].patch).toBe(`${BUILTIN}Small`);
 		expect(built.parts.Loop).toEqual({ x: `${BUILTIN}Loop-x`, y: `${BUILTIN}Loop-y` });
 		expect(built.patches.find((p) => p.id === `${BUILTIN}Loop-x`)?.graph.nodes[0].patch).toBe(`${BUILTIN}Loop-y`);
+	});
+});
+
+describe("the standard set's patches", () => {
+	const graph = (type: Graph['nodes'][number]['type']): Graph => ({ params: [], nodes: [{ id: 1, type }], edges: [] });
+	const example = (name: string, patches: Record<string, [string, Graph]>, set = false) => ({
+		name,
+		set,
+		project: {
+			patches: Object.fromEntries(Object.entries(patches).map(([key, [title, g]]) => [key, { name: title, graph: g }])),
+			programs: []
+		}
+	});
+	const piano = graph('noise');
+	// The recipe comes first, and still the set's examples name what they share with it.
+	const built = buildCatalogue([
+		example('Lonely', { p: ['p', piano] }),
+		example('Piano', { GrandPiano: ['Grand piano', piano], Upright: ['Upright piano', piano] }, true),
+		example('Effects', { GrandPiano: ['Grand piano', piano], LargeHall: ['Large hall', graph('in')] }, true),
+		example('Organ', { DrawbarOrgan: ['Drawbar organ', graph('osc')] }, true),
+		example('Hall', { h: ['h', graph('in')] })
+	]);
+	const byId = new Map(built.patches.map((patch) => [patch.id, patch]));
+
+	it('are the set prefix and their key, named by their own name, however many patches their example has', () => {
+		expect(built.parts.Piano).toEqual({ GrandPiano: setPatch('GrandPiano'), Upright: setPatch('Upright') });
+		expect(built.parts.Organ).toEqual({ DrawbarOrgan: setPatch('DrawbarOrgan') });
+		expect(byId.get(setPatch('DrawbarOrgan'))?.name).toBe('Drawbar organ');
+		expect(byId.get(setPatch('GrandPiano'))?.name).toBe('Grand piano');
+	});
+
+	it('are one patch for one key in two of the set, from the first, and one each for two keys with one graph', () => {
+		expect(built.parts.Effects).toEqual({ GrandPiano: setPatch('GrandPiano'), LargeHall: setPatch('LargeHall') });
+		expect(built.patches.filter((patch) => patch.id === setPatch('GrandPiano'))).toHaveLength(1);
+		expect(byId.get(setPatch('GrandPiano'))?.example).toBe('Piano');
+		expect(byId.get(setPatch('Upright'))?.graph).toEqual(piano);
+	});
+
+	it('are what a piece or a recipe with the same graph plays, which then has none of its own', () => {
+		expect(built.parts.Lonely).toEqual({ p: setPatch('GrandPiano') });
+		expect(built.parts.Hall).toEqual({ h: setPatch('LargeHall') });
+		expect(built.patches.map((patch) => patch.id)).toEqual(
+			['GrandPiano', 'Upright', 'LargeHall', 'DrawbarOrgan'].map(setPatch)
+		);
+	});
+
+	it("are listed with their example's family, in the order it lists them", () => {
+		const groups = exampleGroups(
+			built,
+			['pieces', 'instruments'],
+			[
+				{ name: 'Lonely', file: '', seconds: 1, group: 'pieces', listen_for: 'it' },
+				{ name: 'Effects', file: '', seconds: 1, group: 'instruments', family: 'Effects', listen_for: 'them' },
+				{ name: 'Piano', file: '', seconds: 1, group: 'instruments', family: 'Piano', listen_for: 'them' }
+			]
+		);
+		expect(groups).toEqual([
+			{ name: 'pieces', recipes: [{ name: 'Lonely', listen_for: 'it' }] },
+			{
+				name: 'instruments',
+				recipes: [
+					{
+						name: 'Effects',
+						listen_for: 'them',
+						family: 'Effects',
+						patches: ['GrandPiano', 'LargeHall'].map(setPatch)
+					},
+					{ name: 'Piano', listen_for: 'them', family: 'Piano', patches: ['GrandPiano', 'Upright'].map(setPatch) }
+				]
+			}
+		]);
+	});
+
+	// The pieces are played on the set: MakePieces.py gives each the set's graph for a set instrument, under its name. A piece
+	// written before the set last changed would have a graph of its own there, and so a patch of its own.
+	it("are the set's own wherever a piece plays one of its instruments, and a piece's other patches are its own", () => {
+		const set = new Set(catalogue.patches.filter((patch) => patch.id.startsWith(GM.prefix)).map((patch) => patch.id));
+		for (const entry of RECIPES.filter((recipe) => recipe.group === 'pieces')) {
+			for (const [key, id] of Object.entries(catalogue.parts[entry.name])) {
+				if (set.has(setPatch(key))) expect(id, `${entry.name} ${key}`).toBe(setPatch(key));
+			}
+		}
+		expect(catalogue.parts.FurElise).toEqual({
+			ElectricPiano: setPatch('ElectricPiano'),
+			Tremolo: setPatch('Tremolo'),
+			LargeRoom: setPatch('LargeRoom')
+		});
+		expect(catalogue.parts.PassionChorale.flugelhorn).toBe(`${BUILTIN}PassionChorale-flugelhorn`);
+		expect(catalogue.parts.BachInventionInF.pulse).toBe(`${BUILTIN}BachInventionInF-pulse`);
+	});
+
+	// What ships: whatever examples/Instruments holds, which is nothing until the set is made.
+	it('are every patch the GM tables name, and a key in two of the examples has one graph', async () => {
+		const ids = new Set(catalogue.patches.map((patch) => patch.id));
+		const named = [
+			...GM.programs.map((p) => p.instrument),
+			...GM.drums.map((d) => d.instrument),
+			GM.effects.reverb,
+			GM.effects.chorus
+		];
+		for (const name of named) if (name) expect(ids, name).toContain(setPatch(name));
+		const graphs = new Map<string, string>();
+		for (const entry of RECIPES.filter(inSet)) {
+			for (const [key, patch] of Object.entries((await project(entry.name)).patches)) {
+				expect(catalogue.parts[entry.name][key]).toBe(setPatch(key));
+				const graph = JSON.stringify(patch.graph);
+				expect(graphs.get(key) ?? graph, `${entry.name} ${key}`).toBe(graph);
+				graphs.set(key, graph);
+			}
+		}
+		const listed = exampleGroups(catalogue).find((group) => group.name === GROUPS[1]);
+		if (RECIPES.some(inSet))
+			expect(listed?.recipes.every((recipe) => recipe.family && recipe.patches?.length)).toBe(true);
 	});
 });
 

@@ -1,9 +1,19 @@
 // Mod+K's quick open: what it can open, and how what was typed ranks it.
+import { GM } from '#lib/GeneralMidi.ts';
+
 export interface Openable {
-	kind: 'Song' | 'Example' | 'Patch' | 'Built-in';
+	kind: 'Song' | 'Example' | 'Patch' | 'Instrument' | 'Built-in';
 	name: string;
 	href: string;
 }
+
+// What a patch is called there: the library's own, one of the standard set's, or another built-in, an example's own. The set's
+// are told apart from those, since a kit's Snare and the Snare recipe's are both built in.
+export const patchKind = (patch: { id: string; builtin?: boolean }): 'Patch' | 'Instrument' | 'Built-in' =>
+	!patch.builtin ? 'Patch' : patch.id.startsWith(GM.prefix) ? 'Instrument' : 'Built-in';
+
+// The library's own patches come first, then the set's, then the other built-ins.
+export const PATCH_KINDS = ['Patch', 'Instrument', 'Built-in'] as const;
 
 // What matches what was typed, best first: a name that starts with it, then one with a word that does, then any that holds
 // it, each in the order given. Empty, it is everything, up to `most`.

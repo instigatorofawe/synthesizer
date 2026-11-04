@@ -29,6 +29,7 @@
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { followScroll } from '#lib/Follow.ts';
 	import HeadMix from '#lib/HeadMix.svelte';
+	import { STANDARD_KIT, dropKit, standardKitWhy, useKit } from '#lib/Kit.ts';
 	import Meter from '#lib/Meter.svelte';
 	import { bringing, patchDrag, wavFiles, type DraggedPatch } from '#lib/PatchDrag.svelte.ts';
 	import { anchored, wheelAction } from '#lib/RollView.ts';
@@ -564,6 +565,15 @@
 			},
 			{ label: track.mute ? 'Unmute' : 'Mute', action: () => onmute(track.id), disabled: readonly },
 			{ label: solo.has(track.id) ? 'Unsolo' : 'Solo', action: () => onsolo(track.id) },
+			// The standard set's drums in its slots, and its notes on the sound for each key, as one edit (Kit.ts).
+			{
+				label: 'Use the standard kit',
+				action: () => onchange(useKit(doc, track.id, STANDARD_KIT)),
+				disabled: readonly || !!standardKitWhy(track)
+			},
+			...(track.kit
+				? [{ label: 'Not a kit', action: () => onchange(dropKit(doc, track.id)), disabled: readonly }]
+				: []),
 			{
 				label: 'Delete track',
 				action: () => {
@@ -580,12 +590,13 @@
 		menu = null;
 		onselect({ track: track.id, placement: null });
 		const box = on.getBoundingClientRect();
+		// Use the standard kit is greyed while the set has no drums, which the menu says, as it says why an example's are.
 		other = {
 			x: at?.x ?? box.left,
 			y: at?.y ?? box.bottom,
 			label: `Track ${trackName(track)}`,
 			items: headItems(track),
-			note
+			note: note ?? (STANDARD_KIT.slots.length ? undefined : standardKitWhy(track))
 		};
 	}
 

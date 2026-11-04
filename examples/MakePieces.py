@@ -8,13 +8,21 @@
 """Writes examples/Pieces: public-domain pieces arranged for the engine, in the same form as the recipes.
 
 The notes come from the Mutopia Project's editions, which their typesetters placed in the public domain, and everything
-else is a performance made here: the instruments, the tempo and its rubato, dynamics, pedalling, articulation and the
-mix. Bach's chorale is copied from its LilyPond source below. The others are read from the MIDI files LilyPond wrote
-from theirs, in examples/Pieces/Scores. Each piece is rendered once to set its master gain, so its peak lands where the
-recipes' do.
+else is a performance made here: the tempo and its rubato, dynamics, pedalling, articulation and the mix. Bach's chorale
+is copied from its LilyPond source below. The others are read from the MIDI files LilyPond wrote from theirs, in
+examples/Pieces/Scores.
+
+The pieces play the standard set's instruments and rooms, as a MIDI file does: each such patch is the graph
+examples/Instruments has, exactly, so the library holds it as the set's own built-in patch. Two keep patches of their own:
+the chorale's flugelhorn, which GM has no program for, and the Invention's console channels and small room, which are
+what the board can play. The set plays every instrument at one loudness, so a piece of several instruments trims each
+part's fader to keep the mix it was written with, and each send keeps the balance of wet and dry the piece had in a room
+of its own. Each piece is rendered once to set its master gain, so its peak lands where the recipes' do.
 
     uv run examples/MakePieces.py                  # every piece
     uv run examples/MakePieces.py PassionChorale   # only these
+
+It reads the set as examples/Instruments has it, so when the set changes, MakeInstruments.py runs first.
 
 Sources, all at https://www.mutopiaproject.org/ftp/ and typeset by the Mutopia maintainers named:
     BachPreludeInC.mid    BachJS/BWV846/wtk1-prelude1/wtk1-prelude1.mid, Tobias Erbsland
@@ -26,6 +34,7 @@ Sources, all at https://www.mutopiaproject.org/ftp/ and typeset by the Mutopia m
 Each of these editions is marked Public Domain on Mutopia, placed there by its typesetter.
 """
 
+import functools
 import itertools
 import json
 import math
@@ -36,10 +45,13 @@ from pathlib import Path
 
 import modsynth
 import numpy as np
+from Graph import Graph, dump
+from MakeInstruments import read_set
 
 HERE = Path(__file__).resolve().parent
 PIECES = HERE / "Pieces"
 SCORES = PIECES / "Scores"
+INSTRUMENTS = HERE / "Instruments"
 PPQ = 480
 RATE = 48000
 PEAK = 0.45  # Where every recipe's peak lands, so Listen.py's --gain means the same for all of them
@@ -48,149 +60,18 @@ PEAK = 0.45  # Where every recipe's peak lands, so Listen.py's --gain means the 
 # Patches ------------------------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Ref:
-    """One output of a node, which an input can take instead of a number."""
-
-    id: int
-    port: str = "out"
-
-    def __getattr__(self, port: str) -> "Ref":
-        if port.startswith("_"):
-            raise AttributeError(port)
-        return Ref(self.id, port)
-
-
-class Graph:
-    """Builds a patch's graph a node at a time. An input is a number, or a Ref, which becomes an edge."""
-
-    def __init__(self) -> None:
-        self.params: list[dict] = []
-        self.nodes: list[dict] = []
-        self.edges: list[dict] = []
-
-    def node(self, kind: str, inputs: dict | None = None, **options) -> Ref:
-        id = len(self.nodes) + 1
-        node = {"id": id, "type": kind, **options}
-        numbers = {}
-        for name, value in (inputs or {}).items():
-            if isinstance(value, Ref):
-                edge = {"from": value.id, "to": id, "input": name}
-                if value.port != "out":
-                    edge = {
-                        "from": value.id,
-                        "port": value.port,
-                        "to": id,
-                        "input": name,
-                    }
-                self.edges.append(edge)
-            elif value is not None:
-                numbers[name] = round(float(value), 6)
-        if numbers:
-            node["inputs"] = numbers
-        self.nodes.append(node)
-        return Ref(id)
-
-    def mul(self, a, b) -> Ref:
-        return self.node("mul", {"a": a, "b": b})
-
-    def add(self, a, b) -> Ref:
-        return self.node("add", {"a": a, "b": b})
-
-    def mtof(self, pitch) -> Ref:
-        return self.node("mtof", {"in": pitch})
-
-    def snap(self, signal) -> Ref:
-        return self.node("snap", {"in": signal})
-
-    def env(self, attack, decay, sustain, release) -> Ref:
-        return self.node(
-            "env",
-            {"attack": attack, "decay": decay, "sustain": sustain, "release": release},
-        )
-
-    def osc(self, wave: str, freq, mode: str | None = None, **inputs) -> Ref:
-        options = {"wave": wave} | ({"mode": mode} if mode else {})
-        return self.node("osc", {"freq": freq, **inputs}, **options)
-
-    def filter(self, mode: str, signal, cutoff, q=0.707) -> Ref:
-        return self.node("biquad", {"in": signal, "cutoff": cutoff, "q": q}, mode=mode)
-
-    def keyed(self, pitch, seconds: float) -> Ref:
-        """`seconds` at C4, twice as long two octaves down and half as long two octaves up, as strings ring."""
-        return self.mul(
-            self.node("ratio", {"in": self.add(self.mul(pitch, -0.5), 90.0)}, root=60),
-            seconds,
-        )
-
-    def out(self, left, right=None) -> None:
-        self.node("out", {"l": left, "r": right})
-
-    def json(self) -> dict:
-        graph = {"nodes": self.nodes, "edges": self.edges}
-        return {"params": self.params, **graph} if self.params else graph
-
-
-def harpsichord() -> dict:
-    """Two choirs of strings, one an octave up, plucked bright and dying away faster in the treble, as a quill does."""
-    g = Graph()
-    key = g.node("note")
-    f = g.mtof(key.pitch)
-    eight = g.osc("square", f, width=0.16)  # A narrow pulse for the nasal 8' choir
-    four = g.osc("saw", g.mul(f, 2.003))  # The 4' choir, a hair sharp of the octave
-    strings = g.add(eight, g.mul(four, 0.32))
-    # The cutoff follows the pitch, as a multiple of it, so every note is as bright and none aliases. It opens at
-    # the pluck and settles, and a harder key plucks brighter.
-    pluck = g.snap(g.env(0.0005, 0.35, 0.0, 0.1))
-    harmonics = g.mul(
-        g.add(g.mul(pluck, 22.0), 7.0), g.add(g.mul(key.velocity, 0.6), 0.7)
-    )
-    cutoff = g.node("math", {"a": g.mul(f, harmonics), "b": 16000.0}, mode="min")
-    tone = g.filter("lowpass", strings, cutoff, 0.8)
-    quill = g.mul(
-        g.filter("highpass", g.node("noise"), 3200.0), g.env(0.0002, 0.006, 0.0, 0.004)
-    )
-    # The damper falls quickly when the key comes up, and a harpsichord barely gets louder.
-    ring = g.env(0.0008, g.keyed(key.pitch, 2.4), 0.0, 0.07)
-    sound = g.mul(g.add(tone, g.mul(quill, 0.25)), ring)
-    level = g.mul(g.add(g.mul(key.velocity, 0.35), 0.45), 0.22)
-    g.out(g.filter("highpass", g.mul(sound, level), 70.0))
-    return g.json()
-
-
-def electric_piano() -> dict:
-    """A tine piano: a sine phase-modulated by another at its own pitch, whose bark fades into a bell as it rings."""
-    g = Graph()
-    key = g.node("note")
-    f = g.mtof(key.pitch)
-    bark = g.env(0.0005, 0.5, 0.12, 0.3)
-    # Turns of phase at the strike: a harder key barks more.
-    depth = g.add(g.mul(key.velocity, 0.55), 0.08)
-    modulator = g.mul(g.mul(g.osc("sine", f), bark), depth)
-    tine = g.osc("sine", f, mode="mod", phase=modulator)
-    # The metal of the tine, briefly.
-    ping = g.mul(g.osc("sine", g.mul(f, 7.0)), g.env(0.0002, 0.05, 0.0, 0.03))
-    sound = g.add(tine, g.mul(ping, g.mul(key.velocity, 0.15)))
-    ring = g.env(0.001, g.keyed(key.pitch, 3.0), 0.0, 0.3)
-    level = g.mul(g.add(g.mul(g.mul(key.velocity, key.velocity), 0.8), 0.2), 0.3)
-    # Modulating a sine at its own pitch leaves a DC offset that depends on where the two start, so it is filtered out.
-    g.out(g.filter("highpass", g.mul(g.mul(sound, ring), level), 40.0))
-    return g.json()
-
-
-def tremolo(rate: float, depth: float) -> dict:
-    """An insert that swings a track from side to side, as an electric piano's stereo vibrato does."""
-    g = Graph()
-    source = g.node("in")
-    swing = g.node(
-        "pan",
-        {
-            "in": g.add(source.l, source.r),
-            "position": g.node("lfo", {"rate": rate, "depth": depth}),
-        },
-    )
-    g.out(swing.l, swing.r)
-    return g.json()
+@functools.cache
+def standard_set() -> dict[str, dict]:
+    """The standard set's patches as examples/Instruments has them, by name: each one's title and its graph, exactly, so
+    that the library holds a piece's patch as the set's own, builtin-gm-<Name>, rather than as one of the piece's."""
+    graphs = read_set()
+    titles = {}
+    for entry in json.loads((INSTRUMENTS / "Index.json").read_text()):
+        for name, patch in json.loads((INSTRUMENTS / entry["file"]).read_text())[
+            "patches"
+        ].items():
+            titles[name] = patch["name"]
+    return {name: {"name": titles[name], "graph": graphs[name]} for name in graphs}
 
 
 def brass(
@@ -200,10 +81,10 @@ def brass(
     vibrato: float,
     breath: float,
     attack: float,
-    clean: bool = False,
 ) -> dict:
     """A brass voice: a saw through a filter that opens as it is blown harder, a soft clip that adds the brassy edge,
-    a formant and breath. The same shape as the Trumpet and FrenchHorn recipes, with its colour as arguments."""
+    a formant and breath, with its colour as arguments. The set's brass is this voice (examples/Sounds/Winds.py), and the
+    chorale's flugelhorn, which GM has no program for, keeps it as the piece's own patch."""
     g = Graph()
     key = g.node("note")
     # Lips start a little flat, and vibrato arrives late, on long notes only.
@@ -218,152 +99,12 @@ def brass(
     driven = g.mul(tone, g.add(g.mul(effort, 1.3), 0.4))
     shaped = g.add(driven, g.mul(g.mul(g.mul(driven, driven), driven), -0.33))
     horn = g.add(shaped, g.mul(g.filter("bandpass", shaped, formant, 1.1), 1.1))
-    if clean:
-        horn = g.filter("lowpass", g.filter("highpass", horn, 420.0), 4200.0)
     air = g.mul(
         g.filter("bandpass", g.node("noise"), 2600.0, 0.8),
         g.env(0.002, 0.08, 0.03, 0.05),
     )
     sound = g.mul(g.add(horn, g.mul(air, breath)), blow)
     g.out(g.mul(sound, g.mul(g.add(key.velocity, 0.45), 0.42)))
-    return g.json()
-
-
-def reed(low: float, high: float, width: float) -> dict:
-    """A double reed: a narrow pulse through two formants, brighter as it is blown harder."""
-    g = Graph()
-    key = g.node("note")
-    vibrato = g.mul(
-        g.node("lfo", {"rate": 5.0, "depth": 0.06}), g.snap(g.env(0.35, 0.1, 1.0, 0.1))
-    )
-    buzz = g.osc("square", g.mtof(g.add(key.pitch, vibrato)), width=width)
-    blow = g.env(0.02, 0.1, 0.75, 0.06)
-    open_by = g.mul(g.snap(blow), key.velocity)
-    body = g.mul(
-        g.filter("lowpass", buzz, g.add(g.mul(open_by, 2600.0), 900.0), 0.7), 0.5
-    )
-    body = g.add(body, g.mul(g.filter("bandpass", buzz, low, 2.0), 1.2))
-    body = g.add(body, g.mul(g.filter("bandpass", buzz, high, 3.0), 0.7))
-    g.out(g.mul(g.mul(body, blow), g.mul(g.add(g.mul(key.velocity, 0.7), 0.3), 0.8)))
-    return g.json()
-
-
-def pizzicato() -> dict:
-    """A plucked string: bright at the pluck, ringing longer the lower it is, through a wooden body."""
-    g = Graph()
-    key = g.node("note")
-    f = g.mtof(key.pitch)
-    string = g.add(g.osc("saw", f), g.osc("triangle", f))
-    pluck = g.snap(g.env(0.0005, 0.12, 0.0, 0.05))
-    harmonics = g.mul(
-        g.add(g.mul(pluck, 14.0), 2.0), g.add(g.mul(key.velocity, 0.8), 0.6)
-    )
-    tone = g.filter(
-        "lowpass",
-        string,
-        g.node("math", {"a": g.mul(f, harmonics), "b": 12000.0}, mode="min"),
-        0.9,
-    )
-    body = g.add(tone, g.mul(g.filter("bandpass", tone, 280.0, 1.5), 0.8))
-    ring = g.env(0.001, g.keyed(key.pitch, 0.9), 0.0, 0.12)
-    g.out(g.mul(g.mul(body, ring), g.mul(g.add(g.mul(key.velocity, 0.75), 0.25), 0.35)))
-    return g.json()
-
-
-def bowed() -> dict:
-    """A string section: three saws a few cents apart, a vibrato they share, and a filter opened by the bow."""
-    g = Graph()
-    key = g.node("note")
-    pitch = g.add(key.pitch, g.node("lfo", {"rate": 5.4, "depth": 0.09}))
-    saws = g.add(
-        g.osc("saw", g.mtof(g.add(pitch, -0.08))),
-        g.osc("saw", g.mtof(g.add(pitch, 0.08))),
-    )
-    saws = g.add(saws, g.mul(g.osc("saw", g.mtof(pitch)), 0.8))
-    bow = g.env(0.03, 0.15, 0.85, 0.22)
-    tone = g.filter("lowpass", saws, g.add(g.mul(key.velocity, 4000.0), 1400.0), 0.6)
-    tone = g.filter("highpass", tone, 110.0)
-    g.out(g.mul(g.mul(tone, bow), g.mul(g.add(g.mul(key.velocity, 0.8), 0.2), 0.45)))
-    return g.json()
-
-
-def timpani() -> dict:
-    """A kettledrum: a few inharmonic modes that start a little sharp and settle, over a felt thump."""
-    g = Graph()
-    key = g.node("note")
-    f = g.mtof(g.add(key.pitch, g.mul(g.snap(g.env(0.001, 0.08, 0.0, 0.01)), 0.4)))
-    modes = g.osc("sine", f)
-    for ratio, level in ((1.504, 0.5), (1.742, 0.25), (2.0, 0.2)):
-        modes = g.add(modes, g.mul(g.osc("sine", g.mul(f, ratio)), level))
-    ring = g.env(0.002, 2.2, 0.0, 0.6)
-    thump = g.filter(
-        "lowpass", g.node("noise"), g.add(g.mul(key.velocity, 1500.0), 300.0)
-    )
-    thump = g.mul(thump, g.env(0.0005, 0.06, 0.0, 0.03))
-    sound = g.add(g.mul(modes, ring), g.mul(thump, 0.8))
-    g.out(g.mul(sound, g.mul(g.add(g.mul(key.velocity, 0.8), 0.2), 0.35)))
-    return g.json()
-
-
-def cymbal() -> dict:
-    """A crash: high noise that takes seconds to die, whatever key plays it."""
-    g = Graph()
-    key = g.node("note")
-    hiss = g.filter("highpass", g.node("noise"), 5000.0)
-    hiss = g.add(hiss, g.mul(g.filter("bandpass", hiss, 9000.0, 0.6), 0.8))
-    g.out(g.mul(g.mul(hiss, g.env(0.001, 3.0, 0.0, 1.5)), g.mul(key.velocity, 0.25)))
-    return g.json()
-
-
-def hall(feedback: float, damp: float, wet: float) -> dict:
-    """The Reverb recipe's room, two banks of eight combs and four allpasses, with its size and colour as arguments."""
-    g = Graph()
-    source = g.node("in")
-    mono = g.mul(g.add(source.l, source.r), 0.5)
-    sides = []
-    for spread in (0.0, 0.0005):
-        bank = None
-        for seconds in (0.0297, 0.0371, 0.0411, 0.0437, 0.0253, 0.0269, 0.0290, 0.0307):
-            comb = g.node(
-                "comb",
-                {
-                    "in": mono,
-                    "time": seconds + spread,
-                    "feedback": feedback,
-                    "damp": damp,
-                },
-                max=0.05,
-            )
-            bank = comb if bank is None else g.add(bank, comb)
-        for seconds in (0.0126, 0.0100, 0.0077, 0.0051):
-            bank = g.node(
-                "allpass",
-                {"in": bank, "time": seconds + spread, "feedback": 0.5},
-                max=0.02,
-            )
-        sides.append(g.mul(bank, wet))
-    g.out(*sides)
-    return g.json()
-
-
-def upright() -> dict:
-    """An old upright piano: two strings a few cents apart for each note, which beat as a tired one's unisons do,
-    struck bright and mellowing as they ring, longer in the bass."""
-    g = Graph()
-    key = g.node("note")
-    f = g.mtof(key.pitch)
-    strings = g.add(g.osc("saw", g.mul(f, 1.0032)), g.osc("saw", g.mul(f, 0.9968)))
-    strike = g.snap(g.env(0.0005, 0.3, 0.0, 0.1))
-    harmonics = g.mul(
-        g.add(g.mul(strike, 9.0), 2.2), g.add(g.mul(key.velocity, 0.9), 0.35)
-    )
-    cutoff = g.node(
-        "math", {"a": g.add(g.mul(f, harmonics), 250.0), "b": 14000.0}, mode="min"
-    )
-    tone = g.filter("lowpass", strings, cutoff, 0.6)
-    ring = g.env(0.001, g.keyed(key.pitch, 2.0), 0.0, 0.16)
-    level = g.mul(g.add(g.mul(g.mul(key.velocity, key.velocity), 0.8), 0.2), 0.16)
-    g.out(g.filter("highpass", g.mul(g.mul(tone, ring), level), 50.0))
     return g.json()
 
 
@@ -384,8 +125,9 @@ def console(wave: str) -> dict:
 
 
 def small_room(feedback: float, damp: float, wet: float) -> dict:
-    """A mono room a board can hold: four of the hall's combs and two of its allpasses, each line only as long as its
-    delay, 31 KB in all where the hall's take 188 KB. It costs a sixth of a frame on the board."""
+    """A mono room a board can hold: four of the Reverb recipe's combs and two of its allpasses, each line only as long
+    as its delay, 31 KB in all, where each of the standard set's rooms takes 76 KB or more. It costs a sixth of a frame on
+    the board."""
     g = Graph()
     source = g.node("in")
     mono = g.mul(g.add(source.l, source.r), 0.5)
@@ -593,6 +335,11 @@ class Song:
         self.patches[key] = {"name": name, "graph": graph}
         return key
 
+    def standard(self, name: str) -> str:
+        """Adds the standard set's patch `name`, keyed and titled as the set has it, for a slot or an insert to play."""
+        patch = standard_set()[name]
+        return self.patch(name, patch["name"], patch["graph"])
+
     def bus(self, key: str, insert: str, gain: float = 1.0) -> None:
         self.buses.append(
             {
@@ -759,13 +506,12 @@ def prelude() -> tuple[dict, str]:
     tempo.glide(32 * bar, 34 * bar, 66, 44)
 
     song = Song(tempo, [("prelude", 0)], 35 * bar)
-    song.patch("harpsichord", "Harpsichord", harpsichord())
-    song.patch("room", "Chamber", hall(0.8, 0.35, 0.09))
-    song.bus("room", "room")
-    song.track("Harpsichord", ["harpsichord"], played, voices=12, sends={"room": 0.3})
+    harpsichord, room = song.standard("Harpsichord"), song.standard("LargeRoom")
+    song.bus("room", room)
+    song.track("Harpsichord", [harpsichord], played, voices=12, sends={"room": 0.54})
     listen = (
-        "Bach's C major prelude on a two-choir harpsichord, each figure ringing on under the next, leaning into the "
-        "bars where the harmony arrives and slowing into a rolled last chord."
+        "Bach's C major prelude on the standard set's two-choir harpsichord in a large room, each figure ringing on "
+        "under the next, leaning into the bars where the harmony arrives and slowing into a rolled last chord."
     )
     return song.project("prelude", "Prelude in C"), listen
 
@@ -825,23 +571,40 @@ def chorale() -> tuple[dict, str]:
     length = held[-1] + 2 * PPQ
 
     song = Song(tempo, [("chorale", 0)], length)
-    song.patch(
-        "trumpet", "Trumpet", brass(2600, 650, 1300, 0.08, 0.1, 0.03, clean=True)
-    )
-    song.patch("flugelhorn", "Flugelhorn", brass(1500, 420, 900, 0.06, 0.06, 0.05))
-    song.patch("horn", "Horn", brass(1250, 260, 480, 0.04, 0.03, 0.07))
-    song.patch("trombone", "Trombone", brass(1700, 300, 600, 0.03, 0.05, 0.05))
-    song.patch("church", "Church", hall(0.88, 0.3, 0.07))
-    song.bus("church", "church")
-    for (name, (notes, pan)), slot in zip(
-        parts.items(), ["trumpet", "flugelhorn", "horn", "trombone"]
-    ):
+    slots = {
+        "Trumpet": song.standard("Trumpet"),
+        "Flugelhorn": song.patch(
+            "flugelhorn", "Flugelhorn", brass(1500, 420, 900, 0.06, 0.06, 0.05)
+        ),
+        "Horn": song.standard("FrenchHorn"),
+        "Trombone": song.standard("Trombone"),
+    }
+    song.bus("hall", song.standard("MediumHall"))
+    # The set plays its trumpet, horn and trombone about 12 dB under where the chorale's own did, and the flugelhorn, still
+    # the piece's, is turned down as far, so the master gain makes the 12 dB up. Each part's trim, in dB, takes it the
+    # rest of the way to where it sat in the mix, and its send gives it the balance of wet and dry it had in the church
+    # the chorale had of its own, which the set's hall colours differently for each instrument. Both were measured with
+    # each part alone, before and after.
+    mix = {  # trim, send
+        "Trumpet": (-0.7, 0.81),
+        "Flugelhorn": (-12.0, 0.81),
+        "Horn": (1.6, 0.97),
+        "Trombone": (0.4, 0.92),
+    }
+    for name, (notes, pan) in parts.items():
+        trim, send = mix[name]
         song.track(
-            name, [slot], shaped(notes), voices=3, pan=pan, sends={"church": 0.45}
+            name,
+            [slots[name]],
+            shaped(notes),
+            voices=3,
+            gain=round(10 ** (trim / 20), 4),
+            pan=pan,
+            sends={"hall": send},
         )
     listen = (
-        "Bach's Passion Chorale for trumpet, flugelhorn, horn and trombone in a large church, every phrase slowing "
-        "into its fermata and taking a breath, the repeat an echo of the first time."
+        "Bach's Passion Chorale for the standard set's trumpet, French horn and trombone and a flugelhorn of its own, "
+        "in a hall, every phrase slowing into its fermata and taking a breath, the repeat an echo of the first time."
     )
     # In F major, from a quarter's pickup.
     return song.project(
@@ -949,23 +712,22 @@ def elise() -> tuple[dict, str]:
     sections = [("a", a1), ("a-second", a2), ("b", b_section), ("a-return", back)]
     sections += [("c", c_section), ("run", run), ("a-last", a4)]
     song = Song(tempo, sections, length)
-    song.patch("piano", "Electric piano", electric_piano())
-    song.patch("tremolo", "Stereo tremolo", tremolo(4.2, 0.45))
-    song.patch("room", "Room", hall(0.82, 0.3, 0.08))
-    song.bus("room", "room")
+    piano, tremolo = song.standard("ElectricPiano"), song.standard("Tremolo")
+    song.bus("room", song.standard("LargeRoom"))
     # The pedal keeps every voice busy, so a new note takes one still ringing: fading it out spares a click.
     song.track(
         "Piano",
-        ["piano"],
+        [piano],
         notes,
         voices=24,
-        sends={"room": 0.3},
-        inserts=["tremolo"],
+        sends={"room": 0.5},
+        inserts=[tremolo],
         steal="fade",
     )
     listen = (
-        "Für Elise on a tine electric piano swaying between the speakers, pedalled bar by bar, broadening into each "
-        "cadence, pressing on over the drumming bass and slowing down the chromatic scale."
+        "Für Elise on the standard set's tine electric piano, swaying between the speakers in a large room, pedalled "
+        "bar by bar, broadening into each cadence, pressing on over the drumming bass and slowing down the chromatic "
+        "scale."
     )
     return song.project(
         "elise", "Für Elise", meter=[(0, 3, 8)], pickup=pickup, key=[(0, 0, True)]
@@ -1056,7 +818,7 @@ def king() -> tuple[dict, str]:
             play("Cellos and basses", n)
             play("Timpani", n, 47 - n.pitch, -10)
     for tick, vel in ((stretto * bar, 100), (last * bar, 120)):
-        parts.setdefault("Cymbal", []).append(Note(tick, PPQ, 60, vel))
+        parts.setdefault("Cymbal", []).append(Note(tick, PPQ, 49, vel))  # GM's crash
     length = last * bar + 3 * PPQ
     # The last chord is held.
     for name in ("Horns", "Violins", "Trumpets", "Oboes", "Cellos and basses"):
@@ -1089,10 +851,10 @@ def king() -> tuple[dict, str]:
         ]
 
     lanes = {
-        "Bassoons": fader(climb(theme, rising, 0.7, 1.0)),
-        "Pizzicato": fader(climb(theme, building, 0.7, 1.0, 6)),
-        "Violins": fader(climb(rising, stretto, 0.7, 1.0, 6)),
-        "Horns": fader(climb(rising, stretto, 0.5, 1.0, 6)),
+        "Bassoons": climb(theme, rising, 0.7, 1.0),
+        "Pizzicato": climb(theme, building, 0.7, 1.0, 6),
+        "Violins": climb(rising, stretto, 0.7, 1.0, 6),
+        "Horns": climb(rising, stretto, 0.5, 1.0, 6),
     }
     names = ["call", "theme", "rising", "building", "stretto", "shrieks", "roll"]
     song = Song(
@@ -1100,43 +862,40 @@ def king() -> tuple[dict, str]:
         [(name, start * bar) for name, start in zip(names, starts)],
         length,
     )
-    song.patch("horn", "Horn", brass(1250, 260, 480, 0.04, 0.03, 0.04))
-    song.patch(
-        "trumpet", "Trumpet", brass(2600, 650, 1300, 0.06, 0.1, 0.02, clean=True)
-    )
-    song.patch("bassoon", "Bassoon", reed(480, 1150, 0.28))
-    song.patch("oboe", "Oboe", reed(1100, 2900, 0.18))
-    song.patch("pizzicato", "Pizzicato", pizzicato())
-    song.patch("strings", "Strings", bowed())
-    song.patch("timpani", "Timpani", timpani())
-    song.patch("cymbal", "Cymbal", cymbal())
-    song.patch("hall", "Concert hall", hall(0.86, 0.35, 0.07))
-    song.bus("hall", "hall")
-    seats = {  # patch, voices, gain, pan, send
-        "Bassoons": ("bassoon", 4, 0.9, 0.1, 0.3),
-        "Pizzicato": ("pizzicato", 10, 0.55, 0.3, 0.3),
-        "Violins": ("strings", 10, 0.8, -0.35, 0.3),
-        "Oboes": ("oboe", 6, 0.35, -0.1, 0.3),
-        "Horns": ("horn", 8, 0.8, 0.25, 0.4),
-        "Trumpets": ("trumpet", 6, 0.6, 0.15, 0.35),
-        "Cellos and basses": ("strings", 8, 0.7, 0.4, 0.3),
-        "Timpani": ("timpani", 6, 0.7, 0.0, 0.35),
-        "Cymbal": ("cymbal", 2, 0.5, -0.15, 0.4),
+    # The set plays its instruments about 14 dB under where the piece's own did, which the master gain makes up. Each
+    # part's trim, in dB, takes it the rest of the way to where it sat in the mix, and moves its fader lane with it. Its
+    # send gives it the balance of wet and dry it had in the concert hall the piece had of its own, which the set's hall
+    # colours differently for each instrument: the timpani's two notes ring in it more, and the pizzicato's less. Both
+    # were measured with each part alone, before and after.
+    seats = {  # patch, voices, gain, pan, send, trim
+        "Bassoons": ("Bassoon", 4, 0.9, 0.1, 0.68, 1.9),
+        "Pizzicato": ("PizzicatoStrings", 10, 0.55, 0.3, 0.73, 2.0),
+        "Violins": ("StringEnsemble", 10, 0.8, -0.35, 0.66, 0.1),
+        "Oboes": ("Oboe", 6, 0.35, -0.1, 0.64, 3.2),
+        "Horns": ("FrenchHorn", 8, 0.8, 0.25, 0.7, 0.0),
+        "Trumpets": ("Trumpet", 6, 0.6, 0.15, 0.58, -2.6),
+        "Cellos and basses": ("StringEnsemble", 8, 0.7, 0.4, 0.61, 0.1),
+        "Timpani": ("Timpani", 6, 0.7, 0.0, 0.47, -4.5),
+        "Cymbal": ("KitCrash", 2, 0.5, -0.15, 0.85, -1.5),
     }
-    for name, (patch, voices, gain, pan, send) in seats.items():
+    for name, (patch, voices, gain, pan, send, trim) in seats.items():
+        scale = 10 ** (trim / 20)
+        lane = [(tick, round(value * scale, 4)) for tick, value in lanes.get(name, [])]
         song.track(
             name,
-            [patch],
+            [song.standard(patch)],
             parts[name],
             voices,
-            gain,
+            round(gain * scale, 4),
             pan,
             {"hall": send},
-            lanes.get(name),
+            fader(lane) if lane else None,
         )
+    song.bus("hall", song.standard("MediumHall"))
     listen = (
-        "Grieg's trolls, orchestrated from the piano score: bassoons and pizzicato basses tiptoe through the theme, "
-        "which climbs, gathers the orchestra and speeds up until the trolls shriek over the timpani."
+        "Grieg's trolls, orchestrated from the piano score for the standard set's orchestra in a concert hall: "
+        "bassoons and pizzicato basses tiptoe through the theme, which climbs, gathers the orchestra and speeds up "
+        "until the trolls shriek over the timpani."
     )
     return song.project(
         "king", "In the Hall of the Mountain King", key=[(0, 2, True)]
@@ -1274,25 +1033,25 @@ def entertainer() -> tuple[dict, str]:
     ]
     sections += [("c", c), ("link", link), ("d", d1), ("d-again", d2)]
     song = Song(tempo, sections, length)
-    song.patch("piano", "Upright piano", upright())
-    song.patch("room", "Parlour", hall(0.78, 0.4, 0.08))
-    song.bus("room", "room")
+    piano = song.standard("HonkyTonkPiano")
+    song.bus("room", song.standard("LargeRoom"))
     for name, part, voices, pan in (
         ("Right hand", right, 12, 0.12),
         ("Left hand", left, 10, -0.12),
     ):
         song.track(
             name,
-            ["piano"],
+            [piano],
             [n for n in notes if n.part == part],
             voices=voices,
             pan=pan,
-            sends={"room": 0.22},
+            sends={"room": 0.34},
             steal="fade",
         )
     listen = (
-        "Joplin's rag on an old upright whose unisons have drifted apart, not fast and steady as he asked, its bass "
-        "striding under the syncopated tune, the second time through the B strain an octave up, as marked."
+        "Joplin's rag on the standard set's honky-tonk piano, an old upright whose unisons have drifted apart, in a "
+        "large room, not fast and steady as he asked, its bass striding under the syncopated tune, the second time "
+        "through the B strain an octave up, as marked."
     )
     # In C, with the trio in F, as the score has it.
     keys = [(0, 0, False), (c, -1, False), (link, 0, False)]
@@ -1309,26 +1068,6 @@ MAKERS = {
     "BachInventionInF": invention,
     "TheEntertainer": entertainer,
 }
-
-
-def dump(value, indent: int = 0) -> str:
-    """JSON with one note, node or edge to a line, so a piece reads and diffs a line at a time."""
-    flat = json.dumps(value, ensure_ascii=False)
-    if not isinstance(value, (dict, list)) or len(flat) + indent <= 118:
-        return flat
-    pad = " " * (indent + 1)
-    if isinstance(value, dict):
-        items = [
-            f"{pad}{json.dumps(k)}: {dump(v, indent + 1)}" for k, v in value.items()
-        ]
-        return "{\n" + ",\n".join(items) + "\n" + " " * indent + "}"
-    return (
-        "[\n"
-        + ",\n".join(pad + dump(v, indent + 1) for v in value)
-        + "\n"
-        + " " * indent
-        + "]"
-    )
 
 
 def main() -> None:

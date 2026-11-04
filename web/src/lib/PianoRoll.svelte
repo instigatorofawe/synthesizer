@@ -6,6 +6,7 @@
 	import ContextMenu, { EXAMPLE_NOTE, type MenuItem } from '#lib/ContextMenu.svelte';
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { FOLLOW_MARGIN, followScroll } from '#lib/Follow.ts';
+	import { keyText, kitKeys, noteText, type Kit } from '#lib/Kit.ts';
 	import { ROW, ROWS, anchored, clampBeat, fitRoll, wheelAction, type RollView } from '#lib/RollView.ts';
 	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
 	import {
@@ -56,6 +57,7 @@
 		bars = Bars.of(ppq).shifted(0, true),
 		grid,
 		slots,
+		kit = null,
 		choices,
 		silent = false,
 		playhead,
@@ -83,6 +85,9 @@
 		bars?: Bars; // The song's bars where the clip is placed, in its own ticks and counted from its own first (TimeSignature.ts)
 		grid: number;
 		slots: string[]; // The track's patches, for notes that choose one
+		// The kit the clip's notes play, on a kit track (Kit.ts): the keys are named by it, those it has no sound for are dimmed,
+		// and so is a note on one
+		kit?: Kit | null;
 		choices: LaneChoice[];
 		silent?: boolean; // The clip's track has no notes yet, so it never plays, and a lane that reaches past it can't run
 		playhead: number | null; // In ticks from the start of the clip
@@ -107,7 +112,7 @@
 		toolbarIn?: HTMLElement | null; // Where the zoom, Fit, the chosen notes' fields and the hint go: the tab strip, which has room
 	} = $props();
 
-	const KEYS = 48;
+	const KEYS = $derived(kit ? 136 : 48); // The keys' width, which on a kit track has room for each key's sound
 	const RULER = 16; // The bar ruler at the top, which stays there as the rows scroll under it
 	const VELOCITY = 56;
 	const EDGE = 6;
@@ -169,6 +174,10 @@
 	const refused = new Set<number>();
 
 	const perTick = $derived(beatWidth / ppq);
+	const sounds = $derived(kit ? kitKeys(kit) : null); // A kit's keys, by note
+	const silentKey = (note: number) => !!sounds && !sounds.has(note);
+	// The chosen notes' slot is the kit's to choose, unless one is on a key it has no sound for.
+	const kitSlots = $derived(!!sounds && [...chosen].every((i) => sounds!.has(clip.notes[i]?.note ?? -1)));
 	// A bar's length at the clip's end, which is how far past it the roll goes on.
 	const bar = $derived(Math.max(1, bars.at(clip.length).end - bars.at(clip.length).start));
 	// How long a whole bar is where a tick is, for the lengths that read in bars.
@@ -228,7 +237,7 @@
 	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && modKey() === 'Meta');
 
 	const describe = (note: Pick<Note, 'tick' | 'note' | 'dur'>) =>
-		`${noteName(note.note)} · ${noteValue(note.dur, ppq, barAt(note.tick))} · ${bars.position(note.tick)}`;
+		`${noteText(sounds, note.note)} · ${noteValue(note.dur, ppq, barAt(note.tick))} · ${bars.position(note.tick)}`;
 
 	// What the ghost says: the note a click would add, or the one being drawn. Past the end it says what that does to the clip.
 	const ghostLabel = $derived.by(() => {
@@ -782,7 +791,8 @@
 
 	const keyItems = (key: number): MenuItem[] => {
 		const all = new Set(clip.notes.flatMap((note, index) => (note.note === key ? [index] : [])));
-		return [{ label: `Choose every ${noteName(key)}`, action: () => (chosen = all), disabled: !all.size }];
+		const name = sounds?.get(key)?.name ?? noteName(key);
+		return [{ label: `Choose every ${name}`, action: () => (chosen = all), disabled: !all.size }];
 	};
 
 	const groundItems = (key?: number): MenuItem[] => [
@@ -1009,6 +1019,16 @@
 							width="3.6rem"
 						/></label
 					>
+					{#if sounds}
+						<span
+							class="sound"
+							class:none={silentKey(one.note)}
+							data-testid="note-sound"
+							title={silentKey(one.note)
+								? 'The kit has no sound on this key, so the note keeps the slot it had'
+								: "The kit's sound on this key, which the note plays"}>{sounds.get(one.note)?.name ?? 'no sound'}</span
+						>
+					{/if}
 					<label title="Where it starts, as bar.beat.tick from the clip's start, or a bar"
 						>at <UnitField
 							label="Note tick"
@@ -1100,6 +1120,8 @@
 						<select
 							aria-label="Note slot"
 							value={one.slot === undefined ? '' : String(one.slot)}
+							disabled={kitSlots}
+							title={kitSlots ? 'The kit gives each key its slot' : undefined}
 							onchange={(e) => slotChanged(e.currentTarget.value)}
 						>
 							<option value="">first</option>
@@ -1158,18 +1180,29 @@
 				<svg class="keys" width={KEYS} height={rollHeight} aria-hidden="true">
 					{#each { length: 128 }, row}
 						{@const note = 127 - row}
+						{@const sound = sounds?.get(note)}
 						<rect
 							class="key"
 							class:black={isBlackKey(note)}
+							class:nosound={silentKey(note)}
 							y={row * rowHeight}
 							width={KEYS}
 							height={rowHeight}
 							role="presentation"
 							data-testid={`key-${note}`}
+							data-sound={sounds ? (sound?.name ?? '') : undefined}
 							onpointerdown={(event) => pressKey(event, note)}
 							oncontextmenu={(event) => sideMenu(event, note)}
 						/>
-						{#if note % 12 === 0}<text class="octave" x="4" y={row * rowHeight + rowHeight - 2}>{noteName(note)}</text
+						<!-- A kit names each key that has a sound, where a row is tall enough to read it. -->
+						{#if sounds && sound && rowHeight >= 8}<text
+								class="kitname"
+								class:black={isBlackKey(note)}
+								x="4"
+								y={row * rowHeight + rowHeight - Math.max(2, (rowHeight - 9) / 2)}
+								data-testid={`key-name-${note}`}>{keyText(sounds, note)}</text
+							>{:else if note % 12 === 0}<text class="octave" x="4" y={row * rowHeight + rowHeight - 2}
+								>{noteName(note)}</text
 							>{/if}
 					{/each}
 				</svg>
@@ -1193,6 +1226,7 @@
 						<rect
 							class="lane"
 							class:black={isBlackKey(127 - row)}
+							class:nosound={silentKey(127 - row)}
 							y={row * rowHeight}
 							{width}
 							height={rowHeight}
@@ -1221,11 +1255,14 @@
 						<g
 							class="note"
 							class:chosen={chosen.has(index)}
+							class:nosound={silentKey(note.note)}
 							data-testid={`note-${index}`}
 							data-tick={note.tick}
 							data-note={note.note}
 							data-dur={note.dur}
 							data-vel={note.vel}
+							data-slot={note.slot ?? 0}
+							data-sound={sounds ? (sounds.get(note.note)?.name ?? '') : undefined}
 						>
 							<rect
 								class="body"
@@ -1238,7 +1275,10 @@
 								role="presentation"
 								onpointerdown={(event) => pressNote(event, index, 'move')}
 								oncontextmenu={(event) => noteMenu(event, index)}
-							/>
+								>{#if silentKey(note.note)}<title
+										>{`The kit has no sound on ${note.note}, so this note keeps slot ${(note.slot ?? 0) + 1} of its track`}</title
+									>{/if}</rect
+							>
 							{#if !readonly}
 								<rect
 									class="edge"
@@ -1604,6 +1644,26 @@
 		font-size: 9px;
 		pointer-events: none;
 	}
+	/* A kit's keys, each named by its sound, and those it has no sound for dimmed, as the rows beside them are. */
+	.kitname {
+		fill: #0d1117;
+		font-size: 9px;
+		pointer-events: none;
+	}
+	.kitname.black {
+		fill: #c9d1d9;
+	}
+	.key.nosound {
+		opacity: 0.3;
+	}
+	.sound {
+		flex: none;
+		color: var(--text);
+	}
+	.sound.none {
+		color: var(--muted);
+		font-style: italic;
+	}
 	.lane {
 		fill: #0d1117;
 		stroke: #161b22;
@@ -1611,6 +1671,9 @@
 	}
 	.lane.black {
 		fill: #0a0d12;
+	}
+	.lane.nosound {
+		fill: #07090c;
 	}
 	.beat {
 		stroke: #1c2128;
@@ -1630,6 +1693,15 @@
 	}
 	.note.chosen .body {
 		fill: #f0883e;
+	}
+	/* A note on a key the kit has no sound for: greyed and dashed, as it plays nothing the kit means it to. */
+	.note.nosound .body {
+		fill: #6e7681;
+		stroke: #c9d1d9;
+		stroke-dasharray: 3 2;
+	}
+	.note.nosound.chosen .body {
+		fill: #9a6a43;
 	}
 	.velreadout {
 		fill: var(--text);

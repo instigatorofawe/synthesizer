@@ -158,7 +158,8 @@ export class EngineSession<E extends Engine = AudioEngine> {
 	// What the timeline's editors send. Notes and moves of the playhead bring the song back; a control dragged while a patch
 	// plays on its own has nothing to move, and settles when its edit compiles.
 	readonly controls: SongControls = {
-		noteOn: (track, note, velocity) => this.use('song', () => this.engine.noteOn(track, note, velocity)),
+		noteOn: (track, note, velocity, at, slot) =>
+			this.use('song', () => this.engine.noteOn(track, note, velocity, at, slot)),
 		noteOff: (track, note) => this.use('song', () => this.engine.noteOff(track, note)),
 		locate: (tick) => this.use('song', () => this.#whenNewest(() => this.engine.locate(tick))),
 		setLoop: (start, end) => this.setLoop(end > start ? { start, end } : null, end > start),

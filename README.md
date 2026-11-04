@@ -19,8 +19,9 @@ checked against committed renders in [golden](golden).
 | `web` | The SvelteKit app, with Drizzle over SQLite |
 | `examples/Demo.json` | The project every target renders. `MakeDemo.py` regenerates it. |
 | `examples/Listen.py` | Plays each oscillator and mode through the sound card, with `uv run examples/Listen.py`. `--list` shows the recipes and pieces. |
-| `examples/Recipes` | 61 standalone projects, from a supersaw to a drum loop, that `Listen.py` plays. |
-| `examples/Pieces` | Four public-domain pieces arranged for the engine, from a Bach prelude on harpsichord to Grieg's trolls for orchestra. `MakePieces.py` writes them from the scores in `Scores`. |
+| `examples/Recipes` | 74 standalone projects, from a supersaw to a drum loop, that `Listen.py` plays. |
+| `examples/Instruments` | The standard set: 104 instruments for General MIDI's 128 programs, a 23-sound drum kit and GM2's effects, one example per family. `MakeInstruments.py` writes them from the modules in `examples/Sounds`, sets each one's level, and writes `GeneralMidi.json`, which program and key each plays. |
+| `examples/Pieces` | Six public-domain pieces arranged for the engine, from a Bach prelude on harpsichord to Grieg's trolls for orchestra. `MakePieces.py` writes them from the scores in `Scores`. |
 
 ## Native
 
@@ -51,6 +52,8 @@ the GIL, so engines on separate threads render at once.
 
 ## Web
 
+### Building and running
+
     emcmake cmake -B build/wasm -DMODSYNTH_BUILD_TESTS=OFF
     cmake --build build/wasm --target modsynth_wasm modsynth_compiler_wasm
     cd web
@@ -58,54 +61,88 @@ the GIL, so engines on separate threads render at once.
     pnpm wasm      # copies the wasm build into the app
     pnpm build
     pnpm start     # http://127.0.0.1:5321
-    pnpm e2e       # the browser tests, on a server of their own at 5331, or E2E_PORT
+    pnpm test      # the unit tests
+    pnpm e2e       # the browser tests, in Chromium, on a server of their own at 5331, or E2E_PORT
 
-The editor is laid out like a DAW, as two views under one top bar: Song, the arrangement with the notes of the chosen clip
-below it, and Patch, a patch's graph at full height. The top bar holds the transport and a loop button, the position and the tempo
-as fields, one Undo and Redo for the view on screen, the keys, the master meter with a limiting light, a compile light that lists
-any problems with links to them, and Save. A browser down the side, which folds to a rail, holds the library and the examples, and
-the address holds the view, track, clip, tab, Expand, the chosen node and the JSON tab, so a reload or a link lands where you were. Audio starts with
-the first click or key, and a new song starts with a track playing an electric piano and an empty clip open in the roll. + Track
-makes a track with a clip of its own. A click in the roll adds a note, and a clip grows to hold one placed past its end. Fields read
-in bars and beats, note names and note values, and a bare number in a length is bars, as in Live and Logic. Velocity stems are as wide as
-their notes and a drag across them paints, and a lane's points join in lines. R turns on step entry, where the keys write notes and chords at a cursor, → rests and
-Backspace steps back, and C and V set the velocity of new notes. ● or Shift+R records: a bar is counted in with a click, and what the
-keys play while the song plays is written into the chosen track, each note's start snapped to the grid and its length as played, adding
-to the clip on each pass round a loop.
-The arrangement is only as tall as its tracks until the tab strip under it is dragged, and clips snap to bars apart from the notes'
-Snap. ⤢ or a double-click on a clip gives the notes the whole view, I folds the inspector,
-and each clip keeps its zoom. Track heads have mute and solo, a volume fader and a pan knob. Above the tracks, the Time & key lane
-marks where the time signature and the key change, and its menu adds changes, which the inspector sets, with a pickup before bar 1:
-bars, Snap, positions and the click all follow them, and the compiler ignores them. A Tempo lane unfolds
-into the song's tempo as a curve, where a click adds a change, a drag sets it and a click on a segment makes it glide. A clip's menu
-splits it at the pointer or the playhead, as ⌘ or Ctrl with E does, into two clips that play as it did. Score, beside Roll in the Notes
-toolbar, shows a clip as a score in the song's time and key signatures, drawn with VexFlow, where a click on a line or a space adds
-that note, the arrows move what is chosen, and step entry writes at a cursor on the staff. ⌘ or Ctrl with
-C, V and D copy, paste and duplicate notes, clips and nodes. A track's patch is chosen from one searchable list, or dragged from the
-browser onto its track, or below the tracks for a new one, and its name in the track head opens it in the Patch view. An effect dragged
-onto a track or a Mixer strip joins its inserts, WAV files dropped on the song become an instrument on a track, and a track head drags
-up or down to move the track. A patch draws as a graph, with wires dragged between nodes, which a click chooses and Delete removes, a
-Shift-drag box to choose nodes, a node search on N or a double-click, errors on the nodes they belong to, scopes on any node, and
-its JSON in a tab beside it. Fit pressed again shows the whole patch, and Modulate this input, on an input's right-click menu, puts an
-envelope or another source on it, through a snap and a new Control, in one step. A lane in the Song view can move any input inside the
-track's patch, which gets a parameter for it. A Control shows its value, on a log scale where its range is wide, and saves the track's value with
-the song, and Make default writes it into the patch. A built-in or an example's patch is changed with Edit a copy, which puts the
-copy where the original played. The computer keyboard from A to ' with Z and X for the
-octave plays the chosen track, or in the Patch view the patch, on its own when no track plays it, at the Vel beside the keys,
-which new notes take too, and Latch holds what they play. Space plays and stops, and Home,
-or Stop pressed twice, goes back to the start. ? shows every key, ⌘K or Ctrl+K opens a song, an example or a patch by name, and
-Shift+F10 or a right-click opens the menu of whatever is edited by pointing, from a clip, a note or a lane to the ruler, a node or a
-wire, and in an example or a built-in patch it greys out what would change it and says why. Snap and Draw have triplets, a
-node shows its values, which a drag across changes, and Keys in the Patch view puts the keys across its foot, bigger.
-Shortcuts use ⌘ on a Mac and Ctrl elsewhere, and none uses Alt. A song stops at its
-end unless a loop is on, and the timeline follows the playhead. Edits to any number of patches and timelines stay, each with its
-own undo, while other things are opened, and Save writes them all at once. An example plays as it is, and adding one copies it into
-the library.
-An empty database fills itself with the demo project on first start. `pnpm test` runs the unit tests and `pnpm e2e` drives
-the built app in Chromium. There is no authentication, so keep it on loopback.
+- An empty database fills itself with the demo project on first start.
+- There is no authentication, so keep it on loopback.
+- `pnpm format` formats the app with Prettier, and `pnpm lint` checks it with Prettier and ESLint. The pre-commit hooks run both
+  with the versions the lockfile pins, so run `pnpm install` in `web/` before committing there.
 
-`pnpm format` formats the web app with Prettier and `pnpm lint` checks it with Prettier and ESLint. The pre-commit hooks run
-both, with the versions the lockfile pins, so run `pnpm install` in `web/` before committing there.
+### The editor
+
+It is laid out like a DAW, as two views under one top bar: **Song**, the arrangement with the notes of the chosen clip below it,
+and **Patch**, a patch's graph at full height.
+
+- **The top bar** holds the transport and a loop button, the position and the tempo as fields, one Undo and Redo for the view on
+  screen, the keys, the master meter with a limiting light, a compile light that lists any problems with links to them, and Save.
+- **The browser** down the side, which folds to a rail, holds the library and the examples.
+- **The address** holds the view, track, clip, tab, Expand, the chosen node and the JSON tab, so a reload or a link lands where you
+  were.
+- **Audio** starts with the first click or key. A new song starts with a track playing an electric piano and an empty clip open in
+  the roll.
+- **Shortcuts** are written here as Mod+K and so on: Mod is ⌘ on a Mac and Ctrl elsewhere, and no shortcut uses Alt.
+
+### Songs
+
+- **Tracks:** + Track makes a track with a clip of its own. Track heads have mute and solo, a volume fader and a pan knob, and drag
+  up or down to move the track.
+- **A track's patch** is chosen from one searchable list, or dragged from the browser onto its track, or below the tracks for a new
+  one. The built-in patches are the standard set, under its General MIDI families, and then the recipes' and pieces' own under
+  Techniques. Its name in the track head opens it in the Patch view. An effect dragged onto a track or a Mixer strip joins its inserts, and
+  WAV files dropped on the song become an instrument on a track.
+- **Drum tracks:** Use the standard kit, on a track's menu, makes it a kit: each key plays its own drum, which the roll names.
+- **Clips** snap to bars, apart from the notes' Snap. A clip's menu splits it at the pointer or the playhead, as Mod+E does, into two
+  clips that play as it did. ⤢ or a double-click on a clip gives the notes the whole view, and each clip keeps its zoom.
+- **The arrangement** is only as tall as its tracks until the tab strip under it is dragged. I folds the inspector.
+- **The Time & key lane** above the tracks marks where the time signature and the key change. Its menu adds changes, which the
+  inspector sets, with a pickup before bar 1. Bars, Snap, positions and the click all follow them, and the compiler ignores them.
+- **The Tempo lane** unfolds into the song's tempo as a curve, where a click adds a change, a drag sets it and a click on a segment
+  makes it glide.
+- **Lanes** can move any input inside a track's patch, which gets a parameter for it, and a lane's points join in lines.
+- **Playing:** a song stops at its end unless a loop is on, and the timeline follows the playhead.
+
+### Notes
+
+- **The roll:** a click adds a note, and a clip grows to hold one placed past its end. Velocity stems are as wide as their notes,
+  and a drag across them paints.
+- **The score:** Score, beside Roll in the Notes toolbar, shows a clip as a score in the song's time and key signatures, drawn with
+  VexFlow. A click on a line or a space adds that note, and the arrows move what is chosen.
+- **Step entry:** R turns it on. The keys write notes and chords at a cursor, in the roll or on the staff, → rests and Backspace
+  steps back, and C and V set the velocity of new notes.
+- **Recording:** ● or Shift+R counts in a bar with a click, and what the keys play while the song plays is written into the chosen
+  track, each note's start snapped to the grid and its length as played, adding to the clip on each pass round a loop.
+- **Fields** read in bars and beats, note names and note values, and a bare number in a length is bars, as in Live and Logic. Snap
+  and Draw have triplets.
+
+### Patches
+
+- **The graph:** wires are dragged between nodes. A click chooses a node and Delete removes it, a Shift-drag box chooses several, and
+  N or a double-click searches for a node to add. Errors show on the nodes they belong to, any node can show a scope, and the
+  patch's JSON is in a tab beside it.
+- **Nodes** show their values, which a drag across changes. Fit pressed again shows the whole patch.
+- **Modulate this input,** on an input's right-click menu, puts an envelope or another source on it, through a snap and a new
+  Control, in one step.
+- **A Control** shows its value, on a log scale where its range is wide, and saves the track's value with the song. Make default
+  writes it into the patch.
+- **A built-in or an example's patch** is changed with Edit a copy, which puts the copy where the original played.
+
+### Playing and keys
+
+- **The computer keyboard** from A to ', with Z and X for the octave, plays the chosen track, or in the Patch view the patch, on its
+  own when no track plays it. It plays at the Vel beside the keys, which new notes take too, and Latch holds what it plays. Keys in
+  the Patch view puts the keys across its foot, bigger.
+- **Space** plays and stops, and Home, or Stop pressed twice, goes back to the start.
+- **?** shows every key, and Mod+K opens a song, an example or a patch by name.
+- **Menus:** Shift+F10 or a right-click opens the menu of whatever is edited by pointing, from a clip, a note or a lane to the ruler,
+  a node or a wire. In an example or a built-in patch it greys out what would change it and says why.
+- **Mod+C, Mod+V and Mod+D** copy, paste and duplicate notes, clips and nodes.
+
+### Saving and examples
+
+- Edits to any number of patches and timelines stay, each with its own undo, while other things are opened, and Save writes them
+  all at once.
+- An example plays as it is, and adding one copies it into the library.
 
 ## Firmware
 

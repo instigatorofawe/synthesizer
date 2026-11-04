@@ -309,9 +309,11 @@ export class AudioEngine {
 	setLoop(start: number, end: number) {
 		this.send({ kind: EventKind.SetLoop, tick: start, tickEnd: end });
 	}
-	// A note given the time its key went down or up, on the page's clock, is stamped for a take.
-	noteOn(track: number, note: number, velocity = 100, at?: number) {
-		this.send({ kind: EventKind.NoteOn, target: track, note, velocity, ...this.stamp(at) });
+	// A note given the time its key went down or up, on the page's clock, is stamped for a take. A note given a slot, as the
+	// image numbers its slots, plays there, as a drum kit's key does, without changing the slot the track's own notes play.
+	noteOn(track: number, note: number, velocity = 100, at?: number, slot?: number) {
+		const param = slot === undefined ? 0 : slot + 1;
+		this.send({ kind: EventKind.NoteOn, target: track, note, velocity, param, ...this.stamp(at) });
 	}
 	noteOff(track: number, note: number, at?: number) {
 		this.send({ kind: EventKind.NoteOff, target: track, note, ...this.stamp(at) });

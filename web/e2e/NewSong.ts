@@ -27,3 +27,18 @@ export async function emptyNewSong(page: Page) {
 	await expect(page.getByTestId('arrangement')).toBeVisible();
 	await expect(page.getByTestId('track-1')).toHaveCount(0);
 }
+
+// + Track comes with a four-bar clip, open in the roll. A test that counts from a one-bar clip at the roll's first zoom, as a
+// double-click on an empty row makes, deletes that clip and makes this one.
+export async function oneBarClip(page: Page, track = 1) {
+	await page.getByTestId(`placement-${track}-0`).locator('rect').first().click({ button: 'right' });
+	await page
+		.getByRole('menu', { name: /^Clip / })
+		.getByRole('menuitem', { name: 'Delete clip' })
+		.click();
+	await expect(page.getByTestId(`placement-${track}-0`)).toHaveCount(0);
+	const row = (await page.getByTestId(`row-${track}`).boundingBox())!;
+	await page.mouse.dblclick(row.x + 10, row.y + 20);
+	await expect(page.getByTestId(`placement-${track}-0`)).toBeVisible();
+	await expect(page.getByTestId('roll')).toBeVisible();
+}

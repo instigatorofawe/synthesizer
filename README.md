@@ -64,23 +64,27 @@ The editor is laid out like a DAW, as two views under one top bar: Song, the arr
 below it, and Patch, a patch's graph at full height. The top bar holds the transport and a loop button, the position and the tempo
 as fields, one Undo and Redo for the view on screen, the keys, the master meter with a limiting light, a compile light that lists
 any problems with links to them, and Save. A browser down the side, which folds to a rail, holds the library and the examples, and
-the address holds the view, track, clip, tab, Expand, the chosen node and the JSON tab, so a reload or a link lands where you were. A new
-timeline starts with a track playing an electric piano and an empty clip open in the roll. A click in the roll adds a note, and a
-clip grows to hold one placed past its end. Fields read in bars and beats, note names and note values, velocity stems are as wide as
+the address holds the view, track, clip, tab, Expand, the chosen node and the JSON tab, so a reload or a link lands where you were. Audio starts with
+the first click or key, and a new song starts with a track playing an electric piano and an empty clip open in the roll. + Track
+makes a track with a clip of its own. A click in the roll adds a note, and a clip grows to hold one placed past its end. Fields read
+in bars and beats, note names and note values, and a bare number in a length is bars, as in Live and Logic. Velocity stems are as wide as
 their notes and a drag across them paints, and a lane's points join in lines. R turns on step entry, where the keys write notes and chords at a cursor, → rests and
 Backspace steps back, and C and V set the velocity of new notes. ● or Shift+R records: a bar is counted in with a click, and what the
 keys play while the song plays is written into the chosen track, snapped to the grid, adding to the clip on each pass round a loop.
-The arrangement is only as tall as its tracks, ⤢ or a double-click on a clip gives the notes the whole view, I folds the inspector,
+The arrangement is only as tall as its tracks until the tab strip under it is dragged, and clips snap to bars apart from the notes'
+Snap. ⤢ or a double-click on a clip gives the notes the whole view, I folds the inspector,
 and each clip keeps its zoom. Track heads have mute and solo, a volume fader and a pan knob. Above the tracks, a Tempo lane unfolds
 into the song's tempo as a curve, where a click adds a change, a drag sets it and a click on a segment makes it glide. ⌘ or Ctrl with
 C, V and D copy, paste and duplicate notes, clips and nodes. A track's patch is chosen from one searchable list, and its name in the
 track head opens it in the Patch view. A patch draws as a graph, with wires dragged between nodes, which a click chooses and Delete removes, a
 Shift-drag box to choose nodes, a node search on N or a double-click, errors on the nodes they belong to, scopes on any node, and
-its JSON in a tab beside it. A Control shows its value, on a log scale where its range is wide, and saves the track's value with
+its JSON in a tab beside it. Fit pressed again shows the whole patch, and Modulate this input, on an input's right-click menu, puts an
+envelope or another source on it, through a snap and a new Control, in one step. A lane in the Song view can move any input inside the
+track's patch, which gets a parameter for it. A Control shows its value, on a log scale where its range is wide, and saves the track's value with
 the song, and Make default writes it into the patch. A built-in or an example's patch is changed with Edit a copy, which puts the
 copy where the original played. The computer keyboard from A to ' with Z and X for the
 octave plays the chosen track, or in the Patch view the patch, on its own when no track plays it, at the Vel beside the keys,
-and Hold latches what they play. Space plays and stops, and Home,
+which new notes take too, and Latch holds what they play. Space plays and stops, and Home,
 or Stop pressed twice, goes back to the start. ? shows every key, ⌘K or Ctrl+K opens a song, an example or a patch by name, and
 Shift+F10 or a right-click opens the menu of a clip, notes, a track head, an empty row or the roll. Snap and Draw have triplets, a
 node shows its values, which a drag across changes, and Keys in the Patch view puts the keys across its foot, bigger.

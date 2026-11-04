@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { expect, test as base, type Page } from '@playwright/test';
 import { fromSongMenu, loopButton, openLight, pianoKey, startAudio, undoButton } from './Chrome.ts';
 import { engineRenders, goesRound, loudest } from './Engine.ts';
-import { emptyNewSong } from './NewSong.ts';
+import { emptyNewSong, oneBarClip } from './NewSong.ts';
 import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated: what is typed into it before then is lost, and a slow machine shows it.
@@ -992,11 +992,7 @@ async function addTrack(page: Page, patch: string) {
 async function trackWithClip(page: Page, name: string) {
 	await newTimeline(page, name);
 	await addTrack(page, 'lead');
-	// + Track comes with a four-bar clip, open in the roll. These tests count from a bar, so it is cut to one.
-	const length = page.getByLabel('Clip length');
-	await length.fill('1');
-	await length.press('Enter');
-	await expect(length).toHaveValue('1 bar');
+	await oneBarClip(page);
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 }
@@ -1126,6 +1122,13 @@ test('a clip is moved, repeated and copied in the arrangement, and an overlap la
 	await trackWithClip(page, 'Arranged');
 	await addNoteAt(page, 0, 60);
 	await addTrack(page, 'pluck');
+	// Track 2 comes with a clip, which goes, so the copy below is its only one.
+	await page.getByTestId('placement-2-0').locator('rect').first().click({ button: 'right' });
+	await page
+		.getByRole('menu', { name: /^Clip / })
+		.getByRole('menuitem', { name: 'Delete clip' })
+		.click();
+	await expect(page.getByTestId('placement-2-0')).toHaveCount(0);
 	const block = page.getByTestId('placement-1-0');
 	const barPixels = 96;
 
@@ -1173,12 +1176,13 @@ test('a drawn loop reaches an engine that starts later', async ({ page }) => {
 	await trackWithClip(page, 'Looped');
 	await addNoteAt(page, 0, 60);
 	const strip = (await page.getByTestId('loop-strip').boundingBox())!;
+	// Half a bar's drag, which the clips' Snap, a bar, makes a bar.
 	await press(page, { x: strip.x + 1, y: strip.y + 5 }, { x: strip.x + 48, y: strip.y + 5 });
 	await expect(page.getByTestId('loop-brace')).toBeVisible();
 	await expect(loopButton(page)).toHaveAttribute('aria-pressed', 'true');
 	await startAudioSettled(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
-	await goesRound(page, 1, 960);
+	await goesRound(page, 1, 1920);
 	await expect(page.getByTestId('voices')).toBeAttached(); // Under the compile light's list
 });
 

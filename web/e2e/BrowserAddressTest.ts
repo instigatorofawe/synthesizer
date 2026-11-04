@@ -80,7 +80,7 @@ test('the browser is narrow, and short enough for a laptop with the examples shu
 	await expect(browser(page).getByText('Short pieces that ship with the app')).toBeVisible();
 });
 
-test('the + in Timelines makes a timeline, and Esc closes its field', async ({ page }) => {
+test('the + in Songs makes a song, and Esc closes its field', async ({ page }) => {
 	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/?timeline=song');
 	const add = browser(page).getByRole('button', { name: 'New song', exact: true });
@@ -98,12 +98,14 @@ test('the + in Timelines makes a timeline, and Esc closes its field', async ({ p
 	await add.click(); // Again, it closes
 	await expect(field).toHaveCount(0);
 
+	// Named for the project, since both run against one server's library.
+	const name = `Made by the plus at ${test.info().project.name}`;
 	await add.click();
-	await field.fill('Made by the plus');
+	await field.fill(name);
 	await field.press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== 'song');
-	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Made by the plus');
-	await expect(browser(page).getByRole('link', { name: 'Made by the plus' })).toHaveAttribute('aria-current', 'page');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
+	await expect(browser(page).getByRole('link', { name, exact: true })).toHaveAttribute('aria-current', 'page');
 	await expect(field).toHaveCount(0);
 	await expect(add).toHaveAttribute('aria-expanded', 'false');
 });

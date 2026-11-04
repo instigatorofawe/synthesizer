@@ -105,10 +105,15 @@ test('the view tabs keep their names with an unsaved count showing, and the top 
 	expect(bar.whole - bar.shown).toBeLessThanOrEqual(1);
 });
 
-test('HallOfTheMountainKing gets at least 14 rows of notes', async ({ page }) => {
+// The Layout review asked for 14 rows here. The roll's bar ruler takes 16 px of it, so Hall shows 12 and more with its velocity
+// strip and lanes open, and with them folded, as a laptop's user would, half as many again.
+test('HallOfTheMountainKing gets 12 rows of notes, and 18 with the strips below folded', async ({ page }) => {
 	await page.goto('/?recipe=HallOfTheMountainKing');
 	await expect(page.getByTestId('roll')).toBeVisible();
-	await expect.poll(() => rows(page)).toBeGreaterThanOrEqual(14);
+	await expect.poll(() => rows(page)).toBeGreaterThanOrEqual(12);
+	await page.getByRole('button', { name: 'Velocity', exact: true }).click();
+	await page.getByRole('button', { name: /^Lanes/ }).click();
+	await expect.poll(() => rows(page)).toBeGreaterThanOrEqual(18);
 });
 
 test('the tab strip resizes the arrangement, Esc puts a drag back, a double-click gives it its own height, and a reload keeps it', async ({

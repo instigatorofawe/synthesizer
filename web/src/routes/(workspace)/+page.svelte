@@ -647,7 +647,17 @@
 	});
 
 	// Where each key held down went, so it is let go there though the view or the chosen track changed meanwhile.
-	const sounding = new Map<number, { source: Source; track: number; stamped: boolean }>();
+	// When it went down, and when the engine was sent it, which is later while audio or an image is still on its way.
+	type Held = { source: Source; track: number; stamped: boolean; down: number; sent: number | null };
+	const sounding = new Map<number, Held>();
+
+	// Sends a note to where it is held, and keeps when that was.
+	function sendOn(held: Held, note: number, vel: number, at?: number) {
+		session.use(held.source, () => {
+			held.sent = performance.now();
+			engine.noteOn(held.track, note, vel, held.stamped ? at : undefined);
+		});
+	}
 
 	// While step entry is on, the keys in the Song view also write into the clip in the roll, which they can do on a track
 	// that is silent because it has no notes yet.
@@ -710,9 +720,10 @@
 			const track = view === 'song' ? chosenIndex : hears.kind === 'song' ? hears.track : null;
 			session.wantSong();
 			if (track === null) return;
-			for (const [note] of held) {
-				sounding.set(note, { source: 'song', track, stamped: false });
-				session.use('song', () => engine.noteOn(track, note, velocity));
+			for (const [note, was] of held) {
+				const carried: Held = { source: 'song', track, stamped: false, down: was.down, sent: null };
+				sounding.set(note, carried);
+				sendOn(carried, note, velocity);
 			}
 		});
 	});
@@ -729,9 +740,16 @@
 		if (!on) {
 			const held = sounding.get(note);
 			sounding.delete(note);
-			// A note whose image has since given way to another went with it. One a take heard go down, it hears come up.
-			const stamp = held?.stamped ? (at ?? performance.now()) : undefined;
-			if (held && session.want === held.source) session.use(held.source, () => engine.noteOff(held.track, note, stamp));
+			// A note whose image has since given way to another went with it. One a take heard go down, it hears come up. One that
+			// reached the engine late, because the click that played it also started audio, is held as long as its key was.
+			if (!held || session.want !== held.source) return;
+			const stamp = held.stamped ? (at ?? performance.now()) : undefined;
+			const kept = performance.now() - held.down;
+			session.use(held.source, () => {
+				const short = held.sent === null || stamp !== undefined ? 0 : kept - (performance.now() - held.sent);
+				if (short > 1) setTimeout(() => engine.noteOff(held.track, note), short);
+				else engine.noteOff(held.track, note, stamp);
+			});
 			return;
 		}
 		const heard = hears;
@@ -750,8 +768,9 @@
 		if (!to) return;
 		// A take records the keys that play its track, from the count-in on, and stamps them with when they were pressed.
 		const stamped = at !== undefined && take?.phase === 'started' && to.source === 'song' && to.track === takeIndex;
-		sounding.set(note, { ...to, stamped });
-		session.use(to.source, () => engine.noteOn(to.track, note, vel, stamped ? at : undefined));
+		const held: Held = { ...to, stamped, down: performance.now(), sent: null };
+		sounding.set(note, held);
+		sendOn(held, note, vel, at);
 	}
 
 	// ----------------------------------------------------------------------------------------------------------- recording

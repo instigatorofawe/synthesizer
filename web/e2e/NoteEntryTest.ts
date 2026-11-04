@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { emptyNewSong } from './NewSong.ts';
+import { emptyNewSong, oneBarClip } from './NewSong.ts';
 
 // A page load waits until the page has hydrated, as AppTest.ts does: what is typed into it before then is lost.
 const test = base.extend({
@@ -39,11 +39,7 @@ async function newTrack(page: Page, name: string) {
 // A track with a one-bar clip, open in the roll.
 async function trackWithClip(page: Page, name: string) {
 	await newTrack(page, name);
-	// + Track comes with a four-bar clip, open in the roll. These tests count from a bar, so it is cut to one.
-	const length = page.getByLabel('Clip length');
-	await length.fill('1');
-	await length.press('Enter');
-	await expect(length).toHaveValue('1 bar');
+	await oneBarClip(page);
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 }

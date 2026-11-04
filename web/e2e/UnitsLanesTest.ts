@@ -1,7 +1,7 @@
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import { undoButton } from './Chrome.ts';
 import { settled } from './Engine.ts';
-import { emptyNewSong } from './NewSong.ts';
+import { emptyNewSong, oneBarClip } from './NewSong.ts';
 
 // Musical units in the fields, velocity stems as wide as their notes, and lane points joined by lines.
 
@@ -39,11 +39,7 @@ async function trackWithClip(page: Page, name: string) {
 	await emptyNewSong(page);
 	await page.getByRole('button', { name: 'Add track' }).click();
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
-	// + Track comes with a four-bar clip, open in the roll. These tests count from a bar, so it is cut to one.
-	const length = page.getByLabel('Clip length');
-	await length.fill('1');
-	await length.press('Enter');
-	await expect(length).toHaveValue('1 bar');
+	await oneBarClip(page);
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 }

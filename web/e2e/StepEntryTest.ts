@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { oneBarClip } from './NewSong.ts';
 import { loudest } from './Engine.ts';
 import { openView } from './Views.ts';
 
@@ -52,11 +53,7 @@ async function stepClip(page: Page, name: string) {
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 	const row = page.locator('[data-testid^="row-"]').last();
 	const track = (await row.getAttribute('data-testid'))!.slice('row-'.length);
-	// + Track comes with a four-bar clip, open in the roll. These tests count from a bar, so it is cut to one.
-	const length = page.getByLabel('Clip length');
-	await length.fill('1');
-	await length.press('Enter');
-	await expect(length).toHaveValue('1 bar');
+	await oneBarClip(page, Number(track));
 	await expect(page.getByTestId(`placement-${track}-0`)).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 	return track;
@@ -93,7 +90,7 @@ test('R and the Step toggle turn step entry on and off, and a field or the Patch
 	await toggle(page).click();
 	await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
 
-	await page.getByLabel('Velocity of new notes').focus();
+	await page.getByLabel('Velocity of the keys').focus();
 	await page.keyboard.press('r');
 	await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
 
@@ -261,7 +258,7 @@ test('a step past the end grows the clip as a clicked note does, or offers to le
 
 test('C and V set the velocity of new notes, stepped or clicked, and Mod with them is not theirs', async ({ page }) => {
 	await stepClip(page, 'Velocity');
-	const velocity = page.getByLabel('Velocity of new notes');
+	const velocity = page.getByLabel('Velocity of the keys');
 	await expect(velocity).toHaveValue('100');
 	await page.keyboard.press('v');
 	await expect(velocity).toHaveValue('110');

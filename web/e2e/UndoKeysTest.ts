@@ -1,29 +1,11 @@
-import { expect, test as base, type Page } from '@playwright/test';
-import { redoButton, startAudio, undoButton } from './Chrome.ts';
-import { engineRenders } from './Engine.ts';
+import { expect, test, type Page } from './Fixtures.ts';
+import { redoButton, undoButton } from './Chrome.ts';
+import { engineRenders, startAudioNewest } from './Engine.ts';
 
 // The transport's keys, Stop pressed twice, and an undo history for each patch and timeline that outlasts opening others.
 
-// A page load waits until the page has hydrated, since keys pressed before then go nowhere.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
 // Below 1400 px the browser folds to a rail and opens over the page, and these tests use it as it sits beside the page.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 const state = (page: Page) => page.getByTestId('state');
@@ -97,8 +79,7 @@ test('Space plays and stops from anywhere but a field, and a button with focus d
 
 test('Stop pressed again goes back to the start, and so does Home', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await startAudioNewest(page);
 	const stop = page.getByRole('button', { name: 'Stop', exact: true });
 
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
@@ -115,8 +96,21 @@ test('Stop pressed again goes back to the start, and so does Home', async ({ pag
 	// Home, while it plays and while it doesn't.
 	await page.keyboard.press('Space');
 	await expect.poll(() => tickShown(page), { timeout: 8000 }).toBeGreaterThan(1500);
+	// Back at the start, it plays on: wherever a read falls, the engine's tick is less than the song could have played since
+	// Home (1120 ticks a second at 140 BPM, and a block either side), which it wouldn't be had Home not gone back.
+	const engineAt = () =>
+		state(page).evaluate((e) => ({
+			time: Number(e.getAttribute('data-time')),
+			tick: Number(e.getAttribute('data-tick'))
+		}));
+	const pressed = (await engineAt()).time;
 	await page.keyboard.press('Home');
-	await expect.poll(() => tickShown(page)).toBeLessThan(1500);
+	await expect
+		.poll(async () => {
+			const { time, tick } = await engineAt();
+			return time > pressed && tick < (time - pressed) * 1120 + 480;
+		})
+		.toBe(true);
 	await expect(state(page)).toHaveAttribute('data-playing', 'true');
 	await page.keyboard.press('Space');
 	await expect(state(page)).toHaveAttribute('data-playing', 'false');

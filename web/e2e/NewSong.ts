@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page } from './Fixtures.ts';
 
 // A new timeline as it was before there was a template, with every default written out, as a saved one has them.
 const EMPTY = {

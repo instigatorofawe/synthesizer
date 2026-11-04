@@ -1,28 +1,8 @@
-import { expect, test as base, type Page } from '@playwright/test';
-import { startAudio } from './Chrome.ts';
-import { loudest } from './Engine.ts';
+import { expect, test, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
+import { loudest, startAudioNewest } from './Engine.ts';
 import { emptyNewSong } from './NewSong.ts';
 import { openView } from './Views.ts';
-
-// A page load waits until the page has hydrated, as AppTest's do.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 const options = (page: Page) => page.getByRole('listbox', { name: 'Patches' }).getByRole('option');
@@ -187,16 +167,12 @@ test('New patch for this track makes a patch that sounds, puts it on the track a
 
 	// A note in the track's own clip, and the new patch plays it.
 	await expect(page.getByTestId('roll')).toBeVisible();
-	const roll = page.getByTestId('roll');
-	const box = (await roll.boundingBox())!;
-	const key = (await page.getByTestId('key-60').boundingBox())!;
-	await page.mouse.dblclick(box.x + 2, key.y + key.height / 2);
+	await clickStill(page, await rollPoint(page, 0, 60, 2), { count: 2 });
 	await expect(page.getByTestId('note-0')).toBeAttached();
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
+	await startAudioNewest(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	// The image with the note is the one playing. An image that arrives after Play has passed tick 0 never starts the note.
-	await expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
+	// The note sounded as it was drawn. Once that has died away, all the meter holds since Play is what Play played.
+	await expect(page.getByTestId('voices')).toHaveText('0', { timeout: 10000 });
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	// The meter holds the loudest since Play, so a short note shows whenever it is read.
 	const level = page.getByRole('meter', { name: 'Level of Track 1' });

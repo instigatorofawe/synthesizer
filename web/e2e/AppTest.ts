@@ -1,33 +1,26 @@
 import { readFile } from 'node:fs/promises';
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, prepare, test, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
 import { fromSongMenu, loopButton, openLight, pianoKey, startAudio, undoButton } from './Chrome.ts';
-import { engineRenders, goesRound, loudest } from './Engine.ts';
+import {
+	busyNow,
+	engineRenders,
+	goesRound,
+	imagesNow,
+	loudest,
+	newestPlays,
+	settled,
+	startAudioNewest,
+	swappedFrom
+} from './Engine.ts';
 import { emptyNewSong, oneBarClip } from './NewSong.ts';
+import { closeGate, heldAt, installGates, openGate } from './Gates.ts';
+import { tone as makeTone } from './Tones.ts';
 import { openView } from './Views.ts';
-
-// A page load waits until the page has hydrated: what is typed into it before then is lost, and a slow machine shows it.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
 
 // Below 1400 px the browser folds to a rail and opens over the page, and these tests use it as it sits beside the page.
 // ViewsTest has the narrower screen.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const patchEditor = (page: Page) => page.getByRole('region', { name: 'Patch editor' });
 const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Song editor' });
@@ -40,8 +33,7 @@ async function startPlaying(page: Page, timeline = 'song') {
 		if (m.type() === 'error') problems.push(m.text());
 	});
 	await page.goto(`/?timeline=${timeline}`);
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await startAudioNewest(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	return problems;
 }
@@ -79,10 +71,6 @@ const patchPeaks = (page: Page) => peaksIn(patchRegion(page));
 // The loudest each of them has been since Play, or since the image playing now began.
 const patchLoudest = (page: Page) => peaksIn(patchRegion(page), true);
 
-// Every edit has compiled, and the image made from the last one is playing.
-const settled = (page: Page) =>
-	expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
-
 // Each of the song's four mixer strips has been heard since Play. The pluck is silent between its notes, so they aren't all heard
 // at once. The song lasts seven seconds, and a slow machine can reach its end, where it stops, before this, so it starts again
 // from the beginning first.
@@ -104,6 +92,7 @@ test('the seeded library lists patches, timelines and a bundle', async ({ page }
 });
 
 test('a fresh visit opens the timeline saved last, with its patch a view away', async ({ page }) => {
+	// Every test starts from the same library, in which Ballad was saved last.
 	await page.goto('/');
 	await expect(page).toHaveURL(/\?timeline=ballad/);
 	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad');
@@ -111,6 +100,15 @@ test('a fresh visit opens the timeline saved last, with its patch a view away', 
 	await openView(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Stereo lead');
 	await expect(page.getByTestId('graph')).toBeVisible();
+
+	// Saving another song makes it the one a fresh visit opens.
+	await page.goto('/?timeline=song');
+	await page.getByLabel('Song name', { exact: true }).fill('Song, saved last');
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
+	await expect(page.getByTestId('unsaved')).toHaveCount(0);
+	await page.goto('/');
+	await expect(page).toHaveURL(/\?timeline=song/);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Song, saved last');
 });
 
 test('a timeline plays in an AudioWorklet and the scopes see every bus', async ({ page }) => {
@@ -167,8 +165,7 @@ const playheadInView = (page: Page) =>
 
 test('the arrangement follows the playhead off its edge, unless it was scrolled away', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await startAudioNewest(page);
 	for (let i = 0; i < 5; ++i) await page.getByRole('button', { name: 'Zoom in' }).click(); // Bars of 729 pixels
 	expect((await playheadInView(page)).scroll).toBe(0);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
@@ -189,30 +186,28 @@ test('editing during playback swaps generations without stopping', async ({ page
 	const editor = await timelineJson(page);
 	const text = await editor.inputValue();
 	const before = Number(await page.getByTestId('tick').textContent());
+	const images = await imagesNow(page);
 	await editor.fill(text.replace('"gain": 0.8', '"gain": 0.4'));
-	await expect(page.getByTestId('generation')).toHaveText('2', { timeout: 8000 });
+	await swappedFrom(page, images);
 	expect(Number(await page.getByTestId('tick').textContent())).toBeGreaterThanOrEqual(before);
 	// Taps were re-pointed at the new program's registers.
-	await settled(page);
 	await everyStripHeard(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	expect(problems).toEqual([]);
 });
 
 test('a compile from page load cannot race the first load', async ({ page }) => {
-	// Slow every reply from the compiler, so the compile started at page load finishes after audio has started.
-	await page.addInitScript(() => {
-		window.Worker = class extends window.Worker {
-			set onmessage(handler: (event: MessageEvent) => void) {
-				super.onmessage = (event) => setTimeout(() => handler(event), 1200);
-			}
-		};
-	});
+	// The compile started at page load is held until audio has started, so it comes back after, as on a slow machine.
+	await installGates(page, ['compile']);
 	await page.goto('/?timeline=song');
 	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
-	await settled(page); // The slow compile has come back, and anything it sent to the engine is playing
+	await expect.poll(() => heldAt(page, 'compile')).toBeGreaterThan(0); // The page load's compile, answered and held
+	await openGate(page, 'compile');
+	await newestPlays(page);
+	// The claim is that the race makes one image, not two.
+	// eslint-disable-next-line no-restricted-syntax
 	await expect(page.getByTestId('generation')).toHaveText('1');
+	expect(await busyNow(page)).toBe(false);
 });
 
 test('rapid edits settle on the newest image, with scopes on its registers', async ({ page }) => {
@@ -236,31 +231,30 @@ test('rapid edits settle on the newest image, with scopes on its registers', asy
 });
 
 test('the compile light says an edit is compiling until its image plays', async ({ page }) => {
-	// Slow every reply from the compiler, and every image on its way to the engine, so the edit is seen waiting for each.
-	await page.addInitScript(() => {
-		window.Worker = class extends window.Worker {
-			set onmessage(handler: (event: MessageEvent) => void) {
-				super.onmessage = (event) => setTimeout(() => handler(event), 1200);
-			}
-		};
-		const post = MessagePort.prototype.postMessage;
-		MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
-			if ((args[0] as { type?: string })?.type === 'load') setTimeout(() => post.apply(this, args), 1200);
-			else post.apply(this, args);
-		};
-	});
+	// The edit's compile and then its image are held, so the light is seen waiting for each.
+	await installGates(page);
 	await startPlaying(page);
 	await settled(page);
 	const status = page.getByTestId('status');
 	await expect(status).toContainText('KB image');
+	const before = await imagesNow(page);
+	await closeGate(page, 'compile');
+	await closeGate(page, 'load');
 	const editor = await timelineJson(page);
 	await editor.fill((await editor.inputValue()).replace('"gain": 0.8', '"gain": 0.4'));
 	await expect(status).toHaveAttribute('aria-busy', 'true');
 	await expect(status).toContainText('Compiling…');
-	expect(await page.getByTestId('generation').textContent()).toBe('1');
+	await expect.poll(() => heldAt(page, 'compile')).toBe(1);
+	await openGate(page, 'compile');
+	// Compiled, and its image held on its way: the light still says so, and the old image plays.
+	await expect.poll(() => heldAt(page, 'load')).toBe(1);
+	await expect(status).toHaveAttribute('aria-busy', 'true');
+	expect(await imagesNow(page)).toBe(before);
+	await openGate(page, 'load');
 	// Not just compiled: the moment it stops saying so, the new image is the one playing.
 	await settled(page);
-	expect(await page.getByTestId('generation').textContent()).toBe('2');
+	expect(await imagesNow(page)).not.toBe(before);
+	await expect(status).toHaveAttribute('data-heard', 'newest');
 	await expect(status).not.toContainText('Compiling…');
 	await expect(status).toContainText('KB image');
 });
@@ -289,6 +283,7 @@ test('an image the engine fails to load is explained, nothing waits on it, and t
 	await expect(page.getByTestId('load-rejected')).toContainText('The engine refused this image: chunk hash mismatch.');
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
+	await expect(page.getByTestId('status')).toHaveAttribute('data-heard', 'older');
 	expect(await page.getByTestId('generation').textContent()).toBe('1');
 	await expect(page.getByTestId('voices')).not.toHaveText('0');
 });
@@ -325,14 +320,15 @@ test('a broken edit shows where it failed and the old image keeps playing', asyn
 	const text = await editor.inputValue();
 	await editor.fill(text.replace('"slots": [\n    "lead"\n   ]', '"slots": [\n    "missing"\n   ]'));
 	await expect(page.getByTestId('compile-error')).toContainText("no patch 'missing'");
-	await expect(page.getByTestId('generation')).toHaveText('1');
+	await settled(page);
+	await expect(page.getByTestId('status')).toHaveAttribute('data-heard', 'older');
+	expect(await page.getByTestId('generation').textContent()).toBe('1');
 	await expect(page.getByTestId('voices')).not.toHaveText('0');
 });
 
 test('a tempo ramp glides to the next change, and the transport shows how far it has got', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await startAudioNewest(page);
 	await expect(page.getByTestId('tempo')).toHaveValue('140');
 	// Bars are 96 pixels and 1920 ticks.
 	const ruler = (await page.getByTestId('ruler').boundingBox())!;
@@ -386,8 +382,7 @@ test('seeking chases held notes and a knob works', async ({ page }) => {
 
 test('a timeline saves, and a stale tab is refused', async ({ page, context }) => {
 	await page.goto('/?timeline=ballad');
-	const other = await context.newPage();
-	other.on('dialog', (dialog) => dialog.accept());
+	const other = prepare(await context.newPage());
 	await other.goto('/?timeline=ballad');
 
 	await page.getByLabel('Song name', { exact: true }).fill('Ballad two');
@@ -417,7 +412,7 @@ test('edits to a timeline and its patches save together', async ({ page }) => {
 	await expect(browser(page).getByRole('link', { name: /Pluck, edited/ })).toContainText('•');
 	await expect(page.getByTestId('unsaved')).toHaveText('2 unsaved');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
-	await expect(page.getByText('Saved.')).toBeVisible();
+	await expect(page.getByTestId('unsaved')).toHaveCount(0); // Saved: the badge stays gone until the next edit
 	await page.reload();
 	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad, edited');
 	await expect(browser(page).getByRole('link', { name: 'Pluck, edited' })).toBeVisible();
@@ -521,8 +516,7 @@ test('a patch in use cannot be deleted, and says what an edit would change', asy
 test('a patch no track plays is heard on its own, and Play brings the song back', async ({ page }) => {
 	await page.goto('/?timeline=song&patch=unused');
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'alone');
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await startAudioNewest(page);
 	// The song is playing, so a probe waits for the patch's own image, which the first key brings.
 	await page.locator('g.node:has(text:has-text("osc"))').first().locator('rect.title').click();
 	await page.getByRole('button', { name: 'Probe out' }).click();
@@ -548,7 +542,7 @@ test('a patch a track plays is heard in the song, through that track', async ({ 
 	await expect(page.getByTestId('hearing')).toContainText('Keys play it on Lead, in the song');
 	const key = page.getByRole('button', { name: 'G4', exact: true });
 	await key.dispatchEvent('pointerdown'); // Starts audio as well
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await newestPlays(page);
 	// The track's meter is in the Song view, out of sight
 	await expect
 		.poll(() =>
@@ -567,7 +561,7 @@ test('the computer keyboard plays the patch, Z and X move its octave, and a fiel
 	await expect(key(48)).toHaveAttribute('aria-keyshortcuts', 'A');
 	await page.keyboard.down('g'); // G, a fifth above the lowest C, which starts audio as a click on a key does
 	await expect(key(55)).toHaveClass(/down/);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await newestPlays(page);
 	// The track's meter is in the Song view, out of sight
 	await expect
 		.poll(() =>
@@ -601,7 +595,8 @@ test('an edit to a patch the song does not use, or opening another, swaps nothin
 	await browser(page).getByRole('link', { name: 'Room' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Room');
 	await settled(page); // Any compile has been and gone, and anything it sent to the engine is playing
-	await expect(page.getByTestId('generation')).toHaveText('1');
+	await newestPlays(page);
+	expect(await page.getByTestId('generation').textContent()).toBe('1');
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 });
 
@@ -720,7 +715,7 @@ test('a moved node stays where it was put', async ({ page }) => {
 	await expect.poll(() => page.getByTestId('node-6').getAttribute('transform')).not.toBe(before);
 	const moved = await page.getByTestId('node-6').getAttribute('transform');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
-	await expect(page.getByText('Saved.')).toBeVisible();
+	await expect(page.getByTestId('unsaved')).toHaveCount(0); // Saved: the badge stays gone until the next edit
 	await page.reload();
 	await expect(page.getByTestId('node-6')).toHaveAttribute('transform', moved!);
 });
@@ -750,8 +745,7 @@ test('a patch uses another as a subpatch, and it plays', async ({ page }) => {
 
 test('a probe scopes a node inside a voice', async ({ page }) => {
 	await page.goto('/?timeline=ballad&patch=lead');
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
+	await startAudioNewest(page);
 	const node = page.locator('g.node:has(text:has-text("osc"))').first();
 	const id = (await node.getAttribute('data-testid'))!.replace('node-', '');
 	await node.locator('rect.title').click();
@@ -806,8 +800,7 @@ test('a recipe added to the library is an ordinary timeline that plays the built
 	await fromSongMenu(page, 'Add to library');
 	await page.waitForURL('**/?timeline=recipe-PluckedString');
 	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('PluckedString');
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await startAudioNewest(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveAttribute('data-patch', 'builtin-PluckedString');
 
@@ -827,8 +820,7 @@ test('a recipe with recordings keeps them when it is added', async ({ page }) =>
 	await fromSongMenu(page, 'Add to library');
 	await page.waitForURL('**/?timeline=recipe-OneShotSample');
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await startAudioNewest(page);
 });
 
 test("every example's patches are in the library from the start, and can't be changed", async ({ page }) => {
@@ -869,7 +861,7 @@ test('a track can play a built-in patch, and a duplicate of it takes its place t
 	await addNoteAt(page, 0, 60);
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
-	await startAudioSettled(page);
+	await startAudioNewest(page);
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
@@ -940,7 +932,8 @@ test('a probe in a recipe reads the voice of the patch on screen', async ({ page
 	await node.locator('rect.title').click();
 	await page.getByRole('button', { name: 'Probe out' }).click();
 	await expect.poll(async () => (await patchPeaks(page)).length, { timeout: 8000 }).toBe(2); // The track and the probe
-	await page.getByRole('button', { name: 'Play', exact: true }).click(); // From the start again, once it has ended
+	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'false', { timeout: 10000 }); // It has ended
+	await page.getByRole('button', { name: 'Play', exact: true }).click(); // From the start again
 	await expect.poll(async () => Math.max(0, ...(await patchLoudest(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
 });
 
@@ -997,26 +990,11 @@ async function trackWithClip(page: Page, name: string) {
 	await expect(page.getByTestId('roll')).toBeVisible();
 }
 
-// Where a note at this tick lands in the roll.
-async function rollPoint(page: Page, tick: number, note: number) {
-	const roll = page.getByTestId('roll');
-	const box = (await roll.boundingBox())!;
-	const key = (await page.getByTestId(`key-${note}`).boundingBox())!;
-	return { x: box.x + tick * Number(await roll.getAttribute('data-per-tick')) + 2, y: key.y + key.height / 2 };
-}
-
 // Adds a note, and waits for its compile, so nothing the compile changes on the page moves it under the next measurement.
-async function addNoteAt(page: Page, tick: number, note: number) {
+async function addNoteAt(page: Page, tick: number, note: number, compile = 10000) {
 	const { x, y } = await rollPoint(page, tick, note);
-	await page.mouse.dblclick(x, y);
-	await settled(page);
-}
-
-// Starts audio once every edit has compiled, so the image it starts with is the newest.
-async function startAudioSettled(page: Page) {
-	await settled(page);
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
+	await clickStill(page, { x, y }, { count: 2 });
+	await settled(page, compile);
 }
 
 const stripPeak = async (page: Page, chain: string) =>
@@ -1045,7 +1023,7 @@ test('a song built from nothing plays, saves and comes back', async ({ page }) =
 	await goesRound(page, 1, 1920); // The clip is a bar
 
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
-	await expect(page.getByText('Saved.')).toBeVisible();
+	await expect(page.getByTestId('unsaved')).toHaveCount(0); // Saved: the badge stays gone until the next edit
 	await page.reload();
 	await page.getByTestId('placement-1-0').locator('rect').first().click();
 	await expect(page.getByTestId('note-2')).toHaveAttribute('data-note', '67');
@@ -1180,7 +1158,7 @@ test('a drawn loop reaches an engine that starts later', async ({ page }) => {
 	await press(page, { x: strip.x + 1, y: strip.y + 5 }, { x: strip.x + 48, y: strip.y + 5 });
 	await expect(page.getByTestId('loop-brace')).toBeVisible();
 	await expect(loopButton(page)).toHaveAttribute('aria-pressed', 'true');
-	await startAudioSettled(page);
+	await startAudioNewest(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await goesRound(page, 1, 1920);
 	await expect(page.getByTestId('voices')).toBeAttached(); // Under the compile light's list
@@ -1215,7 +1193,7 @@ test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({
 	await page.getByLabel('Fader point value').blur();
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[2].value).toBe(0);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await startAudioSettled(page);
+	await startAudioNewest(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await tab(page, 'Mixer');
 	await expect.poll(() => stripLoudest(page, 'track:1'), { timeout: 8000 }).toBeGreaterThan(0.01);
@@ -1271,22 +1249,25 @@ test('a fader is heard as it moves, and only compiles when let go', async ({ pag
 	await tab(page, 'Mixer');
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.01);
 	const fader = page.getByLabel('Fader for Master');
+	const images = await imagesNow(page);
 	await fader.evaluate((e: HTMLInputElement) => {
 		e.value = '0';
 		e.dispatchEvent(new Event('input', { bubbles: true }));
 	});
+	expect(await busyNow(page)).toBe(false); // Moving compiles nothing
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 4000 }).toBeLessThan(0.001);
-	await expect(page.getByTestId('generation')).toHaveText('1');
+	expect(await imagesNow(page)).toBe(images);
 
 	await fader.evaluate((e: HTMLInputElement) => e.dispatchEvent(new Event('change', { bubbles: true })));
-	await expect(page.getByTestId('generation')).toHaveText('2', { timeout: 8000 });
+	await swappedFrom(page, images);
 	expect((await timelineDoc(page)).master.gain).toBe(0);
 	await tab(page, 'Mixer');
 	await engineRenders(page, 0.4);
 	expect(await stripLoudest(page, 'master')).toBeLessThan(0.001); // Since the new image began
 
+	const silenced = await imagesNow(page);
 	await undo(page);
-	await expect(page.getByTestId('generation')).toHaveText('3', { timeout: 8000 });
+	await swappedFrom(page, silenced);
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 4000 }).toBeGreaterThan(0.01);
 });
 
@@ -1384,7 +1365,10 @@ test('a song exports as a WAV file, to its end and its tail', async ({ page }) =
 	await expect(button).toBeEnabled({ timeout: 10000 });
 	const [download] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), button.click()]);
 	expect(download.suggestedFilename()).toBe('Kick808.wav');
-	const bytes = await readFile(await download.path());
+	// Saved where the test says, which works whether the browser runs here or in a container (pnpm e2e:linux).
+	const file = test.info().outputPath('Kick808.wav');
+	await download.saveAs(file);
+	const bytes = await readFile(file);
 	expect(bytes.subarray(0, 4).toString()).toBe('RIFF');
 	expect(bytes.subarray(8, 12).toString()).toBe('WAVE');
 	expect(bytes.readUInt32LE(24)).toBe(48000);
@@ -1400,33 +1384,11 @@ async function savedPatch(page: Page, name: string, graph: object) {
 	await (await graphJson(page)).fill(JSON.stringify(graph));
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
-	await expect(page.getByText('Saved.')).toBeVisible();
+	await expect(page.getByTestId('unsaved')).toHaveCount(0); // Saved: the badge stays gone until the next edit
 	return shownPatchId(page);
 }
 
-const tone = {
-	params: [{ id: 7, name: 'level', scope: 'global', min: 0, max: 1, default: 1, smooth_ms: 0 }],
-	nodes: [
-		{ id: 1, type: 'note' },
-		{ id: 2, type: 'mtof' },
-		{ id: 3, type: 'osc', wave: 'sine' },
-		{ id: 4, type: 'env', inputs: { attack: 0.001, decay: 0.01, sustain: 1, release: 0.01 } },
-		{ id: 5, type: 'mul' },
-		{ id: 6, type: 'param', param: 7 },
-		{ id: 8, type: 'mul' },
-		{ id: 9, type: 'out' }
-	],
-	edges: [
-		{ from: 1, port: 'pitch', to: 2, input: 'in' },
-		{ from: 2, to: 3, input: 'freq' },
-		{ from: 3, to: 5, input: 'a' },
-		{ from: 4, to: 5, input: 'b' },
-		{ from: 5, to: 8, input: 'a' },
-		{ from: 6, to: 8, input: 'b' },
-		{ from: 8, to: 9, input: 'l' },
-		{ from: 8, to: 9, input: 'r' }
-	]
-};
+const tone = makeTone({ scope: 'global', default: 1 }, false);
 
 const trim = {
 	params: [{ id: 3, name: 'trim', scope: 'track', min: 0, max: 1, default: 1, smooth_ms: 0 }],
@@ -1465,14 +1427,14 @@ test('insert and global sliders are heard as they move, and stay where they are 
 	await trackWithClip(page, 'Sliders');
 	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
-	await page.mouse.dblclick(x, y);
+	await clickStill(page, { x, y }, { count: 2 });
 	await page.getByLabel('Note length').fill('1900 ticks');
 	await page.getByLabel('Note length').blur();
 	await tab(page, 'Mixer');
 	await page.getByLabel('Add an insert to Track 1').selectOption(insert);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await loopButton(page).click();
-	await startAudioSettled(page);
+	await startAudioNewest(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.1);
 	const generation = await page.getByTestId('generation').textContent();
@@ -1482,8 +1444,9 @@ test('insert and global sliders are heard as they move, and stay where they are 
 		e.value = '0';
 		e.dispatchEvent(new Event('input', { bubbles: true }));
 	});
+	expect(await busyNow(page)).toBe(false); // Moving compiles nothing
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 4000 }).toBeLessThan(0.001);
-	await expect(page.getByTestId('generation')).toHaveText(generation!);
+	expect(await imagesNow(page)).toBe(generation);
 	await trimmed.evaluate((e: HTMLInputElement) => e.dispatchEvent(new Event('change', { bubbles: true })));
 	await expect.poll(async () => (await timelineDoc(page)).tracks[0].inserts[0].params).toEqual({ '3': 0 });
 	await tab(page, 'Mixer');
@@ -1496,6 +1459,7 @@ test('insert and global sliders are heard as they move, and stay where they are 
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.1);
 
 	await moveSlider(page, 'level', '0', 'input');
+	expect(await busyNow(page)).toBe(false); // Moving compiles nothing
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 4000 }).toBeLessThan(0.001);
 	const unmoved = await page.getByTestId('generation').textContent();
 	await moveSlider(page, 'level', '0', 'change');
@@ -1513,11 +1477,11 @@ test('a value edited in the JSON is what plays, over what a swap would carry', a
 	await trackWithClip(page, 'Edited values');
 	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
-	await page.mouse.dblclick(x, y);
+	await clickStill(page, { x, y }, { count: 2 });
 	await page.getByLabel('Note length').fill('1900 ticks');
 	await page.getByLabel('Note length').blur();
 	await loopButton(page).click();
-	await startAudioSettled(page);
+	await startAudioNewest(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect
 		.poll(() => page.getByRole('meter', { name: 'Master level' }).getAttribute('data-peak').then(Number), {
@@ -1547,7 +1511,9 @@ test('a patch edit is heard in the song as it is made', async ({ page }) => {
 	edited.edges = edited.edges.filter((edge: Edge) => edge.to !== out.id);
 	await graph.fill(JSON.stringify(edited, null, 1));
 	await expect(page.getByTestId('compile-error')).toContainText('out node has no input');
-	await expect(page.getByTestId('generation')).toHaveText('1');
+	await settled(page);
+	await expect(page.getByTestId('status')).toHaveAttribute('data-heard', 'older');
+	const refused = await imagesNow(page);
 	// Through a multiply by zero, it compiles, and the song swaps to that without stopping.
 	edited.nodes.push({ id: 999, type: 'mul', inputs: { b: 0 } });
 	edited.edges.push(
@@ -1556,7 +1522,7 @@ test('a patch edit is heard in the song as it is made', async ({ page }) => {
 		{ from: 999, to: out.id, input: 'r' }
 	);
 	await graph.fill(JSON.stringify(edited, null, 1));
-	await expect(page.getByTestId('generation')).toHaveText('2', { timeout: 8000 });
+	await swappedFrom(page, refused);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await expect
 		.poll(() => page.getByRole('meter', { name: 'Master level' }).getAttribute('data-peak').then(Number), {
@@ -1596,7 +1562,7 @@ test('a recipe shows its notes and mix, and none of it can be changed', async ({
 	await expect(page.getByTestId('placement-1-0')).toHaveAttribute('data-tick', '0');
 	await page.keyboard.press('Delete');
 	await page.getByTestId('roll').focus();
-	await page.keyboard.press('Control+a');
+	await page.keyboard.press('ControlOrMeta+a');
 	await page.keyboard.press('Delete');
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.locator('[data-testid^="note-"]')).toHaveCount(notes);
@@ -1708,10 +1674,12 @@ test('an image too large for the engine says so instead of going quiet', async (
 	}
 	await trackWithClip(page, 'Too large');
 	await choosePatch(page, ids[0], 1);
-	await addNoteAt(page, 0, 60);
+	// A song holding 180 s of samples takes about 4 s to compile here and about 9 s on CI, so its ceiling is sized for that.
+	const large = 30000;
+	await addNoteAt(page, 0, 60, large);
 	await addTrack(page, ids[1]); // Which comes with a clip, open in the roll
 	await expect(page.getByTestId('placement-2-0')).toBeVisible();
-	await addNoteAt(page, 0, 60);
+	await addNoteAt(page, 0, 60, large);
 	await startAudio(page);
 	await expect(page.getByTestId('load-rejected')).toContainText('larger than the image slot', { timeout: 20000 });
 });

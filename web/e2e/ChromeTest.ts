@@ -1,35 +1,15 @@
-import { expect, test as base, type Page } from '@playwright/test';
-import { fromSongMenu, loopButton, openLight, startAudio, undoButton } from './Chrome.ts';
+import { expect, test, type Page } from './Fixtures.ts';
+import { settled, startAudioNewest } from './Engine.ts';
+import { fromSongMenu, loopButton, openLight, undoButton } from './Chrome.ts';
 import { openView } from './Views.ts';
-
-// A page load waits until the page has hydrated, as in AppTest.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
 
 // The browser sits beside the page at this width, which the menu's test uses to make and find timelines.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Song editor' });
 const patchEditor = (page: Page) => page.getByRole('region', { name: 'Patch editor' });
 const light = (page: Page) => page.getByTestId('status').getByRole('button', { name: /^Compile status/ });
-const settled = (page: Page) =>
-	expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
 
 async function tab(page: Page, name: 'Notes' | 'JSON') {
 	await page
@@ -315,9 +295,7 @@ test('the master meter lights while the limiter turns the song down', async ({ p
 		song.master.gain = 4;
 		for (const track of song.tracks) track.gain = 4;
 	});
-	await settled(page);
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
+	await startAudioNewest(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	const limiting = page.getByTestId('limiting');
 	await expect(limiting).toBeVisible({ timeout: 8000 });

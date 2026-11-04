@@ -1,62 +1,11 @@
-import { expect, test as base, type Page } from '@playwright/test';
-import { loopButton, pianoKey, startAudio, undoButton } from './Chrome.ts';
-import { engineRenders, loudest, settled } from './Engine.ts';
+import { expect, test, type Page } from './Fixtures.ts';
+import { loopButton, pianoKey, undoButton } from './Chrome.ts';
+import { busyNow, engineRenders, loudest, newestPlays, settled, startAudioNewest } from './Engine.ts';
+import { tone } from './Tones.ts';
 import { openView } from './Views.ts';
-
-// A page load waits until the page has hydrated, as AppTest.ts does: what is typed into it before then is lost.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
 
 // Wide enough that the browser, where patches and timelines are made, sits beside the page.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
-
-// A sine as loud as its note's velocity, held while its key is, times a level the song can set: so a meter reads the level
-// and the velocity straight off. Its release is 0.1 ms, so a note that starts again on its own pitch, as a looped one does at
-// each wrap, never adds to the last one still ringing out.
-function tone(level: { scope: string; default: number }) {
-	return {
-		params: [{ id: 7, name: 'level', min: 0, max: 1, smooth_ms: 0, ...level }],
-		nodes: [
-			{ id: 1, type: 'note' },
-			{ id: 2, type: 'mtof' },
-			{ id: 3, type: 'osc', wave: 'sine' },
-			{ id: 4, type: 'env', inputs: { attack: 0.001, decay: 0.01, sustain: 1, release: 0.0001 } },
-			{ id: 5, type: 'mul' },
-			{ id: 6, type: 'param', param: 7 },
-			{ id: 8, type: 'mul' },
-			{ id: 9, type: 'mul' },
-			{ id: 10, type: 'out' }
-		],
-		edges: [
-			{ from: 1, port: 'pitch', to: 2, input: 'in' },
-			{ from: 2, to: 3, input: 'freq' },
-			{ from: 3, to: 5, input: 'a' },
-			{ from: 4, to: 5, input: 'b' },
-			{ from: 5, to: 8, input: 'a' },
-			{ from: 6, to: 8, input: 'b' },
-			{ from: 8, to: 9, input: 'a' },
-			{ from: 1, port: 'velocity', to: 9, input: 'b' },
-			{ from: 9, to: 10, input: 'l' },
-			{ from: 9, to: 10, input: 'r' }
-		]
-	};
-}
 
 // A saw through a filter whose cutoff, from 20 Hz to 20 kHz, is a parameter: a range that calls for a log taper.
 const filtered = {
@@ -167,9 +116,7 @@ async function toneSong(page: Page, name: string) {
 }
 
 async function play(page: Page) {
-	await settled(page);
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
+	await startAudioNewest(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true');
 }
@@ -206,6 +153,7 @@ test("a Control on a track's patch is the track's value: saved with the song as 
 	// Dragged, it moves the sound and compiles nothing.
 	const compiles = await page.getByTestId('compiles').textContent();
 	await slide(page, 'level', 125, false);
+	expect(await busyNow(page)).toBe(false);
 	await expect(level).toHaveAttribute('aria-valuetext', '0.25');
 	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeLessThan(0.3 * full);
 	await expect.poll(() => masterPeak(page), { timeout: 4000 }).toBeGreaterThan(0.2 * full);
@@ -310,7 +258,8 @@ test('Make default writes the value into the patch, as a step of its undo, and t
 // Esc cancels a drag, as everywhere: the sound goes back to the value kept, and the song keeps nothing.
 test('Esc during a drag of a Control puts it back, and nothing is kept', async ({ page }) => {
 	await toneSong(page, 'Control cancelled');
-	await openView(page, 'patch');
+	await openView(page, 'patch'); // Its click starts audio, and what the engine reports moves the Controls down
+	await newestPlays(page);
 	const level = control(page, 'level');
 	await expect(level).toHaveAttribute('aria-valuetext', '1');
 	const box = (await level.boundingBox())!;
@@ -326,6 +275,24 @@ test('Esc during a drag of a Control puts it back, and nothing is kept', async (
 	await expect(level).toHaveAttribute('aria-valuetext', '1');
 	await expect(controlRow(page, 7)).toHaveAttribute('data-own', 'false');
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
+});
+
+// The side column keeps the room of what arrives late, so a slider measured once the song has compiled is where it is once the
+// track plays and its scope has come: a press measured in between lands where it was meant.
+test("the Controls stay where they are as audio starts and the track's scope arrives", async ({ page }) => {
+	await toneSong(page, 'Controls still');
+	// A click event with no press opens the view without starting audio, which the first press or key does.
+	await page.getByTestId('view-patch').dispatchEvent('click');
+	await expect(page.getByTestId('view-patch')).toHaveAttribute('aria-selected', 'true');
+	await settled(page);
+	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'song');
+	await expect(page.getByTestId('state')).toHaveCount(0); // No audio yet
+	const level = control(page, 'level');
+	await expect(level).toHaveAttribute('aria-valuetext', '1');
+	const compiled = (await level.boundingBox())!;
+	await startAudioNewest(page);
+	await expect(page.getByRole('region', { name: 'Patch editor' }).getByTestId('peak').first()).toBeVisible();
+	expect((await level.boundingBox())!.y).toBe(compiled.y);
 });
 
 test('a slider over a wide range is logarithmic, its middle near the geometric middle, and Make default works heard alone', async ({
@@ -369,7 +336,7 @@ test('Latch keeps a note sounding after its key comes up, until it is played aga
 	await velocity.press('Enter');
 	await velocity.blur(); // A field keeps the piano's keys
 	await page.keyboard.down('a'); // C3, which starts audio
-	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
+	await newestPlays(page);
 	await expect.poll(() => masterPeak(page), { timeout: 8000 }).toBeGreaterThan(0.1);
 	await engineRenders(page, 0.2);
 	const full = await masterLoudest(page); // Since this image began

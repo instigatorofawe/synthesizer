@@ -470,7 +470,8 @@
 			session.goodSong?.report.programs[0] ?? null,
 			shown?.patch ?? null,
 			selectedTrack,
-			shown !== null && !shown.example
+			shown !== null && !shown.example,
+			session.song !== null || session.goodSong !== null
 		)
 	);
 
@@ -1615,7 +1616,7 @@
 		/>
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={session.engineState} /></div>
 		<span class="grow"></span>
-		<CompileLight busy={session.busy} {problems} size={imageSize} details={engineDetails} />
+		<CompileLight busy={session.busy} heard={session.heard} {problems} size={imageSize} details={engineDetails} />
 		{#if dirty.size}<span class="muted unsaved" data-testid="unsaved" title={`${dirty.size} unsaved. Save keeps them.`}
 				>{dirty.size} <span class="word">unsaved</span></span
 			>{/if}
@@ -1846,12 +1847,14 @@
 				data-playing={session.engineState.playing}
 				data-live={session.live ?? ''}
 				data-time={session.engineState.time}
+				data-tick={session.engineState.tick}
+				data-rate={session.engine.sampleRate}
 				data-recording={session.engineState.recording}
 				data-clicks={session.engineState.clicks}
 			>
 				<span data-testid="voices">{session.engineState.voices}</span> voices sounding, in image
 				<span data-testid="generation">{session.engineState.generation}</span> since audio started, which has rendered
-				{session.engineState.time.toFixed(1)} s.
+				{session.engineState.time.toFixed(1)} s at {session.engine.sampleRate / 1000} kHz.
 			</span>
 		{:else}
 			Audio starts with the page's first click or key, which is when a browser lets it.

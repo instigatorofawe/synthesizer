@@ -1,29 +1,12 @@
-import { expect, test as base, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
 import { undoButton } from './Chrome.ts';
 import { settled } from './Engine.ts';
 import { emptyNewSong, oneBarClip } from './NewSong.ts';
 
 // Musical units in the fields, velocity stems as wide as their notes, and lane points joined by lines.
 
-// A page load waits until the page has hydrated, as AppTest.ts does: what is typed into it before then is lost.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
 test.use({ viewport: { width: 1440, height: 900 } }); // The browser and the inspector beside the page
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const notes = (page: Page) => page.locator('[data-testid^="note-"]');
 
@@ -46,17 +29,10 @@ async function trackWithClip(page: Page, name: string) {
 
 const perTick = async (page: Page) => Number(await page.getByTestId('roll').getAttribute('data-per-tick'));
 
-// Where a note at this tick and pitch lands in the roll, a little inside its cell.
-async function rollPoint(page: Page, tick: number, note: number) {
-	const box = (await page.getByTestId('roll').boundingBox())!;
-	const key = (await page.getByTestId(`key-${note}`).boundingBox())!;
-	return { x: box.x + tick * (await perTick(page)) + 3, y: key.y + key.height / 2 };
-}
-
 async function addNote(page: Page, tick: number, note: number) {
 	const count = await notes(page).count();
 	const at = await rollPoint(page, tick, note);
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	await expect(notes(page)).toHaveCount(count + 1);
 }
 

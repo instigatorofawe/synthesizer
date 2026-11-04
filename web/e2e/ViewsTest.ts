@@ -1,28 +1,9 @@
-import { expect, test as base, type Page } from '@playwright/test';
-import { loudest } from './Engine.ts';
+import { expect, test, type Page } from './Fixtures.ts';
+import { loudest, newestPlays } from './Engine.ts';
 import { openView } from './Views.ts';
-
-// A page load waits until the page has hydrated, as in AppTest.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
 
 // At a laptop's 1280 by 720 and 1280 by 800, the smallest screens the editor is laid out for: the two projects in
 // playwright.config.ts run this file at each.
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 // How much shorter than 800 px the window is, which the notes give up.
@@ -189,7 +170,7 @@ test('keys play the chosen track in the Song view, and the patch where it is hea
 	// With the roll focused, as when notes are being written, the keys still play the clip's track
 	await page.getByTestId('roll').focus();
 	await page.keyboard.down('a'); // Starts audio, as a click on a key does
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await newestPlays(page);
 	await expect.poll(() => level(page, 'Pluck'), { timeout: 8000 }).toBeGreaterThan(0.01);
 	expect(await level(page, 'Lead')).toBe(0);
 	await page.keyboard.up('a');

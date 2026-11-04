@@ -1,26 +1,8 @@
-import { expect, test as base, type Page } from '@playwright/test';
-
-// A page load waits until the page has hydrated, as in AppTest.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
+import { expect, test, type Page } from './Fixtures.ts';
+import { startAudioNewest } from './Engine.ts';
 
 // At a laptop's 1280 by 720 and 1280 by 800, the smallest screens the editor is laid out for: the two projects in
 // playwright.config.ts run this file at each.
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const arrangement = (page: Page) => page.getByTestId('arrangement-view');
 // How much shorter than 800 px the window is, which the notes give up: the arrangement and the chrome are as tall at either size.
@@ -241,6 +223,21 @@ test('each clip keeps its zoom and row height, across clips, tabs and a reload',
 	await same(false);
 	await page.getByTestId('placement-2-0').locator('rect.body').click();
 	expect((await roll(page)).row).toBe(first.row);
+});
+
+// A strip keeps its scope's room until the engine says what it watches, so its buttons don't move as audio starts.
+test("the Mixer's buttons stay where they are as audio starts and the scopes arrive", async ({ page }) => {
+	await page.goto('/?timeline=song');
+	// A click event with no press opens the Mixer without starting audio, which the first press or key does.
+	const mixer = page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: 'Mixer' });
+	await mixer.dispatchEvent('click');
+	await expect(mixer).toHaveAttribute('aria-selected', 'true');
+	await expect(page.getByTestId('state')).toHaveCount(0);
+	const mute = page.getByRole('button', { name: 'Mute Pluck' });
+	const waiting = (await mute.boundingBox())!;
+	await startAudioNewest(page);
+	await expect(page.getByTestId('strip-track:2').getByTestId('peak')).toBeVisible();
+	expect((await mute.boundingBox())!.y).toBe(waiting.y);
 });
 
 test('the wheel scrolls, Shift scrolls sideways, Mod or a pinch zooms, Mod+Shift sets the rows, and . fits', async ({

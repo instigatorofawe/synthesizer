@@ -1,28 +1,9 @@
-import { expect, test as base, type Page } from '@playwright/test';
-import { redoButton, startAudio, undoButton } from './Chrome.ts';
-import { settled } from './Engine.ts';
-
-// A page load waits until the page has hydrated, as in AppTest.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
+import { expect, test, type Page } from './Fixtures.ts';
+import { redoButton, undoButton } from './Chrome.ts';
+import { busyNow, settled, startAudioNewest } from './Engine.ts';
 
 // The browser sits beside the page at this width. The last test has the laptop.
 test.use({ viewport: { width: 1440, height: 900 } });
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 type Tempo = { tick: number; bpm: number; ramp?: boolean };
 
@@ -132,9 +113,7 @@ test('a click on the lane adds a change, a drag sets its tempo, and a click on t
 	page
 }) => {
 	await page.goto('/?timeline=song');
-	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
-	await settled(page);
+	await startAudioNewest(page);
 	await unfold(page);
 	await expect(field(page)).toHaveValue('140');
 	// The playhead in bar 4, where a change at bar 3 is playing
@@ -156,7 +135,7 @@ test('a click on the lane adds a change, a drag sets its tempo, and a click on t
 	// The top bar follows the drag, and nothing is an edit until it is let go
 	await expect(field(page)).toHaveValue('100');
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
-	await expect(page.getByTestId('generation')).toHaveText('1');
+	expect(await busyNow(page)).toBe(false);
 	await page.mouse.up();
 	await expect(page.getByTestId('tempo-readout')).toHaveCount(0);
 	await expect(page.getByTestId('unsaved')).toBeVisible();
@@ -203,11 +182,15 @@ test('a click on the lane adds a change, a drag sets its tempo, and a click on t
 			: `${bpm} at ${tick}`;
 	};
 	await expect.poll(gliding, { timeout: 10000, intervals: [50] }).toBe('gliding');
+	// The playhead reaches bar 3 after about 3.8 s of audio, so the ceiling is sized from that, as engineRenders' are.
 	await expect
-		.poll(async () => {
-			const { tick, bpm } = await reading();
-			return tick >= 3840 ? bpm : 'still gliding';
-		})
+		.poll(
+			async () => {
+				const { tick, bpm } = await reading();
+				return tick >= 3840 ? bpm : 'still gliding';
+			},
+			{ timeout: 10000 + 2000 * 4 }
+		)
 		.toBe(100);
 });
 

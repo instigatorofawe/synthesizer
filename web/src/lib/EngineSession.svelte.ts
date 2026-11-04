@@ -74,6 +74,16 @@ export class EngineSession<E extends Engine = AudioEngine> {
 	compiles = $state(0); // Sent to the compiler since the page opened, so a test can tell an edit's compile has started
 	loading = $state.raw<CompileReport | null>(null);
 	readonly busy = $derived(this.compiling.song || this.compiling.alone || this.loading !== null);
+	liveAlone = $state.raw<CompileReport | null>(null); // The image of the patch on its own that is playing, once one is
+	// Whether what is heard is what is on screen: none until an image of what is wanted plays; the newest once nothing is on its
+	// way and the image playing is the newest compile of what is wanted, and it compiled; older otherwise, as after a refused
+	// edit, while an edit compiles, or when the engine refused the newest image. The light says so, and tests wait on it.
+	readonly heard = $derived.by((): 'none' | 'older' | 'newest' => {
+		if (!this.started || this.live === null || this.live !== this.want) return 'none';
+		const newest = this.want === 'song' ? this.song : this.alone;
+		const playing = this.want === 'song' ? this.liveSong : this.liveAlone;
+		return !this.busy && newest?.report.ok && playing === newest.report ? 'newest' : 'older';
+	});
 
 	// Tracks soloed in the song that is open, which play while every other track is muted. Solo is a way of listening to the
 	// song rather than part of it, so it is never saved: it goes into what is compiled and heard, and so into Export WAV, which
@@ -97,13 +107,16 @@ export class EngineSession<E extends Engine = AudioEngine> {
 	#compiler: Compiles | undefined;
 	#starting = false;
 	#waiting: (() => void)[] = []; // Sent when what is wanted goes live
+	#newest: (() => void)[] = []; // Play and playhead moves, sent once the song's newest edit plays or is refused
 	#songRan = false; // Whether the song was playing when a patch on its own took over: that one runs the transport too
 	#loopSent = false;
 	readonly #sent: Record<Source, string> = { song: '', alone: '' };
 	readonly #timers: Partial<Record<Source, ReturnType<typeof setTimeout>>> = {};
-	readonly #asked: Record<Source, number> = { song: 0, alone: 0 };
+	readonly #waitingOut: Record<Source, boolean> = { song: false, alone: false }; // An edit waiting out COMPILE_WAIT_MS
+	readonly #inFlight: Record<Source, number> = { song: 0, alone: 0 }; // Compiles sent and not yet answered
 	readonly #sourceOf = new WeakMap<CompileReport, Source>();
 	readonly #compiledFrom = new WeakMap<CompileReport, Timeline>(); // Which document each song report came from
+	readonly #keyOf = new WeakMap<CompileReport, string>(); // Which song each song report was compiled for
 
 	constructor(host: SessionHost, want: Source, engine?: E, makeCompiler: () => Compiles = () => new Compiler()) {
 		this.#host = host;
@@ -121,10 +134,14 @@ export class EngineSession<E extends Engine = AudioEngine> {
 		e.onRejected = (reason) => {
 			this.rejected = reason;
 			this.loading = null;
+			this.#sendNewest();
 		};
 		e.onLive = (report) => {
 			if (report === this.loading) this.loading = null;
-			this.live = this.#sourceOf.get(report) ?? null;
+			const source = this.#sourceOf.get(report) ?? null;
+			// An image of a song no longer open is not the song wanted: it takes no Play or keys, and the song's own comes.
+			this.live = source === 'song' && this.#keyOf.get(report) !== this.#host.openKey() ? null : source;
+			if (this.live === 'alone') this.liveAlone = report;
 			if (this.live === 'song') {
 				this.liveSong = report;
 				this.#settle(report);
@@ -134,6 +151,7 @@ export class EngineSession<E extends Engine = AudioEngine> {
 				this.#waiting = [];
 				for (const send of ready) send();
 			}
+			this.#sendNewest();
 		};
 	}
 
@@ -142,7 +160,7 @@ export class EngineSession<E extends Engine = AudioEngine> {
 	readonly controls: SongControls = {
 		noteOn: (track, note, velocity) => this.use('song', () => this.engine.noteOn(track, note, velocity)),
 		noteOff: (track, note) => this.use('song', () => this.engine.noteOff(track, note)),
-		locate: (tick) => this.use('song', () => this.engine.locate(tick)),
+		locate: (tick) => this.use('song', () => this.#whenNewest(() => this.engine.locate(tick))),
 		setLoop: (start, end) => this.setLoop(end > start ? { start, end } : null, end > start),
 		setMix: (register, value) => this.#songHeard() && this.engine.setMix(register, value),
 		setParam: (track, param, value) => this.#songHeard() && this.engine.setParam(track, param, value),
@@ -158,16 +176,22 @@ export class EngineSession<E extends Engine = AudioEngine> {
 	// An image's makings changed: it compiles once they stop changing for a moment.
 	schedule(source: Source) {
 		clearTimeout(this.#timers[source]);
-		this.#asked[source]++;
 		this.compiling[source] = true;
-		this.#timers[source] = setTimeout(() => void this.compile(source), COMPILE_WAIT_MS);
+		this.#waitingOut[source] = true;
+		this.#timers[source] = setTimeout(() => {
+			this.#waitingOut[source] = false;
+			void this.compile(source);
+		}, COMPILE_WAIT_MS);
 	}
 
 	async compile(source: Source) {
 		if (this.#host.assetsArriving()) return; // Their arrival schedules this again
-		const mine = this.#asked[source];
+		// The light goes out only once no edit waits and no compile is on its way: one still on its way may load an image after
+		// this one, and a compile with nothing new to send, as Save schedules, mustn't put the light out under it.
 		const done = () => {
-			if (this.#asked[source] === mine) this.compiling[source] = false;
+			if (this.#waitingOut[source] || this.#inFlight[source] > 0) return;
+			this.compiling[source] = false;
+			this.#sendNewest();
 		};
 		const request = source === 'alone' ? this.#host.aloneRequest() : null;
 		const built = source === 'song' ? this.#host.songRequest() : request ? { request } : null;
@@ -176,9 +200,11 @@ export class EngineSession<E extends Engine = AudioEngine> {
 		this.compiles++;
 		const from = this.#host.openKey();
 		this.#compiler ??= this.#makeCompiler();
-		const result = await this.#compiler.compile(built.request, source);
+		this.#inFlight[source]++;
+		const result = await this.#compiler.compile(built.request, source).finally(() => this.#inFlight[source]--);
 		if (!result || (source === 'song' && from !== this.#host.openKey())) return done();
 		this.#sourceOf.set(result.report, source);
+		this.#keyOf.set(result.report, from);
 		if (source === 'song') {
 			if (built.doc) this.#compiledFrom.set(result.report, built.doc);
 			this.song = result;
@@ -216,6 +242,8 @@ export class EngineSession<E extends Engine = AudioEngine> {
 		this.#sent.song = '';
 		this.songTick = 0;
 		this.#songRan = false;
+		if (this.live === 'song') this.live = null; // The last song's image takes no Play or keys while the new one compiles
+		this.#newest = [];
 		this.solo = new Set();
 		this.loop = null;
 		this.looping = false;
@@ -228,7 +256,7 @@ export class EngineSession<E extends Engine = AudioEngine> {
 
 	// What plays on its own is another patch or track: the image there was is no longer it.
 	aloneChanged() {
-		this.alone = this.goodAlone = null;
+		this.alone = this.goodAlone = this.liveAlone = null;
 		this.#sent.alone = '';
 		if (this.live === 'alone') this.live = null;
 	}
@@ -241,6 +269,7 @@ export class EngineSession<E extends Engine = AudioEngine> {
 			if (this.want === 'song') this.#songRan = this.live === 'song' && !!this.engineState?.playing;
 			if (this.live === 'song' && this.engineState) this.songTick = this.engineState.tick;
 			this.want = source;
+			this.#newest = [];
 			// The image swaps under a running transport, and what played on its own ran it only for its LFOs. Stopped first,
 			// the song comes back as it was left. That image may already be on its way out, so `live` can't say it was there.
 			if (source === 'song' && !this.#songRan && this.engineState?.playing) this.engine.stop();
@@ -275,12 +304,33 @@ export class EngineSession<E extends Engine = AudioEngine> {
 	}
 
 	play() {
-		this.use('song', () => {
-			const at = this.engineState;
-			if (at && this.length > 0 && at.tick >= this.length && !at.playing) this.engine.locate(0);
-			for (const ring of this.rings) ring.mark(); // Meters hold the loudest since Play
-			this.engine.play();
-		});
+		this.use('song', () =>
+			this.#whenNewest(() => {
+				const at = this.engineState;
+				if (at && this.length > 0 && at.tick >= this.length && !at.playing) this.engine.locate(0);
+				for (const ring of this.rings) ring.mark(); // Meters hold the loudest since Play
+				this.engine.play();
+			})
+		);
+	}
+
+	// Play and moves of the playhead wait for an edit on its way to the song, as they wait for the song's first image: in the
+	// image before it, a note the edit put at or before the playhead would never start. A refused edit lets them go at once,
+	// to the image that plays. Keys don't wait.
+	#whenNewest(send: () => void) {
+		if (this.#songSettling()) this.#newest.push(send);
+		else send();
+	}
+
+	#songSettling() {
+		return this.compiling.song || this.loading !== null;
+	}
+
+	#sendNewest() {
+		if (this.#songSettling() || this.want !== 'song' || this.live !== 'song') return;
+		const ready = this.#newest;
+		this.#newest = [];
+		for (const send of ready) send();
 	}
 
 	// Stop, and pressed again once stopped, back to the start, as most DAWs do.

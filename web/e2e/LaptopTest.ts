@@ -1,28 +1,11 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
 import { loudest } from './Engine.ts';
 
 // What the postmortem's next wave did for a laptop's screen, at 1280 by 720, the smallest the editor is laid out for: no button
 // for audio, one Vel, view tabs that keep their names, room for notes, and a handle between the arrangement and the notes.
 
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const hydrated = async <T extends { ok(): boolean } | null>(response: T) => {
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		const goto = page.goto.bind(page);
-		const reload = page.reload.bind(page);
-		page.goto = async (...args) => hydrated(await goto(...args));
-		page.reload = async (...args) => hydrated(await reload(...args));
-		await use(page);
-	}
-});
-
 test.use({ viewport: { width: 1280, height: 720 } });
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 const arrangement = (page: Page) => page.getByTestId('arrangement-view');
@@ -56,10 +39,8 @@ test("audio starts with the page's first click, and a note clicked into a new so
 	await expect(page.getByTestId('state')).toHaveCount(0);
 
 	// The click that adds the first note starts audio, and the note it adds is heard while it is held.
-	const roll = page.getByTestId('roll');
-	const box = (await roll.boundingBox())!;
-	const key = (await page.getByTestId('key-60').boundingBox())!;
-	await page.mouse.move(box.x + 6, key.y + key.height / 2);
+	const at = await rollPoint(page, 0, 60, 6);
+	await page.mouse.move(at.x, at.y);
 	await page.mouse.down();
 	await expect(page.getByTestId('note-0')).toBeVisible();
 	await expect.poll(() => level(page, 'Master level'), { timeout: 10000 }).toBeGreaterThan(0.005);
@@ -74,9 +55,7 @@ test('one Vel, beside the keys, sets what new notes are written at', async ({ pa
 	await expect(vel).toBeVisible();
 	await vel.fill('64');
 	await vel.press('Enter');
-	const roll = (await page.getByTestId('roll').boundingBox())!;
-	const key = (await page.getByTestId('key-72').boundingBox())!;
-	await page.mouse.click(roll.x + 8, key.y + key.height / 2);
+	await clickStill(page, await rollPoint(page, 0, 72, 8));
 	await expect(page.getByTestId('note-0')).toBeVisible();
 	await expect(page.getByLabel('Note velocity')).toHaveValue('64');
 });

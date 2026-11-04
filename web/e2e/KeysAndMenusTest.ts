@@ -1,27 +1,11 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
 import { pianoKey } from './Chrome.ts';
 
 // What the keyboard and the menus reach that a mouse used to be needed for: the sheet of shortcuts, quick open, a menu for
 // every track head, empty row and empty roll, the keys as one Tab stop, B into the browser's filter, and the tempo list. At a
 // laptop's 1280 by 800, where the browser opens over the page.
 
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
 test.use({ viewport: { width: 1280, height: 800 } });
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 

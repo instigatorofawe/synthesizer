@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page } from './Fixtures.ts';
 
 // The page shows the Song view or the Patch view. What the other one holds is out of sight and can't be used, so a test
 // that goes from one to the other switches as someone would, with the view's tab.

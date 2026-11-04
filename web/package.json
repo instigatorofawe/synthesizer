@@ -15,7 +15,9 @@
     "test": "vitest run",
     "wasm": "node scripts/CopyWasm.js",
     "db:generate": "drizzle-kit generate",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:stress": "sh scripts/E2eStress.sh",
+    "e2e:linux": "sh scripts/LinuxE2e.sh"
   },
   "dependencies": {
     "@sveltejs/adapter-node": "6.0.1",

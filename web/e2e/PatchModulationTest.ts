@@ -1,24 +1,9 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
+import { settled } from './Engine.ts';
 import { undoButton } from './Chrome.ts';
 
 // A patch seen whole and modulated: Fit pressed again shows all of it, "Modulate this input…" makes a filter envelope in one
 // gesture, and a lane in the Song view can move any input inside a patch.
-
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -27,8 +12,6 @@ const graph = (page: Page) => page.getByTestId('graph');
 const nodes = (page: Page) => graph(page).locator('g.node');
 const sideTab = (page: Page, name: 'Node' | 'Patch' | 'JSON') =>
 	page.getByRole('tablist', { name: 'Side column' }).getByRole('tab', { name, exact: true });
-const settled = (page: Page) =>
-	expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
 
 // How many of the graph's nodes are on the canvas, whole.
 const onCanvas = (page: Page) =>

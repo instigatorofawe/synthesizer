@@ -107,7 +107,13 @@ describe('where keys are heard', () => {
 	it('is the patch on its own when no track in the image plays it', () => {
 		expect(hearing(doc, program, patch('z'), null, true)).toEqual({ kind: 'alone', track: null });
 		expect(hearing(null, null, patch('a'), null, true)).toEqual({ kind: 'alone', track: null });
-		expect(hearing(doc, null, patch('a'), null, true)).toEqual({ kind: 'alone', track: null }); // Nothing has compiled yet
+		expect(hearing(doc, null, patch('a'), null, true)).toEqual({ kind: 'alone', track: null }); // Compiled with errors
+		// Not compiled yet: which track plays it isn't known, rather than none.
+		expect(hearing(doc, null, patch('a'), null, true, false)).toEqual({
+			kind: 'none',
+			why: 'The song is compiling, to find where it plays.'
+		});
+		expect(hearing(doc, null, patch('z'), null, true, false)).toEqual({ kind: 'alone', track: null });
 	});
 
 	it('names the track that plays it, while that track has no notes', () => {

@@ -1,24 +1,8 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
+import { settled } from './Engine.ts';
 
 // The graph editor at a laptop's size: text that can be read, the node search, Tidy, the snap a rate error offers, and a
 // wheel that pans.
-
-// A page load waits until the page has hydrated, as AppTest's do: what is typed into it before then is lost.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 // Room beside a new patch to drop a node or a wire on, once it is zoomed out.
 test.use({ viewport: { width: 1440, height: 1000 } });
@@ -28,8 +12,6 @@ const graph = (page: Page) => page.getByTestId('graph');
 const search = (page: Page) => patchEditor(page).getByRole('combobox', { name: 'Search nodes' });
 const palette = (page: Page) => page.getByTestId('node-palette');
 const nodes = (page: Page) => graph(page).locator('g.node');
-const settled = (page: Page) =>
-	expect(page.getByTestId('status')).toHaveAttribute('aria-busy', 'false', { timeout: 10000 });
 
 // A new patch is a sine through an envelope: note 1, mtof 2, osc 3, env 4, mul 5 and out 6.
 async function newPatch(page: Page, name: string) {

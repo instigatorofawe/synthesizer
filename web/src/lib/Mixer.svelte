@@ -6,6 +6,7 @@
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Param, Timeline } from '#lib/Schema.ts';
 	import Scope from '#lib/Scope.svelte';
+	import ScopePlaceholder from '#lib/ScopePlaceholder.svelte';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import {
 		addBus,
@@ -154,7 +155,7 @@
 	{#if target}
 		<Scope {label} ring={rings[target.slot]} compact />
 	{:else}
-		<p class="muted noscope">{program ? 'Not compiled, or no scope left' : 'No scope until audio starts'}</p>
+		<ScopePlaceholder {label} message={program ? 'Not compiled, or no scope left' : 'No scope until audio starts'} />
 	{/if}
 {/snippet}
 
@@ -513,17 +514,6 @@
 		margin: 0.3rem 0 0;
 		padding: 0;
 		min-width: 0;
-	}
-	.noscope {
-		height: 60px;
-		margin: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		text-align: center;
-		border: 1px dashed var(--line);
-		border-radius: 6px;
-		font-size: 0.72rem;
 	}
 	.fader {
 		display: flex;

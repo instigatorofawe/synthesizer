@@ -1,23 +1,6 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
+import { clickStill, rollPoint } from './Pointer.ts';
 import { emptyNewSong, oneBarClip } from './NewSong.ts';
-
-// A page load waits until the page has hydrated, as AppTest.ts does: what is typed into it before then is lost.
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
-// Leaving with unsaved edits asks first, and a test that leaves means to.
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const BAR = 1920; // Ticks in a bar at a new timeline's 480 ppq
 const notes = (page: Page) => page.locator('[data-testid^="note-"]');
@@ -44,14 +27,6 @@ async function trackWithClip(page: Page, name: string) {
 	await expect(page.getByTestId('roll')).toBeVisible();
 }
 
-// Where a note at this tick and pitch lands in the roll, a little inside its cell.
-async function rollPoint(page: Page, tick: number, note: number) {
-	const roll = page.getByTestId('roll');
-	const box = (await roll.boundingBox())!;
-	const key = (await page.getByTestId(`key-${note}`).boundingBox())!;
-	return { x: box.x + tick * Number(await roll.getAttribute('data-per-tick')) + 3, y: key.y + key.height / 2 };
-}
-
 async function press(page: Page, from: { x: number; y: number }, to: { x: number; y: number }) {
 	await page.mouse.move(from.x, from.y);
 	await page.mouse.down();
@@ -73,7 +48,7 @@ test('a click adds a note as long as the Draw length, and the ghost says what it
 	const at = await rollPoint(page, 1440, 64);
 	await page.mouse.move(at.x, at.y);
 	await expect(page.getByTestId('ghost')).toHaveText('E4 · 1/8 · 1.4.000');
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	await expect(notes(page)).toHaveCount(1);
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-tick', '1440');
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-note', '64');
@@ -87,7 +62,7 @@ test('a click adds a note as long as the Draw length, and the ghost says what it
 	await page.keyboard.press('[');
 	await expect(draw).toHaveValue('120');
 	const next = await rollPoint(page, 0, 60);
-	await page.mouse.click(next.x, next.y);
+	await clickStill(page, next);
 	await expect(page.getByTestId('note-1')).toHaveAttribute('data-dur', '120');
 	const first = await centre(page, 'note-0');
 	await page.mouse.click(first.x, first.y);
@@ -122,11 +97,11 @@ for (const width of [1280, 700]) {
 		const roll = page.getByTestId('roll');
 		const before = (await roll.boundingBox())!.y;
 		const at = await rollPoint(page, 480, 60);
-		await page.mouse.click(at.x, at.y);
+		await clickStill(page, at);
 		await expect(notes(page)).toHaveCount(1);
 		expect((await roll.boundingBox())!.y).toBe(before);
 		const next = await rollPoint(page, 0, 64);
-		await page.mouse.dblclick(next.x, next.y);
+		await clickStill(page, next, { count: 2 });
 		await expect(notes(page)).toHaveCount(2);
 		await expect(page.locator('[data-testid^="note-"][data-note="64"]')).toHaveCount(1);
 		expect((await roll.boundingBox())!.y).toBe(before);
@@ -138,8 +113,8 @@ test('a right-click on a note opens its menu, which deletes and duplicates, and 
 }) => {
 	await trackWithClip(page, 'Menus');
 	const at = await rollPoint(page, 480, 60);
-	await page.mouse.click(at.x, at.y);
-	await page.mouse.dblclick(at.x, at.y);
+	await clickStill(page, at);
+	await clickStill(page, at, { count: 2 });
 	await expect(notes(page)).toHaveCount(1);
 
 	const menu = page.getByRole('menu', { name: 'Note' });
@@ -170,7 +145,7 @@ test('a note past the end grows the clip to the bar that holds it, and Undo take
 	const at = await rollPoint(page, BAR + 480, 62);
 	await page.mouse.move(at.x, at.y);
 	await expect(page.getByTestId('ghost')).toHaveText('D4 · 1/4 · 2.2.000 · makes the clip 2 bars');
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	await expect(page.getByTestId('clip-grown')).toContainText('Clip is now 2 bars');
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-tick', String(BAR + 480));
 	await expect(page.getByLabel('Clip length')).toHaveValue('2 bars');
@@ -190,7 +165,7 @@ test('a clip that would grow into the next placement offers to lengthen instead,
 	await expect(page.getByTestId('placement-1-1')).toHaveAttribute('data-tick', String(BAR));
 
 	const at = await rollPoint(page, BAR + 480, 62);
-	await page.mouse.click(at.x, at.y);
+	await clickStill(page, at);
 	const offer = page.getByTestId('lengthen-offer');
 	await expect(offer).toContainText('would run it into the next clip');
 	await expect(notes(page)).toHaveCount(0);

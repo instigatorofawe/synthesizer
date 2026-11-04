@@ -10,11 +10,13 @@
 	// The list stays on the page while it is shut, so what it says can be read without opening it.
 	let {
 		busy,
+		heard = 'none',
 		problems,
 		size,
 		details
 	}: {
 		busy: boolean; // An edit is compiling, or its image is on its way to the engine
+		heard?: 'none' | 'older' | 'newest'; // Whether the image playing is the newest edit's: none before one plays
 		problems: Problem[];
 		size: string; // How big the last image that compiled is, or nothing if none has
 		details?: Snippet; // What the engine is doing, under the list
@@ -25,6 +27,9 @@
 	let button: HTMLButtonElement;
 
 	const light = $derived(lightOf(busy, problems, size));
+	// Once nothing is on its way, an older image playing is shown by a hollow lamp, and said: what is heard isn't what is on
+	// screen, as after a refused edit, or when the engine refused the newest image.
+	const older = $derived(!busy && heard === 'older');
 	const ordered = $derived([
 		...problems.filter((problem) => problem.severity === 'error'),
 		...problems.filter((problem) => problem.severity === 'warning')
@@ -32,6 +37,8 @@
 	const summary = $derived.by(() => {
 		if (light.state === 'compiling') return 'Compiling the newest edit.';
 		if (light.state === 'idle') return 'Nothing is open to compile.';
+		if (light.state === 'fine' && older)
+			return `It compiles, to a ${size} image, but an older image is the one playing.`;
 		if (light.state === 'fine') return `Everything on screen compiles, to a ${size} image.`;
 		const made = size ? ` The last ${size} image that compiled is the one playing.` : '';
 		return light.state === 'problems' ? `It doesn't all compile.${made}` : `It compiles, but may not sound as meant.`;
@@ -58,12 +65,21 @@
 
 <svelte:window onpointerdown={outside} />
 
-<div class="light" bind:this={root} data-testid="status" aria-busy={busy} role="presentation" onkeydown={keydown}>
+<div
+	class="light"
+	bind:this={root}
+	data-testid="status"
+	aria-busy={busy}
+	data-heard={heard}
+	role="presentation"
+	onkeydown={keydown}
+>
 	<button
 		bind:this={button}
 		type="button"
 		class={`lamp ${light.state}`}
-		aria-label={`Compile status: ${light.label || 'nothing to compile'}`}
+		class:older
+		aria-label={`Compile status: ${light.label || 'nothing to compile'}${older ? ', an older image playing' : ''}`}
 		aria-expanded={open}
 		aria-controls="compile-status"
 		title={`${summary} Click for the problems and the engine.`}
@@ -125,6 +141,17 @@
 	}
 	.problems .dot {
 		background: #f85149;
+	}
+	/* An older image playing: the lamp's colour stays what the problems say, as a ring. */
+	.older .dot {
+		background: transparent;
+		box-shadow: inset 0 0 0 2px #3fb950;
+	}
+	.older.warnings .dot {
+		box-shadow: inset 0 0 0 2px #d29922;
+	}
+	.older.problems .dot {
+		box-shadow: inset 0 0 0 2px #f85149;
 	}
 	.problems .label {
 		color: #ff7b72;

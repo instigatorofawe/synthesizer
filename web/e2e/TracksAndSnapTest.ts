@@ -1,24 +1,8 @@
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from './Fixtures.ts';
 
 // A new track comes with a clip for its notes, and clips snap to bars while notes follow Snap, as in Live and Logic.
 
-const test = base.extend({
-	page: async ({ page }, use) => {
-		const goto = page.goto.bind(page);
-		page.goto = async (...args) => {
-			const response = await goto(...args);
-			if (response?.ok()) await page.locator('body[data-hydrated]').waitFor({ state: 'attached' });
-			return response;
-		};
-		await use(page);
-	}
-});
-
 test.use({ viewport: { width: 1440, height: 900 } });
-
-test.beforeEach(({ page }) => {
-	page.on('dialog', (dialog) => dialog.accept());
-});
 
 const BAR = 1920; // Ticks in a bar at a new song's 480 ppq
 

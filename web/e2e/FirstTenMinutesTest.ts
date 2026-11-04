@@ -168,9 +168,10 @@ test('M and S in the track heads and the Mixer agree: a mute is saved and undone
 	expect(doc.tracks.map((t: { mute: boolean }) => t.mute)).toEqual([false, false]);
 	expect(JSON.stringify(doc)).not.toContain('solo');
 
-	// It is heard: with Lead soloed and muted, nothing plays, and without the solo Pluck comes back
+	// It is heard: with Lead soloed and muted, nothing plays, and without the solo Pluck comes back. The first click above
+	// started audio, and how many images the edits since made depends on how quickly they came, so this waits for the newest.
 	await startAudio(page);
-	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
+	await settled(page);
 	await loopButton(page).click();
 	await expect(loopButton(page)).toHaveAttribute('aria-pressed', 'true');
 	await page.getByRole('button', { name: 'Play', exact: true }).click();

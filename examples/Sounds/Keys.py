@@ -95,7 +95,8 @@ def grand(
     width: float = 0.5,
 ):
     """A grand piano: three strings a note, struck where the hammer leaves a notch in their harmonics, a cent or so
-    apart so they beat slowly. Two of them die fast and one rings on, which is a piano's prompt sound and aftersound.
+    apart so they beat slowly. One of them dies fast and two ring on, beating, which is a piano's prompt sound and its
+    aftersound.
     A harder blow is louder and brighter, and the brightness fades with the prompt sound, faster in the treble. The
     hammer knocks, the damper stops the note when the key comes up, and the top keys have no damper.
 
@@ -110,9 +111,10 @@ def grand(
     centre = g.osc("square", f, width=strike)
     sharp = g.osc("square", g.mul(f, 1 + 1.1 * detune * CENT), width=strike)
     if unisons > 2:
-        sharp = g.add(
-            sharp, g.osc("square", g.mul(f, 1 - 0.8 * detune * CENT), width=strike)
+        centre = g.add(
+            centre, g.osc("square", g.mul(f, 1 - 0.8 * detune * CENT), width=strike)
         )
+        sharp = g.mul(sharp, 1.6)
     # The damper: every envelope takes its release from here, and the keys above F#6 ring on, as they have none.
     damper = g.node(
         "math",

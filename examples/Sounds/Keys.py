@@ -15,8 +15,8 @@ from Instrument import Instrument, Voice
 CENT = 2 ** (1 / 1200) - 1
 
 # Half a sine, from its trough to its peak, for a shape node to bend a triangle into a sine. An osc in mod mode makes a
-# sine whose phase moves a sample at a time, but at about seven times the cost of a triangle bent this way, which sounds
-# the same to -70 dB.
+# sine whose phase moves a sample at a time, but on a desktop at about ten times the cost of a triangle in mod mode bent
+# this way, which sounds the same to -75 dB.
 SINE = [round(math.sin(math.pi / 2 * (-1 + i / 32)), 6) for i in range(65)]
 
 

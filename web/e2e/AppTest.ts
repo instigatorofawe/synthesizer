@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test as base, type Page } from '@playwright/test';
-import { fromSongMenu, loopButton, openLight, pianoKey, undoButton } from './Chrome.ts';
+import { fromSongMenu, loopButton, openLight, pianoKey, startAudio, undoButton } from './Chrome.ts';
 import { engineRenders, goesRound, loudest } from './Engine.ts';
-import { emptyNewSong } from './NewSong.ts';
+import { emptyNewSong, oneBarClip } from './NewSong.ts';
 import { openView } from './Views.ts';
 
 // A page load waits until the page has hydrated: what is typed into it before then is lost, and a slow machine shows it.
@@ -30,7 +30,7 @@ test.beforeEach(({ page }) => {
 });
 
 const patchEditor = (page: Page) => page.getByRole('region', { name: 'Patch editor' });
-const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Timeline editor' });
+const timelineEditor = (page: Page) => page.getByRole('region', { name: 'Song editor' });
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
 
 async function startPlaying(page: Page, timeline = 'song') {
@@ -40,7 +40,7 @@ async function startPlaying(page: Page, timeline = 'song') {
 		if (m.type() === 'error') problems.push(m.text());
 	});
 	await page.goto(`/?timeline=${timeline}`);
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	return problems;
@@ -48,14 +48,14 @@ async function startPlaying(page: Page, timeline = 'song') {
 
 async function tab(page: Page, name: 'Notes' | 'Mixer' | 'JSON' | 'Image') {
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: new RegExp(`^${name}`) })
 		.click();
 }
 
 async function timelineJson(page: Page) {
 	await tab(page, 'JSON');
-	return page.getByLabel('Timeline JSON');
+	return page.getByLabel('Song JSON');
 }
 
 // The patch's JSON is a tab of the graph's side column, beside the graph.
@@ -106,7 +106,7 @@ test('the seeded library lists patches, timelines and a bundle', async ({ page }
 test('a fresh visit opens the timeline saved last, with its patch a view away', async ({ page }) => {
 	await page.goto('/');
 	await expect(page).toHaveURL(/\?timeline=ballad/);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Ballad');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad');
 	await expect(page.getByTestId('arrangement')).toBeVisible();
 	await openView(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Stereo lead');
@@ -167,7 +167,7 @@ const playheadInView = (page: Page) =>
 
 test('the arrangement follows the playhead off its edge, unless it was scrolled away', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	for (let i = 0; i < 5; ++i) await page.getByRole('button', { name: 'Zoom in' }).click(); // Bars of 729 pixels
 	expect((await playheadInView(page)).scroll).toBe(0);
@@ -209,7 +209,7 @@ test('a compile from page load cannot race the first load', async ({ page }) => 
 		};
 	});
 	await page.goto('/?timeline=song');
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await settled(page); // The slow compile has come back, and anything it sent to the engine is playing
 	await expect(page.getByTestId('generation')).toHaveText('1');
@@ -331,7 +331,7 @@ test('a broken edit shows where it failed and the old image keeps playing', asyn
 
 test('a tempo ramp glides to the next change, and the transport shows how far it has got', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await expect(page.getByTestId('tempo')).toHaveValue('140');
 	// Bars are 96 pixels and 1920 ticks.
@@ -345,9 +345,9 @@ test('a tempo ramp glides to the next change, and the transport shows how far it
 	await timelineEditor(page).getByRole('button', { name: 'Add a change at the playhead' }).click();
 	await page.getByLabel('Tempo at bar 3', { exact: true }).fill('100');
 	await page.getByLabel('Tempo at bar 3', { exact: true }).press('Enter');
-	// Only a change with a later one can ramp.
-	await expect(page.getByLabel('Ramp from bar 3')).toHaveCount(0);
-	await page.getByLabel('Ramp from bar 1').check();
+	// Only a change with a later one can glide.
+	await expect(page.getByLabel('Glide from bar 3')).toHaveCount(0);
+	await page.getByLabel('Glide from bar 1').check();
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	expect(await page.getByTestId('generation').textContent()).not.toBe('1');
@@ -360,10 +360,10 @@ test('a tempo ramp glides to the next change, and the transport shows how far it
 		{ tick: 3840, bpm: 100 }
 	]);
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: /^Notes/ })
 		.click();
-	await page.getByLabel('Ramp from bar 1').uncheck();
+	await page.getByLabel('Glide from bar 1').uncheck();
 	await expect(page.getByTestId('tempo')).toHaveValue('140');
 });
 
@@ -390,27 +390,27 @@ test('a timeline saves, and a stale tab is refused', async ({ page, context }) =
 	other.on('dialog', (dialog) => dialog.accept());
 	await other.goto('/?timeline=ballad');
 
-	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad two');
+	await page.getByLabel('Song name', { exact: true }).fill('Ballad two');
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('Saved.')).toBeVisible();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
 
-	await other.getByLabel('Timeline name', { exact: true }).fill('Stale');
+	await other.getByLabel('Song name', { exact: true }).fill('Stale');
 	await other.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(other.getByText('changed elsewhere')).toBeVisible();
 	await expect(other.getByTestId('unsaved')).toHaveText('1 unsaved'); // Refused, so nothing was lost
 
 	await page.reload();
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Ballad two');
-	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad two');
+	await page.getByLabel('Song name', { exact: true }).fill('Ballad');
 	await page.keyboard.press('ControlOrMeta+s');
 	await expect(page.getByText('Saved.')).toBeVisible();
 });
 
 test('edits to a timeline and its patches save together', async ({ page }) => {
 	await page.goto('/?timeline=ballad');
-	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad, edited');
+	await page.getByLabel('Song name', { exact: true }).fill('Ballad, edited');
 	await browser(page).getByRole('link', { name: 'Sampled pluck' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Sampled pluck');
 	await page.getByLabel('Patch name', { exact: true }).fill('Pluck, edited');
@@ -419,12 +419,12 @@ test('edits to a timeline and its patches save together', async ({ page }) => {
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByText('Saved.')).toBeVisible();
 	await page.reload();
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Ballad, edited');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Ballad, edited');
 	await expect(browser(page).getByRole('link', { name: 'Pluck, edited' })).toBeVisible();
 	await expect(browser(page).getByRole('link', { name: 'Stereo lead' })).toBeVisible();
 
 	await openView(page, 'song');
-	await page.getByLabel('Timeline name', { exact: true }).fill('Ballad');
+	await page.getByLabel('Song name', { exact: true }).fill('Ballad');
 	await browser(page).getByRole('link', { name: 'Pluck, edited' }).click();
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Pluck, edited');
 	await page.getByLabel('Patch name', { exact: true }).fill('Sampled pluck');
@@ -449,11 +449,11 @@ test('choosing a track shows its patch, and the browser shows another', async ({
 	// A patch the address names stays, whatever track a timeline opens on, as when one is made while it is shown.
 	await page.goto('/?timeline=song&patch=unused');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Square, in the library but on no timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill('Beside a patch');
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill('Beside a patch');
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== 'song');
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('Beside a patch');
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('Beside a patch');
 	await settled(page); // The new timeline has compiled
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Square, in the library but on no timeline');
 	await expect(page).toHaveURL(/patch=unused/);
@@ -513,7 +513,7 @@ test('the browser filters everything by name', async ({ page }) => {
 
 test('a patch in use cannot be deleted, and says what an edit would change', async ({ page }) => {
 	await page.goto('/?patch=lead');
-	await expect(page.getByTestId('used-by')).toContainText('2 timelines');
+	await expect(page.getByTestId('used-by')).toContainText('2 songs');
 	await page.getByRole('button', { name: 'Delete patch' }).click();
 	await expect(page.getByText('used by')).toBeVisible();
 });
@@ -521,7 +521,7 @@ test('a patch in use cannot be deleted, and says what an edit would change', asy
 test('a patch no track plays is heard on its own, and Play brings the song back', async ({ page }) => {
 	await page.goto('/?timeline=song&patch=unused');
 	await expect(page.getByTestId('hearing')).toHaveAttribute('data-kind', 'alone');
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	// The song is playing, so a probe waits for the patch's own image, which the first key brings.
 	await page.locator('g.node:has(text:has-text("osc"))').first().locator('rect.title').click();
@@ -750,7 +750,7 @@ test('a patch uses another as a subpatch, and it plays', async ({ page }) => {
 
 test('a probe scopes a node inside a voice', async ({ page }) => {
 	await page.goto('/?timeline=ballad&patch=lead');
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	const node = page.locator('g.node:has(text:has-text("osc"))').first();
 	const id = (await node.getAttribute('data-testid'))!.replace('node-', '');
@@ -780,9 +780,9 @@ test('a recipe plays from the examples without touching the library', async ({ p
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect.poll(async () => Math.max(0, ...(await patchLoudest(page))), { timeout: 8000 }).toBeGreaterThan(0.01);
 	await page.goto('/');
-	await expect(
-		browser(page).getByRole('list', { name: 'Timelines' }).getByRole('link', { name: 'Kick808' })
-	).toHaveCount(0);
+	await expect(browser(page).getByRole('list', { name: 'Songs' }).getByRole('link', { name: 'Kick808' })).toHaveCount(
+		0
+	);
 	expect(problems).toEqual([]);
 });
 
@@ -805,8 +805,8 @@ test('a recipe added to the library is an ordinary timeline that plays the built
 	await page.goto('/?recipe=PluckedString');
 	await fromSongMenu(page, 'Add to library');
 	await page.waitForURL('**/?timeline=recipe-PluckedString');
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue('PluckedString');
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue('PluckedString');
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await expect(page.getByLabel('Patch slot 1', { exact: true })).toHaveAttribute('data-patch', 'builtin-PluckedString');
@@ -827,7 +827,7 @@ test('a recipe with recordings keeps them when it is added', async ({ page }) =>
 	await fromSongMenu(page, 'Add to library');
 	await page.waitForURL('**/?timeline=recipe-OneShotSample');
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 });
 
@@ -869,7 +869,7 @@ test('a track can play a built-in patch, and a duplicate of it takes its place t
 	await addNoteAt(page, 0, 60);
 	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
-	await startAudio(page);
+	await startAudioSettled(page);
 	await settled(page);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
@@ -947,11 +947,11 @@ test('a probe in a recipe reads the voice of the patch on screen', async ({ page
 async function newTimeline(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	await expect(page.getByTestId('arrangement')).toBeVisible();
 	await emptyNewSong(page);
 }
@@ -992,8 +992,7 @@ async function addTrack(page: Page, patch: string) {
 async function trackWithClip(page: Page, name: string) {
 	await newTimeline(page, name);
 	await addTrack(page, 'lead');
-	const row = (await page.getByTestId('row-1').boundingBox())!;
-	await page.mouse.dblclick(row.x + 10, row.y + 20);
+	await oneBarClip(page);
 	await expect(page.getByTestId('placement-1-0')).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 }
@@ -1014,9 +1013,9 @@ async function addNoteAt(page: Page, tick: number, note: number) {
 }
 
 // Starts audio once every edit has compiled, so the image it starts with is the newest.
-async function startAudio(page: Page) {
+async function startAudioSettled(page: Page) {
 	await settled(page);
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 }
 
@@ -1123,6 +1122,13 @@ test('a clip is moved, repeated and copied in the arrangement, and an overlap la
 	await trackWithClip(page, 'Arranged');
 	await addNoteAt(page, 0, 60);
 	await addTrack(page, 'pluck');
+	// Track 2 comes with a clip, which goes, so the copy below is its only one.
+	await page.getByTestId('placement-2-0').locator('rect').first().click({ button: 'right' });
+	await page
+		.getByRole('menu', { name: /^Clip / })
+		.getByRole('menuitem', { name: 'Delete clip' })
+		.click();
+	await expect(page.getByTestId('placement-2-0')).toHaveCount(0);
 	const block = page.getByTestId('placement-1-0');
 	const barPixels = 96;
 
@@ -1170,12 +1176,13 @@ test('a drawn loop reaches an engine that starts later', async ({ page }) => {
 	await trackWithClip(page, 'Looped');
 	await addNoteAt(page, 0, 60);
 	const strip = (await page.getByTestId('loop-strip').boundingBox())!;
+	// Half a bar's drag, which the clips' Snap, a bar, makes a bar.
 	await press(page, { x: strip.x + 1, y: strip.y + 5 }, { x: strip.x + 48, y: strip.y + 5 });
 	await expect(page.getByTestId('loop-brace')).toBeVisible();
 	await expect(loopButton(page)).toHaveAttribute('aria-pressed', 'true');
-	await startAudio(page);
+	await startAudioSettled(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
-	await goesRound(page, 1, 960);
+	await goesRound(page, 1, 1920);
 	await expect(page.getByTestId('voices')).toBeAttached(); // Under the compile light's list
 });
 
@@ -1189,8 +1196,8 @@ test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({
 	const lane = (await page.getByTestId('lane-0').boundingBox())!;
 	await page.mouse.dblclick(lane.x + 96, lane.y + 10);
 	await expect(page.locator('[data-testid^="lane-0-point-"]')).toHaveCount(2);
-	await page.getByLabel('cutoff point ramp').fill('480');
-	await page.getByLabel('cutoff point ramp').blur();
+	await page.getByLabel('cutoff point over').fill('480 ticks');
+	await page.getByLabel('cutoff point over').blur();
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[1]?.ramp).toBe(480);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 
@@ -1208,7 +1215,7 @@ test('a lane moves a parameter over a clip, and a mixer lane is heard', async ({
 	await page.getByLabel('Fader point value').blur();
 	await expect.poll(async () => (await timelineDoc(page)).clips[0].automation[2].value).toBe(0);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
-	await startAudio(page);
+	await startAudioSettled(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await tab(page, 'Mixer');
 	await expect.poll(() => stripLoudest(page, 'track:1'), { timeout: 8000 }).toBeGreaterThan(0.01);
@@ -1459,13 +1466,13 @@ test('insert and global sliders are heard as they move, and stay where they are 
 	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
 	await page.mouse.dblclick(x, y);
-	await page.getByLabel('Note length').fill('1900');
+	await page.getByLabel('Note length').fill('1900 ticks');
 	await page.getByLabel('Note length').blur();
 	await tab(page, 'Mixer');
 	await page.getByLabel('Add an insert to Track 1').selectOption(insert);
 	await expect(page.getByTestId('compile-error')).toHaveCount(0);
 	await loopButton(page).click();
-	await startAudio(page);
+	await startAudioSettled(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect.poll(() => stripPeak(page, 'master'), { timeout: 8000 }).toBeGreaterThan(0.1);
 	const generation = await page.getByTestId('generation').textContent();
@@ -1507,10 +1514,10 @@ test('a value edited in the JSON is what plays, over what a swap would carry', a
 	await choosePatch(page, voice, 1);
 	const { x, y } = await rollPoint(page, 0, 60);
 	await page.mouse.dblclick(x, y);
-	await page.getByLabel('Note length').fill('1900');
+	await page.getByLabel('Note length').fill('1900 ticks');
 	await page.getByLabel('Note length').blur();
 	await loopButton(page).click();
-	await startAudio(page);
+	await startAudioSettled(page);
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect
 		.poll(() => page.getByRole('meter', { name: 'Master level' }).getAttribute('data-peak').then(Number), {
@@ -1702,12 +1709,10 @@ test('an image too large for the engine says so instead of going quiet', async (
 	await trackWithClip(page, 'Too large');
 	await choosePatch(page, ids[0], 1);
 	await addNoteAt(page, 0, 60);
-	await addTrack(page, ids[1]);
-	const row = (await page.getByTestId('row-2').boundingBox())!;
-	await page.mouse.dblclick(row.x + 10, row.y + 20);
+	await addTrack(page, ids[1]); // Which comes with a clip, open in the roll
 	await expect(page.getByTestId('placement-2-0')).toBeVisible();
 	await addNoteAt(page, 0, 60);
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('load-rejected')).toContainText('larger than the image slot', { timeout: 20000 });
 });
 

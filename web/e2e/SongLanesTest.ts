@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { redoButton, undoButton } from './Chrome.ts';
+import { redoButton, startAudio, undoButton } from './Chrome.ts';
 import { settled } from './Engine.ts';
 
 // A page load waits until the page has hydrated, as in AppTest.
@@ -37,21 +37,21 @@ const box = async (page: Page, id: string) => (await page.getByTestId(id).boundi
 
 async function tab(page: Page, name: 'Notes' | 'Mixer' | 'JSON') {
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: new RegExp(`^${name}`) })
 		.click();
 }
 
 async function timelineDoc(page: Page) {
 	await tab(page, 'JSON');
-	const doc = JSON.parse(await page.getByLabel('Timeline JSON').inputValue());
+	const doc = JSON.parse(await page.getByLabel('Song JSON').inputValue());
 	await tab(page, 'Notes');
 	return doc as { tempo: Tempo[]; tracks: { id: number; gain: number; pan: number }[] };
 }
 
 async function setTempo(page: Page, tempo: Tempo[]) {
 	await tab(page, 'JSON');
-	const json = page.getByLabel('Timeline JSON');
+	const json = page.getByLabel('Song JSON');
 	const doc = JSON.parse(await json.inputValue());
 	doc.tempo = tempo;
 	await json.fill(JSON.stringify(doc, null, 1));
@@ -132,7 +132,7 @@ test('a click on the lane adds a change, a drag sets its tempo, and a click on t
 	page
 }) => {
 	await page.goto('/?timeline=song');
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).toHaveText('1', { timeout: 10000 });
 	await settled(page);
 	await unfold(page);
@@ -238,7 +238,7 @@ test('each gesture in the lane is one step to undo, and its keys and menu edit t
 	await page.mouse.down();
 	await page.mouse.move(from.x - 4 * BAR, from.y, { steps: 6 });
 	await page.mouse.up();
-	await expect(point(page, 1)).toHaveAttribute('data-tick', '480');
+	await expect(point(page, 1)).toHaveAttribute('data-tick', '1920'); // A step of the clips' Snap, a bar, after it
 	await undoButton(page).click();
 	await expect(point(page, 1)).toHaveAttribute('data-tick', '3840');
 	from = await centre(page, 0);

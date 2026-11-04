@@ -54,7 +54,7 @@
 	const HEIGHT = 64;
 	const PAD = 6;
 	const POINT_REACH = 8; // Pixels above or below a point within which a click on the lane meant that point
-	const SHAPE_NAMES: Record<Shape, string> = { step: 'Step', line: 'Line', exp: 'Exp' };
+	const SHAPE_NAMES: Record<Shape, string> = { step: 'Step', line: 'Line', exp: 'Curve' };
 
 	let svg: SVGSVGElement;
 	let chosen = $state<number | null>(null); // An index into `clip.automation`
@@ -243,7 +243,7 @@
 				/></label
 			>
 			<label
-				title="How the lane gets to this point from the one before: at once, in a line, or along an exp curve, which moves by equal ratios, evenly in decibels for a gain and in pitch for a frequency"
+				title="How the lane gets to this point from the one before: at once, in a line, or along a curve, which moves by equal ratios, evenly in decibels for a gain and in pitch for a frequency"
 			>
 				shape
 				<select
@@ -252,15 +252,15 @@
 					onchange={(e) => change(index, { shape: e.currentTarget.value as Shape })}
 				>
 					{#each SHAPES as shape (shape)}
-						<option value={shape} disabled={shape !== 'step' && !roomFor(current)}>{shape}</option>
+						<option value={shape} disabled={shape !== 'step' && !roomFor(current)}>{SHAPE_NAMES[shape]}</option>
 					{/each}
 				</select>
 			</label>
 			{#if current.shape !== 'step'}
 				<label
 					title="How long the lane takes to get here. As long as the gap from the point before, it joins them, and it is never longer."
-					>ramp <UnitField
-						label={`${label} point ramp`}
+					>over <UnitField
+						label={`${label} point over`}
 						value={current.ramp}
 						format={(ramp) => noteValue(ramp, ppq)}
 						read={readLength(ppq, 0)}

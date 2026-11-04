@@ -52,7 +52,7 @@
 			{ label: 'Rename', action: onrename },
 			wav,
 			{ label: 'Export saved version', action: () => exportForm?.requestSubmit() },
-			{ label: 'Delete timeline', action: () => deleteForm?.requestSubmit() }
+			{ label: 'Delete song', action: () => deleteForm?.requestSubmit() }
 		];
 	});
 
@@ -75,7 +75,7 @@
 		aria-label="Song menu"
 		aria-haspopup="menu"
 		aria-expanded={at !== null}
-		title={example ? 'Add this example to the library, or export it' : 'Rename, export or delete this timeline'}
+		title={example ? 'Add this example to the library, or export it' : 'Rename, export or delete this song'}
 		onpointerdown={(event) => {
 			if (at) event.stopPropagation();
 		}}

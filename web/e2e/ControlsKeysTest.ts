@@ -1,5 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
-import { loopButton, pianoKey, undoButton } from './Chrome.ts';
+import { loopButton, pianoKey, startAudio, undoButton } from './Chrome.ts';
 import { engineRenders, loudest, settled } from './Engine.ts';
 import { openView } from './Views.ts';
 
@@ -83,7 +83,7 @@ const masterPeak = (page: Page) =>
 // The loudest the master has been since Play, or since the image playing now began.
 const masterLoudest = (page: Page) => loudest(page.getByRole('meter', { name: 'Master level' }));
 const voices = (page: Page) => page.getByTestId('voices');
-const holdButton = (page: Page) => page.getByRole('button', { name: 'Hold', exact: true });
+const holdButton = (page: Page) => page.getByRole('button', { name: 'Latch', exact: true });
 const control = (page: Page, name: string) => page.getByRole('slider', { name: `Control ${name}`, exact: true });
 const controlRow = (page: Page, id: number) => page.getByTestId(`control-${id}`);
 
@@ -121,14 +121,14 @@ async function newPatch(page: Page, name: string, graph: object) {
 }
 
 async function timelineJson(page: Page) {
-	await page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: /^JSON/ }).click();
-	return page.getByLabel('Timeline JSON');
+	await page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: /^JSON/ }).click();
+	return page.getByLabel('Song JSON');
 }
 
 async function timelineDoc(page: Page) {
 	const doc = JSON.parse(await (await timelineJson(page)).inputValue());
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: /^Notes/ })
 		.click();
 	return doc;
@@ -142,11 +142,11 @@ async function toneSong(page: Page, name: string) {
 	await expect(page.getByTestId('unsaved')).toHaveCount(0);
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	const doc = {
 		ppq: 480,
 		tempo: [{ tick: 0, bpm: 120 }],
@@ -168,7 +168,7 @@ async function toneSong(page: Page, name: string) {
 
 async function play(page: Page) {
 	await settled(page);
-	await page.getByRole('button', { name: 'Start audio' }).click();
+	await startAudio(page);
 	await expect(page.getByTestId('generation')).not.toHaveText('0', { timeout: 10000 });
 	await page.getByRole('button', { name: 'Play', exact: true }).click();
 	await expect(page.getByTestId('state')).toHaveAttribute('data-playing', 'true');
@@ -356,7 +356,7 @@ test('a slider over a wide range is logarithmic, its middle near the geometric m
 	expect((await patchGraph(page)).params[0].default).toBe(middle);
 });
 
-test('Hold keeps a note sounding after its key comes up, until it is played again, Esc, or Hold off', async ({
+test('Latch keeps a note sounding after its key comes up, until it is played again, Esc, or Latch off', async ({
 	page
 }) => {
 	await newPatch(page, 'Held', tone({ scope: 'track', default: 1 }));
@@ -409,7 +409,7 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 	await expect(voices(page)).toHaveText('0');
 	await expect(holdButton(page)).toHaveAttribute('aria-pressed', 'true');
 
-	// Hold off lets go of everything it held.
+	// Latch off lets go of everything it held.
 	await page.keyboard.press('a');
 	await page.keyboard.press('d');
 	await expect(voices(page)).toHaveText('2');
@@ -422,22 +422,20 @@ test('Hold keeps a note sounding after its key comes up, until it is played agai
 	await expect(page.locator('.key.latched')).toHaveCount(0);
 });
 
-test("the keys' velocity is the roll's Vel: set in either view, it is what step entry writes", async ({ page }) => {
+test("the keys' velocity is the page's one Vel: set in either view, it is what step entry writes", async ({ page }) => {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill('Velocities');
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill('Velocities');
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
 	await expect(page.getByTestId('roll')).toBeVisible();
 	const keys = page.getByLabel('Velocity of the keys');
-	const roll = page.getByLabel('Velocity of new notes');
 	await expect(keys).toHaveValue('100');
-	await expect(roll).toHaveValue('100');
+	await expect(page.getByLabel('Velocity of new notes')).toHaveCount(0); // One field, beside the keys
 
 	await keys.fill('64');
 	await keys.press('Enter');
-	await expect(roll).toHaveValue('64');
 	await keys.blur();
 	await page.keyboard.press('r');
 	await expect(page.getByTestId('step-cursor')).toHaveAttribute('data-tick', '0');
@@ -451,13 +449,8 @@ test("the keys' velocity is the roll's Vel: set in either view, it is what step 
 	await page.keyboard.press('v');
 	await expect(keys).toHaveValue('70');
 	await openView(page, 'song');
-	await expect(roll).toHaveValue('70');
+	await expect(keys).toHaveValue('70');
 	await page.keyboard.press('s');
 	await expect(notes).toHaveCount(2);
 	await expect(page.getByTestId('note-1')).toHaveAttribute('data-vel', '70');
-
-	// The roll's field sets the keys' too.
-	await roll.fill('20');
-	await roll.press('Enter');
-	await expect(keys).toHaveValue('20');
 });

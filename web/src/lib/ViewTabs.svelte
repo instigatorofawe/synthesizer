@@ -30,9 +30,9 @@
 	]);
 	const aloneWords = $derived(`Playing ${patch || 'a patch'} on its own. Play goes back to the song.`);
 
-	// How far a tab gives way: its name to 8 characters, or all of a shorter one, so the top bar always says what is open. A
+	// How far a tab gives way: its name to 10 characters, or all of a shorter one, so the top bar always says what is open. A
 	// name's own smallest size is all of it, so each tab's is worked out here: its padding, its icon and the gap, then the name.
-	const shown = (name: string) => `${Math.min(name.length, 8)}ch`;
+	const shown = (name: string) => `${Math.min(name.length, 10)}ch`;
 	const songFloor = $derived(`calc(${menu ? '2.4rem' : '1.3rem'} + 0.35rem + 1.2em + ${shown(tabs[0].name)})`);
 	const patchFloor = $derived(`calc(1.3rem + 0.35rem + 1.2em + ${shown(tabs[1].name)}${alone ? ' + 1.6em' : ''})`);
 </script>

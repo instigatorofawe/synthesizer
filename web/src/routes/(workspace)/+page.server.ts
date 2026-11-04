@@ -146,7 +146,7 @@ export const actions = {
 	createTimeline: async ({ request }) => {
 		const form = await request.formData();
 		const name = field(form, 'name');
-		if (!name) return fail(400, { message: 'a timeline needs a name' });
+		if (!name) return fail(400, { message: 'a song needs a name' });
 		redirect(303, back(form, { timeline: createTimeline(db(), name, NEW_TIMELINE), recipe: null, part: null }));
 	},
 	createBundle: async ({ request }) => {
@@ -254,7 +254,7 @@ export const actions = {
 		const thin = form.get('thin') === 'on';
 		const bundle = getBundle(db(), field(form, 'id'));
 		const members = bundle.timelines.map((t) => t.id);
-		if (members.length === 0) return fail(400, { message: 'add a timeline first' });
+		if (members.length === 0) return fail(400, { message: 'add a song first' });
 		const rows = snapshot(db(), members);
 		const full = await compileSnapshot(rows);
 		if (!full.report.ok) return fail(422, { message: full.report.errors?.[0]?.message ?? 'compile failed' });

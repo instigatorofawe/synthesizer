@@ -3,17 +3,8 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onDestroy, onMount, tick as rendered, untrack } from 'svelte';
-	import {
-		AudioEngine,
-		LOAD_ERRORS,
-		tapTargets,
-		type EngineState,
-		type PlayedKey,
-		type Probe,
-		type SongControls,
-		type TapTarget
-	} from '#lib/AudioEngine.ts';
-	import type { Loop } from '#lib/Arrangement.svelte';
+	import { LOAD_ERRORS, tapTargets, type PlayedKey, type Probe } from '#lib/AudioEngine.ts';
+	import { EngineSession, type Source } from '#lib/EngineSession.svelte.ts';
 	import Browser, { type Section } from '#lib/Browser.svelte';
 	import BrowserRail from '#lib/BrowserRail.svelte';
 	import BundleDialog from '#lib/BundleDialog.svelte';
@@ -23,7 +14,6 @@
 	import ShortcutsSheet from '#lib/ShortcutsSheet.svelte';
 	import type { SideTab } from '#lib/GraphEditor.svelte';
 	import CompileLight from '#lib/CompileLight.svelte';
-	import { Compiler, type Compiled } from '#lib/Compiler.ts';
 	import DocumentMenu from '#lib/DocumentMenu.svelte';
 	import { downloadBytes, downloadImage } from '#lib/Download.ts';
 	import { renderWav } from '#lib/Render.ts';
@@ -31,12 +21,13 @@
 	import { History } from '#lib/History.ts';
 	import Keyboard from '#lib/Keyboard.svelte';
 	import Meter from '#lib/Meter.svelte';
+	import { withParameter } from '#lib/Modulate.ts';
 	import { friendlyName } from '#lib/NodeHelp.ts';
 	import PatchPanel from '#lib/PatchPanel.svelte';
 	import { setSongValue, songValue } from '#lib/ParamValues.ts';
 	import { placeOf, placeWords, sizeOf, type Names, type Problem } from '#lib/Problems.ts';
 	import ReportPanel from '#lib/ReportPanel.svelte';
-	import { buildRequest, missingAssets, reachable, type AssetEntry, type CompileReport } from '#lib/Request.ts';
+	import { buildRequest, missingAssets, reachable, type AssetEntry } from '#lib/Request.ts';
 	import { referencedPatches, timelineSchema, type Graph, type Param, type Timeline } from '#lib/Schema.ts';
 	import { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, typingIn } from '#lib/Shortcuts.ts';
@@ -44,17 +35,7 @@
 	import { TakeRun, type TakeHost } from '#lib/Take.svelte.ts';
 	import { stepVelocity } from '#lib/StepEntry.ts';
 	import { bpmText, tempoAt, gliding, parseBpm, shownTempo, tempoTyped, tempoWords } from '#lib/Tempo.ts';
-	import {
-		mixWrites,
-		patchUses,
-		addSlot,
-		replacePatch,
-		setSlot,
-		settlingWrites,
-		soloed,
-		trackKey,
-		type PatchUse
-	} from '#lib/TimelineEdit.ts';
+	import { patchUses, addSlot, replacePatch, setSlot, soloed, type PatchUse } from '#lib/TimelineEdit.ts';
 	import { wholeSong } from '#lib/Transport.ts';
 	import { BEATS_PER_BAR, barOf, position, parsePosition } from '#lib/Units.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
@@ -85,11 +66,6 @@
 	} from '#lib/Workspace.ts';
 
 	let { data, form } = $props();
-
-	// The engine plays one image at a time: the song, which is the open timeline or example, or the Patch view's patch on its
-	// own, for a patch no track plays. What the page touches decides which: the transport and the timeline's editors want the
-	// song, and the keys in the Patch view want wherever that patch is heard.
-	type Source = 'song' | 'alone';
 
 	// ------------------------------------------------------------------------------------------------------- what is open
 
@@ -255,18 +231,23 @@
 	}
 
 	function patchEdited(change: { name?: string; text?: string; graph?: Graph }, how: How = 'edit') {
-		if (!savedPatch || savedPatch.builtin) return;
-		const key = draftKey('patch', savedPatch.id);
+		if (savedPatch) editPatch(savedPatch, change, how);
+	}
+
+	// An edit of a library patch, the one on screen or another, such as the one a lane is put inside from the Song view.
+	function editPatch(
+		patch: (typeof data.library.patches)[number],
+		change: { name?: string; text?: string; graph?: Graph },
+		how: How = 'edit'
+	) {
+		if (patch.builtin) return;
+		const key = draftKey('patch', patch.id);
+		const savedText = JSON.stringify(patch.graph, null, 1);
+		const now = drafts[key]?.text ?? savedText;
 		const text = change.graph ? JSON.stringify(change.graph, null, 1) : change.text;
-		remember(key, patchText, text, how);
-		if (text === patchText && change.name === undefined) return;
-		const base = {
-			kind: 'patch' as const,
-			id: savedPatch.id,
-			revision: savedPatch.revision,
-			name: savedPatch.name,
-			text: savedPatchText
-		};
+		remember(key, now, text, how);
+		if (text === now && change.name === undefined) return;
+		const base = { kind: 'patch' as const, id: patch.id, revision: patch.revision, name: patch.name, text: savedText };
 		const graph = change.graph ?? (text === undefined ? undefined : (parseGraph(text) ?? undefined));
 		put(
 			key,
@@ -321,6 +302,40 @@
 			void open({ patch: made.to, part: null }, false, 'patch');
 		};
 	};
+
+	// "In the patch…": a lane on an input inside the track's patch. The input gets a parameter of its own, wired to it at the value
+	// it had, as one edit of the patch, and the lane, the song's edit, then moves it. A built-in patch can't change, so Edit a
+	// copy makes one first, which takes its place in the song as an edit of its own. Gives the parameter's id once it's there.
+	async function laneInPatch(at: { patch: string; node: number; input: string }): Promise<number | null> {
+		if (!saved || !timelineDoc) return null;
+		let id = at.patch;
+		if (data.library.patches.find((p) => p.id === id)?.builtin) {
+			const body = new FormData();
+			body.set('id', id);
+			const response = await fetch(actionOn(search, 'editCopy'), {
+				method: 'POST',
+				body,
+				headers: { accept: 'application/json', 'x-sveltekit-action': 'true' }
+			});
+			const result = deserialize(await response.text());
+			const made =
+				result.type === 'success' ? (result.data?.duplicated as { from: string; to: string } | undefined) : undefined;
+			if (!made) {
+				if (result.type === 'failure') await applyAction(result);
+				return null;
+			}
+			await invalidateAll();
+			swapIn(made.from, made.to);
+			id = made.to;
+		}
+		const patch = data.library.patches.find((p) => p.id === id);
+		const graph = library.find((p) => p.id === id)?.graph;
+		if (!patch || !graph) return null;
+		const given = withParameter(graph, at, data.catalog, library);
+		if (!given) return null;
+		editPatch(patch, { graph: given.graph });
+		return given.param;
+	}
 
 	// Use on track: the patch the Patch view shows, put on the track the Song view chose, in place of what it plays, as one
 	// edit. Only a library timeline can be changed, and an insert has no notes to play, so neither is offered.
@@ -429,81 +444,48 @@
 
 	// ---------------------------------------------------------------------------------------------------------- the engine
 
-	const engine = new AudioEngine();
-	const rings = Array.from({ length: 8 }, () => new Ring(48000));
-	let started = $state(false);
-	let starting = false;
-	let engineState = $state<EngineState | null>(null);
-	let targets = $state<TapTarget[]>([]);
-	let rejected = $state('');
-	let want = $state<Source>(untrack(() => (data.open ? 'song' : 'alone')));
-	let live = $state<Source | null>(null); // Which the image now playing is, once one is
-	let waiting: (() => void)[] = []; // Sent when what is wanted goes live
-	let songTick = $state(0); // Where the song was when a patch on its own took over
-	let songRan = false; // Whether it was playing then: a patch on its own runs the transport, which the song mustn't inherit
-
-	let compiler: Compiler | undefined;
+	const session = new EngineSession(
+		{
+			songRequest,
+			aloneRequest,
+			assetsArriving: () => fetchingAssets > 0,
+			openKey: () => openKey,
+			patches: () => library,
+			songRefused: () => {
+				if (take?.phase !== 'arming') return;
+				take = null;
+				say("The song doesn't compile, so it can't be recorded into. The light says what's wrong.");
+			}
+		},
+		untrack(() => (data.open ? 'song' : 'alone'))
+	);
+	const { engine, rings, controls } = session;
 	let rendering = $state<number | null>(null); // How far a WAV export has got
 	let renderProblem = $state('');
-	let song = $state.raw<Compiled | null>(null);
-	let goodSong = $state.raw<Compiled | null>(null);
-	let alone = $state.raw<Compiled | null>(null);
-	let goodAlone = $state.raw<Compiled | null>(null);
-	const sent: Record<Source, string> = { song: '', alone: '' };
-	const timers: Partial<Record<Source, ReturnType<typeof setTimeout>>> = {};
-	// An edit not yet compiled, and an image sent to the engine that isn't playing yet. The status bar says so until both are
-	// done, so what is heard is known to be the newest edit.
-	const asked: Record<Source, number> = { song: 0, alone: 0 };
-	let compiling = $state<Record<Source, boolean>>({ song: false, alone: false });
-	let compiles = $state(0); // Sent to the compiler since the page opened, so a test can tell an edit's compile has started
-	let loading = $state.raw<CompileReport | null>(null);
-	const busy = $derived(compiling.song || compiling.alone || loading !== null);
-	const sourceOf = new WeakMap<CompileReport, Source>();
-	const compiledFrom = new WeakMap<CompileReport, Timeline>(); // Which document each song report came from
 
 	// A library patch shown beside an example isn't in it, whatever its id: an example's ids are its own.
 	const hears = $derived(
 		hearing(
 			recipe && !shown?.example ? null : songDoc,
-			goodSong?.report.programs[0] ?? null,
+			session.goodSong?.report.programs[0] ?? null,
 			shown?.patch ?? null,
 			selectedTrack,
 			shown !== null && !shown.example
 		)
 	);
 
-	// Tracks soloed in the song that is open, which play while every other track is muted. Solo is a way of listening to the
-	// song rather than part of it, so it is never saved: it goes into what is compiled and heard, and so into Export WAV, which
-	// writes what is heard. A song opened starts with none.
-	let solo = $state.raw<ReadonlySet<number>>(new Set());
-
-	function toggleSolo(id: number) {
-		const next = new Set(solo);
-		if (!next.delete(id)) next.add(id);
-		solo = next;
-		// Heard at once through the mix registers, as a Mute is, until the compile that follows puts it in the image.
-		const program = goodSong?.report.programs[0];
-		if (!songDoc || !program) return;
-		const heard = soloed(songDoc, next);
-		for (const track of songDoc.tracks) {
-			for (const { register, value } of mixWrites(heard, program, trackKey(track.id))) controls.setMix(register, value);
-		}
-	}
-
 	// A soloed track that is deleted is soloed no more, so a track made later with its id doesn't start soloed.
 	$effect(() => {
 		const ids = new Set(songDoc?.tracks.map((track) => track.id));
-		untrack(() => {
-			if ([...solo].some((id) => !ids.has(id))) solo = new Set([...solo].filter((id) => ids.has(id)));
-		});
+		untrack(() => session.keepSolo(ids));
 	});
 
 	// In the Song view the keys play the chosen track. While the song's image leaves it out, because it has no notes yet, they
 	// play it on its own instead, as the Patch view plays a patch no track plays, so a new track sounds before its first note.
 	const aloneTrack = $derived.by(() => {
 		if (view !== 'song' || !saved || !songDoc || selectedTrack === null) return null;
-		if (goodSong?.report.programs[0]?.tracks.some((t) => t.id === selectedTrack)) return null;
-		return trackAlone(soloed(songDoc, solo), selectedTrack);
+		if (session.goodSong?.report.programs[0]?.tracks.some((t) => t.id === selectedTrack)) return null;
+		return trackAlone(soloed(songDoc, session.solo), selectedTrack);
 	});
 
 	// A patch no track plays is compiled on its own too, so its errors and what compiled away show even when it can't be played.
@@ -511,13 +493,14 @@
 		aloneTrack !== null ||
 			(shown !== null &&
 				!shown.example &&
-				(hears.kind === 'alone' || (isInsert(shown.patch.graph) && !goodSong?.report.sidecar?.[shown.patch.id])))
+				(hears.kind === 'alone' ||
+					(isInsert(shown.patch.graph) && !session.goodSong?.report.sidecar?.[shown.patch.id])))
 	);
 
 	function songRequest(): { request: string; doc?: Timeline } | null {
 		if (recipe) {
 			const [first, ...rest] = recipe.project.programs;
-			const programs = [{ ...first, timeline: soloed(first.timeline as Timeline, solo) }, ...rest];
+			const programs = [{ ...first, timeline: soloed(first.timeline as Timeline, session.solo) }, ...rest];
 			return { request: JSON.stringify({ ...recipe.project, programs }) };
 		}
 		if (!saved || timelineParsed.value === null) return null;
@@ -526,13 +509,13 @@
 		const reached = checked.success
 			? reachable(referencedPatches(checked.data), library, assets)
 			: { patches: library, assets };
-		const timeline = checked.success ? soloed(timelineParsed.value as Timeline, solo) : timelineParsed.value;
+		const timeline = checked.success ? soloed(timelineParsed.value as Timeline, session.solo) : timelineParsed.value;
 		const programs = [{ id: saved.id, name: timelineName, timeline: timeline as Timeline }];
 		// While a take runs the image keeps every track, as the keys' own image does, so a track recorded into from nothing
 		// plays in the song from its first note.
 		return {
 			request: buildRequest(reached.patches, reached.assets, programs, { live: keepTracks }),
-			doc: checked.success ? soloed(checked.data, solo) : undefined
+			doc: checked.success ? soloed(checked.data, session.solo) : undefined
 		};
 	}
 
@@ -560,16 +543,9 @@
 		);
 	}
 
-	function schedule(source: Source) {
-		clearTimeout(timers[source]);
-		asked[source]++;
-		compiling[source] = true;
-		timers[source] = setTimeout(() => compile(source), 250);
-	}
-
 	// The song as it last compiled, rendered to its end and its tail, then downloaded.
 	async function exportWav() {
-		const compiled = goodSong;
+		const compiled = session.goodSong;
 		const program = compiled?.report.programs[0];
 		if (!compiled || !program || rendering !== null) return;
 		rendering = 0;
@@ -584,46 +560,6 @@
 		}
 	}
 
-	// Sends an image to the engine, which plays it once it has loaded.
-	function load(compiled: Compiled) {
-		rejected = '';
-		loading = compiled.report;
-		engine.load(compiled.image, compiled.report);
-	}
-
-	async function compile(source: Source) {
-		if (fetchingAssets > 0) return; // Their arrival schedules this again
-		const mine = asked[source];
-		const done = () => {
-			if (asked[source] === mine) compiling[source] = false;
-		};
-		const request = source === 'alone' ? aloneRequest() : null;
-		const built: { request: string; doc?: Timeline } | null =
-			source === 'song' ? songRequest() : request ? { request } : null;
-		if (!built || built.request === sent[source]) return done();
-		sent[source] = built.request;
-		compiles++;
-		const from = openKey;
-		compiler ??= new Compiler();
-		const result = await compiler.compile(built.request, source);
-		if (!result || (source === 'song' && from !== openKey)) return done();
-		sourceOf.set(result.report, source);
-		if (source === 'song') {
-			if (built.doc) compiledFrom.set(result.report, built.doc);
-			song = result;
-			if (result.report.ok) goodSong = result;
-			else if (take?.phase === 'arming') {
-				take = null;
-				say("The song doesn't compile, so it can't be recorded into. The light says what's wrong.");
-			}
-		} else {
-			alone = result;
-			if (result.report.ok) goodAlone = result;
-		}
-		if (result.report.ok && started && want === source) load(result);
-		done();
-	}
-
 	// Another song resets what belonged to the last one, and the transport goes back to its start. The chosen track is the new
 	// timeline editor's to say, which it does as it opens, and that can come before this runs, so it isn't reset here.
 	let shownSong = '';
@@ -636,18 +572,7 @@
 			if (first) return;
 			if (take) endTake();
 			take = null;
-			song = goodSong = liveSong = null;
-			sent.song = '';
-			songTick = 0;
-			songRan = false;
-			solo = new Set();
-			loop = null;
-			looping = false;
-			if (started && want === 'song') {
-				engine.stop();
-				engine.locate(0);
-				engine.setLoop(0, 0);
-			}
+			session.songChanged();
 		});
 	});
 
@@ -659,9 +584,7 @@
 			if (id === shownPatchId) return;
 			shownPatchId = id;
 			probes = [];
-			alone = goodAlone = null;
-			sent.alone = '';
-			if (live === 'alone') live = null;
+			session.aloneChanged();
 		});
 	});
 
@@ -672,139 +595,40 @@
 		untrack(() => {
 			if (key === aloneKey) return;
 			aloneKey = key;
-			alone = goodAlone = null;
-			sent.alone = '';
-			if (live === 'alone') live = null;
+			session.aloneChanged();
 		});
 	});
 
 	// What each image is made of. Reading it here is what runs these again when any of it changes, and an image whose request
 	// hasn't changed isn't compiled again.
 	$effect(() => {
-		void [recipe, saved, timelineText, timelineName, library, assets, fetchingAssets, solo, keepTracks];
-		schedule('song');
+		void [recipe, saved, timelineText, timelineName, library, assets, fetchingAssets, session.solo, keepTracks];
+		session.schedule('song');
 	});
 	$effect(() => {
 		void [aloneWanted, aloneTrack, shown, patchName, library, assets, fetchingAssets];
-		schedule('alone');
+		session.schedule('alone');
 	});
-
-	// Makes `source` the image playing, then sends `then` once it is.
-	function use(source: Source, then?: () => void) {
-		if (want !== source) {
-			if (want === 'song') songRan = live === 'song' && !!engineState?.playing;
-			if (live === 'song' && engineState) songTick = engineState.tick;
-			want = source;
-			// The image swaps under a running transport, and what played on its own ran it only for its LFOs. Stopped first,
-			// the song comes back as it was left. That image may already be on its way out, so `live` can't say it was there.
-			if (source === 'song' && !songRan && engineState?.playing) engine.stop();
-			waiting = source === 'song' ? [() => engine.locate(songTick)] : [];
-			const good = source === 'song' ? goodSong : goodAlone;
-			if (started && good) load(good);
-		}
-		if (then) {
-			if (live === want) then();
-			else waiting.push(then);
-		}
-		if (!started) void start();
-	}
-
-	async function start() {
-		if (starting) return;
-		starting = true;
-		await engine.start();
-		started = true;
-		const good = want === 'song' ? goodSong : goodAlone;
-		if (good) load(good);
-	}
-
-	function settle(report: CompileReport) {
-		const doc = compiledFrom.get(report);
-		const program = report.programs[0];
-		if (!doc || !program) return;
-		const { mix, params, inserts } = settlingWrites(doc, program, library);
-		for (const { register, value } of mix) engine.setMix(register, value);
-		for (const { track, param, value } of params) engine.setParam(track, param, value);
-		for (const { insert, param, value } of inserts) engine.setInsertParam(insert, param, value);
-	}
-
-	// The song's length, so Play at its end starts it again.
-	const length = $derived(goodSong?.report.programs[0]?.length_ticks ?? 0);
-
-	function play() {
-		use('song', () => {
-			if (engineState && length > 0 && engineState.tick >= length && !engineState.playing) engine.locate(0);
-			for (const ring of rings) ring.mark(); // Meters hold the loudest since Play
-			engine.play();
-		});
-	}
-
-	const songPlaying = $derived(live === 'song' && !!engineState?.playing);
 
 	// Stop, and pressed again once stopped, back to the start, as most DAWs do. A laptop may have no Home key.
 	function stop() {
-		if (take) {
-			endTake();
-			engine.stop();
-		} else if (songPlaying) engine.stop();
-		else toStart();
+		if (!take) return session.stopOrStart();
+		endTake();
+		engine.stop();
 	}
 
-	// Back to the start of the song. A patch heard on its own keeps the engine, and the song starts there when it comes back.
-	function toStart() {
-		songTick = 0;
-		if (live === 'song') engine.locate(0);
-	}
-
-	// The playhead moved by the top bar's position: shown there at once, and where the song starts if a patch on its own is
-	// playing now.
-	function moveTo(at: number) {
-		songTick = at;
-		controls.locate(at);
-	}
-
-	// The loop is the editor's, not the song's: it isn't saved, and another song starts without one. The top bar turns it on and
-	// off, and the arrangement's strip shows it, draws it and moves it. Until one is drawn it is the whole song, which follows the
-	// song as it grows, so null stands for that.
-	let loop = $state.raw<Loop | null>(null);
-	let looping = $state(false);
-	let loopSent = false;
-
-	function setLoop(next: Loop | null, on: boolean) {
-		loop = next;
-		looping = on;
-	}
-
-	const toggleLoop = () => setLoop(loop, !looping);
-
-	// What the engine loops, sent again with each new image, which can be in a new engine. A loop drawn before audio starts
-	// reaches the engine this way too.
+	// What the engine loops, sent again with each new image, which can be in a new engine.
 	$effect(() => {
-		void targets;
-		const range = looping && songDoc ? (loop ?? wholeSong(songDoc)) : null;
-		untrack(() => {
-			if (range) engine.setLoop(range.start, range.end);
-			else if (loopSent) engine.setLoop(0, 0);
-			loopSent = range !== null;
-		});
+		void session.targets;
+		const range = session.looping && songDoc ? (session.loop ?? wholeSong(songDoc)) : null;
+		untrack(() => session.sendLoop(range));
 	});
-
-	// What the timeline's editors send. Notes and moves of the playhead bring the song back; a control dragged while a patch plays
-	// on its own has nothing to move, and settles when its edit compiles.
-	const controls: SongControls = {
-		noteOn: (track, note, velocity) => use('song', () => engine.noteOn(track, note, velocity)),
-		noteOff: (track, note) => use('song', () => engine.noteOff(track, note)),
-		locate: (tick) => use('song', () => engine.locate(tick)),
-		setLoop: (start, end) => setLoop(end > start ? { start, end } : null, end > start),
-		setMix: (register, value) => live === 'song' && want === 'song' && engine.setMix(register, value),
-		setParam: (track, param, value) => live === 'song' && want === 'song' && engine.setParam(track, param, value),
-		setInsertParam: (insert, param, value) =>
-			live === 'song' && want === 'song' && engine.setInsertParam(insert, param, value)
-	};
 
 	// The top bar's keys play what the view on screen is about: the chosen track in the Song view, and in the Patch view its
 	// patch, wherever it is heard. A track the image leaves out, because it has no notes yet, is played on its own.
-	const chosenIndex = $derived(goodSong?.report.programs[0]?.tracks.find((t) => t.id === selectedTrack)?.index ?? null);
+	const chosenIndex = $derived(
+		session.goodSong?.report.programs[0]?.tracks.find((t) => t.id === selectedTrack)?.index ?? null
+	);
 	const chosenName = $derived(songDoc?.tracks.find((t) => t.id === selectedTrack)?.name ?? '');
 	const keysPlay = $derived(view === 'song' ? chosenIndex !== null || aloneTrack !== null : hears.kind !== 'none');
 	const keysWhere = $derived.by(() => {
@@ -823,18 +647,29 @@
 	});
 
 	// Where each key held down went, so it is let go there though the view or the chosen track changed meanwhile.
-	const sounding = new Map<number, { source: Source; track: number; stamped: boolean }>();
+	// When it went down, and when the engine was sent it, which is later while audio or an image is still on its way.
+	type Held = { source: Source; track: number; stamped: boolean; down: number; sent: number | null };
+	const sounding = new Map<number, Held>();
+
+	// Sends a note to where it is held, and keeps when that was.
+	function sendOn(held: Held, note: number, vel: number, at?: number) {
+		session.use(held.source, () => {
+			held.sent = performance.now();
+			engine.noteOn(held.track, note, vel, held.stamped ? at : undefined);
+		});
+	}
 
 	// While step entry is on, the keys in the Song view also write into the clip in the roll, which they can do on a track
 	// that is silent because it has no notes yet.
 	let songEditor = $state<ReturnType<typeof TimelineEditor>>();
 	let stepWriting = $state(false);
 
-	// The velocity the keys play at, which is the roll's Vel, the velocity of new notes: so what is heard is what step entry and
-	// a take write, and C and V step it in either view. It outlasts the song it was set in, as the keys do.
+	// The velocity the keys play at, which is the velocity of new notes too, clicked into the roll, stepped or recorded: so what
+	// is heard is what is written. One Vel field holds it, beside the keys, and C and V step it in either view. It outlasts the
+	// song it was set in, as the keys do.
 	let velocity = $state(100);
 
-	// Hold latches what the keys play: a key let go keeps sounding until it is played again, Esc, or Hold is turned off, which
+	// Latch holds what the keys play: a key let go keeps sounding until it is played again, Esc, or Latch is turned off, which
 	// lets go of everything. It is only what is heard. Step entry still hears each key come up as it does, and a key a take
 	// records isn't latched, so the take writes how long it was down and what plays back is what was heard.
 	let hold = $state(false);
@@ -874,9 +709,28 @@
 		if (!on) letGo(latched);
 	}
 
+	// Once nothing is heard on its own any more, as when a new track's first note puts it in the song, the song takes over, and a
+	// key still held carries on there, so the click that wrote the note is heard, though it started audio and that image was
+	// still on its way.
+	$effect(() => {
+		if (aloneWanted) return;
+		untrack(() => {
+			if (session.want !== 'alone') return;
+			const held = [...sounding].filter(([note, at]) => at.source === 'alone' && !at.stamped && !latched.has(note));
+			const track = view === 'song' ? chosenIndex : hears.kind === 'song' ? hears.track : null;
+			session.wantSong();
+			if (track === null) return;
+			for (const [note, was] of held) {
+				const carried: Held = { source: 'song', track, stamped: false, down: was.down, sent: null };
+				sounding.set(note, carried);
+				sendOn(carried, note, velocity);
+			}
+		});
+	});
+
 	// A held note goes with the image it was playing in, once another takes over.
 	$effect(() => {
-		const now = want;
+		const now = session.want;
 		untrack(() => letGo([...latched].filter((note) => sounding.get(note)?.source !== now)));
 	});
 
@@ -886,9 +740,16 @@
 		if (!on) {
 			const held = sounding.get(note);
 			sounding.delete(note);
-			// A note whose image has since given way to another went with it. One a take heard go down, it hears come up.
-			const stamp = held?.stamped ? (at ?? performance.now()) : undefined;
-			if (held && want === held.source) use(held.source, () => engine.noteOff(held.track, note, stamp));
+			// A note whose image has since given way to another went with it. One a take heard go down, it hears come up. One that
+			// reached the engine late, because the click that played it also started audio, is held as long as its key was.
+			if (!held || session.want !== held.source) return;
+			const stamp = held.stamped ? (at ?? performance.now()) : undefined;
+			const kept = performance.now() - held.down;
+			session.use(held.source, () => {
+				const short = held.sent === null || stamp !== undefined ? 0 : kept - (performance.now() - held.sent);
+				if (short > 1) setTimeout(() => engine.noteOff(held.track, note), short);
+				else engine.noteOff(held.track, note, stamp);
+			});
 			return;
 		}
 		const heard = hears;
@@ -907,8 +768,9 @@
 		if (!to) return;
 		// A take records the keys that play its track, from the count-in on, and stamps them with when they were pressed.
 		const stamped = at !== undefined && take?.phase === 'started' && to.source === 'song' && to.track === takeIndex;
-		sounding.set(note, { ...to, stamped });
-		use(to.source, () => engine.noteOn(to.track, note, vel, stamped ? at : undefined));
+		const held: Held = { ...to, stamped, down: performance.now(), sent: null };
+		sounding.set(note, held);
+		sendOn(held, note, vel, at);
 	}
 
 	// ----------------------------------------------------------------------------------------------------------- recording
@@ -923,21 +785,20 @@
 	// edit of its run, and a clip for the roll to show.
 	const takeHost: TakeHost = {
 		doc: (key) => (saved && timelineDoc && draftKey('timeline', saved.id) === key ? timelineDoc : null),
-		loop: () => (looping && timelineDoc ? (loop ?? wholeSong(timelineDoc)) : null),
+		loop: () => (session.looping && timelineDoc ? (session.loop ?? wholeSong(timelineDoc)) : null),
 		write: (doc) => timelineEdited({ text: JSON.stringify(doc, null, 1) }, 'typing'),
 		shown: (track, clip) => void rendered().then(() => songEditor?.reveal({ track, clip }))
 	};
-	let liveSong = $state.raw<CompileReport | null>(null); // The song's image that is playing, once one is
 	const keepTracks = $derived(take !== null);
 	const takeIndex = $derived(
-		take ? (goodSong?.report.programs[0]?.tracks.find((t) => t.id === take!.track)?.index ?? null) : null
+		take ? (session.goodSong?.report.programs[0]?.tracks.find((t) => t.id === take!.track)?.index ?? null) : null
 	);
 	const takeTrack = $derived(timelineDoc?.tracks.find((t) => t.id === selectedTrack));
 	const recordWhy = $derived.by(() => {
 		if (recipe)
 			return "An example can't be recorded into. Add it to the library from its ▾ menu to record into a copy.";
 		if (view !== 'song') return 'Recording writes into the chosen track, in the Song view.';
-		if (!saved || !timelineDoc) return 'Open a timeline to record into.';
+		if (!saved || !timelineDoc) return 'Open a song to record into.';
 		if (!takeTrack) return 'Choose a track to record into.';
 		if (!takeTrack.slots.length) return 'This track has no patch to play.';
 		return '';
@@ -945,7 +806,7 @@
 	const recordState = $derived.by(() => {
 		if (!take) return 'off';
 		if (take.phase === 'arming') return 'arming';
-		const now = engineState?.recording ?? 0;
+		const now = session.engineState?.recording ?? 0;
 		return now === 1 ? 'counting' : now === 2 ? 'recording' : 'arming';
 	});
 	const recordTitle = $derived.by(() => {
@@ -967,7 +828,7 @@
 		const key = draftKey('timeline', saved.id);
 		history.end(key); // A take is a step of its own
 		take = new TakeRun(takeHost, selectedTrack, key, settings);
-		use('song');
+		session.use('song');
 	}
 
 	// The take starts once an image that plays its track is playing: at once for a track with notes, and for one without,
@@ -976,8 +837,8 @@
 		const ready =
 			take !== null &&
 			take.phase === 'arming' &&
-			live === 'song' &&
-			!!liveSong?.programs[0]?.tracks.some((t) => t.id === take!.track);
+			session.live === 'song' &&
+			!!session.liveSong?.programs[0]?.tracks.some((t) => t.id === take!.track);
 		if (ready) untrack(beginTake);
 	});
 
@@ -986,13 +847,13 @@
 		const doc = songDoc;
 		take.start();
 		songEditor?.stopStepping();
-		if (engineState?.playing) {
-			engine.record(doc.ppq, BEATS_PER_BAR, 0, engineState.tick);
+		if (session.engineState?.playing) {
+			engine.record(doc.ppq, BEATS_PER_BAR, 0, session.engineState.tick);
 			return;
 		}
 		// With a loop on, the take starts at its start, so the first pass is a whole one.
-		const start = looping ? (loop ?? wholeSong(doc)).start : tick;
-		if (start !== engineState?.tick) engine.locate(start);
+		const start = session.looping ? (session.loop ?? wholeSong(doc)).start : tick;
+		if (start !== session.engineState?.tick) engine.locate(start);
 		for (const ring of rings) ring.mark(); // Meters hold the loudest since the take began, as they do since Play
 		engine.record(doc.ppq, BEATS_PER_BAR, tempoAt(doc.tempo, start), start);
 	}
@@ -1036,8 +897,8 @@
 	});
 
 	function patchParam(param: Param, value: number, done = false) {
-		if (hears.kind === 'song' && live === 'song') engine.setParam(hears.track, param.id, value);
-		else if (hears.kind === 'alone' && live === 'alone') engine.setParam(0, param.id, value);
+		if (hears.kind === 'song' && session.live === 'song') engine.setParam(hears.track, param.id, value);
+		else if (hears.kind === 'alone' && session.live === 'alone') engine.setParam(0, param.id, value);
 		if (done && controlsSave && hears.kind === 'song' && timelineDoc) {
 			timelineEdited({ text: JSON.stringify(setSongValue(timelineDoc, hears.id, param, value), null, 1) });
 		}
@@ -1046,25 +907,31 @@
 	// A track's own value taken away, so the patch's default plays there again, heard at once and settled by the compile.
 	function patchParamReset(param: Param) {
 		if (!controlsSave || hears.kind !== 'song' || !timelineDoc) return;
-		if (live === 'song') engine.setParam(hears.track, param.id, param.default);
+		if (session.live === 'song') engine.setParam(hears.track, param.id, param.default);
 		timelineEdited({ text: JSON.stringify(setSongValue(timelineDoc, hears.id, param, undefined), null, 1) });
 	}
 
 	// ------------------------------------------------------------------------------------------------------ probes, scopes
 
 	let probes = $state<Probe[]>([]);
-	const songTargets = $derived(live === 'song' ? targets : []);
+	const songTargets = $derived(session.live === 'song' ? session.targets : []);
 	const maxProbes = $derived(
 		hears.kind === 'none'
 			? 0
-			: Math.max(0, 8 - (hears.kind === 'alone' ? 2 : goodSong ? tapTargets(goodSong.report.programs[0]).length : 8))
+			: Math.max(
+					0,
+					8 -
+						(hears.kind === 'alone' ? 2 : session.goodSong ? tapTargets(session.goodSong.report.programs[0]).length : 8)
+				)
 	);
 
 	// A probe follows the voice where keys are heard.
 	$effect(() => {
 		const id = shown?.patch.id;
 		const voice =
-			live === 'song' && hears.kind === 'song' ? { track: hears.track, slot: hears.slot } : { track: 0, slot: 0 };
+			session.live === 'song' && hears.kind === 'song'
+				? { track: hears.track, slot: hears.slot }
+				: { track: 0, slot: 0 };
 		const list = probes;
 		if (id) untrack(() => engine.setProbes(id, list, voice));
 	});
@@ -1072,30 +939,32 @@
 	const patchScopes = $derived.by(() => {
 		const found: { slot: number; label: string; ring: Ring }[] = [];
 		const chain =
-			live === 'alone' && hears.kind === 'alone'
+			session.live === 'alone' && hears.kind === 'alone'
 				? 'master'
-				: live === 'song' && hears.kind === 'song'
+				: session.live === 'song' && hears.kind === 'song'
 					? `track:${hears.id}`
 					: null;
-		const output = targets.find((t) => chain && t.chain === chain);
+		const output = session.targets.find((t) => chain && t.chain === chain);
 		if (output)
 			found.push({
 				slot: output.slot,
 				label: hears.kind === 'alone' ? `${patchName} on its own` : output.label,
 				ring: rings[output.slot]
 			});
-		for (const t of targets) if (!t.chain) found.push({ slot: t.slot, label: t.label, ring: rings[t.slot] });
+		for (const t of session.targets) if (!t.chain) found.push({ slot: t.slot, label: t.label, ring: rings[t.slot] });
 		return found;
 	});
 	const masterRing = $derived.by(() => {
-		const master = targets.find((t) => t.chain === 'master');
+		const master = session.targets.find((t) => t.chain === 'master');
 		return master ? rings[master.slot] : null;
 	});
 
 	// --------------------------------------------------------------------------------------------------------- the page
 
-	const songErrors = $derived(song?.report.ok === false ? (song.report.errors ?? []) : []);
-	const aloneErrors = $derived(aloneWanted && alone?.report.ok === false ? (alone.report.errors ?? []) : []);
+	const songErrors = $derived(session.song?.report.ok === false ? (session.song.report.errors ?? []) : []);
+	const aloneErrors = $derived(
+		aloneWanted && session.alone?.report.ok === false ? (session.alone.report.errors ?? []) : []
+	);
 	const errors = $derived(
 		[...songErrors, ...aloneErrors].filter(
 			(problem, index, all) =>
@@ -1110,11 +979,13 @@
 		}
 		return found;
 	});
-	const inSong = $derived(shown ? goodSong?.report.sidecar?.[shown.patch.id] !== undefined : false);
+	const inSong = $derived(shown ? session.goodSong?.report.sidecar?.[shown.patch.id] !== undefined : false);
 	const patchNodes = $derived(
-		shown ? (goodSong?.report.sidecar?.[shown.patch.id] ?? goodAlone?.report.sidecar?.[shown.patch.id]) : undefined
+		shown
+			? (session.goodSong?.report.sidecar?.[shown.patch.id] ?? session.goodAlone?.report.sidecar?.[shown.patch.id])
+			: undefined
 	);
-	const patchFailed = $derived(inSong ? song?.report.ok === false : alone?.report.ok === false);
+	const patchFailed = $derived(inSong ? session.song?.report.ok === false : session.alone?.report.ok === false);
 	const patchProblem = $derived(shown && !shown.example ? graphError(patchText) : '');
 
 	// ---------------------------------------------------------------------------------------------- the compile light
@@ -1171,19 +1042,19 @@
 		return () => void openSong({ track: place.track, clip: place.clip, tab: place.mix ? 'mixer' : undefined });
 	}
 
-	const warnings = $derived(song?.report.ok ? (song.report.programs[0]?.warnings ?? []) : []);
+	const warnings = $derived(session.song?.report.ok ? (session.song.report.programs[0]?.warnings ?? []) : []);
 	const problems = $derived.by((): Problem[] => {
 		const list: Problem[] = [];
 		if (assetProblem) list.push({ key: 'assets', severity: 'error', place: 'Recordings', message: assetProblem });
-		if (rejected) {
-			const message = `The engine refused this image: ${rejected}.`;
+		if (session.rejected) {
+			const message = `The engine refused this image: ${session.rejected}.`;
 			list.push({ key: 'rejected', severity: 'error', place: 'Engine', message, testid: 'load-rejected' });
 		}
-		const loadError = engineState ? LOAD_ERRORS[engineState.error] : '';
+		const loadError = session.engineState ? LOAD_ERRORS[session.engineState.error] : '';
 		if (loadError) list.push({ key: 'load', severity: 'error', place: 'Engine', message: loadError });
 		if (timelineParsed.error) {
 			const go = () => void openSong({ tab: 'json' });
-			list.push({ key: 'timeline-json', severity: 'error', place: 'Timeline JSON', message: timelineParsed.error, go });
+			list.push({ key: 'timeline-json', severity: 'error', place: 'Song JSON', message: timelineParsed.error, go });
 		}
 		if (patchProblem) {
 			const go = () => void show('patch');
@@ -1204,14 +1075,18 @@
 			const place = placeWords(where, names);
 			list.push({ key: `warning ${index}`, severity: 'warning', place, message, go: goTo(where) });
 		});
-		if (engineState?.guardTrips) {
-			const message = `A voice made a value that isn't a number ${engineState.guardTrips} times, and its guard silenced it.`;
+		if (session.engineState?.guardTrips) {
+			const message = `A voice made a value that isn't a number ${session.engineState.guardTrips} times, and its guard silenced it.`;
 			list.push({ key: 'guards', severity: 'warning', place: 'Engine', message });
 		}
 		return list;
 	});
 	const imageSize = $derived(
-		goodSong ? sizeOf(goodSong.report.image_bytes) : goodAlone ? sizeOf(goodAlone.report.image_bytes) : ''
+		session.goodSong
+			? sizeOf(session.goodSong.report.image_bytes)
+			: session.goodAlone
+				? sizeOf(session.goodAlone.report.image_bytes)
+				: ''
 	);
 
 	// ------------------------------------------------------------------------------------------------------------ messages
@@ -1238,7 +1113,7 @@
 	const formProblem = $derived(form?.message && shutForm !== form ? form.message : '');
 
 	const problemCount = $derived.by(() => {
-		if (busy) return null;
+		if (session.busy) return null;
 		const errorCount = problems.filter((problem) => problem.severity === 'error').length;
 		if (errorCount) return `${errorCount} ${errorCount === 1 ? 'problem' : 'problems'}`;
 		return problems.length ? `${problems.length} ${problems.length === 1 ? 'warning' : 'warnings'}` : 'No problems';
@@ -1265,12 +1140,12 @@
 	const exampleUse = $derived.by(() => {
 		if (!recipe || !shown?.example) return '';
 		const uses = patchUses(recipe.timeline, shown.patch.id);
-		const what = `${shown.patch.name} is ${uses.length ? uses.map(usedAs).join(' and ') : 'not used by the timeline'}.`;
+		const what = `${shown.patch.name} is ${uses.length ? uses.map(usedAs).join(' and ') : 'not used by the song'}.`;
 		return hears.kind === 'none' && uses.length ? `${what} Probes follow a voice, so an insert can't be probed.` : what;
 	});
 
 	const ppq = $derived(songDoc?.ppq ?? 480);
-	const tick = $derived(live === 'song' ? (engineState?.tick ?? 0) : songTick);
+	const tick = $derived(session.tick);
 
 	// The position and the tempo are fields. Typing a position moves the playhead, and typing a tempo changes the tempo in effect
 	// at the playhead, the one change of the song's that is playing there. While one is typed into, the playhead moving on
@@ -1290,7 +1165,7 @@
 	const tempoItems = (doc: Timeline): MenuItem[] =>
 		doc.tempo.map((change, index) => ({
 			label: `${bpmText(change.bpm)} BPM at bar ${barOf(change.tick, doc.ppq)}${change.ramp && index < doc.tempo.length - 1 ? ', gliding on' : ''}`,
-			action: () => moveTo(change.tick)
+			action: () => session.moveTo(change.tick)
 		}));
 
 	// Enter or leaving the field sends what was typed, and Esc puts back what was there.
@@ -1311,7 +1186,7 @@
 		if (text === null || !songDoc || recipe) return;
 		const at = parsePosition(text, ppq);
 		if (at === null) say(`“${text.trim()}” isn't a position. Type bar.beat.tick, as 3.2.000, or a bar.`);
-		else if (at !== tick) moveTo(at);
+		else if (at !== tick) session.moveTo(at);
 	}
 
 	function tempoEntered() {
@@ -1410,7 +1285,7 @@
 	// What Mod+K finds: the library's timelines, the examples, and the patches, the library's own before the built-in ones.
 	const openables = $derived.by((): Openable[] => [
 		...data.library.timelines.map((t) => ({
-			kind: 'Timeline' as const,
+			kind: 'Song' as const,
 			name: t.name,
 			href: timelineHref(search, t.id, saved?.id ?? null)
 		})),
@@ -1523,14 +1398,14 @@
 			event.preventDefault(); // Or a button with focus is pressed, and the roll scrolls
 			if (event.repeat) return;
 			if (take) stop();
-			else if (songPlaying) engine.stop();
-			else if (songDoc) play();
+			else if (session.songPlaying) engine.stop();
+			else if (songDoc) session.play();
 		} else if (view === 'song' && matches(event, 'record')) {
 			event.preventDefault();
 			if (!event.repeat) record();
 		} else if (matches(event, 'start')) {
 			event.preventDefault();
-			toStart();
+			session.toStart();
 		} else if (matches(event, 'softer') || matches(event, 'louder')) {
 			event.preventDefault(); // C and V step the velocity the keys play and new notes take, in either view
 			velocity = stepVelocity(velocity, matches(event, 'louder') ? 1 : -1);
@@ -1554,39 +1429,31 @@
 		if (form?.exported) downloadImage(form.exported.image, `${form.exported.name}.msimg`);
 	});
 
+	// Audio starts with the page's first click or key anywhere, which is when a browser first lets it, so nothing has to be
+	// pressed for it, and the click or key itself is heard: a note clicked into a new song sounds. Capture sees it before what
+	// it lands on acts.
 	onMount(() => {
-		browserOpen = localStorage.getItem('modsynth.browser') !== 'closed';
-		engine.onState = (s) => {
-			engineState = s;
-			// A shared LFO waits for the transport, and a patch on its own has no Play button.
-			if (live === 'alone' && want === 'alone' && s.generation !== 0 && !s.playing) engine.play();
+		const begin = () => {
+			if (!session.started) void session.start();
 		};
-		engine.onTap = (slot, block) => rings[slot].push(block.samples, block.start, block.generation);
-		engine.onTargets = (t) => (targets = t);
-		engine.onRejected = (reason) => {
-			rejected = reason;
-			loading = null;
-		};
-		engine.onPlayed = keyStamped;
-		engine.onTakeEnd = takeEnded;
-		engine.onLive = (report) => {
-			if (report === loading) loading = null;
-			live = sourceOf.get(report) ?? null;
-			if (live === 'song') liveSong = report;
-			if (live === 'song') settle(report);
-			if (live === want) {
-				const ready = waiting;
-				waiting = [];
-				for (const send of ready) send();
-			}
+		const options = { capture: true };
+		addEventListener('pointerdown', begin, options);
+		addEventListener('keydown', begin, options);
+		return () => {
+			removeEventListener('pointerdown', begin, options);
+			removeEventListener('keydown', begin, options);
 		};
 	});
 
+	onMount(() => {
+		browserOpen = localStorage.getItem('modsynth.browser') !== 'closed';
+		engine.onPlayed = keyStamped;
+		engine.onTakeEnd = takeEnded;
+	});
+
 	onDestroy(() => {
-		for (const timer of Object.values(timers)) clearTimeout(timer);
 		clearTimeout(noteTimer);
-		compiler?.close();
-		engine.close();
+		session.close();
 	});
 </script>
 
@@ -1610,35 +1477,33 @@
 			{view}
 			song={songName}
 			patch={patchName}
-			alone={live === 'alone' || (want === 'alone' && started)}
+			alone={session.live === 'alone' || (session.want === 'alone' && session.started)}
 			menu={recipe || saved ? songMenu : undefined}
 			onview={show}
 		/>
-		{#if !started}
+		<div class="transport" role="group" aria-label="Transport">
 			<button
 				type="button"
-				title="Browsers make no sound until the page is clicked or a key pressed, so audio starts with this, Play or a key"
-				onclick={() => use(want)}>Start audio</button
-			>
-		{/if}
-		<div class="transport" role="group" aria-label="Transport">
-			<button type="button" class="icon play" aria-label="Play" onclick={play} disabled={!songDoc} title="Play (Space)"
-				><span aria-hidden="true">▶</span></button
+				class="icon play"
+				aria-label="Play"
+				onclick={() => session.play()}
+				disabled={!songDoc}
+				title="Play (Space)"><span aria-hidden="true">▶</span></button
 			>
 			<button
 				type="button"
 				class="icon"
 				aria-label="Stop"
 				onclick={stop}
-				disabled={!started}
+				disabled={!session.started}
 				title="Stop. Pressed again, back to the start (Home)"><span aria-hidden="true">■</span></button
 			>
 			<button
 				type="button"
 				class="icon"
 				aria-label="Loop"
-				aria-pressed={looping}
-				onclick={toggleLoop}
+				aria-pressed={session.looping}
+				onclick={() => session.toggleLoop()}
 				disabled={!songDoc}
 				title="Loop, over what the strip under the arrangement's bar numbers shows"
 				><span aria-hidden="true">⟲</span></button
@@ -1653,7 +1518,7 @@
 				onclick={record}
 				disabled={!take && recordWhy !== ''}
 				title={recordTitle}
-				>{#if recordState === 'counting'}<span class="count">{engineState?.countIn}</span>{:else}<span
+				>{#if recordState === 'counting'}<span class="count">{session.engineState?.countIn}</span>{:else}<span
 						aria-hidden="true">●</span
 					>{/if}</button
 			>
@@ -1748,14 +1613,14 @@
 			onletgo={() => letGo(latched)}
 			stripIn={view === 'patch' ? keyStrip : null}
 		/>
-		<div class="master"><Meter ring={masterRing} label="Master level" limiter={engineState} /></div>
+		<div class="master"><Meter ring={masterRing} label="Master level" limiter={session.engineState} /></div>
 		<span class="grow"></span>
-		<CompileLight {busy} {problems} size={imageSize} details={engineDetails} />
+		<CompileLight busy={session.busy} {problems} size={imageSize} details={engineDetails} />
 		{#if dirty.size}<span class="muted unsaved" data-testid="unsaved" title={`${dirty.size} unsaved. Save keeps them.`}
 				>{dirty.size} <span class="word">unsaved</span></span
 			>{/if}
 		<form method="POST" action={actionOn(search, 'save')} use:enhance={saving} bind:this={saveForm}>
-			<button disabled={!dirty.size} title={`Save every unsaved patch and timeline (${label('save')})`}>Save</button>
+			<button disabled={!dirty.size} title={`Save every unsaved patch and song (${label('save')})`}>Save</button>
 		</form>
 	</header>
 
@@ -1783,17 +1648,17 @@
 							id={openKey}
 							doc={songDoc}
 							patches={songPatches}
-							program={goodSong?.report.programs[0] ?? null}
+							program={session.goodSong?.report.programs[0] ?? null}
 							errors={songErrors}
 							{tick}
-							playing={live === 'song' && !!engineState?.playing}
+							playing={session.live === 'song' && !!session.engineState?.playing}
 							targets={songTargets}
 							{rings}
 							engine={controls}
 							history={timelineHistory}
-							{loop}
-							{looping}
-							onloop={setLoop}
+							loop={session.loop}
+							looping={session.looping}
+							onloop={(next, on) => session.setLoop(next, on)}
 							readonly={recipe !== null}
 							active={view === 'song'}
 							tabs={[
@@ -1802,24 +1667,24 @@
 							]}
 							{heading}
 							examples={data.examples}
-							{solo}
+							solo={session.solo}
 							onchange={(next) => timelineEdited({ text: JSON.stringify(next, null, 1) })}
 							asked={askedPlace}
 							onplace={placeChosen}
 							onopen={patchOpened}
 							onnewpatch={newPatchForTrack}
 							onwriting={(writing) => (stepWriting = writing)}
-							onsolo={toggleSolo}
+							onsolo={(id) => session.toggleSolo(id, songDoc)}
 							ontempo={(tempo) => (draggedTempo = tempo)}
-							onkey={(note, on) => started && soundNote(note, on)}
+							onkey={(note, on) => soundNote(note, on)}
 							onsay={say}
-							bind:velocity
+							{velocity}
+							catalog={data.catalog}
+							onpatchinput={laneInPatch}
 						/>
 					{/key}
 				{:else}
-					<p class="muted empty">
-						No timeline is open. Choose one or an example in the browser, or make a new one there.
-					</p>
+					<p class="muted empty">No song is open. Choose one or an example in the browser, or make a new one there.</p>
 				{/if}
 			</div>
 
@@ -1946,11 +1811,11 @@
 		<strong class="songname" title={recipe.entry.listen_for}>{recipe.entry.name}</strong>
 		<span class="muted listen">{recipe.entry.listen_for}</span>
 	{:else if saved}
-		<span class="kind">Timeline</span>
+		<span class="kind">Song</span>
 		<input
 			bind:this={nameField}
 			class="songname"
-			aria-label="Timeline name"
+			aria-label="Song name"
 			value={timelineName}
 			oninput={(e) => timelineEdited({ name: e.currentTarget.value })}
 		/>
@@ -1965,7 +1830,7 @@
 		timeline={saved && !recipe ? { id: saved.id } : null}
 		example={recipe ? { name: recipe.entry.name, inLibrary: recipe.inLibrary ?? null } : null}
 		{rendering}
-		canRender={goodSong !== null}
+		canRender={session.goodSong !== null}
 		onrename={() => void rename()}
 		onwav={() => void exportWav()}
 	/>
@@ -1975,23 +1840,23 @@
 {#snippet engineDetails()}
 	<p class="engine muted">
 		The playhead is at tick <span data-testid="tick">{tick}</span>.
-		{#if engineState}
+		{#if session.engineState}
 			<span
 				data-testid="state"
-				data-playing={engineState.playing}
-				data-live={live ?? ''}
-				data-time={engineState.time}
-				data-recording={engineState.recording}
-				data-clicks={engineState.clicks}
+				data-playing={session.engineState.playing}
+				data-live={session.live ?? ''}
+				data-time={session.engineState.time}
+				data-recording={session.engineState.recording}
+				data-clicks={session.engineState.clicks}
 			>
-				<span data-testid="voices">{engineState.voices}</span> voices sounding, in image
-				<span data-testid="generation">{engineState.generation}</span> since audio started, which has rendered
-				{engineState.time.toFixed(1)} s.
+				<span data-testid="voices">{session.engineState.voices}</span> voices sounding, in image
+				<span data-testid="generation">{session.engineState.generation}</span> since audio started, which has rendered
+				{session.engineState.time.toFixed(1)} s.
 			</span>
 		{:else}
-			Audio starts with Play, a key, or Start audio.
+			Audio starts with the page's first click or key, which is when a browser lets it.
 		{/if}
-		Edits have compiled <span data-testid="compiles">{compiles}</span> times since the page opened.
+		Edits have compiled <span data-testid="compiles">{session.compiles}</span> times since the page opened.
 	</p>
 {/snippet}
 
@@ -1999,7 +1864,7 @@
 	<div class="json">
 		{#if recipe}
 			<textarea
-				aria-label="Timeline JSON"
+				aria-label="Song JSON"
 				wrap="off"
 				spellcheck="false"
 				readonly
@@ -2007,7 +1872,7 @@
 		{:else}
 			<p class="muted">Edits compile as you type, and audio crossfades to them without stopping.</p>
 			<textarea
-				aria-label="Timeline JSON"
+				aria-label="Song JSON"
 				wrap="off"
 				spellcheck="false"
 				value={timelineText}
@@ -2018,7 +1883,11 @@
 {/snippet}
 
 {#snippet image()}
-	{#if goodSong}<ReportPanel report={goodSong.report} />{:else}<p class="muted">Nothing has compiled yet.</p>{/if}
+	{#if session.goodSong}
+		<ReportPanel report={session.goodSong.report} />
+	{:else}
+		<p class="muted">Nothing has compiled yet.</p>
+	{/if}
 {/snippet}
 
 <style>

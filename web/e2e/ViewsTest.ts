@@ -17,19 +17,20 @@ const test = base.extend({
 	}
 });
 
-// A 1280 by 800 laptop, the smallest screen the editor is laid out for.
-test.use({ viewport: { width: 1280, height: 800 } });
+// At a laptop's 1280 by 720 and 1280 by 800, the smallest screens the editor is laid out for: the two projects in
+// playwright.config.ts run this file at each.
 
 test.beforeEach(({ page }) => {
 	page.on('dialog', (dialog) => dialog.accept());
 });
 
 const browser = (page: Page) => page.getByRole('navigation', { name: 'Browser' });
+// How much shorter than 800 px the window is, which the notes give up.
+const shorter = (page: Page) => 800 - page.viewportSize()!.height;
 const rail = (page: Page) => page.getByRole('toolbar', { name: 'Library and examples' });
 const shows = (page: Page, view: 'song' | 'patch') =>
 	expect(page.getByTestId(`view-${view}`)).toHaveAttribute('aria-selected', 'true');
-const notesTab = (page: Page) =>
-	page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: /^Notes/ });
+const notesTab = (page: Page) => page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: /^Notes/ });
 // The loudest a track has been since Play or since the image playing now began. A pluck dies away while its key is held, so
 // its level may be gone when it's read, but not this. A track's meter is in its head, in the Song view, which is still there
 // while the Patch view is on screen.
@@ -65,7 +66,7 @@ test('the tabs and ` switch views, and a field keeps its `', async ({ page }) =>
 	await expect(page.getByTestId('graph')).toBeHidden();
 	await expect(page).not.toHaveURL(/view=/);
 
-	const name = page.getByLabel('Timeline name', { exact: true });
+	const name = page.getByLabel('Song name', { exact: true });
 	await name.press('End');
 	await name.press('Backquote');
 	await expect(name).toHaveValue('Song`');
@@ -74,18 +75,18 @@ test('the tabs and ` switch views, and a field keeps its `', async ({ page }) =>
 
 test('the top bar fits a 1280 px screen, long names and all', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await page.getByLabel('Timeline name', { exact: true }).fill('A song with a very long name that goes on and on');
+	await page.getByLabel('Song name', { exact: true }).fill('A song with a very long name that goes on and on');
 	await openView(page, 'patch');
 	await page.getByLabel('Patch name', { exact: true }).fill('A patch with a name just as long as the song has');
 	const bar = page.locator('header.topbar');
 	const fits = () => bar.evaluate((e) => e.scrollWidth <= e.clientWidth);
 	expect(await fits()).toBe(true);
-	await expect(page.getByRole('button', { name: 'Start audio' })).toBeInViewport({ ratio: 1 });
+	await expect(page.getByRole('button', { name: 'Start audio' })).toHaveCount(0); // Audio starts with a click or a key
 	await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeInViewport({ ratio: 1 });
 	await expect(page.getByRole('button', { name: 'C5', exact: true })).toBeInViewport({ ratio: 1 });
 	await expect(page.getByTestId('view-patch')).toHaveAttribute('title', /A patch with a name just as long/);
-	// Each tab still says which song and which patch, in eight characters or more.
-	for (const tab of ['song', 'patch']) expect(await shownCharacters(page, tab)).toBeGreaterThanOrEqual(8);
+	// Each tab still says which song and which patch, in ten characters or more.
+	for (const tab of ['song', 'patch']) expect(await shownCharacters(page, tab)).toBeGreaterThanOrEqual(10);
 });
 
 // Roughly how many of a tab's name's characters show, by the share of its width that does.
@@ -95,13 +96,10 @@ const shownCharacters = (page: Page, tab: string) =>
 		.locator('.name')
 		.evaluate((e) => Math.floor((e.textContent!.length * e.clientWidth) / e.scrollWidth));
 
-test('at 1280 px, with audio not started and an edit unsaved, the tabs show the demo song and its patch whole', async ({
-	page
-}) => {
+test('at 1280 px, with an edit unsaved, the tabs show the demo song and its patch whole', async ({ page }) => {
 	await page.goto('/?timeline=song');
 	await page.getByRole('button', { name: 'Mute' }).first().click();
 	await expect(page.getByTestId('unsaved')).toHaveText('1 unsaved');
-	await expect(page.getByRole('button', { name: 'Start audio' })).toBeVisible();
 	for (const tab of ['song', 'patch']) {
 		const name = page.getByTestId(`view-${tab}`).locator('.name');
 		expect(await name.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
@@ -141,16 +139,17 @@ test('a clip opens its patch, and the song comes back on the same clip, as it wa
 
 test('Back goes to the view before, on the tab it was left on', async ({ page }) => {
 	await page.goto('/?timeline=song');
-	await page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: 'Mixer' }).click();
+	await page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: 'Mixer' }).click();
 	await page.getByRole('button', { name: 'Edit insert 1 on room' }).click();
 	await shows(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Room');
 
 	await page.goBack();
 	await shows(page, 'song');
-	await expect(
-		page.getByRole('tablist', { name: 'Timeline views' }).getByRole('tab', { name: 'Mixer' })
-	).toHaveAttribute('aria-selected', 'true');
+	await expect(page.getByRole('tablist', { name: 'Song views' }).getByRole('tab', { name: 'Mixer' })).toHaveAttribute(
+		'aria-selected',
+		'true'
+	);
 	await page.goForward();
 	await shows(page, 'patch');
 	await expect(page.getByLabel('Patch name', { exact: true })).toHaveValue('Room');
@@ -231,7 +230,7 @@ test('below 1400 px the browser is a rail, and opens over the page until it is u
 	await expect(rail(page)).toBeVisible();
 	const left = (await page.getByTestId('arrangement').boundingBox())!.x;
 
-	await rail(page).getByRole('button', { name: 'Timelines' }).click();
+	await rail(page).getByRole('button', { name: 'Songs' }).click();
 	await expect(browser(page)).toBeVisible();
 	expect((await page.getByTestId('arrangement').boundingBox())!.x).toBe(left); // Over the page, not beside it
 	await page.keyboard.press('Escape');
@@ -252,8 +251,8 @@ test('below 1400 px the browser is a rail, and opens over the page until it is u
 test('the piano roll has room in the Song view', async ({ page }) => {
 	// The roll was 100 px or so when the patch editor shared the page.
 	await page.goto('/?timeline=ballad');
-	await expect.poll(async () => (await rollView(page)).height).toBeGreaterThan(300);
+	await expect.poll(async () => (await rollView(page)).height).toBeGreaterThan(300 - shorter(page));
 	// Two tracks, and a lane under the notes
 	await page.goto('/?timeline=song');
-	await expect.poll(async () => (await rollView(page)).height).toBeGreaterThan(250);
+	await expect.poll(async () => (await rollView(page)).height).toBeGreaterThan(250 - shorter(page));
 });

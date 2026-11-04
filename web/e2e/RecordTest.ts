@@ -45,18 +45,18 @@ async function written(page: Page) {
 async function newSong(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	await expect(page.getByTestId('roll')).toBeVisible();
 	await settled(page);
 }
 
 async function tab(page: Page, name: 'Notes' | 'JSON') {
 	await page
-		.getByRole('tablist', { name: 'Timeline views' })
+		.getByRole('tablist', { name: 'Song views' })
 		.getByRole('tab', { name: new RegExp(`^${name}`) })
 		.click();
 }
@@ -64,7 +64,7 @@ async function tab(page: Page, name: 'Notes' | 'JSON') {
 // The song open, as its JSON has it.
 async function timelineDoc(page: Page) {
 	await tab(page, 'JSON');
-	const doc = JSON.parse(await page.getByLabel('Timeline JSON').inputValue());
+	const doc = JSON.parse(await page.getByLabel('Song JSON').inputValue());
 	await tab(page, 'Notes');
 	return doc;
 }
@@ -134,7 +134,7 @@ test('Shift+R records round a loop, each pass adding to the clip', async ({ page
 	doc.clips[0].length = BAR;
 	doc.tempo = [{ tick: 0, bpm: 240 }];
 	await tab(page, 'JSON');
-	await page.getByLabel('Timeline JSON').fill(JSON.stringify(doc, null, 1));
+	await page.getByLabel('Song JSON').fill(JSON.stringify(doc, null, 1));
 	await tab(page, 'Notes');
 	await settled(page);
 	await loopButton(page).click();

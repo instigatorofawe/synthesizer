@@ -301,7 +301,7 @@ export function saveTimeline(db: Db, id: string, revision: number, name: string,
 			.set({ name, doc, revision: revision + 1, updatedAt: new Date() })
 			.where(and(eq(timelines.id, id), eq(timelines.revision, revision)))
 			.run();
-		if (result.changes === 0) throw new Conflict('this timeline was changed elsewhere; reload before saving');
+		if (result.changes === 0) throw new Conflict('this song was changed elsewhere; reload before saving');
 		linkPatches(tx as unknown as Db, id, doc);
 		return revision + 1;
 	});

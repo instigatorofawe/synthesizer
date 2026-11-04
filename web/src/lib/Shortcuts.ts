@@ -38,7 +38,7 @@ export const SHORTCUTS = [
 	{ id: 'start', code: 'Home', scope: 'everywhere', description: 'Go back to the start' },
 	{ id: 'undo', code: 'KeyZ', mod: true, scope: 'everywhere', description: 'Undo' },
 	{ id: 'redo', code: 'KeyZ', mod: true, shift: true, scope: 'everywhere', description: 'Redo' },
-	{ id: 'save', code: 'KeyS', mod: true, scope: 'everywhere', description: 'Save every unsaved patch and timeline' },
+	{ id: 'save', code: 'KeyS', mod: true, scope: 'everywhere', description: 'Save every unsaved patch and song' },
 	{
 		id: 'escape',
 		code: 'Escape',

@@ -25,6 +25,7 @@
 	import {
 		addNote,
 		addPoint,
+		laneKey,
 		describeLane,
 		duplicateNotes,
 		growToHold,
@@ -82,6 +83,7 @@
 		onchange,
 		onaudition,
 		onundo = () => {},
+		onpatchinput,
 		onview = () => {},
 		onsay,
 		toolbarIn = null
@@ -107,6 +109,8 @@
 		onchange: (clip: Clip) => void;
 		onaudition: (note: number, on: boolean) => void;
 		onundo?: () => void; // The timeline's own undo, for the Undo beside "Clip is now 2 bars"
+		// An input inside the track's patch given a parameter of its own, for a lane to move, whose id it gives once it's there
+		onpatchinput?: (at: { patch: string; node: number; input: string }) => Promise<number | null>;
 		onview?: (view: RollView, zoomed: boolean) => void; // As it scrolls, and as someone zooms it, which `zoomed` says
 		onsay: (text: string) => void; // Says why something typed into a field was refused, where the page says such things
 		toolbarIn?: HTMLElement | null; // Where the zoom, Fit, the chosen notes' fields and the hint go: the tab strip, which has room
@@ -804,9 +808,17 @@
 		});
 	}
 
-	function addLane(key: string) {
+	// A lane starts with a point at the clip's start, at the value what it moves stands at. One on an input inside the patch
+	// waits for the page to give the input a parameter, and then moves that.
+	async function addLane(key: string) {
 		const choice = free.find((candidate) => candidate.key === key);
-		if (choice) onchange(addPoint(clip, choice, 0, choice.start));
+		if (!choice) return;
+		if (!choice.input) return onchange(addPoint(clip, choice, 0, choice.start));
+		const param = await onpatchinput?.(choice.input);
+		if (param === null || param === undefined) return;
+		await settle();
+		const made = choices.find((candidate) => candidate.key === laneKey(param, undefined));
+		if (made) onchange(addPoint(clip, made, 0, made.start));
 	}
 
 	// The roll scrolls both ways, and everything below it follows it across.
@@ -969,7 +981,7 @@
 				{:else}
 					<span class="muted">{chosen.size} notes</span>
 				{/if}
-				<label title="How long it is, as a note value such as 1/8 or 3/16, in bars, or in ticks"
+				<label title="How long it is, as a note value such as 1/8 or 3/16, in bars, as 2, or in ticks, as 240 ticks"
 					>length <UnitField
 						label="Note length"
 						value={one.dur}
@@ -1382,7 +1394,7 @@
 			aria-label="Add a lane"
 			value=""
 			onchange={(e) => {
-				addLane(e.currentTarget.value);
+				void addLane(e.currentTarget.value);
 				e.currentTarget.value = '';
 			}}
 		>

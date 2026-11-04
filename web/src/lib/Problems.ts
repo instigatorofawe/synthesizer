@@ -5,7 +5,7 @@ import { placeOfError } from '#lib/TimelineEdit.ts';
 export interface Problem {
 	key: string;
 	severity: 'error' | 'warning';
-	place: string; // Where it is, in words: "Stereo lead › Filter 13", "Pluck › pluck-a", "Timeline JSON"
+	place: string; // Where it is, in words: "Stereo lead › Filter 13", "Pluck › pluck-a", "Song JSON"
 	message: string;
 	testid?: string; // What the end-to-end tests know it by
 	go?: () => void; // Shows where it is

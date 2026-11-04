@@ -1,4 +1,4 @@
-# modsynth design, revision 28
+# modsynth design, revision 29
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -853,7 +853,9 @@ to.
   examples shut it fits a laptop's height. A + in a heading opens a field for a new timeline, patch or bundle, which Enter
   makes and Esc closes, and the Samples + asks for WAV files and imports them as they are chosen.
 - In Song the arrangement is as tall as its ruler and tracks, up to about a third of the window, past which it scrolls, and the
-  notes have the rest, so the roll's room doesn't depend on a splitter dragged for another song. Expand, ⤢ at the right of the
+  notes have the rest. The tab strip under it is the handle between the two, as the line between them is in Live, Logic and Bitwig:
+  dragged, it gives one the other's room, and a double-click gives the arrangement back its own height. Each song keeps its own, so
+  the roll's room doesn't depend on a split dragged for another song. Expand, ⤢ at the right of the
   tabs or a double-click on a clip, gives the notes the whole view, and ⤢ again or Esc brings the arrangement back. Esc closes
   one thing at a time: a menu, then a drag, then a mode, step entry before Expand, and only then what is chosen. The inspector
   is a column down the right of the arrangement and the notes, which I or its own control folds to a rail. Below 1400 px wide it
@@ -880,7 +882,9 @@ to.
   in one transaction, patches first, so a timeline is never saved against a patch edit that was refused. Each draft names
   the revision it started from, so a stale one refuses the whole save and loses nothing. A draft edited back to what was
   saved stops being one, and leaving with drafts asks first.
-- A patch is a track's instrument. + Track asks which patch the new track plays, and Esc makes no track. A track head names its patch,
+- A patch is a track's instrument. + Track asks which patch the new track plays, and Esc makes no track. The track comes with a clip
+  as long as a new song's, at the bar the playhead is in, which the roll opens on, so the keys and step entry write into the track
+  they play. A track head names its patch,
   not its id: the name opens that patch in the Patch view, and ▾ beside it chooses another. Wherever a patch is chosen, the inspector's slots too,
   one picker filters as it is typed in, and lists what the song already plays, then the library's own patches, then the built-ins grouped
   as the browser groups the examples. Its last entry, New patch for this track, saves a new patch at once, the same sine and envelope the
@@ -909,9 +913,10 @@ to.
   without opening it.
 - What an action did, or why it didn't, is a short message over the foot of the page, read out by a screen reader: "Saved."
   goes after a few seconds, and a refusal or a failed WAV export stays until it is shut. A patch heard on its own is marked on
-  the Patch tab, and the hint that audio starts with a click is Start audio's tooltip.
+  the Patch tab. Audio starts with the page's first click or key anywhere, which is when a browser first lets it, so there is no
+  button for it, and the click itself is heard: a note clicked into a new song sounds.
 - What is done to a song as a whole is rare, so it is in the Song tab's ▾ menu: Rename, Export WAV, Export saved version and
-  Delete timeline, or for an example, Add to library or Open in the library. The name stays a field at the start of the Song
+  Delete song, or for an example, Add to library or Open in the library. The name stays a field at the start of the Song
   view's toolbar, as a patch's is in the Patch view's trail, and Rename goes to it.
 - Each patch and timeline keeps its own undo history, of up to 200 steps, while others are open, and saving keeps it. A step is the
   document's whole text, so an edit typed into its JSON is undone as an editor's is, and what is typed in one visit to the field is one
@@ -935,9 +940,10 @@ to.
   above it the black keys, and Z and X move the keys an octave. It goes by where a key is rather than its letter, so any layout plays the same
   piano, and a field being typed in or a key with a modifier keeps its own meaning, though a button or a slider with focus doesn't. A key
   let go while the page is in the background lets go of its note.
-- The keys play at the velocity in the field beside them, which is the roll's Vel, so what is heard is what step entry and a take
-  write, and C and V step it in either view. Hold, on their other side, latches what they play, from the computer keyboard or the
-  mouse: a key let go keeps sounding until it is played again, Esc, or Hold is turned off, which lets go of everything. It is the
+- The keys play at the velocity in the field beside them, the page's one Vel, which a note clicked into the roll, step entry and a
+  take write at too, so what is heard is what is written, and C and V step it in either view. Latch, on their other side, holds what
+  they play, from the computer keyboard or the mouse: a key let go keeps sounding until it is played again, Esc, or Latch is turned
+  off, which lets go of everything. It is the
   page's and changes only what is heard. Step entry still writes as each key comes up, and a key a take records isn't latched, so
   the take writes how long it was down.
 - The position and the tempo in the top bar are fields. A position typed as the ghost note reads, bar.beat.tick, or as a bar, moves
@@ -965,7 +971,9 @@ It is a tab of the side column, beside Node and Patch, so the graph stays on scr
   for it and each input's unit and range are a table in the web app, `NodeHelp.ts`, which a test holds to the catalog in both directions. A range is the
   clamp `docs/Format.md` gives, and an input with none written down shows none. The catalog could carry them, but that would be a compiler change for
   nothing an image holds.
-- Fit never draws text smaller than 11 CSS pixels, and what doesn't fit is panned to: at 1280 by 800 it had drawn the graph's text at 5. A wheel or two
+- Fit never draws text smaller than 11 CSS pixels, and what doesn't fit is panned to: at 1280 by 800 it had drawn the graph's text at 5.
+  Pressed again with the view as it left it, Fit shows the whole graph however small its text gets, as Bitwig's, VCV's and Max's
+  overviews do, and a third press goes back. A wheel or two
   fingers pan, as they scroll a page, and Mod with the wheel or a pinch zooms where the pointer is. Wires read once a frame are dashed as well as blue.
 - A node is added from one search, which a double-click on empty canvas, N, + Node, or a wire let go of on empty canvas opens. It finds a node by any of
   its names, other words for it or what it does, so "filter" finds biquad. The node lands at the pointer, the wire's end or beside the chosen node, at
@@ -1025,18 +1033,39 @@ the graph is too wide to fit. Keys, in the Patch view's header, draws the keys a
 fit, with the computer keys' letters on them. The address keeps Expand (`expand=1`), the chosen node (`node`) and the JSON tab
 (`side=json`), so a reload comes back to them. Undo keeps at most 20 MB of each document's steps, and the JSON fields don't wrap.
 
+Clips have a Snap of their own beside the notes', at Bar until another is chosen, as Live and Logic keep the two apart: a clip drawn,
+moved or repeated, the loop strip, a click on the ruler and the Tempo lane go by it, and notes by Snap. "Modulate this input…", on the
+right-click menu of an input read once a frame, puts `amount × source + offset` into it as one edit, which is what a filter envelope
+takes: the offset is the value the input had, the amount a new Control over the input's range either way, and a source that is
+audio is read once a frame first by a snap (`Modulate.ts`). The snap comes before the arithmetic, so the multiply and the add are KMul
+and KAdd, once a frame, rather than Mul and AddS on every sample, which is the same to hear, since the input reads one value a frame
+either way, and cheaper on the board. An input with a wire takes the wire's source, and one without asks which: a new envelope, or a
+source already in the patch that doesn't depend on the input, which would be a loop. A wire from audio into such an input, which the
+compiler refuses, is offered it beside "Put a snap on this wire". `NodeHelp.ts` gives the sources' output ranges, an envelope's 0 to 1
+and a wave's −1 to 1, which the amount starts from. Add a lane… also lists each input inside the track's patches that is read once a
+frame and that no wire feeds, under "In" the patch's name. Choosing one gives the input a parameter of its own, at its value and over
+its range, read by a Parameter node wired to it, as one edit of the patch, and the lane, the song's edit, then moves it. A built-in
+patch is copied first, as Edit a copy does, and the copy takes its place in the song. The page says song wherever it shows a word for
+a timeline: the browser's Songs and New song, the Song tab's menu and the fields. The address and the format still say timeline.
+
+The page's session with the engine, which image plays, compiling the song and the patch heard on its own as they change, loading what
+compiled, the transport, the loop and solo, is a class of its own, `EngineSession.svelte.ts`, with tests that stand in for the engine and
+the compiler. The page says what each image is made of and draws what the session holds.
+
 The fields read as music while the document holds ticks and MIDI numbers (`Units.ts`). A position reads as bar.beat.tick, as the ghost does,
 counted from the clip's start inside a clip, as the roll's ruler is, and from the song's for a placement. A pitch reads as a name and a
 length as a note value, a clip's and a window's in bars. Each takes what a musician would type: a bar or bar.beat, `E4`, `F#3`, `Bb2` or a
-MIDI number, `3/16`, a dotted `1/8.` or `2 bars`. A bare number in a length is ticks, so a length no note value names can still be had,
-and a bare number in a position is a bar, as in the top bar. What isn't one is refused with a message that says what to type, and the field
+MIDI number, `3/16`, a dotted `1/8.` or `2 bars`. A bare number in a length is bars, the unit the fields read in, as in Live and Logic,
+since a note value is a part of a bar, and ticks need the word, as `240 ticks`, so a length no note value names can still be had. A bare
+number in a position is a bar, as in the top bar. What isn't one is refused with a message that says what to type, and the field
 goes back to what it held. Velocity stems run from each note's start to its end, as tall and as deeply shaded as it is loud, so a chord's
 overlap and still read apart. A click on a stem sets its note, or every chosen note, and a drag across the strip paints: each note whose
 start it passes takes the velocity the drag had there, and the drag is one edit.
 
 A lane's points are joined by lines, as DAW breakpoints are. The compiler starts a point's ramp at the point's own tick and ramps from
 wherever the lane is then, so a point is drawn where its ramp ends, and a line from the point before is a ramp that starts at that
-point. A click after another point adds one joined to it, and each point is a step, a line or an exp curve into it, set in its fields or its
+point. A click after another point adds one joined to it, and each point is a step, a line or a curve into it (Step, Line and Curve, with
+a point's ramp called "over"), set in its fields or its
 right-click menu. Moving or removing a point keeps the lines either side of it joined, and a ramp shorter than its gap holds and then
 ramps, as it always has. The lane draws what the compiler plays, which `lanePoints` and `laneCurve` in `TimelineEdit.ts` work out as the
 compiler does, so a document from before reads as it plays: most of the examples' ramps already start at the point before.
@@ -1050,7 +1079,7 @@ takes the last step back, or with none behind the cursor moves it back and delet
 own rather than the roll's or the arrangement's, and Esc leaves it once nothing nearer is left to close. A step past the clip's end grows the
 clip as a clicked note does. The rules are pure functions over a clip and a cursor, in `StepEntry.ts`. The keys reach them through the page,
 which lets them write into a track the image leaves out for having no notes yet. C and V step the velocity of new notes, clicked,
-stepped or played, by 10, and Vel beside Draw and beside the keys shows it.
+stepped or played, by 10, and Vel beside the keys shows it.
 
 Recording writes what the keys play while the song plays, as Live and Logic do with quantizing on. ● in the top bar, or Shift+R in the
 Song view, starts a take on the chosen track. With the song stopped, a bar is counted in with a click on each beat, and then the song
@@ -1119,7 +1148,7 @@ Between the loop strip and the first track is the song layer, lanes for what bel
 values. Folded, as it starts, it is a row 18 px tall with a flag at each change reading its BPM, and a slope from a change that glides
 to the next one, so the song's tempo reads with no clicks. ▸ in its head, or a double-click on it, unfolds it to 72 px: a curve of BPM
 over the song, steps where a change holds and lines where it glides, scaled to the song's tempos with room above and below, and the
-playhead and the bar lines pass through it. A click on empty lane adds a change on the Snap grid at the tempo playing there, and
+playhead and the bar lines pass through it. A click on empty lane adds a change on the clips' Snap grid at the tempo playing there, and
 dragging before letting go sets its tempo. A point drags up and down for its tempo, to a whole BPM or with Shift a tenth, and sideways
 on the grid, never past its neighbours, and the first moves only up and down. A click on the line from a change, or the change's menu,
 switches it between holding until the next change and gliding to it. ↑ and ↓ nudge the chosen change by 1 BPM, or 10 with Shift, and
@@ -1605,6 +1634,39 @@ fixes without changing the format or the compiler. Choices made here that the us
   its release, both oscillators at zero phase, so a looped A4 at 120 BPM, a whole number of cycles a bar, adds in phase to 1.84 times at
   every wrap, in any image. A live swap adds nothing. The test's tone now has a 0.1 ms release. Whether the engine should reuse the
   releasing voice is the postmortem's decision 16, recommended no.
+
+**Built from the postmortem's next wave** (revision 29), as section 19 describes. The user took the postmortem's twelve decisions for
+the wave as it recommended: + Track makes a clip (1); audio starts on the first click or key, so Start audio goes (2); one Vel (3);
+Glide for tempo, Song for timeline, and Latch for the keys' Hold, the page's pick over the reviewers' Sustain, since sustain is an
+Envelope input (4 to 6); the tab strip is a handle (7); a bare number takes the field's unit (8); clips snap to bars apart from notes
+(9); Fit twice shows the whole patch (10); Modulate this input (11); and a Parameter offered for a lane (12). Decisions 13 to 21 are
+still open. None of this changes the format or the compiler. Choices made here that the user hasn't weighed in on:
+- **Audio** starts on a pointer or key going down anywhere on the page, seen before what it lands on acts.
+- **The view tabs** keep 10 characters of their names, where they kept 8 while Start audio took 90 px.
+- **+ Track's clip** goes at the bar the playhead is in, as the roll's New clip does, not at bar 1 as a new song's.
+- **A bare number is bars** in every length field: a note's, a lane point's and a clip's and a window's, since a note value is a part of a
+  bar. A position's bare number was a bar already.
+- **Clip snap** is Bar for every song when it opens and isn't saved, and offers what Snap does. The loop strip and a click on the ruler go
+  by it too.
+- **The handle** is the whole tab strip outside its controls, and a line along its top takes focus, which ↑ and ↓ move by 24 px. Esc puts a
+  drag back. The arrangement keeps 72 px and the notes 120, and each song's height is kept in localStorage, under `modsynth.split`.
+- **Fit** counts the first view of a patch as a press, so the first press after opening one shows all of it. The whole view goes down to
+  5%.
+- **Modulate this input** snaps before the arithmetic, where the postmortem had it after, for the board's sake. It is offered only for an
+  input read once a frame, as Format.md's opcode table has them, and not inside a subpatch. The amount's range is the input's span either
+  way, with a cutoff's taken as 20 kHz, and it starts halfway up from the offset for a source from 0 to 1, or halfway to the nearer end
+  for one either side of 0. It is called "cutoff amount" and the like, scoped to the track.
+- **A lane inside the patch** is offered for each input read once a frame that no wire feeds, in each of the track's slots, but not an
+  example's, which can't change. The parameter is named after the input, and is one step of the patch's undo while the lane is one of the
+  song's. A built-in's copy is saved as Edit a copy saves one, and swapping it in is the song's edit.
+- **Glide** is the tempo list's word too. A track's own glide, its portamento, keeps the word, in the Track section.
+- **The first click's note:** a key or a click that also starts audio waits for the image, and is then held as long as it was. Once a
+  track joins the song, nothing plays on its own, so the song takes over, and a key still held carries on there.
+- **Tests at a laptop's sizes:** `ViewsTest`, `RoomTest` and `BrowserAddressTest` run at 1280 by 720 and again at 1280 by 800, as two
+  Playwright projects. *HallOfTheMountainKing* at 1280 by 720 shows 12.75 rows, under the 14 the Layout review asked for, since the
+  roll's bar ruler takes 16 px; with its velocity strip and lanes folded it shows 18 or more.
+- **The engine session** is `EngineSession.svelte.ts`. GraphEditor's side column is still in GraphEditor, which the postmortem's wave
+  didn't ask to move.
 
 **Built from what the postmortem left that needed no decision** (revision 28), as section 19 describes. None of it changes the
 format or the compiler. Choices made here that the user hasn't weighed in on:

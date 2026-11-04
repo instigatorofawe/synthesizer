@@ -3,7 +3,11 @@
 	import { on } from 'svelte/events';
 	import Arrangement, { type Loop, type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
+	import { escapeCancels } from '#lib/Drag.ts';
 	import { leavesFields } from '#lib/Fields.ts';
+	import type { CatalogEntry } from '#lib/GraphEdit.ts';
+	import { patchInputChoices } from '#lib/Modulate.ts';
+	import { SPLIT_KEY, keepSplit, keptSplit, splitAt } from '#lib/Split.ts';
 	import type { Undoable } from '#lib/History.ts';
 	import Mixer from '#lib/Mixer.svelte';
 	import type { ExampleGroup } from '#lib/PatchGroups.ts';
@@ -62,7 +66,7 @@
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { label, matches, modKey, typingIn } from '#lib/Shortcuts.ts';
-	import { clampVelocity, type Cursor } from '#lib/StepEntry.ts';
+	import type { Cursor } from '#lib/StepEntry.ts';
 	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import { landing, type SongPlace } from '#lib/Workspace.ts';
 
@@ -97,7 +101,9 @@
 		ontempo = () => {},
 		onkey,
 		onsay = () => {},
-		velocity = $bindable(100)
+		catalog = [],
+		onpatchinput,
+		velocity = 100
 	}: {
 		id?: string; // Which timeline this is, for what the editor keeps about it between visits, such as each clip's zoom
 		doc: Timeline;
@@ -128,9 +134,11 @@
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
 		ontempo?: (tempo: Timeline['tempo'] | null) => void; // The tempo while the Tempo lane is dragged, then null
-		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do, once audio has started
+		onkey?: (note: number, on: boolean) => void; // Plays a note where the top bar's keys do
 		onsay?: (text: string) => void; // Says why something typed into a field was refused, where the page says such things
-		velocity?: number; // The velocity of new notes, clicked or stepped, which is the keys' too, so the page keeps it
+		velocity?: number; // The velocity of new notes, clicked or stepped, which is the keys' Vel, the page's
+		catalog?: CatalogEntry[]; // The compiler's nodes, for the inputs inside a patch that a lane can be put on
+		onpatchinput?: (at: { patch: string; node: number; input: string }) => Promise<number | null>;
 	} = $props();
 
 	const MODES = ['poly', 'mono', 'legato'] as const;
@@ -142,6 +150,8 @@
 	let selection = $state<Selection>({ track: opened.track, placement: opened.placement });
 	let clipId = $state<string | null>(opened.clip);
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
+	// Clips snap apart from notes, as in Live and Logic: to bars, until a finer step is chosen. The Tempo lane follows clips.
+	let clipGrid = $state(untrack(() => ticksPerBar(doc)));
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
 	// Step entry, which R or the Step toggle turns on and Esc leaves. It outlasts a change of clip, and its cursor is kept for
@@ -174,7 +184,12 @@
 	const voices = $derived(patches.filter((patch) => !patch.graph.nodes.some((node) => node.type === 'in')));
 	const used = $derived(doc.tracks.flatMap((t) => t.slots));
 	const newPatchAction = $derived(onnewpatch && !readonly ? 'New patch for this track' : '');
-	const choices = $derived(laneChoices(doc, home?.id ?? null, patches));
+	// What a lane can move: the patch's parameters, the inserts' and the mix, and in a library song, any input inside the
+	// track's patch, which then gets a parameter of its own.
+	const choices = $derived([
+		...laneChoices(doc, home?.id ?? null, patches),
+		...(onpatchinput && !readonly ? patchInputChoices(home?.slots ?? [], patches, catalog) : [])
+	]);
 	// A track with no notes in any clip is left out of the image, so it never plays.
 	const silent = $derived(!!home && !home.placements.some((p) => doc.clips.find((c) => c.id === p.clip)?.notes.length));
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
@@ -190,7 +205,7 @@
 		roll?.stepKey(note, on);
 	}
 
-	// What a take snaps to and writes at, as a clicked note does: the roll's Snap and Vel.
+	// What a take snaps to and writes at, as a clicked note does: the roll's Snap, and the Vel beside the keys.
 	export function takeSettings(): { grid: number; velocity: number } {
 		return { grid, velocity };
 	}
@@ -294,10 +309,18 @@
 
 	const trackName = (track: { id: number; name: string }) => track.name || `Track ${track.id}`;
 
+	// A new track comes with a clip as long as a new song's, at the bar the playhead is in, and the roll opens on it, so what
+	// the keys and step entry write goes into the track they play.
 	function newTrack(patch: string) {
 		const added = addTrack(doc, patch);
-		commit(added.doc);
-		selection = { track: added.id, placement: null };
+		const bar = ticksPerBar(doc);
+		const at = Math.floor(tick / bar) * bar;
+		const made = addClip(added.doc, TEMPLATE_BARS * bar);
+		const next = place(made.doc, added.id, made.id, at);
+		commit(next);
+		selection = { track: added.id, placement: placementIndex(next, added.id, made.id, at) };
+		clipId = made.id;
+		tab = 'notes';
 		return added.id;
 	}
 
@@ -366,6 +389,65 @@
 	function expand(on = !expanded) {
 		expanded = on;
 		peek = false;
+	}
+
+	// The tab strip is the handle between the arrangement and the notes: dragged, it gives one the other's room, and a
+	// double-click gives the arrangement back its own height. Esc puts back what the drag found. Each song keeps its own.
+	let split = $state<number | null>(null);
+	let editor = $state<HTMLElement>();
+	type Resizing = { y: number; from: number; room: number; before: number | null; moved: boolean; stop: () => void };
+	let resizing = $state.raw<Resizing | null>(null);
+	onMount(() => (split = keptSplit(localStorage.getItem(SPLIT_KEY), id)));
+
+	function keep(next: number | null) {
+		split = next;
+		localStorage.setItem(SPLIT_KEY, keepSplit(localStorage.getItem(SPLIT_KEY), id, next));
+	}
+
+	const onHandle = (event: Event) => !(event.target as Element).closest('button, input, select, label, a, textarea');
+
+	function startSplit(event: PointerEvent) {
+		if (event.button !== 0 || expanded || !onHandle(event)) return;
+		const arrangement = editor?.querySelector<HTMLElement>('[data-testid="arrangement-view"]');
+		const detail = editor?.querySelector<HTMLElement>('.detail');
+		if (!arrangement || !detail) return;
+		event.preventDefault();
+		const before = split;
+		const from = arrangement.offsetHeight;
+		const stop = escapeCancels(() => {
+			resizing?.stop();
+			resizing = null;
+			split = before;
+		});
+		resizing = { y: event.clientY, from, room: from + detail.offsetHeight, before, moved: false, stop };
+		(event.currentTarget as Element).setPointerCapture(event.pointerId);
+	}
+
+	function moveSplit(event: PointerEvent) {
+		if (!resizing) return;
+		const by = event.clientY - resizing.y;
+		if (!resizing.moved && Math.abs(by) < 3) return;
+		if (!resizing.moved) resizing = { ...resizing, moved: true };
+		split = splitAt(resizing.from, by, resizing.room);
+	}
+
+	function endSplit() {
+		const done = resizing;
+		if (!done) return;
+		done.stop();
+		resizing = null;
+		if (done.moved) keep(split);
+	}
+
+	// The arrows move the line too, from the handle along the strip's top.
+	function splitKeys(event: KeyboardEvent) {
+		const by = event.key === 'ArrowUp' ? -24 : event.key === 'ArrowDown' ? 24 : 0;
+		if (!by) return;
+		const arrangement = editor?.querySelector<HTMLElement>('[data-testid="arrangement-view"]');
+		const detail = editor?.querySelector<HTMLElement>('.detail');
+		if (!arrangement || !detail) return;
+		event.preventDefault();
+		keep(splitAt(arrangement.offsetHeight, by, arrangement.offsetHeight + detail.offsetHeight));
 	}
 
 	// A double-click on a clip opens it: its notes, with the whole view.
@@ -618,11 +700,12 @@
 
 <section
 	use:leavesFields
+	bind:this={editor}
 	class="timeline"
 	class:expanded
 	class:inspecting={inspecting === true}
 	class:folded={inspecting === false}
-	aria-label="Timeline editor"
+	aria-label="Song editor"
 >
 	<div class="toolbar">
 		{@render heading?.()}
@@ -646,27 +729,19 @@
 					{#each drawChoices as choice (choice.ticks)}<option value={choice.ticks}>{choice.label}</option>{/each}
 				</select>
 			</label>
-			<label
-				title={`How hard a new note is played, from 1 to 127. ${label('softer')} and ${label('louder')} step it by 10.`}
-			>
-				Vel
-				<input
-					class="velocity"
-					type="number"
-					min="1"
-					max="127"
-					aria-label="Velocity of new notes"
-					value={velocity}
-					onchange={(e) => {
-						velocity = clampVelocity(Number(e.currentTarget.value) || velocity);
-						e.currentTarget.value = String(velocity);
-					}}
-				/>
-			</label>
 		{/if}
-		<label>
+		<label title="Where a clicked note starts, and the step a dragged note's length goes by">
 			Snap
 			<select aria-label="Snap" bind:value={grid}>
+				{#each grids(doc.ppq) as choice (choice.label)}<option value={choice.ticks}>{choice.label}</option>{/each}
+			</select>
+		</label>
+		<span class="divider" aria-hidden="true"></span>
+		<label
+			title="Where a clip drawn, moved or repeated in the arrangement starts and ends, and where a tempo change goes"
+		>
+			Clips
+			<select aria-label="Clip snap" bind:value={clipGrid}>
 				{#each grids(doc.ppq) as choice (choice.label)}<option value={choice.ticks}>{choice.label}</option>{/each}
 			</select>
 		</label>
@@ -692,7 +767,8 @@
 			{doc}
 			{selection}
 			{barWidth}
-			{grid}
+			grid={clipGrid}
+			height={split}
 			{tick}
 			{playing}
 			{loop}
@@ -754,14 +830,14 @@
 								onchange={(e) => commit(setTempo(doc, index, { bpm: number(e) }))}
 							/>
 							{#if doc.tempo.some((t) => t.tick > change.tick)}
-								<label class="ramp" title="Glide to the next change's tempo, instead of holding this one until it">
+								<label class="glide" title="Glide to the next change's tempo, instead of holding this one until it">
 									<input
 										type="checkbox"
-										aria-label={`Ramp from bar ${barOf(change.tick, doc.ppq)}`}
+										aria-label={`Glide from bar ${barOf(change.tick, doc.ppq)}`}
 										checked={change.ramp ?? false}
 										onchange={(e) => commit(setTempo(doc, index, { ramp: e.currentTarget.checked }))}
 									/>
-									ramp
+									glide
 								</label>
 							{/if}
 							{#if index > 0 && !readonly}
@@ -926,7 +1002,8 @@
 							onchange={(e) => rename(e.currentTarget.value)}
 						/></label
 					>
-					<label title="How long the clip is, in bars, as a note value such as 1/2, or in ticks"
+					<label
+						title="How long the clip is: a number is bars, as 8, and it takes a note value such as 1/2, or ticks, as 240 ticks"
 						>length <UnitField
 							label="Clip length"
 							value={clip.length}
@@ -978,7 +1055,8 @@
 									width="8rem"
 								/></label
 							>
-							<label title="For this long, each repeat, in bars, as a note value or in ticks"
+							<label
+								title="For this long, each repeat: a number is bars, and it takes a note value, or ticks, as 240 ticks"
 								>for <UnitField
 									label="Window length"
 									value={window.length}
@@ -1068,8 +1146,36 @@
 	</div>
 
 	<div class="detail">
-		<div class="strip">
-			<div class="tabs" role="tablist" aria-label="Timeline views">
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="strip"
+			class:resizing={resizing !== null}
+			title={expanded
+				? undefined
+				: 'Drag the strip to give the arrangement or the notes more room. A double-click gives the arrangement its own height.'}
+			onpointerdown={startSplit}
+			onpointermove={moveSplit}
+			onpointerup={endSplit}
+			onpointercancel={endSplit}
+			ondblclick={(event) => {
+				if (!expanded && onHandle(event)) keep(null);
+			}}
+		>
+			{#if !expanded}
+				<!-- A separator that takes focus is a control, which moves with the arrows. -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+				<div
+					class="grip"
+					role="separator"
+					tabindex="0"
+					aria-orientation="horizontal"
+					aria-label="Resize the arrangement"
+					aria-valuenow={split ?? undefined}
+					data-testid="split"
+					onkeydown={splitKeys}
+				></div>
+			{/if}
+			<div class="tabs" role="tablist" aria-label="Song views">
 				<button type="button" role="tab" aria-selected={tab === 'notes'} onclick={() => (tab = 'notes')}>
 					Notes{clip ? `: ${clip.id}` : ''}
 				</button>
@@ -1133,6 +1239,7 @@
 							onchange={clipChanged}
 							onaudition={audition}
 							onundo={undo}
+							{onpatchinput}
 							onview={(view, zoomed) => clip && viewed(clip.id, view, zoomed)}
 							{onsay}
 						/>
@@ -1230,6 +1337,11 @@
 		flex: none;
 		white-space: nowrap;
 	}
+	.toolbar .divider {
+		width: 1px;
+		align-self: stretch;
+		background: var(--line);
+	}
 	.hint {
 		min-width: 0;
 		white-space: nowrap;
@@ -1315,10 +1427,37 @@
 	/* The tabs, the roll's toolbar in what room they leave, and Step and ⤢ at the right end. */
 	.strip {
 		flex: none;
+		position: relative;
 		display: flex;
 		align-items: stretch;
 		height: 2rem;
 		border-bottom: 1px solid var(--line);
+	}
+	.timeline:not(.expanded) .strip {
+		cursor: row-resize;
+	}
+	.strip :global(button),
+	.strip :global(select),
+	.strip :global(input),
+	.strip :global(label) {
+		cursor: auto;
+	}
+	/* The handle's own line, along the strip's top, which takes focus and the arrows. */
+	.grip {
+		position: absolute;
+		top: 0;
+		left: 30%;
+		right: 30%;
+		height: 4px;
+		border-radius: 2px;
+		background: var(--line);
+		opacity: 0.6;
+	}
+	.strip:hover .grip,
+	.strip.resizing .grip,
+	.grip:focus-visible {
+		background: var(--accent);
+		opacity: 1;
 	}
 	.rollbar {
 		flex: 1;
@@ -1347,10 +1486,6 @@
 	}
 	.step[aria-pressed='true'] span {
 		color: #3fb950;
-	}
-	.toolbar input.velocity {
-		width: 3.2rem;
-		padding: 0.1rem 0.25rem;
 	}
 	.tabs {
 		flex: none;
@@ -1426,14 +1561,14 @@
 		margin: 0.2rem 0 0.35rem;
 		font-size: 0.72rem;
 	}
-	.ramp {
+	.glide {
 		display: flex;
 		align-items: center;
 		gap: 0.2rem;
 		font-size: 0.75rem;
 		color: var(--muted);
 	}
-	.inspector .ramp input {
+	.inspector .glide input {
 		width: auto;
 		margin: 0;
 	}

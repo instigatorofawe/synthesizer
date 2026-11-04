@@ -24,12 +24,19 @@ export interface InputHelp {
 	max?: number | string;
 }
 
+// What an output runs between, where its kernel keeps it there, so what it drives can be scaled to it.
+export interface OutputHelp {
+	min: number;
+	max: number;
+}
+
 export interface NodeHelp {
 	name: string;
 	group: Group;
 	description: string;
 	synonyms: string[];
 	inputs: Record<string, InputHelp>;
+	outputs?: Record<string, OutputHelp>;
 }
 
 const SECONDS = { unit: 's', min: 0.0001, max: 60 }; // Env and Follow clamp their times to this
@@ -42,12 +49,13 @@ export const NODE_HELP: Record<string, NodeHelp> = {
 		group: 'Notes and values',
 		description: 'The note that started this voice: its pitch, velocity and gate.',
 		synonyms: ['midi', 'key', 'keyboard', 'pitch', 'velocity', 'gate', 'trigger'],
-		inputs: {}
+		inputs: {},
+		outputs: { pitch: { min: 0, max: 127 }, velocity: { min: 0, max: 1 }, gate: { min: 0, max: 1 } }
 	},
 	param: {
 		name: 'Parameter',
 		group: 'Notes and values',
-		description: "A value from the patch's parameters, which a timeline's lanes and controls change.",
+		description: "A value from the patch's parameters, which a song's lanes and controls change.",
 		synonyms: ['knob', 'control', 'macro', 'automation', 'slider'],
 		inputs: {}
 	},
@@ -83,14 +91,16 @@ export const NODE_HELP: Record<string, NodeHelp> = {
 			phase: { unit: 'turns', min: -64, max: 64 },
 			sync: {},
 			feedback: { min: -1, max: 1 }
-		}
+		},
+		outputs: { out: { min: -1, max: 1 } }
 	},
 	noise: {
 		name: 'Noise',
 		group: 'Sources',
 		description: 'White noise, the same each time a note plays.',
 		synonyms: ['white noise', 'hiss', 'random'],
-		inputs: {}
+		inputs: {},
+		outputs: { out: { min: -1, max: 1 } }
 	},
 	sample: {
 		name: 'Sampler',
@@ -159,7 +169,8 @@ export const NODE_HELP: Record<string, NodeHelp> = {
 			decay: SECONDS,
 			sustain: { min: 0, max: 1 },
 			release: SECONDS
-		}
+		},
+		outputs: { out: { min: 0, max: 1 } }
 	},
 	lfo: {
 		name: 'LFO',
@@ -179,7 +190,8 @@ export const NODE_HELP: Record<string, NodeHelp> = {
 		inputs: {
 			in: {},
 			release: SECONDS
-		}
+		},
+		outputs: { out: { min: 0, max: 1 } }
 	},
 	snap: {
 		name: 'Snap',

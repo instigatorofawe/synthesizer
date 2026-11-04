@@ -1,4 +1,5 @@
 import { expect, test as base, type Page } from '@playwright/test';
+import { oneBarClip } from './NewSong.ts';
 import { loudest } from './Engine.ts';
 import { openView } from './Views.ts';
 
@@ -43,17 +44,16 @@ async function written(page: Page) {
 async function stepClip(page: Page, name: string) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
-	await page.getByRole('button', { name: 'New timeline', exact: true }).click(); // Its + opens the field
-	await page.getByLabel('New timeline name').fill(name);
-	await page.getByLabel('New timeline name').press('Enter');
+	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
+	await page.getByLabel('New song name').fill(name);
+	await page.getByLabel('New song name').press('Enter');
 	await page.waitForURL((url) => url.searchParams.get('timeline') !== before);
-	await expect(page.getByLabel('Timeline name', { exact: true })).toHaveValue(name);
+	await expect(page.getByLabel('Song name', { exact: true })).toHaveValue(name);
 	await page.getByRole('button', { name: 'Add track' }).click(); // It asks which patch the track plays
 	await page.getByRole('listbox', { name: 'Patches' }).locator('[data-patch="lead"]').click();
 	const row = page.locator('[data-testid^="row-"]').last();
 	const track = (await row.getAttribute('data-testid'))!.slice('row-'.length);
-	const box = (await row.boundingBox())!;
-	await page.mouse.dblclick(box.x + 10, box.y + 20);
+	await oneBarClip(page, Number(track));
 	await expect(page.getByTestId(`placement-${track}-0`)).toBeVisible();
 	await expect(page.getByTestId('roll')).toBeVisible();
 	return track;
@@ -90,7 +90,7 @@ test('R and the Step toggle turn step entry on and off, and a field or the Patch
 	await toggle(page).click();
 	await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
 
-	await page.getByLabel('Velocity of new notes').focus();
+	await page.getByLabel('Velocity of the keys').focus();
 	await page.keyboard.press('r');
 	await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
 
@@ -258,7 +258,7 @@ test('a step past the end grows the clip as a clicked note does, or offers to le
 
 test('C and V set the velocity of new notes, stepped or clicked, and Mod with them is not theirs', async ({ page }) => {
 	await stepClip(page, 'Velocity');
-	const velocity = page.getByLabel('Velocity of new notes');
+	const velocity = page.getByLabel('Velocity of the keys');
 	await expect(velocity).toHaveValue('100');
 	await page.keyboard.press('v');
 	await expect(velocity).toHaveValue('110');

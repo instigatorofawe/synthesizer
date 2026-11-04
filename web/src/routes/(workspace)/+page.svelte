@@ -10,7 +10,7 @@
 	import BundleDialog from '#lib/BundleDialog.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import QuickOpen from '#lib/QuickOpen.svelte';
-	import type { Openable } from '#lib/QuickOpen.ts';
+	import { PATCH_KINDS, patchKind, type Openable } from '#lib/QuickOpen.ts';
 	import ShortcutsSheet from '#lib/ShortcutsSheet.svelte';
 	import type { SideTab } from '#lib/GraphEditor.svelte';
 	import CompileLight from '#lib/CompileLight.svelte';
@@ -1318,7 +1318,8 @@
 	let quickOpen = $state(false); // Mod+K's search
 	let keyStrip = $state<HTMLElement | null>(null); // The Patch view's strip, where the keys are drawn while it is open
 
-	// What Mod+K finds: the library's timelines, the examples, and the patches, the library's own before the built-in ones.
+	// What Mod+K finds: the library's timelines, the examples, and the patches, the library's own, then the set's, then the
+	// other built-in ones.
 	const openables = $derived.by((): Openable[] => [
 		...data.library.timelines.map((t) => ({
 			kind: 'Song' as const,
@@ -1333,9 +1334,9 @@
 			}))
 		),
 		...[...library]
-			.sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin))
+			.sort((a, b) => PATCH_KINDS.indexOf(patchKind(a)) - PATCH_KINDS.indexOf(patchKind(b)))
 			.map((p) => ({
-				kind: p.builtin ? ('Built-in' as const) : ('Patch' as const),
+				kind: patchKind(p),
 				name: p.name,
 				href: patchHref(search, p.id)
 			}))

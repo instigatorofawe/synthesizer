@@ -1,20 +1,25 @@
 // What the patch picker lists, and in what order: the patches the open song already plays, then the library's own, then the
-// built-in ones, grouped as the browser groups the examples they come from. Filtering is here too, so it can be tested
-// without a page.
+// built-in ones: the standard set's under their families, and then the examples' own under one heading. Filtering is here
+// too, so it can be tested without a page.
 import type { PatchLike } from '#lib/TimelineEdit.ts';
 
-// An example group as the browser lists it, with its examples in order.
+// An example group as the browser lists it, with its examples in order. The standard set's examples name their family and
+// the built-in patches they play, in their own order.
 export interface ExampleGroup {
 	name: string;
-	recipes: { name: string }[];
+	recipes: { name: string; family?: string; patches?: string[] }[];
 }
 
 export interface PatchGroup<T extends PatchLike = PatchLike> {
 	key: string;
-	label: string; // The heading: "On this song", "My patches", or under "Built in", the examples' group
+	label: string; // The heading: "On this song", "My patches", or under "Built in", a family of the set's or "Techniques"
 	builtin: boolean; // Under the "Built in" heading
 	patches: T[];
+	words?: Map<string, string>; // What else a patch here matches, by its id: a technique's example group, such as "drums"
 }
+
+// The heading every built-in patch that isn't the set's goes under: the recipes' and the pieces' own.
+export const TECHNIQUES = 'Techniques';
 
 // Builtins.ts names a built-in patch after its example, as `builtin-Kick808`, or with its part, as
 // `builtin-PassionChorale-horn`. That module is the server's, so the prefix is repeated here.
@@ -49,37 +54,67 @@ export function patchGroups<T extends PatchLike>(
 		{ key: 'mine', label: 'My patches', builtin: false, patches: rest.filter((patch) => !patch.builtin).sort(byName) }
 	];
 
-	const names = examples.flatMap((group) => group.recipes.map((recipe) => recipe.name));
-	const where = new Map<string, { group: number; at: number }>();
-	examples.forEach((group, index) =>
-		group.recipes.forEach((recipe, at) => where.set(recipe.name, { group: index, at }))
-	);
-	const builtins = examples.map((group) => ({ group, list: [] as { patch: T; at: number }[] }));
-	const other: T[] = [];
-	for (const patch of rest) {
-		if (!patch.builtin) continue;
-		const example = exampleOf(patch.id, names);
-		const place = example === null ? undefined : where.get(example);
-		if (place) builtins[place.group].list.push({ patch, at: place.at });
-		else other.push(patch);
+	// The set's, under their families in the order the examples come, each in the order its example plays them. A patch two
+	// of them play, as the effects' example plays the grand piano, is in the first.
+	const families = new Map<string, string[]>();
+	const family = new Map<string, string>();
+	for (const group of examples) {
+		for (const recipe of group.recipes) {
+			if (recipe.family === undefined) continue;
+			const list = families.get(recipe.family) ?? [];
+			families.set(recipe.family, list);
+			for (const id of recipe.patches ?? []) {
+				if (family.has(id)) continue;
+				family.set(id, recipe.family);
+				list.push(id);
+			}
+		}
 	}
-	for (const { group, list } of builtins) {
-		list.sort((a, b) => a.at - b.at || byName(a.patch, b.patch));
+	const builtins = rest.filter((patch) => patch.builtin);
+	const inFamily = new Map(builtins.filter((patch) => family.has(patch.id)).map((patch) => [patch.id, patch]));
+	for (const [name, ids] of families) {
 		groups.push({
-			key: `builtin:${group.name}`,
-			label: group.name,
+			key: `family:${name}`,
+			label: name,
 			builtin: true,
-			patches: list.map((entry) => entry.patch)
+			patches: ids.flatMap((id) => inFamily.get(id) ?? [])
 		});
 	}
+
+	// The rest are the examples' own, in the order the browser lists their examples.
+	const where = new Map<string, { group: string; at: number }>();
+	let at = 0;
+	for (const group of examples) {
+		for (const recipe of group.recipes) {
+			if (recipe.family === undefined) where.set(recipe.name, { group: group.name, at: at++ });
+		}
+	}
+	const names = [...where.keys()];
+	const techniques: { patch: T; at: number; group: string }[] = [];
+	const other: T[] = [];
+	for (const patch of builtins) {
+		if (inFamily.has(patch.id)) continue;
+		const example = exampleOf(patch.id, names);
+		const place = example === null ? undefined : where.get(example);
+		if (place) techniques.push({ patch, ...place });
+		else other.push(patch);
+	}
+	techniques.sort((a, b) => a.at - b.at || byName(a.patch, b.patch));
+	groups.push({
+		key: 'builtin:techniques',
+		label: TECHNIQUES,
+		builtin: true,
+		patches: techniques.map((entry) => entry.patch),
+		words: new Map(techniques.map((entry) => [entry.patch.id, entry.group]))
+	});
 	// Built-ins no example names, such as one that stopped shipping while a timeline still plays it. With no examples to
 	// group by, they all go here, under no heading of their own.
 	groups.push({ key: 'builtin:', label: examples.length ? 'other' : '', builtin: true, patches: other.sort(byName) });
 	return groups.filter((group) => group.patches.length);
 }
 
-// The groups with only what matches every word typed, in any case. A built-in also matches its group's name, so "drums"
-// finds the drum kit.
+// The groups with only what matches every word typed, in any case. A built-in also matches its group's name, so "drum"
+// finds the drum kit and "piano" the piano family, and a technique its example group's, so "drums" finds the Kick808.
 export function filterGroups<T extends PatchLike>(groups: PatchGroup<T>[], query: string): PatchGroup<T>[] {
 	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
 	if (!words.length) return groups;
@@ -87,8 +122,8 @@ export function filterGroups<T extends PatchLike>(groups: PatchGroup<T>[], query
 		.map((group) => ({
 			...group,
 			patches: group.patches.filter((patch) => {
-				const text = `${patch.name} ${group.builtin ? group.label : ''}`.toLowerCase();
-				return words.every((word) => text.includes(word));
+				const text = `${patch.name} ${group.builtin ? `${group.label} ${group.words?.get(patch.id) ?? ''}` : ''}`;
+				return words.every((word) => text.toLowerCase().includes(word));
 			})
 		}))
 		.filter((group) => group.patches.length);

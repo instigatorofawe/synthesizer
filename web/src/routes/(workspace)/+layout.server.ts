@@ -1,9 +1,9 @@
 // What the browser lists and every editor draws from. It reads no part of the address, so opening another timeline or patch
 // doesn't send it again: the library holds the samples, which can run to megabytes. A built-in patch's recordings come only
 // once something uses it, and the page asks /assets for those of one it opens before then.
+import { exampleGroups, readCatalogue } from '#lib/server/Builtins.ts';
 import { nodeCatalog } from '#lib/server/Compile.ts';
 import { db } from '#lib/server/Db.ts';
-import { GROUPS, RECIPES } from '#lib/server/Recipes.ts';
 import {
 	allPatches,
 	bundlesWithMembers,
@@ -30,10 +30,7 @@ export const load = async () => {
 			assets: libraryAssets(db()),
 			bundles: bundlesWithMembers(db())
 		},
-		examples: GROUPS.map((group) => ({
-			name: group,
-			recipes: RECIPES.filter((recipe) => recipe.group === group).map(({ name, listen_for }) => ({ name, listen_for }))
-		})),
+		examples: exampleGroups(await readCatalogue()),
 		catalog: await nodeCatalog()
 	};
 };

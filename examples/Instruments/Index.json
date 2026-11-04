@@ -1,1 +1,34 @@
-[]
+[
+ {
+  "name": "Strings",
+  "file": "Strings.json",
+  "seconds": 92.25,
+  "group": "instruments",
+  "family": "Strings",
+  "listen_for": "The set's strings instruments in turn: Violin, Viola, Cello, Contrabass, Tremolo strings, Pizzicato strings, Orchestral harp, Timpani."
+ },
+ {
+  "name": "Ensemble",
+  "file": "Ensemble.json",
+  "seconds": 74.5,
+  "group": "instruments",
+  "family": "Ensemble",
+  "listen_for": "The set's ensemble instruments in turn: String ensemble, Slow strings, Synth strings, Soft synth strings, Choir aahs, Voice oohs, Synth voice, Orchestra hit."
+ },
+ {
+  "name": "DrumKit",
+  "file": "DrumKit.json",
+  "seconds": 24.25,
+  "group": "instruments",
+  "family": "Drum kit",
+  "listen_for": "Every drum of the kit in turn, by its GM key, and then a groove on the kit."
+ },
+ {
+  "name": "Effects",
+  "file": "Effects.json",
+  "seconds": 77.0,
+  "group": "instruments",
+  "family": "Effects",
+  "listen_for": "Each effect in turn, on the same phrase: Small room, Medium room, Large room, Medium hall, Large hall, Plate, Chorus, Stereo tremolo."
+ }
+]

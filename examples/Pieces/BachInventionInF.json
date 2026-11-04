@@ -106,6 +106,8 @@
    "timeline": {
     "ppq": 480,
     "tempo": [{"tick": 0, "bpm": 104}],
+    "meter": [{"tick": 0, "beats": 3, "unit": 4}],
+    "key": [{"tick": 0, "fifths": -1}],
     "clips": [
      {
       "id": "righthand-invention",

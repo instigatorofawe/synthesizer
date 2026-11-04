@@ -1535,7 +1535,10 @@ inline void check_list(const json& list, const std::string& where, const std::st
 }
 
 inline void check_timeline(const json& doc, const std::string& where) {
-    check_keys(doc, {"ppq", "tempo", "clips", "tracks", "buses", "master", "globals"}, where, "a timeline");
+    // `meter`, `pickup` and `key` are the editor's: where bars fall and how notes are spelled, which change how a song
+    // is drawn and never how it plays. They are checked for misspellings like the rest and otherwise ignored.
+    check_keys(doc, {"ppq", "tempo", "meter", "pickup", "key", "clips", "tracks", "buses", "master", "globals"}, where,
+               "a timeline");
     const auto list = [&](const json& d, const char* name, const std::string& at) -> const json& {
         static const json none = json::array();
         if (!d.contains(name)) return none;
@@ -1543,6 +1546,8 @@ inline void check_timeline(const json& doc, const std::string& where) {
         return d.at(name);
     };
     for (const json& t : list(doc, "tempo", where)) check_keys(t, {"tick", "bpm", "ramp"}, where, "a tempo change");
+    for (const json& m : list(doc, "meter", where)) check_keys(m, {"tick", "beats", "unit"}, where, "a time signature");
+    for (const json& k : list(doc, "key", where)) check_keys(k, {"tick", "fifths", "minor"}, where, "a key signature");
     for (const json& clip : list(doc, "clips", where)) {
         const std::string at = where + "/clip:" + (clip.is_object() ? clip.value("id", std::string{}) : "");
         check_keys(clip, {"id", "length", "notes", "automation", "play"}, at, "a clip");

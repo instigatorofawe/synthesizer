@@ -206,6 +206,8 @@
      {"tick": 128640, "bpm": 88, "ramp": true},
      {"tick": 130320, "bpm": 60}
     ],
+    "meter": [{"tick": 0, "beats": 2, "unit": 4}],
+    "key": [{"tick": 0, "fifths": 0}, {"tick": 80640, "fifths": -1}, {"tick": 96000, "fifths": 0}],
     "clips": [
      {
       "id": "righthand-intro",

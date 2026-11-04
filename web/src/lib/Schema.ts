@@ -1,5 +1,6 @@
 // The documents the app stores. The same schemas validate on the server and shape the editors, and they are deliberately
 // close to what the compiler reads, so a saved document needs no translation.
+import { MOST_BEATS, UNITS, holds } from '#lib/TimeSignature.ts';
 import { z } from 'zod';
 
 export const NODE_TYPES = [
@@ -174,6 +175,24 @@ export const timelineSchema = z
 		tempo: z
 			.array(z.strictObject({ tick, bpm: z.number().min(1).max(1000), ramp: z.boolean().optional() }))
 			.default([{ tick: 0, bpm: 120 }]),
+		// Time signatures, a pickup and key signatures, which the editors draw, snap, number bars by and spell notes in, and
+		// which the compiler ignores, as it ignores where a node is drawn (TimeSignature.ts, KeySignature.ts). A song that says none is
+		// in 4/4 from its first tick, in C major.
+		meter: z
+			.array(
+				z.strictObject({
+					tick,
+					beats: z.number().int().min(1).max(MOST_BEATS),
+					unit: z.union(UNITS.map((unit) => z.literal(unit)))
+				})
+			)
+			.min(1)
+			.optional(),
+		pickup: tick.optional(), // Ticks before bar 1: the end of a bar of the first meter, numbered 0
+		key: z
+			.array(z.strictObject({ tick, fifths: z.number().int().min(-7).max(7), minor: z.boolean().optional() }))
+			.min(1)
+			.optional(),
 		clips: z.array(clipSchema).default([]),
 		tracks: z.array(trackSchema).default([]),
 		buses: z.array(busSchema).default([]),
@@ -185,7 +204,13 @@ export const timelineSchema = z
 	// The editors key what they draw on these, and every reference to one of them means only one thing if it names only one.
 	.refine((doc) => distinct(doc.tracks.map((track) => track.id)), 'two tracks have the same id')
 	.refine((doc) => distinct(doc.buses.map((bus) => bus.id)), 'two buses have the same id')
-	.refine((doc) => distinct(doc.clips.map((clip) => clip.id)), 'two clips have the same id');
+	.refine((doc) => distinct(doc.clips.map((clip) => clip.id)), 'two clips have the same id')
+	.refine((doc) => distinct((doc.meter ?? []).map((change) => change.tick)), 'two time signatures are at one tick')
+	.refine((doc) => distinct((doc.key ?? []).map((change) => change.tick)), 'two key signatures are at one tick')
+	.refine(
+		(doc) => (doc.meter ?? []).every((change) => holds(doc.ppq, change.unit)),
+		"a time signature's beat isn't a whole number of ticks at this ppq"
+	);
 
 export type Graph = z.infer<typeof graphSchema>;
 export type Param = z.infer<typeof paramSchema>;

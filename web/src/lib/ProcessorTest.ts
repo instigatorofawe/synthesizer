@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { Bars, pulseTicks } from '#lib/TimeSignature.ts';
 
 const BLOCK = 4;
 type Processor = {
@@ -86,6 +87,7 @@ type Recorder = {
 	port: { postMessage: (message: Message) => void };
 	receive: (message: Record<string, unknown>) => void;
 	process: (inputs: unknown, outputs: Float32Array[][]) => boolean;
+	clickHz: number;
 };
 
 // An engine that moves `ticks` a quantum while it plays, round a loop if it has one, and renders silence.
@@ -156,6 +158,50 @@ describe('a take', () => {
 		run(8);
 		expect(engine.sent).toContain(6);
 		expect(states().at(-1)).toMatchObject({ recording: 2, countIn: 0, clicks: 5 });
+	});
+
+	// What AudioEngine.record sends for a song in this meter, from tick 0.
+	const take = (bars: Bars) => {
+		const bar = bars.at(0);
+		const ticks = bar.beat * bar.meter.beats;
+		const pulses = ticks / pulseTicks(PPQ, bar.meter);
+		return { type: 'record', ppq: PPQ, meter: bars.segments(), ticks, pulses, beats: pulses, bpm: 120 };
+	};
+
+	it('counts in a bar of the song’s meter, accenting its first beat, and clicks 6/8 in two', () => {
+		const engine = engineMoving(2.56);
+		const { p, run, states } = recorder(engine);
+		p.receive(take(Bars.of(PPQ, [{ tick: 0, beats: 3, unit: 4 }]))); // A bar of 3/4 at 120 is 1.5 s, 563 quanta
+		run(8);
+		expect(states().at(-1)).toMatchObject({ recording: 1, countIn: 3, clicks: 1 });
+		expect(p.clickHz).toBe(1760);
+		run(200);
+		expect(states().at(-1)).toMatchObject({ clicks: 2 });
+		expect(p.clickHz).toBe(1320);
+		run(355);
+		expect(engine.sent).not.toContain(6);
+		run(8);
+		expect(engine.sent).toContain(6);
+		expect(states().at(-1)).toMatchObject({ recording: 2, clicks: 4 });
+		expect(p.clickHz).toBe(1760);
+
+		const compound = recorder(engineMoving(2.56));
+		compound.p.receive(take(Bars.of(PPQ, [{ tick: 0, beats: 6, unit: 8 }])));
+		compound.run(560);
+		expect(compound.states().at(-1)).toMatchObject({ recording: 1, clicks: 2 });
+	});
+
+	it('accents the bars a pickup leaves, so a count-in leads into it', () => {
+		// 3/8 after an eighth's pickup: the song starts on the third eighth of bar 0, and the count-in is the bar of 3/8 before
+		// that, from the last eighth of bar -1.
+		const engine = engineMoving(2.56);
+		const { p, run, states } = recorder(engine);
+		p.receive(take(Bars.of(PPQ, [{ tick: 0, beats: 3, unit: 8 }], 240)));
+		run(8);
+		expect(states().at(-1)).toMatchObject({ recording: 1, countIn: 3, clicks: 1 });
+		expect(p.clickHz).toBe(1320); // The last eighth of the bar before the pickup's
+		run(100);
+		expect(p.clickHz).toBe(1760); // Bar 0's first beat
 	});
 
 	it('clicks on the beats of a song already playing, from where it is, and stops clicking when the take ends', () => {

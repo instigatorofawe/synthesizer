@@ -1,4 +1,5 @@
 // The main thread's handle on the worklet.
+import { pulseTicks, type Bars } from '#lib/TimeSignature.ts';
 import { LiveReports } from '#lib/LiveReports.ts';
 import type { CompileReport, NodesReport, ProgramReport } from '#lib/Request.ts';
 
@@ -282,9 +283,14 @@ export class AudioEngine {
 	}
 
 	// A take: a bar counted in at `bpm` before the song plays from `start`, or none if `bpm` is 0 or the song is playing, and
-	// then each note sent with a time is stamped with where the song was when it was heard.
-	record(ppq: number, beatsPerBar: number, bpm: number, start: number) {
-		this.node?.port.postMessage({ type: 'record', ppq, beatsPerBar, beats: beatsPerBar, bpm, start });
+	// then each note sent with a time is stamped with where the song was when it was heard. The bar counted in is the one of
+	// the song's meter at `start`, and the click follows `bars` through the take (TimeSignature.ts).
+	record(bars: Bars, bpm: number, start: number) {
+		const bar = bars.at(start);
+		const ticks = bar.beat * bar.meter.beats;
+		const pulses = Math.round(ticks / pulseTicks(bars.ppq, bar.meter));
+		const meter = bars.segments();
+		this.node?.port.postMessage({ type: 'record', ppq: bars.ppq, meter, ticks, pulses, beats: pulses, bpm, start });
 	}
 
 	stopRecording(at?: number) {

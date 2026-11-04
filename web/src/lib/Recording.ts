@@ -5,6 +5,7 @@
 // The worklet says when each key went down and came up, as the tick of the song that was being heard then, so the output's
 // latency and the time a key takes to reach it don't move a note. These are pure functions from those stamps and a document
 // to a document, so they can be tested without a page.
+import { barsOf, type Bars } from '#lib/TimeSignature.ts';
 import type { Timeline } from '#lib/Schema.ts';
 import {
 	addClip,
@@ -37,14 +38,18 @@ export interface Played {
 
 // A note snapped to the grid, at a tick of the song. Null if it starts before the song does, which only a key pressed early in
 // the count-in can. Round a loop, a note played just before it comes round that snaps to its end goes at its start, since that
-// is where the take goes on from.
+// is where the take goes on from. The grid starts afresh at each bar of `bars`, the song's, as Snap's does.
 export function snapPlayed(
 	played: Played,
 	grid: number,
-	loop: { start: number; end: number } | null = null
+	loop: { start: number; end: number } | null = null,
+	bars: Bars = barsOf({ ppq: 480 })
 ): { tick: number; note: number; vel: number; dur: number } | null {
-	const step = Math.max(1, grid);
-	let tick = Math.round(played.on.tick / step) * step + 0; // + 0 so a key just before the start writes 0, not -0
+	const step = bars.step(0, grid);
+	let tick =
+		played.on.tick < 0
+			? Math.round(played.on.tick / step) * step + 0 // + 0 so a key just before the start writes 0, not -0
+			: bars.snap(played.on.tick, grid);
 	if (loop && loop.end > loop.start && played.on.tick < loop.end && tick >= loop.end) tick -= loop.end - loop.start;
 	if (tick < 0) return null;
 	const dur = Math.max(1, Math.round(played.off.elapsed - played.on.elapsed));
@@ -96,7 +101,7 @@ export function recordNote(
 	const write = (placed: Placement, at: number) => {
 		const clip = clipOf(placed.clip);
 		if (!clip) return null;
-		const grown = growToHold(clip, at, doc.ppq);
+		const grown = growToHold(clip, at, barsOf(doc).shifted(placed.tick, true));
 		if (grown !== clip && !canGrow(doc, clip.id, grown.length)) return null;
 		return {
 			doc: setClip(doc, clip.id, withNote(grown, inClip(placed, note, at))),

@@ -533,6 +533,8 @@
      {"tick": 29040, "bpm": 58, "ramp": true},
      {"tick": 29280, "bpm": 29.0}
     ],
+    "pickup": 480,
+    "key": [{"tick": 0, "fifths": -1}],
     "clips": [
      {
       "id": "trumpet-chorale",

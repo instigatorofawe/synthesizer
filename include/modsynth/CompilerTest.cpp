@@ -1362,6 +1362,29 @@ TEST(Timeline, AFieldTheCompilerDoesNotKnowIsRefused) {
     }
 }
 
+// Time signatures, a pickup and key signatures are the editor's: they change where it draws bars and how it spells
+// notes, and the same song compiles to the same bytes with them or without. Misspelt fields in them are refused like
+// any other.
+TEST(Timeline, MetersAndKeysAreTheEditorsAndChangeNoByte) {
+    const json plain = lane_project(json::parse(R"([{"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5}])"));
+    json signed_ = plain;
+    json& timeline = signed_["programs"][0]["timeline"];
+    timeline["meter"] = json::parse(R"([{"tick": 0, "beats": 3, "unit": 8}, {"tick": 2160, "beats": 6, "unit": 8}])");
+    timeline["pickup"] = 240;
+    timeline["key"] = json::parse(R"([{"tick": 0, "fifths": 0, "minor": true}, {"tick": 2160, "fifths": -3}])");
+    EXPECT_EQ(lane_error(signed_), "");
+    EXPECT_EQ(compile_image(plain).image, compile_image(signed_).image);
+    for (const auto& [pointer, wanted] : std::initializer_list<std::pair<const char*, const char*>>{
+             {"/meter/0/bar", "a time signature has no 'bar'"},
+             {"/key/1/mode", "a key signature has no 'mode'"},
+         }) {
+        SCOPED_TRACE(pointer);
+        json bad = signed_;
+        bad["programs"][0]["timeline"][json::json_pointer(pointer)] = 1;
+        EXPECT_NE(lane_error(bad).find(wanted), std::string::npos) << lane_error(bad);
+    }
+}
+
 namespace {
 
 // One track playing one clip through a placement the test describes.

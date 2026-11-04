@@ -706,6 +706,7 @@
      {"tick": 163200, "bpm": 196, "ramp": true},
      {"tick": 167040, "bpm": 150}
     ],
+    "key": [{"tick": 0, "fifths": 2, "minor": true}],
     "clips": [
      {
       "id": "bassoons-theme",

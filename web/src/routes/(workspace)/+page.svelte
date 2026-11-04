@@ -37,7 +37,7 @@
 	import { bpmText, tempoAt, gliding, parseBpm, shownTempo, tempoTyped, tempoWords } from '#lib/Tempo.ts';
 	import { patchUses, addSlot, replacePatch, setSlot, soloed, type PatchUse } from '#lib/TimelineEdit.ts';
 	import { wholeSong } from '#lib/Transport.ts';
-	import { BEATS_PER_BAR, barOf, position, parsePosition } from '#lib/Units.ts';
+	import { barsOf } from '#lib/TimeSignature.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
 	import { playedBy, playedOn, usedBy } from '#lib/UsedBy.ts';
 	import ViewTabs from '#lib/ViewTabs.svelte';
@@ -850,14 +850,14 @@
 		take.start();
 		songEditor?.stopStepping();
 		if (session.engineState?.playing) {
-			engine.record(doc.ppq, BEATS_PER_BAR, 0, session.engineState.tick);
+			engine.record(barsOf(doc), 0, session.engineState.tick);
 			return;
 		}
 		// With a loop on, the take starts at its start, so the first pass is a whole one.
 		const start = session.looping ? (session.loop ?? wholeSong(doc)).start : tick;
 		if (start !== session.engineState?.tick) engine.locate(start);
 		for (const ring of rings) ring.mark(); // Meters hold the loudest since the take began, as they do since Play
-		engine.record(doc.ppq, BEATS_PER_BAR, tempoAt(doc.tempo, start), start);
+		engine.record(barsOf(doc), tempoAt(doc.tempo, start), start);
 	}
 
 	// Recording stops. The worklet says where the song was when it did, for the notes still held, and then the take is done.
@@ -1147,6 +1147,7 @@
 	});
 
 	const ppq = $derived(songDoc?.ppq ?? 480);
+	const songBars = $derived(barsOf(songDoc ?? { ppq }));
 	const tick = $derived(session.tick);
 
 	// The position and the tempo are fields. Typing a position moves the playhead, and typing a tempo changes the tempo in effect
@@ -1154,19 +1155,19 @@
 	// doesn't overwrite what is typed. An example can't change, so neither can be typed into there.
 	let typedPosition = $state<string | null>(null);
 	let typedTempo = $state<string | null>(null);
-	const positionText = $derived(typedPosition ?? position(tick, ppq));
+	const positionText = $derived(typedPosition ?? songBars.position(tick));
 	// While the Tempo lane is dragged, the field follows the drag, and the song compiles once it is let go.
 	let draggedTempo = $state.raw<Timeline['tempo'] | null>(null);
 	const heardTempo = $derived(draggedTempo ?? songDoc?.tempo);
 	const tempoText = $derived(typedTempo ?? (heardTempo ? String(shownTempo(heardTempo, tick, false)) : ''));
-	const tempoTitle = $derived(heardTempo ? tempoWords(heardTempo, tick, ppq) : 'The tempo, once a song is open');
+	const tempoTitle = $derived(heardTempo ? tempoWords(heardTempo, tick, songBars) : 'The tempo, once a song is open');
 	const glide = $derived(heardTempo ? gliding(heardTempo, tick) : null);
 
 	// The ▾ beside BPM lists the song's tempo changes, each going to where it is, as a DAW's tempo list does.
 	let tempoMenu = $state<{ x: number; y: number } | null>(null);
 	const tempoItems = (doc: Timeline): MenuItem[] =>
 		doc.tempo.map((change, index) => ({
-			label: `${bpmText(change.bpm)} BPM at bar ${barOf(change.tick, doc.ppq)}${change.ramp && index < doc.tempo.length - 1 ? ', gliding on' : ''}`,
+			label: `${bpmText(change.bpm)} BPM at bar ${barsOf(doc).at(change.tick).number}${change.ramp && index < doc.tempo.length - 1 ? ', gliding on' : ''}`,
 			action: () => session.moveTo(change.tick)
 		}));
 
@@ -1186,8 +1187,8 @@
 		const text = typedPosition;
 		typedPosition = null;
 		if (text === null || !songDoc || recipe) return;
-		const at = parsePosition(text, ppq);
-		if (at === null) say(`“${text.trim()}” isn't a position. Type bar.beat.tick, as 3.2.000, or a bar.`);
+		const at = songBars.parse(text);
+		if (at === null || at < 0) say(`“${text.trim()}” isn't a position. Type bar.beat.tick, as 3.2.000, or a bar.`);
 		else if (at !== tick) session.moveTo(at);
 	}
 
@@ -1573,7 +1574,7 @@
 			disabled={!songDoc}
 			onfocus={(event) => {
 				if (recipe) return;
-				typedPosition = position(tick, ppq);
+				typedPosition = songBars.position(tick);
 				event.currentTarget.select();
 			}}
 			oninput={(event) => (typedPosition = event.currentTarget.value)}

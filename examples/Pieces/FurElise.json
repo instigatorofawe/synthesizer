@@ -290,6 +290,9 @@
      {"tick": 87360, "bpm": 64, "ramp": true},
      {"tick": 89520, "bpm": 46}
     ],
+    "meter": [{"tick": 0, "beats": 3, "unit": 8}],
+    "pickup": 240,
+    "key": [{"tick": 0, "fifths": 0, "minor": true}],
     "clips": [
      {
       "id": "piano-a",

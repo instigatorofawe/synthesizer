@@ -6,7 +6,7 @@
 // gliding to it. The lane and the inspector's list are two views of that one list, so every edit here is one of the
 // timeline's own, and undoes as any other does.
 import type { Tempo } from '#lib/TimelineEdit.ts';
-import { barOf, snapTick } from '#lib/Units.ts';
+import type { Bars } from '#lib/TimeSignature.ts';
 import type { Timeline } from '#lib/Schema.ts';
 
 export const MIN_BPM = 1;
@@ -89,17 +89,17 @@ export function tempoTyped(doc: Timeline, tick: number, bpm: number): Timeline {
 }
 
 // What the tempo field's tooltip says about the song's tempo at a tick, and what typing into it changes.
-export function tempoWords(tempo: Tempo[], tick: number, ppq: number): string {
+export function tempoWords(tempo: Tempo[], tick: number, bars: Bars): string {
 	const index = tempoIndexAt(tempo, tick);
 	const change = tempo[index];
 	if (!change) return 'The tempo';
 	const to = rampTo(tempo, index);
-	const bar = barOf(change.tick, ppq);
+	const bar = bars.at(change.tick).number;
 	// Each says where the rest is: the Tempo lane, above the tracks, which ▸ Tempo unfolds.
 	const lane = 'The Tempo lane above the tracks, which ▸ Tempo unfolds,';
 	if (to) {
 		return (
-			`Gliding from ${change.bpm} BPM at bar ${bar} to ${to.bpm} at bar ${barOf(to.tick, ppq)}. ` +
+			`Gliding from ${change.bpm} BPM at bar ${bar} to ${to.bpm} at bar ${bars.at(to.tick).number}. ` +
 			`Typing sets where the glide starts. ${lane} draws the glide.`
 		);
 	}
@@ -165,26 +165,26 @@ function neighbours(tempo: Tempo[], index: number): { before: number; after: num
 
 // Where a change dragged to `tick` goes: the nearest line of the grid, kept between the changes either side of it, since a
 // change can't pass another. Where no line of the grid is left between them, it stays where it was. The first change sets
-// the tempo the song opens at, so it stays at its tick.
-export function tempoTick(tempo: Tempo[], index: number, tick: number, grid: number): number {
+// the tempo the song opens at, so it stays at its tick. The grid starts afresh at each of the song's `bars`, as Snap's does.
+export function tempoTick(tempo: Tempo[], index: number, tick: number, grid: number, bars: Bars): number {
 	const change = tempo[index];
 	const { before, after } = neighbours(tempo, index);
 	if (before < 0) return change.tick;
 	const low = tempo[before].tick + 1;
 	const high = after < 0 ? Infinity : tempo[after].tick - 1;
-	const snapped = snapTick(tick, grid);
+	const snapped = bars.snap(tick, grid);
 	if (snapped >= low && snapped <= high) return snapped;
-	const first = Math.ceil(low / grid) * grid;
-	const last = Math.floor(high / grid) * grid;
+	const first = bars.ceil(low, grid);
+	const last = high === Infinity ? Infinity : bars.floor(high, grid);
 	if (first > last) return change.tick;
 	return snapped < low ? first : last;
 }
 
 // A change dragged: to `bpm`, and sideways to where `tempoTick` says. It keeps whether it glides.
-export function moveTempo(doc: Timeline, index: number, tick: number, bpm: number, grid: number): Timeline {
+export function moveTempo(doc: Timeline, index: number, tick: number, bpm: number, grid: number, bars: Bars): Timeline {
 	const change = doc.tempo[index];
 	if (!change) return doc;
-	const to = { tick: tempoTick(doc.tempo, index, tick, grid), bpm };
+	const to = { tick: tempoTick(doc.tempo, index, tick, grid, bars), bpm };
 	return to.tick === change.tick && to.bpm === change.bpm ? doc : setTempo(doc, index, to);
 }
 
@@ -277,13 +277,14 @@ export function labelsShown(at: number[], width: number[], gap = 4): boolean[] {
 export const bpmText = (bpm: number) => String(Math.round(bpm * 100) / 100);
 
 // The song's tempo in words, for the lane's label and a screen reader: "140 BPM, gliding to 100 by bar 3, 120 from bar 5".
-export function tempoSummary(tempo: Tempo[], ppq: number): string {
+export function tempoSummary(tempo: Tempo[], bars: Bars): string {
 	const order = [...tempo].sort((a, b) => a.tick - b.tick);
 	if (!order.length) return '120 BPM';
 	return order
 		.map((change, at) => {
-			if (at === 0) return `${bpmText(change.bpm)} BPM${change.tick > 0 ? ` from bar ${barOf(change.tick, ppq)}` : ''}`;
-			const bar = barOf(change.tick, ppq);
+			if (at === 0)
+				return `${bpmText(change.bpm)} BPM${change.tick > 0 ? ` from bar ${bars.at(change.tick).number}` : ''}`;
+			const bar = bars.at(change.tick).number;
 			return order[at - 1].ramp
 				? `gliding to ${bpmText(change.bpm)} by bar ${bar}`
 				: `${bpmText(change.bpm)} from bar ${bar}`;

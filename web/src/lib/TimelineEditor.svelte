@@ -43,25 +43,47 @@
 		setSlot,
 		setTrack,
 		soloed,
+		splitPlacement,
 		trackKey,
 		windowOf,
 		type Clip,
 		type PatchLike
 	} from '#lib/TimelineEdit.ts';
 	import {
+		BAR,
 		barLength,
 		barLengths,
 		readLength,
 		readPosition,
-		barOf,
 		drawLengths,
 		grids,
 		noteValue,
-		position,
-		snapTick,
-		stepLength,
-		ticksPerBar
+		stepLength
 	} from '#lib/Units.ts';
+	import {
+		MOST_BEATS,
+		UNITS,
+		addMeter,
+		barsOf,
+		holds,
+		meterText,
+		metersOf,
+		removeMeter,
+		setMeter,
+		setPickup
+	} from '#lib/TimeSignature.ts';
+	import {
+		KEYS,
+		accidentalsText,
+		addKey,
+		keyAt,
+		keyName,
+		keyValue,
+		keysOf,
+		parseKeyValue,
+		removeKey,
+		setKey
+	} from '#lib/KeySignature.ts';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import { ZOOM_KEY, dropGone, gone, keepZoom, keptZoom, rollViews, zoomKey, type RollView } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
@@ -154,7 +176,7 @@
 	let clipId = $state<string | null>(opened.clip);
 	let grid = $state(untrack(() => grids(doc.ppq)[1].ticks));
 	// Clips snap apart from notes, as in Live and Logic: to bars, until a finer step is chosen. The Tempo lane follows clips.
-	let clipGrid = $state(untrack(() => ticksPerBar(doc)));
+	let clipGrid = $state(BAR);
 	let draw = $state(untrack(() => doc.ppq)); // The Draw length, a 1/4 note until a note is added, resized or chosen
 	let mod = $state('Ctrl'); // What the hints call Mod, which only the browser knows
 	// Step entry, which R or the Step toggle turns on and Esc leaves. It outlasts a change of clip, and its cursor is kept for
@@ -164,9 +186,9 @@
 	let roll = $state<ReturnType<typeof PianoRoll>>();
 	let rollBar = $state<HTMLElement | null>(null); // Where in the tab strip the roll draws its toolbar
 	const drawChoices = $derived.by(() => {
-		const lengths = drawLengths(doc.ppq);
+		const lengths = drawLengths(doc.ppq, true, clipBar);
 		if (lengths.some((length) => length.ticks === draw)) return lengths;
-		return [...lengths, { label: noteValue(draw, doc.ppq), ticks: draw }].sort((a, b) => a.ticks - b.ticks);
+		return [...lengths, { label: noteValue(draw, doc.ppq, clipBar), ticks: draw }].sort((a, b) => a.ticks - b.ticks);
 	});
 	let barWidth = $state(96);
 	let tab = $state(opened.tab);
@@ -174,6 +196,22 @@
 	const track = $derived(doc.tracks.find((t) => t.id === selection.track));
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
 	const clip = $derived(doc.clips.find((c) => c.id === clipId));
+	// Where bars fall (TimeSignature.ts): the song's, and the roll's, in its clip's own ticks. A clip's bars are those of where it is
+	// played: the chosen placement, or else the first that plays it, or the song's start for a clip on no track. They line up with
+	// where the placement starts, which a window doesn't move, so the window's own fields never move the bars they read in.
+	const bars = $derived(barsOf(doc));
+	const rollPlaced = $derived(
+		placed?.clip === clipId
+			? placed
+			: (track?.placements.find((p) => p.clip === clipId) ??
+					doc.tracks.flatMap((t) => t.placements).find((p) => p.clip === clipId))
+	);
+	const clipBars = $derived(bars.shifted(rollPlaced?.tick ?? 0, true));
+	// A whole bar where the clip starts, which a clip's length and a Draw length of bars read in.
+	const clipBar = $derived.by(() => {
+		const first = clipBars.at(0);
+		return first.beat * first.meter.beats;
+	});
 	// A clip can be placed on several tracks. What it moves and what it plays are worked out for the one it was opened from,
 	// or for the chosen track, which the roll follows.
 	const home = $derived(
@@ -281,8 +319,8 @@
 
 	// The roll's New clip, for a track with none: as long as a new song's, at the bar the playhead is in.
 	function firstClip(id: number) {
-		const bar = ticksPerBar(doc);
-		newClip(id, Math.floor(tick / bar) * bar, TEMPLATE_BARS * bar);
+		const at = bars.floor(tick, BAR);
+		newClip(id, at, bars.after(at, TEMPLATE_BARS) - at);
 	}
 
 	function select(next: Selection) {
@@ -314,10 +352,9 @@
 
 	// A new track comes with a clip as long as a new song's, at the bar the playhead is in, and the roll opens on it, so what
 	// the keys and step entry write goes into the track they play.
-	function newTrack(patch: string, at = Math.floor(tick / ticksPerBar(doc)) * ticksPerBar(doc)) {
+	function newTrack(patch: string, at = bars.floor(tick, BAR)) {
 		const added = addTrack(doc, patch);
-		const bar = ticksPerBar(doc);
-		const made = addClip(added.doc, TEMPLATE_BARS * bar);
+		const made = addClip(added.doc, bars.after(at, TEMPLATE_BARS) - at);
 		const next = place(made.doc, added.id, made.id, at);
 		commit(next);
 		selection = { track: added.id, placement: placementIndex(next, added.id, made.id, at) };
@@ -394,7 +431,7 @@
 				: ` Drag across a row for a new clip, or double-click it for a bar. Drag a clip's right edge to repeat it, hold ${mod} to copy it, and right-click it for more.`)
 	);
 
-	function newClip(id: number, at: number, length = ticksPerBar(doc)) {
+	function newClip(id: number, at: number, length = bars.at(at).end - at) {
 		const added = addClip(doc, length);
 		const next = place(added.doc, id, added.id, at);
 		commit(next);
@@ -507,6 +544,44 @@
 		return on(query, 'change', () => (wide = query.matches));
 	});
 
+	// The inspector's Time signature and Key, which a mark on the Time & key lane opens, at the field for its change.
+	const meters = $derived(metersOf(doc));
+	const keys = $derived(keysOf(doc));
+	let meterOpen = $state(false);
+	let keyOpen = $state(false);
+	const firstBar = $derived(barTicksOf(meters[0]));
+	function barTicksOf(meter: { beats: number; unit: number }) {
+		return meter.beats * ((doc.ppq * 4) / meter.unit);
+	}
+	// Where a change is, as the inspector says it: its bar, or bar.beat.tick if a change cut the bar before it short there.
+	const barWords = (at: number) => `bar ${bars.at(at).number}`;
+
+	async function inspectSignature(at: { kind: 'meter' | 'key'; tick: number }) {
+		if (inspecting === false) toggleInspector();
+		if (at.kind === 'meter') meterOpen = true;
+		else keyOpen = true;
+		await settle();
+		const name = `${at.kind === 'meter' ? 'Beats' : 'Key'} at ${barWords(at.tick)}`;
+		const field = document.getElementById('inspector')?.querySelector<HTMLElement>(`[aria-label="${name}"]`);
+		field?.scrollIntoView({ block: 'nearest' });
+		field?.focus();
+	}
+
+	// Add a change at the playhead: at the start of the bar it is in, as what plays there, and its field takes the keys.
+	function inspectAdded(kind: 'meter' | 'key') {
+		const at = bars.floor(tick, BAR);
+		commit(kind === 'meter' ? addMeter(doc, at, bars.meterAt(at)) : addKey(doc, at, keyAt(doc, at)));
+		void inspectSignature({ kind, tick: at });
+	}
+
+	// A pickup typed as a length, or none.
+	const readPickup = (text: string): number | string => {
+		if (/^\s*(none|0)?\s*$/i.test(text)) return 0;
+		const read = readLength(doc.ppq, 1, firstBar)(text);
+		if (typeof read === 'number' && read >= firstBar) return `A pickup is less than a bar of ${meterText(meters[0])}.`;
+		return read;
+	};
+
 	// Each clip keeps how the roll showed it: its zoom and row height across a reload, and its scroll while the page is open.
 	const viewKey = (clip: string) => zoomKey(id, clip);
 	function rollViewOf(clip: string): RollView | null {
@@ -570,12 +645,11 @@
 	const placeFor = $derived(selection.track === null ? doc.tracks[0] : track);
 	function placeShown() {
 		if (!clip || !placeFor) return;
-		const bar = ticksPerBar(doc);
 		const span = Math.max(clip.length, 1);
 		const ends = placeFor.placements.map((p) => ({ start: p.tick, end: p.tick + placementSpan(doc, p) }));
 		const free = (at: number) => ends.every((p) => at + span <= p.start || at >= p.end);
-		let at = Math.floor(tick / bar) * bar;
-		if (!free(at)) at = Math.ceil(Math.max(...ends.map((p) => p.end)) / bar) * bar;
+		let at = bars.floor(tick, BAR);
+		if (!free(at)) at = bars.ceil(Math.max(...ends.map((p) => p.end)), BAR);
 		const next = place(doc, placeFor.id, clip.id, at);
 		commit(next);
 		selection = { track: placeFor.id, placement: placementIndex(next, placeFor.id, clip.id, at) };
@@ -654,6 +728,18 @@
 		delete: (at) => {
 			select(at);
 			deleteClip();
+		},
+		// Split in two where it was asked, and the second part chosen, as Live and Logic leave it.
+		split: (at, where) => {
+			const done = splitPlacement(doc, at.track, at.placement, where);
+			if (!done) {
+				onsay('The playhead is not inside that clip, so there is nowhere to split it.');
+				return;
+			}
+			commit(done.doc);
+			selection = { track: at.track, placement: done.index };
+			clipId = done.doc.tracks.find((t) => t.id === at.track)?.placements[done.index]?.clip ?? clipId;
+			tab = 'notes';
 		},
 		// The loop goes over the placement and its repeats, and the playhead into it, so Play plays the loop.
 		loop: (at) => {
@@ -838,6 +924,7 @@
 			onmix={mixed}
 			onzoom={zoomBars}
 			ondropped={(drop) => void dropped(drop)}
+			onsignature={(at) => void inspectSignature(at)}
 		/>
 
 		<aside class="inspector" id="inspector">
@@ -859,16 +946,16 @@
 					{#each doc.tempo as change, index (index)}
 						<div class="line">
 							<span class="muted"
-								>{change.tick % ticksPerBar(doc)
-									? position(change.tick, doc.ppq)
-									: `bar ${barOf(change.tick, doc.ppq)}`}</span
+								>{bars.at(change.tick).start !== change.tick
+									? bars.position(change.tick)
+									: `bar ${bars.at(change.tick).number}`}</span
 							>
 							<input
 								type="number"
 								min="1"
 								max="1000"
 								step="any"
-								aria-label={`Tempo at bar ${barOf(change.tick, doc.ppq)}`}
+								aria-label={`Tempo at bar ${bars.at(change.tick).number}`}
 								value={change.bpm}
 								onchange={(e) => commit(setTempo(doc, index, { bpm: number(e) }))}
 							/>
@@ -876,7 +963,7 @@
 								<label class="glide" title="Glide to the next change's tempo, instead of holding this one until it">
 									<input
 										type="checkbox"
-										aria-label={`Glide from bar ${barOf(change.tick, doc.ppq)}`}
+										aria-label={`Glide from bar ${bars.at(change.tick).number}`}
 										checked={change.ramp ?? false}
 										onchange={(e) => commit(setTempo(doc, index, { ramp: e.currentTarget.checked }))}
 									/>
@@ -886,7 +973,7 @@
 							{#if index > 0 && !readonly}
 								<button
 									type="button"
-									aria-label={`Remove tempo at bar ${barOf(change.tick, doc.ppq)}`}
+									aria-label={`Remove tempo at bar ${bars.at(change.tick).number}`}
 									onclick={() => commit(removeTempo(doc, index))}>×</button
 								>
 							{/if}
@@ -896,12 +983,100 @@
 						<button
 							type="button"
 							onclick={() => {
-								const at = snapTick(tick, ticksPerBar(doc));
+								const at = bars.snap(tick, BAR);
 								commit(addTempo(doc, at, Math.round(tempoAt(doc.tempo, at) * 100) / 100));
 							}}
 						>
 							Add a change at the playhead
 						</button>
+					{/if}
+				</details>
+
+				<details bind:open={meterOpen}>
+					<summary
+						>Time signature, {meterText(meters[0])}{meters.length > 1 ? ` and ${meters.length - 1} more` : ''}</summary
+					>
+					<p class="muted lanenote">The Time & key lane, above the tracks, marks these. A change starts a bar.</p>
+					{#each meters as change, index (change.tick)}
+						{@const where = barWords(change.tick)}
+						<div class="line">
+							<span class="muted">{where}</span>
+							<input
+								type="number"
+								min="1"
+								max={MOST_BEATS}
+								aria-label={`Beats at ${where}`}
+								value={change.beats}
+								onchange={(e) => {
+									const beats = Math.round(number(e));
+									if (beats >= 1 && beats <= MOST_BEATS) commit(setMeter(doc, index, { beats }));
+									else e.currentTarget.value = String(change.beats);
+								}}
+							/>
+							<span aria-hidden="true">/</span>
+							<select
+								aria-label={`Beat at ${where}`}
+								value={change.unit}
+								onchange={(e) => commit(setMeter(doc, index, { unit: Number(e.currentTarget.value) }))}
+							>
+								{#each UNITS.filter((unit) => holds(doc.ppq, unit)) as unit (unit)}<option value={unit}>{unit}</option
+									>{/each}
+							</select>
+							{#if index > 0 && !readonly}
+								<button
+									type="button"
+									aria-label={`Remove time signature at ${where}`}
+									onclick={() => commit(removeMeter(doc, index))}>×</button
+								>
+							{/if}
+						</div>
+					{/each}
+					<label title="A bar before bar 1 that is only its end, as a tune that starts on an upbeat has: 1/8, or none"
+						>pickup <UnitField
+							label="Pickup"
+							value={doc.pickup ?? 0}
+							format={(ticks) => (ticks ? noteValue(ticks, doc.ppq, firstBar) : 'none')}
+							read={readPickup}
+							onvalue={(ticks) => commit(setPickup(doc, ticks))}
+							{onsay}
+							width="6rem"
+						/></label
+					>
+					{#if !readonly}
+						<button type="button" onclick={() => inspectAdded('meter')}>Add a change at the playhead</button>
+					{/if}
+				</details>
+
+				<details bind:open={keyOpen}>
+					<summary>Key, {keyName(keys[0])}{keys.length > 1 ? ` and ${keys.length - 1} more` : ''}</summary>
+					<p class="muted lanenote">How notes are named and spelled, which changes nothing about how they play.</p>
+					{#each keys as change, index (change.tick)}
+						{@const where = barWords(change.tick)}
+						<div class="line">
+							<span class="muted">{where}</span>
+							<select
+								aria-label={`Key at ${where}`}
+								value={keyValue(change)}
+								onchange={(e) => {
+									const key = parseKeyValue(e.currentTarget.value);
+									if (key) commit(setKey(doc, index, key));
+								}}
+							>
+								{#each KEYS as key (keyValue(key))}<option value={keyValue(key)}
+										>{keyName(key)}{accidentalsText(key.fifths) ? `, ${accidentalsText(key.fifths)}` : ''}</option
+									>{/each}
+							</select>
+							{#if index > 0 && !readonly}
+								<button
+									type="button"
+									aria-label={`Remove key at ${where}`}
+									onclick={() => commit(removeKey(doc, index))}>×</button
+								>
+							{/if}
+						</div>
+					{/each}
+					{#if !readonly}
+						<button type="button" onclick={() => inspectAdded('key')}>Add a change at the playhead</button>
 					{/if}
 				</details>
 
@@ -929,7 +1104,7 @@
 					{#if held !== undefined}
 						<p class="muted" class:short data-testid="notes-at-once">
 							Holds up to {held} at once{#if short && short.tick !== undefined}, so with {track.voices} the oldest are cut
-								short from bar {barOf(short.tick, doc.ppq)}{/if}.
+								short from bar {bars.at(short.tick).number}{/if}.
 						</p>
 					{/if}
 					{#each track.slots as slot, index (index)}
@@ -1050,9 +1225,9 @@
 						>length <UnitField
 							label="Clip length"
 							value={clip.length}
-							format={(length) => barLength(length, doc.ppq)}
-							read={readLength(doc.ppq)}
-							choices={barLengths(doc.ppq)}
+							format={(length) => barLength(length, doc.ppq, clipBar)}
+							read={readLength(doc.ppq, 1, clipBar)}
+							choices={barLengths(doc.ppq, clipBar)}
 							onvalue={(length) => commit(setClip(doc, clip.id, { ...clip, length }))}
 							{onsay}
 							width="9.5rem"
@@ -1065,8 +1240,8 @@
 							<UnitField
 								label="Clip start"
 								value={placed.tick}
-								format={(tick) => position(tick, doc.ppq)}
-								read={readPosition(doc.ppq)}
+								format={(tick) => bars.position(tick)}
+								read={readPosition(bars)}
 								onvalue={(tick) => {
 									const next = setPlacement(doc, at.track, at.index, { tick });
 									commit(next);
@@ -1091,8 +1266,8 @@
 								>from <UnitField
 									label="Window start"
 									value={window.start}
-									format={(tick) => position(tick, doc.ppq)}
-									read={readPosition(doc.ppq, clip.length)}
+									format={(tick) => clipBars.position(tick)}
+									read={readPosition(clipBars, clip.length)}
 									onvalue={(start) => commit(setPlacement(doc, at.track, at.index, { start, length: undefined }))}
 									{onsay}
 									width="8rem"
@@ -1103,9 +1278,9 @@
 								>for <UnitField
 									label="Window length"
 									value={window.length}
-									format={(length) => barLength(length, doc.ppq)}
-									read={readLength(doc.ppq)}
-									choices={barLengths(doc.ppq)}
+									format={(length) => barLength(length, doc.ppq, clipBar)}
+									read={readLength(doc.ppq, 1, clipBar)}
+									choices={barLengths(doc.ppq, clipBar)}
 									onvalue={(length) => commit(setPlacement(doc, at.track, at.index, { length }))}
 									{onsay}
 									width="9.5rem"
@@ -1143,8 +1318,8 @@
 								label={`Play change ${index + 1} tick`}
 								title="Where in the clip it changes, as bar.beat.tick from the clip's start"
 								value={change.tick}
-								format={(tick) => position(tick, doc.ppq)}
-								read={readPosition(doc.ppq, clip.length)}
+								format={(tick) => clipBars.position(tick)}
+								read={readPosition(clipBars, clip.length)}
 								onvalue={(tick) => clipChanged(setPlayChange(clip, index, { tick }))}
 								{onsay}
 								width="5.5rem"
@@ -1270,6 +1445,7 @@
 							{clip}
 							toolbarIn={rollBar}
 							ppq={doc.ppq}
+							bars={clipBars}
 							{grid}
 							slots={home?.slots ?? []}
 							{choices}

@@ -1,8 +1,8 @@
+import { Bars } from '#lib/TimeSignature.ts';
 import { describe, expect, it } from 'vitest';
 import {
 	noteName,
 	noteValue,
-	position,
 	barLength,
 	barLengths,
 	noteLengths,
@@ -144,15 +144,15 @@ describe('a length', () => {
 
 describe('a field', () => {
 	it('takes a position as bar.beat.tick or a bar, as the top bar does, and says what to type otherwise', () => {
-		const read = readPosition(PPQ);
+		const read = readPosition(Bars.of(PPQ));
 		expect(read('2.3.120')).toBe(1920 + 960 + 120);
 		expect(read('3')).toBe(3840);
-		expect(read(position(1234, PPQ))).toBe(1234);
+		expect(read(Bars.of(PPQ).position(1234))).toBe(1234);
 		expect(read('1.5')).toBe("“1.5” isn't a position. Type bar.beat.tick, as 3.2.000, or a bar.");
 	});
 
 	it("refuses a position past its clip's end, and says where the end is", () => {
-		const read = readPosition(PPQ, 1920);
+		const read = readPosition(Bars.of(PPQ), 1920);
 		expect(read('1.4.479')).toBe(1919);
 		expect(read('2')).toBe("“2” is past the clip's end, at 2.1.000. Type a position before it.");
 	});

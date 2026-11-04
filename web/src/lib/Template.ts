@@ -3,7 +3,7 @@
 // heard. It is an ordinary timeline, which saves, undoes and compiles as any other, so nothing about it is special after that.
 import { EMPTY_TIMELINE, type Timeline } from '#lib/Schema.ts';
 import { addClip, addTrack, place } from '#lib/TimelineEdit.ts';
-import { ticksPerBar } from '#lib/Units.ts';
+import { barsOf } from '#lib/TimeSignature.ts';
 
 // The tine electric piano Für Elise is played on. An electric piano is what Logic and GarageBand open a new song with: it
 // sounds right on its own, with no insert or bus behind it, and it answers velocity. It has no recordings to fetch, so the
@@ -14,7 +14,7 @@ export const TEMPLATE_BARS = 4;
 
 function template(): Timeline {
 	const track = addTrack(EMPTY_TIMELINE, TEMPLATE_PATCH);
-	const clip = addClip(track.doc, TEMPLATE_BARS * ticksPerBar(EMPTY_TIMELINE));
+	const clip = addClip(track.doc, barsOf(EMPTY_TIMELINE).after(0, TEMPLATE_BARS));
 	return place(clip.doc, track.id, clip.id, 0);
 }
 

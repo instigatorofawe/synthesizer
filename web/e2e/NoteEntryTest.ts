@@ -210,6 +210,8 @@ test('Mod-drag copies a placement, and its menu makes it unique and takes it awa
 	await expect(menu.getByRole('menuitem')).toHaveText([
 		'Open notes',
 		'Loop this clip',
+		/^Split here, at /,
+		'Split at the playhead',
 		'Copy',
 		'Duplicate after',
 		'Make unique',

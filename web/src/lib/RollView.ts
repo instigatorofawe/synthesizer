@@ -3,7 +3,7 @@
 
 import { modHeld } from '#lib/Shortcuts.ts';
 import type { Clip } from '#lib/TimelineEdit.ts';
-import { BEATS_PER_BAR } from '#lib/Units.ts';
+import { Bars } from '#lib/TimeSignature.ts';
 
 export interface RollZoom {
 	beat: number; // Pixels across a beat
@@ -67,13 +67,15 @@ export function fitRoll(
 	clip: Pick<Clip, 'notes' | 'length'>,
 	ppq: number,
 	size: { width: number; height: number },
-	row: number
+	row: number,
+	bars: Bars = Bars.of(ppq)
 ): Required<RollView> {
-	const bar = ppq * BEATS_PER_BAR;
 	const notes = clip.notes;
-	const first = notes.length ? Math.floor(Math.min(...notes.map((n) => n.tick)) / bar) * bar : 0;
-	const last = notes.length ? Math.ceil(Math.max(...notes.map((n) => n.tick + n.dur)) / bar) * bar : clip.length;
-	const span = Math.max(last - first, bar);
+	const ends = notes.map((n) => n.tick + n.dur);
+	const first = notes.length ? Math.max(0, bars.at(Math.min(...notes.map((n) => n.tick))).start) : 0;
+	const lastEnd = notes.length ? Math.max(...ends) : clip.length;
+	const last = notes.length ? (bars.at(lastEnd).start === lastEnd ? lastEnd : bars.at(lastEnd).end) : clip.length;
+	const span = Math.max(last - first, bars.at(first).end - Math.max(0, bars.at(first).start));
 	const beat = clampBeat(size.width / (span / ppq));
 
 	const low = notes.length ? Math.min(...notes.map((n) => n.note)) : 60;

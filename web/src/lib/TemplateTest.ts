@@ -4,7 +4,6 @@ import { referencedAssets, referencedPatches, referencedSubpatches, timelineSche
 import { readCatalogue } from '#lib/server/Builtins.ts';
 import { compileRequest } from '#lib/server/Compile.ts';
 import { NEW_TIMELINE, TEMPLATE_BARS, TEMPLATE_PATCH } from '#lib/Template.ts';
-import { ticksPerBar } from '#lib/Units.ts';
 import { trackAlone } from '#lib/Workspace.ts';
 
 describe('the new song', () => {
@@ -26,7 +25,7 @@ describe('the new song', () => {
 		expect(track.slots).toEqual([TEMPLATE_PATCH]);
 		expect(track.placements).toEqual([{ clip: NEW_TIMELINE.clips[0].id, tick: 0, repeat: 1 }]);
 		expect(NEW_TIMELINE.clips).toHaveLength(1);
-		expect(NEW_TIMELINE.clips[0]).toMatchObject({ length: TEMPLATE_BARS * ticksPerBar(NEW_TIMELINE), notes: [] });
+		expect(NEW_TIMELINE.clips[0]).toMatchObject({ length: TEMPLATE_BARS * 4 * NEW_TIMELINE.ppq, notes: [] });
 	});
 
 	// With no notes the song's image has no track in it, which is why the keys play the track on its own until it has one.

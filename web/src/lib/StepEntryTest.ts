@@ -1,3 +1,4 @@
+import { Bars } from '#lib/TimeSignature.ts';
 import { describe, expect, it } from 'vitest';
 import {
 	START,
@@ -18,6 +19,7 @@ import {
 import type { Clip, Note } from '#lib/TimelineEdit.ts';
 
 const PPQ = 480;
+const BARS = Bars.of(PPQ);
 const BAR = 4 * PPQ;
 const EIGHTH = PPQ / 2;
 const SIXTEENTH = PPQ / 4;
@@ -31,7 +33,7 @@ function chord(clip: Clip, cursor: Cursor, pitches: number[], length = EIGHTH, v
 	for (const pitch of pitches) held = press(held, cursor, pitch, length, velocity);
 	for (const pitch of pitches) held = release(held!, pitch);
 	expect(held!.held).toEqual([]);
-	return write(clip, cursor, held!, PPQ);
+	return write(clip, cursor, held!, BARS);
 }
 
 describe('writing a step', () => {
@@ -55,7 +57,7 @@ describe('writing a step', () => {
 			[0, 67]
 		]);
 		held = release(release(held, 64), 67);
-		const written = write(clipOf(), START, held, PPQ);
+		const written = write(clipOf(), START, held, BARS);
 		expect(written.clip.notes).toHaveLength(3);
 		expect(written.cursor.tick).toBe(EIGHTH);
 	});
@@ -77,7 +79,7 @@ describe('writing a step', () => {
 		held = lengthen(held, SIXTEENTH);
 		expect(held.notes.map((n) => n.dur)).toEqual([EIGHTH + 2 * SIXTEENTH, EIGHTH + SIXTEENTH]);
 		expect(chordEnd(held)).toBe(EIGHTH + 2 * SIXTEENTH);
-		const written = write(clipOf(), START, release(held, 60), PPQ);
+		const written = write(clipOf(), START, release(held, 60), BARS);
 		expect(written.cursor.tick).toBe(PPQ);
 	});
 

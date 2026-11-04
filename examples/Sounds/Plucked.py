@@ -19,9 +19,8 @@ from Instrument import Instrument, Phrase, Sound, Voice
 
 # Pieces every voice here is made of ----------------------------------------------------------------------------------
 
-Body = list[
-    tuple[float, float, float]
-]  # A resonance's frequency in Hz, its q and its level
+# A body's resonances: each one's frequency in Hz, its q and its level.
+Body = list[tuple[float, float, float]]
 
 
 def loudness(v: Voice, floor: float) -> Ref:
@@ -258,11 +257,10 @@ def driven(
         cabinet = g.filter("lowpass", clipped, follows(g, f, 4200.0, 1.5), 1.1)
         cabinet = g.filter("lowpass", cabinet, follows(g, f, 6500.0, 2.0), 0.7)
         cabinet = g.add(cabinet, g.mul(g.filter("bandpass", cabinet, 1800.0, 1.2), 0.5))
-        # The band-pass ahead of the curve has already taken out the bass, and an odd curve makes no offset of its own.
         gate = g.env(0.001, 0.1, 1.0, 0.09)
-        return g.mul(
-            g.mul(cabinet, gate), g.mul(loudness(v, 0.08), tilt(g, v.key.pitch, tilted))
-        )
+        level = g.mul(loudness(v, 0.08), tilt(g, v.key.pitch, tilted))
+        # A pulse is lopsided, and a curve that clips it leaves an offset, which the last filter takes out.
+        return g.filter("highpass", g.mul(g.mul(cabinet, gate), level), 90.0)
 
     return build
 
@@ -297,13 +295,15 @@ def bass(
     body: Body,
     tone_hz: float | None,
     click: float,
-    mwah: float = 0.0,
+    bloom: float = 0.0005,
+    q: float = 0.7,
 ):
     """A bass guitar's string or a double bass's: rounder than a guitar's, through `body`, and a pickup's low-pass at
-    `tone_hz`, if it has one. The pluck's bright part dies first, and `share` of the start rings on for `after` seconds at middle C.
-    `click` is noise at the pluck, as a finger on the wood or a slap on the frets makes. `mwah` is a fretless's: a
-    resonance that climbs the harmonics just after the pluck and slowly falls back, as a string buzzing on a
-    fingerboard with no frets makes, so the note opens like a vowel and then settles."""
+    `tone_hz`, if it has one. The pluck's bright part dies first, and `share` of the start rings on for `after`
+    seconds at middle C. `click` is noise at the pluck, as a finger on the wood or a slap on the frets makes. A
+    fretless's string buzzes along a fingerboard with no frets, which brings its harmonics up just after the pluck:
+    `bloom` is how long they take to arrive and `q` the resonance they arrive with, so the note opens like a vowel,
+    "mwah", and then settles."""
 
     def build(v: Voice) -> Sound:
         g = v.g
@@ -316,12 +316,10 @@ def bass(
             floor,
             fade,
             offset=60.0,
-            pick=scratch(g, v, click, 0.005),
+            q=q,
+            attack=bloom,
+            pick=scratch(g, v, click, 0.005) if click else None,
         )
-        if mwah:
-            sing = stepped(g, g.env(0.12, g.keyed(v.key.pitch, 0.5), 0.0, 0.1))
-            hz = clamp_cutoff(g, g.mul(f, g.add(g.mul(sing, 6.0), 1.5)), 6000.0)
-            tone = g.add(tone, g.mul(g.filter("bandpass", tone, hz, 5.0), mwah))
         if tone_hz is not None:
             tone = g.filter("lowpass", tone, follows(g, f, tone_hz, 2.0), 0.9)
         rings = g.env(0.001, g.keyed(v.key.pitch, after), 0.0, release)
@@ -374,10 +372,12 @@ def sitar(v: Voice) -> Sound:
         g.node("ratio", {"in": g.add(g.mul(v.pitch, -1.0), 138.0)}, root=69),
         2.0 / 440.0,
     )
+    # The pluck alone sets them going: fed the whole note, a comb tuned to it would swell it instead.
+    struck = g.mul(tone, g.env(0.0005, 0.012, 0.0, 0.012))
     sympathy = g.node(
-        "comb", {"in": tone, "time": period, "feedback": 0.93, "damp": 0.35}, max=0.1
+        "comb", {"in": struck, "time": period, "feedback": 0.95, "damp": 0.35}, max=0.1
     )
-    sound = resonate(g, g.add(tone, g.mul(sympathy, 0.35)), [(140.0, 1.4, 0.6)])
+    sound = resonate(g, g.add(tone, g.mul(sympathy, 0.4)), [(140.0, 1.4, 0.6)])
     return g.filter("highpass", sound, 70.0)
 
 
@@ -503,7 +503,7 @@ def fiddle(v: Voice) -> Sound:
         },
     )
     f = g.mtof(g.add(v.pitch, wobble))
-    saw = g.add(g.osc("saw", f), g.mul(g.osc("saw", g.mul(f, 1.003)), 0.3))
+    saw = g.osc("saw", f)
     bow = g.env(0.04, 0.2, 0.85, 0.08)
     rosin = g.mul(g.node("noise"), g.env(0.005, 0.08, 0.06, 0.08))
     weight = g.add(g.mul(v.velocity, 0.7), g.add(g.mul(v.pressure, 0.3), 0.3))
@@ -535,15 +535,15 @@ def line(
     phrase, t = [], at
     for note, beats in notes:
         if note:
-            phrase.append((t, note, velocity, beats * held))
+            phrase.append((t, note, velocity, beats * step * held))
         t += beats * step
     return phrase
 
 
-SOFT = curve(lambda x: math.tanh(2.0 * x) / math.tanh(2.0))  # A valve's gentle bend
-HARD = curve(
-    lambda x: 1.5 * x - 0.5 * x**3
-)  # Flat at the top, as a pedal clips: no harmonic above the 3rd of what goes in, until it clips
+# A valve's gentle bend, and a pedal's: flat at the top, and making no harmonic above the third of what goes in
+# until it flattens there, so that little of it reaches past the top of the band to fold back down.
+SOFT = curve(lambda x: math.tanh(2.0 * x) / math.tanh(2.0))
+HARD = curve(lambda x: 1.5 * x - 0.5 * x**3)
 
 E_CHORD = [40, 47, 52, 56, 59, 64]
 A_MINOR = [45, 52, 57, 60, 64]
@@ -1031,16 +1031,17 @@ INSTRUMENTS = [
         "Bass",
         bass(
             width=0.28,
-            bright=5.0,
-            floor=2.2,
-            fade=0.5,
+            bright=7.0,
+            floor=1.5,
+            fade=0.45,
             after=4.0,
             share=0.6,
             release=0.09,
             body=[],
-            tone_hz=2200.0,
+            tone_hz=2400.0,
             click=0.0,
-            mwah=2.5,
+            bloom=0.07,
+            q=4.0,
         ),
         28,
         67,
@@ -1054,16 +1055,16 @@ INSTRUMENTS = [
         "Slap bass",
         "Bass",
         bass(
-            width=0.06,
-            bright=40.0,
+            width=0.1,
+            bright=60.0,
             floor=4.0,
             fade=0.08,
             after=2.0,
             share=0.4,
             release=0.06,
-            body=[(2800.0, 1.0, 1.2)],
+            body=[(2500.0, 0.9, 1.8), (500.0, 1.2, -0.4)],
             tone_hz=7000.0,
-            click=0.15,
+            click=0.1,
         ),
         28,
         67,
@@ -1157,7 +1158,7 @@ INSTRUMENTS = [
         "Bagpipe",
         "Ethnic",
         double_reed(
-            low=1100.0, high=2900.0, width=0.22, attack=0.02, drone=0.35, breath=0.0
+            low=1100.0, high=2900.0, width=0.22, attack=0.02, drone=0.5, breath=0.0
         ),
         67,
         81,

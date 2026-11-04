@@ -90,7 +90,7 @@ describe('the built-in patches', () => {
 	it("are named after their example, with the part for one of several, except the set's", () => {
 		const byId = new Map(catalogue.patches.map((patch) => [patch.id, patch]));
 		expect(byId.get(`${BUILTIN}Kick808`)?.name).toBe('Kick808');
-		expect(byId.get(`${BUILTIN}PassionChorale-horn`)?.name).toBe('PassionChorale Horn');
+		expect(byId.get(`${BUILTIN}PassionChorale-flugelhorn`)?.name).toBe('PassionChorale Flugelhorn');
 		for (const patch of catalogue.patches) {
 			if (!patch.id.startsWith(GM.prefix)) expect(patch.name.startsWith(patch.example)).toBe(true);
 		}
@@ -234,6 +234,24 @@ describe("the standard set's patches", () => {
 				]
 			}
 		]);
+	});
+
+	// The pieces are played on the set: MakePieces.py gives each the set's graph for a set instrument, under its name. A piece
+	// written before the set last changed would have a graph of its own there, and so a patch of its own.
+	it("are the set's own wherever a piece plays one of its instruments, and a piece's other patches are its own", () => {
+		const set = new Set(catalogue.patches.filter((patch) => patch.id.startsWith(GM.prefix)).map((patch) => patch.id));
+		for (const entry of RECIPES.filter((recipe) => recipe.group === 'pieces')) {
+			for (const [key, id] of Object.entries(catalogue.parts[entry.name])) {
+				if (set.has(setPatch(key))) expect(id, `${entry.name} ${key}`).toBe(setPatch(key));
+			}
+		}
+		expect(catalogue.parts.FurElise).toEqual({
+			ElectricPiano: setPatch('ElectricPiano'),
+			Tremolo: setPatch('Tremolo'),
+			LargeRoom: setPatch('LargeRoom')
+		});
+		expect(catalogue.parts.PassionChorale.flugelhorn).toBe(`${BUILTIN}PassionChorale-flugelhorn`);
+		expect(catalogue.parts.BachInventionInF.pulse).toBe(`${BUILTIN}BachInventionInF-pulse`);
 	});
 
 	// What ships: whatever examples/Instruments holds, which is nothing until the set is made.

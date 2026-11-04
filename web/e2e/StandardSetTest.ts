@@ -20,6 +20,7 @@ const read = <T>(file: string): T => JSON.parse(readFileSync(new URL(file, examp
 const SET = read<Entry[]>('Instruments/Index.json');
 const project = (entry: Entry) => read<Project>(`Instruments/${entry.file}`);
 const PREFIX = read<{ prefix: string }>('Instruments/GeneralMidi.json').prefix;
+const isInsert = (patch: Project['patches'][string]) => patch.graph.nodes.some((node) => node.type === 'in');
 // Each family's patches as a track's patch picker lists them: a patch two of the examples play is in the first one's family,
 // and an effect, which takes a track's sound in, is left out, since a track plays an instrument.
 const FAMILIES = (() => {
@@ -27,10 +28,14 @@ const FAMILIES = (() => {
 	return SET.map((entry) => {
 		const fresh = Object.entries(project(entry).patches).filter(([key]) => !seen.has(key));
 		for (const [key] of fresh) seen.add(key);
-		const voices = fresh.filter(([, patch]) => !patch.graph.nodes.some((node) => node.type === 'in'));
+		const voices = fresh.filter(([, patch]) => !isInsert(patch));
 		return { family: entry.family, keys: voices.map(([key]) => key), names: voices.map(([, patch]) => patch.name) };
 	}).filter((family) => family.keys.length);
 })();
+// The set's effects, by name, as an insert's choices list them.
+const EFFECTS = [
+	...new Set(SET.flatMap((entry) => Object.values(project(entry).patches).filter(isInsert)).map((patch) => patch.name))
+].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 // The recipes' groups, which come after the set's in the browser, by name.
 const RECIPE_GROUPS = [
 	...new Set(read<{ group: string }[]>('Recipes/Index.json').map((recipe) => recipe.group))
@@ -99,6 +104,23 @@ test("a patch picker lists the set's patches first, under their families, and th
 	await group(page, first.family).getByRole('option', { name: first.names[0], exact: true }).click();
 	await expect(page.getByTestId('track-patch-1')).toHaveText(first.names[0]);
 	expect(await slots(page)).toEqual([[`${PREFIX}${first.keys[0]}`]]);
+});
+
+test("a mixer strip's inserts offer the set's effects, and then the techniques", async ({ page }) => {
+	await page.goto('/?timeline=song');
+	await page
+		.getByRole('tablist', { name: 'Song views' })
+		.getByRole('tab', { name: /^Mixer/ })
+		.click();
+	const add = page.getByLabel('Add an insert to Lead');
+	const groups = add.locator('optgroup');
+	await expect(groups).toHaveCount(EFFECTS.length ? 2 : 1);
+	expect(await groups.evaluateAll((list) => list.map((group) => group.getAttribute('label')))).toEqual([
+		...(EFFECTS.length ? ['Effects'] : []),
+		'Techniques'
+	]);
+	if (EFFECTS.length) await expect(groups.first().locator('option')).toHaveText(EFFECTS);
+	await expect(groups.last().locator('option', { hasText: 'Reverb' }).first()).toBeAttached();
 });
 
 test("the browser lists the set's examples after the pieces and before the recipes", async ({ page }) => {

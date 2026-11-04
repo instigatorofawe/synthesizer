@@ -19,14 +19,25 @@ export function endPatchDrag() {
 	patchDrag.patch = null;
 }
 
-// What a drag over the page brings: a patch from the browser, WAV files from the desktop, or nothing a target here takes.
-export type Bringing = { kind: 'patch'; patch: DraggedPatch } | { kind: 'files' } | null;
+// What a drag over the page brings: a patch from the browser, files from the desktop, or nothing a target here takes. Until a
+// drop, a page sees the kind of each file and not its name, so MIDI files are told apart from the rest only where the
+// system says what they are, and the drop looks again at their names.
+export type Bringing = { kind: 'patch'; patch: DraggedPatch } | { kind: 'files' } | { kind: 'midi' } | null;
+
+const MIDI_TYPES = ['audio/midi', 'audio/mid', 'audio/x-midi', 'audio/x-mid'];
+const isMidi = (file: File) => /\.midi?$/i.test(file.name) || MIDI_TYPES.includes(file.type);
 
 export function bringing(event: DragEvent): Bringing {
 	if (patchDrag.patch) return { kind: 'patch', patch: patchDrag.patch };
-	return event.dataTransfer?.types.includes('Files') ? { kind: 'files' } : null;
+	const transfer = event.dataTransfer;
+	if (!transfer?.types.includes('Files')) return null;
+	const files = [...transfer.items].filter((item) => item.kind === 'file');
+	return files.length && files.every((item) => MIDI_TYPES.includes(item.type)) ? { kind: 'midi' } : { kind: 'files' };
 }
 
 // The WAV files a drop brought, which an import takes. Anything else dropped with them is left out.
 export const wavFiles = (event: DragEvent) =>
 	[...(event.dataTransfer?.files ?? [])].filter((file) => /\.wav$/i.test(file.name) || file.type === 'audio/wav');
+
+// The MIDI files a drop brought, each of which a MIDI import makes a song of.
+export const midiFiles = (event: DragEvent) => [...(event.dataTransfer?.files ?? [])].filter(isMidi);

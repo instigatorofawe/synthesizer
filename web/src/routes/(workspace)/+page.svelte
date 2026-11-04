@@ -1313,6 +1313,41 @@
 		return id;
 	}
 
+	// MIDI import: a file chosen from the Song menu or dropped on the arrangement becomes a song in the library, as New song
+	// makes one, played on the standard set, and opens. The server reads the file, so a file it can't read is refused with why,
+	// as a form's problem is. What the song holds and what was left out of it stays at the foot of the page while it is open,
+	// until it is shut, since it is more than a glance takes in.
+	let imported = $state.raw<{ id: string; text: string } | null>(null);
+	let importing = $state<string | null>(null); // The file on its way
+	async function importMidi(file: File) {
+		if (importing !== null) return;
+		importing = file.name;
+		imported = null;
+		try {
+			const body = new FormData();
+			body.set('file', file);
+			const response = await fetch(actionOn(search, 'importMidi'), {
+				method: 'POST',
+				body,
+				headers: { accept: 'application/json', 'x-sveltekit-action': 'true' }
+			});
+			const result = deserialize(await response.text());
+			const made =
+				result.type === 'success' ? (result.data?.imported as { id: string; summary: string } | undefined) : undefined;
+			if (!made) {
+				if (result.type === 'failure') await applyAction(result);
+				return;
+			}
+			await goto(timelineHref(search, made.id, saved?.id ?? null), { invalidateAll: true });
+			imported = { id: made.id, text: `${file.name}: ${made.summary}` };
+		} finally {
+			importing = null;
+		}
+	}
+	$effect(() => {
+		if (imported && saved?.id !== imported.id) untrack(() => (imported = null));
+	});
+
 	// The browser sits beside the views on a wide screen, and folds to a rail of icons when asked. Below 1400 px there isn't the
 	// room, so it is always the rail there, and opens over the views until something in it is chosen.
 	const WIDE = 1400;
@@ -1731,6 +1766,7 @@
 							onopen={patchOpened}
 							onnewpatch={newPatchForTrack}
 							onimport={importForTrack}
+							onmidi={(file) => void importMidi(file)}
 							onwriting={(writing) => (stepWriting = writing)}
 							onsolo={(id) => session.toggleSolo(id, songDoc)}
 							ontempo={(tempo) => (draggedTempo = tempo)}
@@ -1807,6 +1843,13 @@
 			<p class="message bad">
 				{formProblem}
 				<button type="button" aria-label="Dismiss" onclick={() => (shutForm = form)}>×</button>
+			</p>
+		{/if}
+		{#if importing !== null}<p class="message" data-testid="importing">Importing {importing}…</p>{/if}
+		{#if imported}
+			<p class="message" data-testid="import-summary">
+				{imported.text}
+				<button type="button" aria-label="Dismiss" onclick={() => (imported = null)}>×</button>
 			</p>
 		{/if}
 		{#if note}<p class="message">{note}</p>{/if}
@@ -1892,6 +1935,7 @@
 		canRender={session.goodSong !== null}
 		onrename={() => void rename()}
 		onwav={() => void exportWav()}
+		onmidi={(file) => void importMidi(file)}
 	/>
 {/snippet}
 

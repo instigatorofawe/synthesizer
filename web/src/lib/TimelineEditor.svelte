@@ -134,6 +134,7 @@
 		onopen = () => {},
 		onnewpatch,
 		onimport,
+		onmidi = () => {},
 		onwriting = () => {},
 		onsolo = () => {},
 		ontempo = () => {},
@@ -170,6 +171,7 @@
 		onopen?: (patch: string) => void; // Someone asked to open a patch this timeline uses, in the Patch view
 		onnewpatch?: (name: string) => Promise<string | null>; // Makes a patch in the library, and gives its id once it's there
 		onimport?: (files: File[]) => Promise<string | null>; // Makes an instrument of WAV files, and gives its id once it's there
+		onmidi?: (file: File) => void; // Makes a song of a MIDI file, which opens in place of this one
 		onwriting?: (writing: boolean) => void; // Whether step entry is writing the piano keys into the roll
 		onsolo?: (track: number) => void; // Solo a track, or stop soloing it
 		ontempo?: (tempo: Timeline['tempo'] | null) => void; // The tempo while the Tempo lane is dragged, then null
@@ -412,8 +414,13 @@
 
 	// A patch dragged from the browser plays on the track it is let go of on, as one chosen by its ▾ does, or on a new track whose
 	// clip starts at the bar it was let go of at. An insert joins the track's effects, after those it has. WAV files dropped
-	// become an instrument in the library first, which then goes where a patch would.
+	// become an instrument in the library first, which then goes where a patch would. A MIDI file becomes a song of its own,
+	// from an example too, since it changes nothing here: the first, if several came.
 	async function dropped(drop: Dropped) {
+		if (drop.kind === 'midi') {
+			onmidi(drop.files[0]);
+			return;
+		}
 		if (readonly) return;
 		const patch = drop.kind === 'patch' ? drop.patch : null;
 		const id = patch ? patch.id : await onimport?.(drop.kind === 'files' ? drop.files : []);

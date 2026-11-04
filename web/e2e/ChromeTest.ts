@@ -105,7 +105,13 @@ test("the Song tab's menu holds what is done to the song as a whole", async ({ p
 	const opener = page.getByRole('button', { name: 'Song menu' });
 	await opener.click();
 	const menu = page.getByRole('menu', { name: 'Song' });
-	await expect(menu.getByRole('menuitem')).toHaveText(['Rename', 'Export WAV', 'Export saved version', 'Delete song']);
+	await expect(menu.getByRole('menuitem')).toHaveText([
+		'Rename',
+		'Export WAV',
+		'Export saved version',
+		'Import MIDI file…',
+		'Delete song'
+	]);
 	await expect(menu.getByRole('menuitem', { name: 'Rename' })).toBeFocused();
 	await page.keyboard.press('Escape');
 	await expect(menu).toHaveCount(0);
@@ -147,7 +153,7 @@ test("the Song tab's menu holds what is done to the song as a whole", async ({ p
 	// An example has no timeline to rename or delete, and goes to the library from here
 	await page.goto('/?recipe=Kick808');
 	await opener.click();
-	await expect(menu.getByRole('menuitem')).toHaveText(['Add to library', 'Export WAV']);
+	await expect(menu.getByRole('menuitem')).toHaveText(['Add to library', 'Export WAV', 'Import MIDI file…']);
 });
 
 const brace = (page: Page) => page.getByTestId('loop-brace');

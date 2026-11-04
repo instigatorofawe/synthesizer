@@ -7,6 +7,7 @@
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { chooser, leavesFields } from '#lib/Fields.ts';
 	import {
+		KIT_VOICES,
 		STANDARD_KIT,
 		clipKit,
 		dropKit,
@@ -1206,7 +1207,7 @@
 							type="button"
 							disabled={!!kitWhy}
 							title={kitWhy ||
-								`The standard set's drums in this track's slots, in place of its patches, and each note on the sound for its key: ${soundsText(STANDARD_KIT.kit)} on ${STANDARD_KIT.kit.length} keys`}
+								`The standard set's drums in this track's slots, in place of its patches, each note on the sound for its key, and ${KIT_VOICES} voices at least for the cymbals' tails: ${soundsText(STANDARD_KIT.kit)} on ${STANDARD_KIT.kit.length} keys`}
 							onclick={() => commit(useKit(doc, track.id, STANDARD_KIT))}>Use the standard kit</button
 						>
 					</div>

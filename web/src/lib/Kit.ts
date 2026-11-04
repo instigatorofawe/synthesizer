@@ -105,14 +105,29 @@ export function standardKitWhy(track: Track, standard = STANDARD_KIT): string {
 	return playsKit(track, standard) ? 'It plays the standard kit already.' : '';
 }
 
+// The voices a kit track has at least. A cymbal or a ride rings for 9 to 14 s, and holds its voice all that time, so a groove
+// with a few of them needs room, and a voice taken from one fades rather than clicks.
+export const KIT_VOICES = 32;
+
 // A track made a kit: these slots and this kit, as Use the standard kit gives it from the standard set (GeneralMidi.ts), and
-// its notes on the kit's sounds. The slots it had go, so a note on a key the kit has no sound for keeps a slot that is now
-// another patch's, or one the track lacks, which the compiler says.
+// its notes on the kit's sounds, with voices enough for its cymbals' tails, and a stolen one faded out. The slots it had go,
+// so a note on a key the kit has no sound for keeps a slot that is now another patch's, or one the track lacks, which the
+// compiler says.
 export function useKit(doc: Timeline, id: number, standard: { slots: string[]; kit: Kit }): Timeline {
-	return withKitSlots(setTrack(doc, id, { slots: [...standard.slots], kit: standard.kit.map((key) => ({ ...key })) }));
+	const track = doc.tracks.find((t) => t.id === id);
+	if (!track) return doc;
+	return withKitSlots(
+		setTrack(doc, id, {
+			slots: [...standard.slots],
+			kit: standard.kit.map((key) => ({ ...key })),
+			voices: Math.max(track.voices, KIT_VOICES),
+			steal: 'fade'
+		})
+	);
 }
 
-// A track that isn't a kit any more. Its slots stay, and so do its notes', so it plays as it did until a note is changed.
+// A track that isn't a kit any more. Its slots and its notes' slots stay as they are, so it plays as it did, and from now on a
+// note moved to another key keeps its slot, as on any other track.
 export function dropKit(doc: Timeline, id: number): Timeline {
 	return {
 		...doc,

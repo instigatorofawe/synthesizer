@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	KIT_VOICES,
 	clipKit,
 	dropKit,
 	keyText,
@@ -140,10 +141,17 @@ describe('using a kit, and dropping one', () => {
 		const used = useKit(doc, 1, standard);
 		expect(used.tracks[0].slots).toEqual(standard.slots);
 		expect(used.tracks[0].kit).toEqual(standard.kit);
+		expect(used.tracks[0]).toMatchObject({ voices: KIT_VOICES, steal: 'fade' }); // Room for the cymbals' tails
 		expect(clipOf(used).notes.map((n) => n.slot)).toEqual([2, 1, 1]); // 70 has no sound, and keeps its slot
 		expect(used.tracks[1]).toBe(doc.tracks[1]);
 		// The standard kit isn't shared with the document, so an edit to one can't reach the other.
 		expect(used.tracks[0].kit).not.toBe(standard.kit);
+	});
+
+	it('keeps more voices than a kit needs, and leaves a track that has gone as it was', () => {
+		const doc = setTrack(dropKit(song(), 1), 1, { voices: 64, steal: undefined });
+		expect(useKit(doc, 1, standard).tracks[0]).toMatchObject({ voices: 64, steal: 'fade' });
+		expect(useKit(doc, 9, standard)).toBe(doc);
 	});
 
 	it('says when there is nothing to use: no drums in the set, or the kit is there already', () => {

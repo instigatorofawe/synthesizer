@@ -37,8 +37,12 @@ function standardKit() {
 }
 
 // A new song whose track is a kit track, made by editing its JSON, as nothing else in the app makes one while the set is
-// empty. Its four-bar clip is open in the roll.
-async function kitSong(page: Page, name: string) {
+// empty, and changed further by `more` if it is given. Its four-bar clip is open in the roll.
+async function kitSong(
+	page: Page,
+	name: string,
+	more: (doc: { tracks: Record<string, unknown>[] }) => void = () => {}
+) {
 	await page.goto('/');
 	const before = new URL(page.url()).searchParams.get('timeline');
 	await page.getByRole('button', { name: 'New song', exact: true }).click(); // Its + opens the field
@@ -51,6 +55,7 @@ async function kitSong(page: Page, name: string) {
 	const json = page.getByLabel('Song JSON');
 	const doc = JSON.parse(await json.inputValue());
 	doc.tracks[0] = { ...doc.tracks[0], name: 'Drums', slots: ['builtin-FurElise-piano', 'lead'], kit: KIT };
+	more(doc);
 	await json.fill(JSON.stringify(doc, null, 1));
 	await tabs.getByRole('tab', { name: /^Notes/ }).click();
 	await expect(page.getByTestId('roll')).toBeVisible();
@@ -178,6 +183,8 @@ test('Use the standard kit sets the track’s slots and kit and reslots its note
 	);
 	await expect(page.getByTestId('note-1')).toHaveAttribute('data-slot', String(key.slot));
 	await expect(page.getByTestId('note-1')).not.toHaveAttribute('data-sound', '');
+	await expect(page.getByLabel('Voices', { exact: true })).toHaveValue('32'); // Room for the cymbals' tails
+	await expect(page.getByLabel('Stolen voices', { exact: true })).toHaveValue('fade');
 	const kept = standard.kit.some((k) => k.note === 62) ? null : '1';
 	if (kept) await expect(page.getByTestId('note-0')).toHaveAttribute('data-slot', kept);
 	// It plays the standard kit already, so there is nothing more for it to do.
@@ -192,6 +199,7 @@ test('Use the standard kit sets the track’s slots and kit and reslots its note
 		'builtin-FurElise-piano'
 	);
 	await expect(page.getByLabel('Patch slot 3', { exact: true })).toHaveCount(0);
+	await expect(page.getByLabel('Voices', { exact: true })).toHaveValue('8');
 
 	// The inspector's button does the same.
 	await kitLine(page).getByRole('button', { name: 'Use the standard kit' }).click();
@@ -214,5 +222,22 @@ test('the Score view on a kit track says the roll is where drums are written, an
 	await expect(page.getByTestId('score-told')).toHaveText(/ · no sound · /);
 	await page.getByRole('group', { name: 'Show the notes as' }).getByRole('button', { name: 'Roll' }).click();
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-note', '63');
+	await expect(page.getByTestId('note-0')).toHaveAttribute('data-slot', '1');
+});
+
+test('a clip on a kit track and an ordinary one plays the kit’s slots on both, and the inspector says so', async ({
+	page
+}) => {
+	await kitSong(page, 'Kit shared', (doc) => {
+		doc.tracks.push({ ...doc.tracks[0], id: 2, name: 'Keys', slots: ['lead', 'builtin-FurElise-piano'] });
+		delete doc.tracks[1].kit;
+	});
+	await expect(page.getByTestId('clip-kit-shared')).toHaveText(
+		"Its notes play the slots Drums's kit gives their keys, on Keys too."
+	);
+	// Opened from the ordinary track, the roll still names the keys by the kit its notes play.
+	await page.getByTestId('placement-2-0').locator('rect').first().click();
+	await expect(page.getByTestId('key-name-62')).toHaveText('62 Snare');
+	await clickStill(page, await rollPoint(page, 0, 62));
 	await expect(page.getByTestId('note-0')).toHaveAttribute('data-slot', '1');
 });

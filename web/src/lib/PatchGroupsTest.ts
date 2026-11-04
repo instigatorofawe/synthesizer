@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exampleOf, filterGroups, patchGroups, type ExampleGroup } from '#lib/PatchGroups.ts';
+import { exampleOf, filterGroups, patchGroups, TECHNIQUES, type ExampleGroup } from '#lib/PatchGroups.ts';
 import { EMPTY_GRAPH } from '#lib/Schema.ts';
 
 const patch = (id: string, name: string, builtin = false) => ({ id, name, graph: EMPTY_GRAPH, builtin });
@@ -9,6 +9,18 @@ const examples: ExampleGroup[] = [
 	{ name: 'drums', recipes: [{ name: 'Kick808' }, { name: 'DrumLoop' }, { name: 'Snare' }] },
 	{ name: 'effects', recipes: [{ name: 'Chorus' }] }
 ];
+
+// The standard set's examples, as the browser lists them after the pieces. The effects' example plays the grand piano too.
+const set: ExampleGroup = {
+	name: 'instruments',
+	recipes: [
+		{ name: 'Piano', family: 'Piano', patches: ['builtin-gm-GrandPiano', 'builtin-gm-Harpsichord'] },
+		{ name: 'Organ', family: 'Organ', patches: ['builtin-gm-DrawbarOrgan'] },
+		{ name: 'DrumKit', family: 'Drum kit', patches: ['builtin-gm-Kick', 'builtin-gm-Snare'] },
+		{ name: 'Effects', family: 'Effects', patches: ['builtin-gm-GrandPiano', 'builtin-gm-LargeHall'] }
+	]
+};
+const withSet = [examples[0], set, ...examples.slice(1)];
 
 const library = [
 	patch('b-uuid', 'bright saw'),
@@ -39,28 +51,70 @@ describe('the groups a patch picker shows', () => {
 		expect(shape(groups)).toEqual([
 			['On this song', false, ['builtin-Kick808', 'lead']],
 			['My patches', false, ['a-uuid', 'b-uuid']],
-			['pieces', true, ['builtin-PassionChorale-bass', 'builtin-PassionChorale-horn']],
-			['drums', true, ['builtin-Snare']],
+			[TECHNIQUES, true, ['builtin-PassionChorale-bass', 'builtin-PassionChorale-horn', 'builtin-Snare']],
 			['other', true, ['builtin-Retired']]
 		]);
 	});
 
-	it('orders built-ins as the browser orders their examples, and leaves out empty groups', () => {
+	it('orders the techniques as the browser orders their examples, and leaves out empty groups', () => {
 		const groups = patchGroups(library, [], examples);
-		expect(groups.map((group) => group.label)).toEqual(['My patches', 'pieces', 'drums', 'other']);
-		expect(groups[2].patches.map((p) => p.id)).toEqual(['builtin-Kick808', 'builtin-Snare']);
+		expect(groups.map((group) => group.label)).toEqual(['My patches', TECHNIQUES, 'other']);
+		expect(groups[1].patches.map((p) => p.id)).toEqual([
+			'builtin-PassionChorale-bass',
+			'builtin-PassionChorale-horn',
+			'builtin-Kick808',
+			'builtin-Snare'
+		]);
+	});
+
+	it("puts the set's patches first, under their families, each in the order its example plays them", () => {
+		const groups = patchGroups(
+			[
+				...library,
+				patch('builtin-gm-LargeHall', 'Large hall', true),
+				patch('builtin-gm-Snare', 'Snare', true),
+				patch('builtin-gm-Kick', 'Kick', true),
+				patch('builtin-gm-Harpsichord', 'Harpsichord', true),
+				patch('builtin-gm-GrandPiano', 'Grand piano', true),
+				patch('builtin-gm-Retired', 'Retired instrument', true)
+			],
+			['builtin-gm-Harpsichord'],
+			withSet
+		);
+		expect(shape(groups)).toEqual([
+			['On this song', false, ['builtin-gm-Harpsichord']],
+			['My patches', false, ['a-uuid', 'b-uuid', 'lead']],
+			['Piano', true, ['builtin-gm-GrandPiano']],
+			['Drum kit', true, ['builtin-gm-Kick', 'builtin-gm-Snare']],
+			['Effects', true, ['builtin-gm-LargeHall']],
+			[
+				TECHNIQUES,
+				true,
+				['builtin-PassionChorale-bass', 'builtin-PassionChorale-horn', 'builtin-Kick808', 'builtin-Snare']
+			],
+			['other', true, ['builtin-Retired', 'builtin-gm-Retired']]
+		]);
 	});
 
 	it('puts every built-in in one group with no heading of its own when there are no examples', () => {
 		expect(shape(patchGroups(library.slice(3, 5), [], []))).toEqual([['', true, ['builtin-Kick808', 'builtin-Snare']]]);
 	});
 
-	it('filters by every word typed, in any case, and a built-in by its group too', () => {
-		const groups = patchGroups(library, ['lead'], examples);
+	it("filters by every word typed, in any case, and a built-in by its family's or its example group's name too", () => {
+		const groups = patchGroups(
+			[...library, patch('builtin-gm-Kick', 'Kick', true), patch('builtin-gm-GrandPiano', 'Grand piano', true)],
+			['lead'],
+			withSet
+		);
 		expect(shape(filterGroups(groups, 'LEAD'))).toEqual([['On this song', false, ['lead']]]);
-		expect(shape(filterGroups(groups, 'drums'))).toEqual([['drums', true, ['builtin-Kick808', 'builtin-Snare']]]);
-		expect(shape(filterGroups(groups, ' snare  drums '))).toEqual([['drums', true, ['builtin-Snare']]]);
-		expect(shape(filterGroups(groups, 'chorale horn'))).toEqual([['pieces', true, ['builtin-PassionChorale-horn']]]);
+		expect(shape(filterGroups(groups, 'drum'))).toEqual([
+			['Drum kit', true, ['builtin-gm-Kick']],
+			[TECHNIQUES, true, ['builtin-Kick808', 'builtin-Snare']]
+		]);
+		expect(shape(filterGroups(groups, 'piano'))).toEqual([['Piano', true, ['builtin-gm-GrandPiano']]]);
+		expect(shape(filterGroups(groups, ' snare  drums '))).toEqual([[TECHNIQUES, true, ['builtin-Snare']]]);
+		expect(shape(filterGroups(groups, 'chorale horn'))).toEqual([[TECHNIQUES, true, ['builtin-PassionChorale-horn']]]);
+		expect(shape(filterGroups(groups, 'techniques kick'))).toEqual([[TECHNIQUES, true, ['builtin-Kick808']]]);
 		expect(filterGroups(groups, 'song')).toEqual([]); // A heading of the library's own is not a name
 		expect(filterGroups(groups, 'nothing like it')).toEqual([]);
 		expect(filterGroups(groups, '  ')).toBe(groups);

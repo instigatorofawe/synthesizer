@@ -15,7 +15,7 @@
 	const SAMPLES =
 		"WAV files become one playable instrument, with a zone for each. A file's sampler chunk or a name like Piano_C4.wav says which key it was recorded at. Drop them here, or on the song for a track that plays them.";
 	const BUILTINS =
-		"Every example's patches, for any song to play. They can't be changed: Edit a copy makes one that can.";
+		"The standard set's instruments, drums and effects, and the techniques every other example plays, for any song to play. They can't be changed: Edit a copy makes one that can.";
 	const BUNDLES = 'Several songs compiled into one image, for a device to choose between.';
 	const EXAMPLES =
 		'Short pieces that ship with the app. Each plays as it is, its patches are built in, and adding one to the library copies its song to change.';
@@ -63,7 +63,8 @@
 		ondragging = () => {}
 	}: {
 		search: string; // The page's address now, which every link here changes a part of
-		examples: { name: string; recipes: { name: string; listen_for: string }[] }[];
+		// In the order they are listed. The standard set's name their family and the built-in patches they play.
+		examples: { name: string; recipes: { name: string; listen_for: string; family?: string; patches?: string[] }[] }[];
 		timelines: { id: string; name: string }[];
 		patches: { id: string; name: string; graph: Graph; builtin?: boolean; users: { id: string; name: string }[] }[];
 		samples: {
@@ -212,7 +213,7 @@
 	const ownSamples = $derived(samples.filter((s) => !s.builtin));
 	const shownPatches = $derived(ownPatches.filter((p) => matches(p.name)));
 	const shownBuiltins = $derived(builtinPatches.filter((p) => matches(p.name)));
-	// Under the examples' own headings, as the patch picker has them, so 136 of them read as a dozen families.
+	// Under the headings the patch picker has: the standard set's families, and then the techniques, the examples' own.
 	const builtinGroups = $derived(patchGroups(shownBuiltins, [], examples).filter((group) => group.builtin));
 	const shownSamples = $derived(ownSamples.filter((s) => matches(s.name)));
 	const shownBundles = $derived(bundles.filter((b) => matches(b.name)));

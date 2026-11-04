@@ -4,7 +4,8 @@ beside them.
 
 A string here is an oscillator at the note's exact pitch, not a delay line. The comb a Karplus-Strong string rings in
 holds a whole number of samples, so a high note lands up to a third of a semitone off, and by a different amount at
-each sample rate. A pulse wave stands in for the pluck instead: its width is where the string was plucked, since a
+each sample rate. The one comb here is the sitar's sympathetic strings, which are meant to be a little out of tune
+with what is played. A pulse wave stands in for the pluck instead: its width is where the string was plucked, since a
 string plucked a fifth of the way along has no fifth harmonic and neither has a pulse a fifth wide. A low-pass whose
 cutoff follows the pitch and falls after the pluck stands in for the string losing its upper harmonics first, and fixed
 band-passes for the body, which resonates at its own frequencies whatever note is played. The overdriven guitars carry

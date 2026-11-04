@@ -492,7 +492,9 @@ function ringOn(group: Group, gm: GeneralMidi, rings: (tick: number) => number) 
 	notes.forEach((note, index) => {
 		if (!LONG_KEYS.has(note.key)) return;
 		const stoppers = chokes.get(note.key) ?? new Set([note.key]);
-		const next = notes.slice(index + 1).find((later) => later.tick > note.tick && stoppers.has(later.key));
+		let next: Played | undefined;
+		for (let i = index + 1; i < notes.length && !next; ++i)
+			if (notes[i].tick > note.tick && stoppers.has(notes[i].key)) next = notes[i];
 		note.end = next ? next.tick : Math.max(note.end ?? note.tick, note.tick + rings(note.tick));
 	});
 }
@@ -588,8 +590,9 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 		}
 		if (!kept.length) continue;
 
-		const first = Math.min(...kept.map((note) => note.tick));
-		const last = Math.max(...kept.map((note) => Math.max(note.end, note.tick + 1)));
+		// A large file's track has more notes than a call can take arguments, so these go one by one.
+		const first = kept.reduce((most, note) => Math.min(most, note.tick), Infinity);
+		const last = kept.reduce((most, note) => Math.max(most, note.end, note.tick + 1), 0);
 		const start = Math.max(0, bars.at(first).start);
 		const finish = bars.whole(start, last - 1).end;
 		if (finish > MOST_TICK) throw new MidiError('It is longer than a song can be.');

@@ -15,9 +15,17 @@ WHEEL_VIBRATO = 0.4  # Semitones of vibrato the mod wheel adds at the top of its
 # Pieces every voice here is made of ----------------------------------------------------------------------------------
 
 
-def clamp_cutoff(g: Graph, cutoff, highest: float = 14000.0) -> Ref:
-    """A cutoff held well below the top of the band, however high the note and however hard it is played."""
-    return g.node("math", {"a": cutoff, "b": highest}, mode="min")
+def clamp_cutoff(
+    g: Graph, cutoff, highest: float = 14000.0, note: Ref | None = None
+) -> Ref:
+    """A cutoff held well below the top of the band, however high the note and however hard it is played. Given the
+    `note`'s frequency, it is also kept half an octave above it, so a note played far above the range a fixed
+    cutoff was written for keeps its fundamental."""
+    if note is None:
+        return g.node("math", {"a": cutoff, "b": highest}, mode="min")
+    return g.node(
+        "math", {"a": cutoff, "b": g.mul(note, 1.5), "c": highest}, mode="clip"
+    )
 
 
 def late(g: Graph, wait: float, grow: float) -> Ref:
@@ -64,7 +72,8 @@ def solo(
         string = g.add(g.osc("saw", f), g.mul(hair, 0.5))
         # More bow, or more weight on it, is brighter.
         weight = g.add(g.mul(v.velocity, 0.7), g.add(g.mul(v.pressure, 0.5), 0.3))
-        tone = g.filter("lowpass", string, clamp_cutoff(g, g.mul(weight, bright)), 0.7)
+        cutoff = clamp_cutoff(g, g.mul(weight, bright), note=f)
+        tone = g.filter("lowpass", string, cutoff, 0.7)
         sound = g.mul(tone, 0.5)
         for hz, q, level in body:
             sound = g.add(sound, g.mul(g.filter("bandpass", tone, hz, q), level))
@@ -91,7 +100,7 @@ def tremolo(v: Voice) -> Sound:
         half = g.add(g.mul(g.osc("sine", rate), 0.5), 0.5)
         return g.add(g.mul(g.mul(half, half), 0.75), 0.25)
 
-    cutoff = g.add(g.mul(v.velocity, 4000.0), 1400.0)
+    cutoff = clamp_cutoff(g, g.add(g.mul(v.velocity, 4000.0), 1400.0), note=v.freq)
     level = g.mul(g.env(0.04, 0.15, 0.85, 0.2), loudness(v, 0.15))
     desks = []
     for saw, rate in ((low, 12.6), (high, 14.1)):
@@ -207,10 +216,12 @@ def machine(v: Voice) -> Sound:
             side = saw if side is None else g.add(side, saw)
         sides.append(side)
     cutoff = clamp_cutoff(
-        g, g.add(g.mul(v.velocity, 3500.0), g.add(g.mul(v.pressure, 2000.0), 2200.0))
+        g,
+        g.add(g.mul(v.velocity, 3500.0), g.add(g.mul(v.pressure, 2000.0), 2200.0)),
+        note=v.freq,
     )
     swell = g.env(0.12, 0.3, 0.9, 0.3)
-    level = g.mul(swell, loudness(v, 0.2))
+    level = g.mul(swell, loudness(v, 0.12))
     return tuple(g.mul(g.filter("lowpass", side, cutoff, 0.7), level) for side in sides)
 
 
@@ -219,10 +230,12 @@ def pwm(v: Voice) -> Sound:
     and thickens the tone as the PwmPad recipe's does, one to each side."""
     g = v.g
     pitch = g.add(v.pitch, vibrato(v, 5.2, 0.0))
-    swell = g.env(0.3, 0.4, 0.9, 0.35)
-    level = g.mul(swell, loudness(v, 0.2))
+    swell = g.env(0.3, 0.4, 0.9, 0.3)
+    level = g.mul(swell, loudness(v, 0.12))
     cutoff = clamp_cutoff(
-        g, g.add(g.mul(v.velocity, 2400.0), g.add(g.mul(v.pressure, 1500.0), 1500.0))
+        g,
+        g.add(g.mul(v.velocity, 2400.0), g.add(g.mul(v.pressure, 1500.0), 1500.0)),
+        note=v.freq,
     )
     sides = []
     for detune, rate in ((-0.07, 0.7), (0.07, 0.93)):
@@ -240,34 +253,38 @@ def voices(
     breath: float,
     depth: float,
     pulse: bool = False,
+    sweep: float = 0.0,
 ):
     """Voices: each singer a saw, or with `pulse` a narrow pulse, with their own vibrato, a few cents from the others,
     through three formants that make the vowel. The lowest formant rises with the note once the note passes it, as a
     soprano opens her mouth for a high one, so a high note isn't left between the formants. `vowel` is each formant's
-    Hz, q and level; `singers` each one's detune and vibrato rate."""
+    Hz, q and level; `singers` each one's detune and vibrato rate; `sweep` how many Hz the second formant wanders,
+    slowly, which no singer holding a vowel would do and a synthesiser's voice does."""
 
     def build(v: Voice) -> Sound:
         g = v.g
+        # Every singer's vibrato arrives together, each at their own rate.
+        arrives = g.mul(late(g, 0.1, 0.4), depth)
         source = None
         for detune, rate in singers:
-            pitch = g.add(
-                v.pitch,
-                g.add(vibrato(v, rate, g.mul(late(g, 0.1, 0.4), depth)), detune),
-            )
+            pitch = g.add(v.pitch, g.add(vibrato(v, rate, arrives), detune))
             if pulse:
                 one = g.osc("square", g.mtof(pitch), width=0.3)
             else:
                 one = g.osc("saw", g.mtof(pitch))
             source = one if source is None else g.add(source, one)
-        air = g.mul(g.node("noise"), breath)
-        source = g.add(source, air)
+        if breath:
+            source = g.add(source, g.mul(g.node("noise"), breath))
         sound = None
         for n, (hz, q, level) in enumerate(vowel):
-            cutoff = (
-                g.node("math", {"a": g.mul(v.freq, 1.1), "b": hz}, mode="max")
-                if n == 0
-                else hz
-            )
+            cutoff = hz
+            if n == 0:
+                cutoff = g.node("math", {"a": g.mul(v.freq, 1.1), "b": hz}, mode="max")
+            elif n == 1 and sweep:
+                cutoff = g.add(g.node("lfo", {"rate": 0.23, "depth": sweep}), hz)
+            # A voice sung louder carries more of its upper formants.
+            if n > 0:
+                level = g.mul(g.add(g.mul(v.velocity, 0.8), 0.4), level)
             band = g.mul(g.filter("bandpass", source, cutoff, q), level)
             sound = band if sound is None else g.add(sound, band)
         swell = g.env(attack, 0.3, 0.9, release)
@@ -582,7 +599,7 @@ INSTRUMENTS = [
         "ChoirAahs",
         "Choir aahs",
         "Ensemble",
-        voices(AH, ((-0.1, 5.1), (0.0, 5.6), (0.11, 6.0)), 0.18, 0.35, 0.03, 0.15),
+        voices(AH, ((-0.1, 5.1), (0.0, 5.6), (0.11, 6.0)), 0.18, 0.3, 0.03, 0.15),
         43,
         81,
         programs=[52],
@@ -594,7 +611,7 @@ INSTRUMENTS = [
         "VoiceOohs",
         "Voice oohs",
         "Ensemble",
-        voices(OO, ((-0.06, 5.3), (0.06, 5.8)), 0.12, 0.3, 0.02, 0.12),
+        voices(OO, ((-0.06, 5.3), (0.06, 5.8)), 0.12, 0.25, 0.02, 0.12),
         48,
         79,
         programs=[53],
@@ -606,7 +623,16 @@ INSTRUMENTS = [
         "SynthVoice",
         "Synth voice",
         "Ensemble",
-        voices(EH_OH, ((-0.05, 5.0), (0.05, 5.0)), 0.15, 0.4, 0.0, 0.06, pulse=True),
+        voices(
+            EH_OH,
+            ((-0.05, 5.0), (0.05, 5.0)),
+            0.15,
+            0.3,
+            0.0,
+            0.06,
+            pulse=True,
+            sweep=350.0,
+        ),
         48,
         84,
         programs=[54],

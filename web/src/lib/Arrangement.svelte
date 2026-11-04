@@ -482,10 +482,13 @@
 		return row >= doc.tracks.length && !insert ? { ...at, track: null } : null;
 	}
 
+	// Files whose kind the system didn't say may be MIDI files, which go anywhere, so files are taken wherever they are held, and
+	// their names at the drop say what they are.
 	function dragOver(event: DragEvent) {
 		const place = dropPlace(event);
 		if (!place) {
 			dropAt = null;
+			if (bringing(event)?.kind === 'files') event.preventDefault();
 			return;
 		}
 		event.preventDefault();
@@ -498,14 +501,15 @@
 		const place = dropPlace(event);
 		dropAt = null;
 		const what = bringing(event);
-		if (!place || !what) return;
-		event.preventDefault();
+		if (!what) return;
 		const midi = what.kind === 'patch' ? [] : midiFiles(event);
 		if (midi.length) {
+			event.preventDefault();
 			ondropped({ kind: 'midi', files: midi });
 			return;
 		}
-		if (place.kind === 'midi') return;
+		if (!place || place.kind === 'midi') return;
+		event.preventDefault();
 		const at = { track: place.track, tick: place.tick };
 		if (what.kind === 'patch') ondropped({ kind: 'patch', patch: what.patch, ...at });
 		else {

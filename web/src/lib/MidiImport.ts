@@ -3,7 +3,7 @@
 // song's, and each channel it plays becomes a track, as a General MIDI synthesizer would play it:
 // - A track plays its channel's programs, a slot for each instrument they reach, and each note the one in force as it starts.
 //   Channel 10 is the drum kit: its track's kit holds the sounds the file plays, and a note in a choke group stops the one
-//   before it, as a closed hi-hat stops an open one.
+//   before it, as a closed hi-hat stops an open one. The long sound of a group, an open hi-hat, rings on until then.
 // - The sustain pedal is folded into the notes' lengths, as the user decided: a note let go of while it is down lasts until
 //   it lifts, or until the key is struck again. A song has no pedal of its own to hold them.
 // - Volume and pan go to the track's fader and pan, the reverb and chorus sends to buses holding the set's effects, and
@@ -51,6 +51,15 @@ type Target = NonNullable<Automation['target']>;
 const MOST_TICK = 0x7fffffff;
 const MOST_PPQ = 65535;
 const MOST_VOICES = 64;
+// A kit's cymbals ring on for 9 to 14 seconds whatever their notes' lengths, each holding a voice, so a kit track has this many
+// rather than as many as its notes sound at once.
+const KIT_VOICES = 32;
+// The long sound of each pair a choke group stops: an open hi-hat, a long whistle, a long guiro, an open cuica and an open
+// triangle. The set's sound for each stops soon after its note ends, as every other drum of the kit doesn't, and a file gives
+// a drum a note of a few ticks, so each rings on to the next note of its group, as a closed hi-hat stops an open one, or
+// for as long as one rings out when nothing stops it.
+const LONG_KEYS = new Set([46, 72, 74, 79, 81]);
+const RINGS = 1.5; // Seconds
 const MOST_BEND = 24; // Semitones either way, the set's bend parameter's range
 const NAME_LENGTH = 100;
 const DEFAULT_TEMPO = 120; // What a file plays at until it says otherwise
@@ -456,6 +465,38 @@ function play(file: MidiFile, scale: number, pedalFolds: boolean, gm: GeneralMid
 	return { channels, groups: [...groups.values()].sort((a, b) => a.track - b.track || a.channel - b.channel) };
 }
 
+// Ticks from `from` that last `seconds` at a song's tempo, which a file holds without ramps.
+function ticksLasting(tempo: Timeline['tempo'], ppq: number, from: number, seconds: number): number {
+	let at = from;
+	let left = seconds;
+	let index = Math.max(
+		0,
+		tempo.findLastIndex((change) => change.tick <= from)
+	);
+	for (;;) {
+		const perSecond = (ppq * tempo[index].bpm) / 60;
+		const next = tempo[index + 1]?.tick ?? Infinity;
+		if (at + left * perSecond <= next) return Math.round(at + left * perSecond - from);
+		left -= (next - at) / perSecond;
+		at = next;
+		index += 1;
+	}
+}
+
+// The long sound of a choke group's pair rings on to the next note of its group, or for as long as it rings when nothing
+// stops it, unless its own note is longer than that.
+function ringOn(group: Group, gm: GeneralMidi, rings: (tick: number) => number) {
+	const chokes = new Map<number, Set<number>>();
+	for (const keys of Object.values(gm.chokes)) for (const key of keys) chokes.set(key, new Set(keys));
+	const notes = group.notes.filter((note) => !note.doubled).sort((a, b) => a.tick - b.tick);
+	notes.forEach((note, index) => {
+		if (!LONG_KEYS.has(note.key)) return;
+		const stoppers = chokes.get(note.key) ?? new Set([note.key]);
+		const next = notes.slice(index + 1).find((later) => later.tick > note.tick && stoppers.has(later.key));
+		note.end = next ? next.tick : Math.max(note.end ?? note.tick, note.tick + rings(note.tick));
+	});
+}
+
 // ------------------------------------------------------------------------------------------------------------- the song
 
 // What a lane holds over a clip from `start` to `end`: its value as the clip starts, and each change after that, in the
@@ -500,6 +541,8 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 	const clock = time(file);
 	const left: Left = { controllers: new Map(), keyPressure: 0, programs: new Map(), drums: new Map() };
 	const { channels, groups } = play(file, clock.scale, options.pedal ?? true, gm, left);
+	const rings = (tick: number) => ticksLasting(clock.tempo, clock.ppq, tick, RINGS);
+	for (const group of groups) if (group.channel === DRUM_CHANNEL) ringOn(group, gm, rings);
 	const bars = barsOf({ ppq: clock.ppq, meter: clock.meter.length ? clock.meter : undefined });
 	// In format 0 the one track's name is the song's, and says nothing about any one channel.
 	const names = file.tracks.map((track) =>
@@ -605,7 +648,7 @@ export function midiTimeline(file: MidiFile, options: ImportOptions = {}): Impor
 		tracks.push({
 			id,
 			name,
-			voices: Math.max(1, Math.min(MOST_VOICES, polyphony(notes))),
+			voices: drums ? KIT_VOICES : Math.max(1, Math.min(MOST_VOICES, polyphony(notes))),
 			slots,
 			params,
 			placements: [{ clip, tick: start, repeat: 1 }],

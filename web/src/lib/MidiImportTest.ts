@@ -290,6 +290,37 @@ describe('a MIDI file as a song: drums', () => {
 	});
 });
 
+describe('a MIDI file as a song: the long sounds of choke groups', () => {
+	it('rings an open hi-hat on to the next note of its group, however short its own note', () => {
+		const { doc } = one([
+			on(0, 9, 46),
+			off(10, 9, 46),
+			on(480, 9, 38),
+			off(490, 9, 38),
+			on(960, 9, 42),
+			off(970, 9, 42)
+		]);
+		expect(lengths(doc)).toEqual([
+			[0, 46, 960],
+			[480, 38, 10], // Every other drum keeps the length the file gives it
+			[960, 42, 10]
+		]);
+	});
+
+	it('rings one nothing stops for a second and a half at the tempo there, or for its own note if that is longer', () => {
+		const short = one([tempo(0, 120), tempo(960, 60), on(0, 9, 46), off(5, 9, 46)]).doc;
+		expect(lengths(short)).toEqual([[0, 46, 1200]]); // A second at 120 is 960 ticks, and half of one at 60 is 240 more
+		const long = one([on(0, 9, 46), off(4800, 9, 46)]).doc;
+		expect(lengths(long)).toEqual([[0, 46, 4800]]);
+	});
+
+	it('gives a kit track 32 voices, for the cymbals that ring on whatever their notes', () => {
+		const { doc } = one([on(0, 9, 36), off(10, 9, 36)]);
+		expect(doc.tracks[0].voices).toBe(32);
+		expect(doc.tracks[0].steal).toBe('fade');
+	});
+});
+
 describe('a MIDI file as a song: notes', () => {
 	it('takes a note-on at velocity 0 for a note-off, and keeps each note its velocity', () => {
 		const { doc } = one([on(0, 0, 60, 90), on(240, 0, 60, 0), on(240, 0, 62, 40), off(720, 0, 62)]);

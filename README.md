@@ -20,6 +20,7 @@ checked against committed renders in [golden](golden).
 | `examples/Demo.json` | The project every target renders. `MakeDemo.py` regenerates it. |
 | `examples/Listen.py` | Plays each oscillator and mode through the sound card, with `uv run examples/Listen.py`. `--list` shows the recipes and pieces. |
 | `examples/Recipes` | 74 standalone projects, from a supersaw to a drum loop, that `Listen.py` plays. |
+| `examples/Instruments` | The standard set: 104 instruments for General MIDI's 128 programs, a 23-sound drum kit and GM2's effects, one example per family. `MakeInstruments.py` writes them from the modules in `examples/Sounds`, sets each one's level, and writes `GeneralMidi.json`, which program and key each plays. |
 | `examples/Pieces` | Six public-domain pieces arranged for the engine, from a Bach prelude on harpsichord to Grieg's trolls for orchestra. `MakePieces.py` writes them from the scores in `Scores`. |
 
 ## Native
@@ -87,8 +88,10 @@ and **Patch**, a patch's graph at full height.
 - **Tracks:** + Track makes a track with a clip of its own. Track heads have mute and solo, a volume fader and a pan knob, and drag
   up or down to move the track.
 - **A track's patch** is chosen from one searchable list, or dragged from the browser onto its track, or below the tracks for a new
-  one. Its name in the track head opens it in the Patch view. An effect dragged onto a track or a Mixer strip joins its inserts, and
+  one. The built-in patches are the standard set, under its General MIDI families, and then the recipes' and pieces' own under
+  Techniques. Its name in the track head opens it in the Patch view. An effect dragged onto a track or a Mixer strip joins its inserts, and
   WAV files dropped on the song become an instrument on a track.
+- **Drum tracks:** Use the standard kit, on a track's menu, makes it a kit: each key plays its own drum, which the roll names.
 - **Clips** snap to bars, apart from the notes' Snap. A clip's menu splits it at the pointer or the playhead, as Mod+E does, into two
   clips that play as it did. ⤢ or a double-click on a clip gives the notes the whole view, and each clip keeps its zoom.
 - **The arrangement** is only as tall as its tracks until the tab strip under it is dragged. I folds the inspector.

@@ -673,10 +673,30 @@ class Song:
         )
         return id
 
-    def project(self, id: str, name: str, gain: float = 1.0) -> dict:
-        timeline = {
-            "ppq": PPQ,
-            "tempo": self.tempo.changes,
+    def project(
+        self,
+        id: str,
+        name: str,
+        gain: float = 1.0,
+        meter: list[tuple[int, int, int]] | None = None,
+        pickup: int = 0,
+        key: list[tuple[int, int, bool]] | None = None,
+    ) -> dict:
+        """`meter` is (tick, beats, unit) changes and `key` (tick, fifths, minor) ones: where the editor draws bars and how
+        it spells notes, which the compiler ignores. A piece that gives none is in 4/4 from its first tick, in C major."""
+        timeline: dict = {"ppq": PPQ, "tempo": self.tempo.changes}
+        if meter:
+            timeline["meter"] = [
+                {"tick": t, "beats": b, "unit": u} for t, b, u in meter
+            ]
+        if pickup:
+            timeline["pickup"] = pickup
+        if key:
+            timeline["key"] = [
+                {"tick": t, "fifths": f} | ({"minor": True} if minor else {})
+                for t, f, minor in key
+            ]
+        timeline |= {
             "clips": self.clips,
             "tracks": self.tracks,
             "buses": self.buses,
@@ -823,7 +843,10 @@ def chorale() -> tuple[dict, str]:
         "Bach's Passion Chorale for trumpet, flugelhorn, horn and trombone in a large church, every phrase slowing "
         "into its fermata and taking a breath, the repeat an echo of the first time."
     )
-    return song.project("chorale", "O Haupt voll Blut und Wunden"), listen
+    # In F major, from a quarter's pickup.
+    return song.project(
+        "chorale", "O Haupt voll Blut und Wunden", pickup=PPQ, key=[(0, -1, False)]
+    ), listen
 
 
 def elise() -> tuple[dict, str]:
@@ -944,7 +967,9 @@ def elise() -> tuple[dict, str]:
         "Für Elise on a tine electric piano swaying between the speakers, pedalled bar by bar, broadening into each "
         "cadence, pressing on over the drumming bass and slowing down the chromatic scale."
     )
-    return song.project("elise", "Für Elise"), listen
+    return song.project(
+        "elise", "Für Elise", meter=[(0, 3, 8)], pickup=pickup, key=[(0, 0, True)]
+    ), listen
 
 
 def king() -> tuple[dict, str]:
@@ -1113,7 +1138,9 @@ def king() -> tuple[dict, str]:
         "Grieg's trolls, orchestrated from the piano score: bassoons and pizzicato basses tiptoe through the theme, "
         "which climbs, gathers the orchestra and speeds up until the trolls shriek over the timpani."
     )
-    return song.project("king", "In the Hall of the Mountain King"), listen
+    return song.project(
+        "king", "In the Hall of the Mountain King", key=[(0, 2, True)]
+    ), listen
 
 
 def invention() -> tuple[dict, str]:
@@ -1178,7 +1205,9 @@ def invention() -> tuple[dict, str]:
         "triangle for the left, chasing each other across the speakers in a small room: a whole piece the NUCLEO-L476RG "
         "plays."
     )
-    return song.project("invention", "Invention No. 8"), listen
+    return song.project(
+        "invention", "Invention No. 8", meter=[(0, 3, 4)], key=[(0, -1, False)]
+    ), listen
 
 
 def entertainer() -> tuple[dict, str]:
@@ -1265,7 +1294,11 @@ def entertainer() -> tuple[dict, str]:
         "Joplin's rag on an old upright whose unisons have drifted apart, not fast and steady as he asked, its bass "
         "striding under the syncopated tune, the second time through the B strain an octave up, as marked."
     )
-    return song.project("entertainer", "The Entertainer"), listen
+    # In C, with the trio in F, as the score has it.
+    keys = [(0, 0, False), (c, -1, False), (link, 0, False)]
+    return song.project(
+        "entertainer", "The Entertainer", meter=[(0, 2, 4)], key=keys
+    ), listen
 
 
 MAKERS = {

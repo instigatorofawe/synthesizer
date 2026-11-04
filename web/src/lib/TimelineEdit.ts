@@ -446,6 +446,14 @@ export function replacePatch(doc: Timeline, from: string, to: string): Timeline 
 
 // ----------------------------------------------------------------------------------------------- clips and placements
 
+// A name for a part of a clip, counting on from the clip's own: verse makes verse-2, and verse-2 makes verse-3, not verse-2-2.
+function nextClipId(doc: Timeline, id: string): string {
+	const numbered = /^(.*)-(\d+)$/.exec(id);
+	const [stem, from] = numbered ? [numbered[1], Number(numbered[2]) + 1] : [id, 2];
+	const taken = new Set(doc.clips.map((clip) => clip.id));
+	for (let n = from; ; ++n) if (!taken.has(`${stem}-${n}`)) return `${stem}-${n}`;
+}
+
 function freshClipId(doc: Timeline, base: string): string {
 	const taken = new Set(doc.clips.map((clip) => clip.id));
 	if (!taken.has(base)) return base;
@@ -585,10 +593,10 @@ export function splitPlacement(
 	} else {
 		const uses = doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clip.id).length;
 		const alone = uses === 1 && repeat === 0 && repeat + 1 === placed.repeat;
-		const first = alone ? clip.id : freshClipId(next, clip.id);
+		const first = alone ? clip.id : nextClipId(next, clip.id);
 		next = alone ? next : { ...next, clips: [...next.clips, { ...clipWindow(clip, start, start + cut), id: first }] };
 		if (alone) next = setClip(next, clip.id, { ...clipWindow(clip, start, start + cut), id: first });
-		const second = freshClipId(next, clip.id);
+		const second = nextClipId(next, clip.id);
 		next = { ...next, clips: [...next.clips, { ...clipWindow(clip, start + cut, start + length), id: second }] };
 		if (repeat > 0) pieces.push({ ...placed, repeat });
 		pieces.push({ ...plain, clip: first, tick: placed.tick + repeat * length, repeat: 1 });

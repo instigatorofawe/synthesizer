@@ -38,7 +38,7 @@ describe('a key', () => {
 describe('a song’s keys', () => {
 	it('are C major throughout until one says otherwise', () => {
 		expect(keysOf(song())).toEqual([{ tick: 0, fifths: 0 }]);
-		expect(keyAt(song(), 5000)).toEqual({ tick: 0, fifths: 0 });
+		expect(keyAt(song(), 5000)).toEqual({ fifths: 0 });
 	});
 
 	it('are added, changed and taken away, the first staying, and say nothing when they are C major throughout', () => {
@@ -47,8 +47,12 @@ describe('a song’s keys', () => {
 			{ tick: 0, fifths: 0 },
 			{ tick: 3840, fifths: -1 }
 		]);
-		expect(keyAt(doc, 3839)).toMatchObject({ fifths: 0 });
-		expect(keyAt(doc, 3840)).toMatchObject({ fifths: -1 });
+		expect(keyAt(doc, 3839)).toEqual({ fifths: 0 });
+		expect(keyAt(doc, 3840)).toEqual({ fifths: -1 });
+		// A key added where one plays already, as the lane adds one, is a change of its own at its own tick.
+		expect(addKey(doc, 7680, { tick: 0, fifths: -1 } as never).key?.map((change) => change.tick)).toEqual([
+			0, 3840, 7680
+		]);
 		doc = setKey(doc, 0, { fifths: 0, minor: true });
 		expect(doc.key?.[0]).toEqual({ tick: 0, fifths: 0, minor: true });
 		expect(removeKey(doc, 0)).toBe(doc);

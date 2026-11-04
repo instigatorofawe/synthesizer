@@ -46,10 +46,13 @@ export function keysOf(doc: Pick<Timeline, 'key'>): KeyChange[] {
 	return sorted;
 }
 
+// A key on its own, without where it changes.
+const keyOnly = ({ fifths, minor }: Key): Key => (minor ? { fifths, minor } : { fifths });
+
 // The key playing at a tick.
 export function keyAt(doc: Pick<Timeline, 'key'>, tick: number): Key {
 	const keys = keysOf(doc);
-	return keys.findLast((change) => change.tick <= tick) ?? keys[0];
+	return keyOnly(keys.findLast((change) => change.tick <= tick) ?? keys[0]);
 }
 
 // ------------------------------------------------------------------------------------------------------------------ edits
@@ -70,13 +73,13 @@ function tidy(doc: Timeline, keys: KeyChange[]): Timeline {
 // A key from a tick on. One there already is changed instead.
 export function addKey(doc: Timeline, tick: number, key: Key): Timeline {
 	const at = Math.max(0, tick);
-	return tidy(doc, [...keysOf(doc).filter((change) => change.tick !== at), { tick: at, ...key }]);
+	return tidy(doc, [...keysOf(doc).filter((change) => change.tick !== at), { tick: at, ...keyOnly(key) }]);
 }
 
 export const setKey = (doc: Timeline, index: number, key: Key) =>
 	tidy(
 		doc,
-		keysOf(doc).map((change, i) => (i === index ? { tick: change.tick, ...key } : change))
+		keysOf(doc).map((change, i) => (i === index ? { tick: change.tick, ...keyOnly(key) } : change))
 	);
 
 // The first one says what the song opens in, so it stays.

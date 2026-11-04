@@ -1,4 +1,4 @@
-# modsynth design, revision 31
+# modsynth design, revision 32
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -141,6 +141,9 @@ A Timeline compiles to a Program, and a Program is a table of tracks.
   which is what makes a locate or a loop sound the same as playing from the top. A lane with no target that opens with a plain value at tick 0 already does
   that, so it adds nothing to the stream. A `SetParam` reaches every slot of a track, so where a parameter has to go back and its slots start from
   different values, the compiler refuses it and asks for a track value or a value at tick 0.
+- A timeline's `meter`, `pickup` and `key` are the editor's: where its bars fall and how its notes are spelled. The compiler checks
+  their fields for misspellings, as it does every field, and otherwise ignores them, so a song compiles to the same bytes with them or
+  without, as it does wherever its nodes are drawn [measured: the compiler's test, and the six pieces regenerated with theirs].
 - A mix register holds the product of its factors: fader with mute, pan, a send's gain, and the master fader on the way into master. A lane
   writes that product with the others' fixed values in it, so two factors that move can't share a register. When a song would make them, the
   compiler moves one to a **stage**, a Gather of one input that scales the chain's bus by a pair of its own: the master fader first, before
@@ -1002,8 +1005,21 @@ It is a tab of the side column, beside Node and Patch, so the graph stays on scr
 
 **The timeline editor.** Arrangement, piano roll, lanes and mixer are views of one document, which stays on the page as JSON. Every edit is a pure function from a document to a document, so undo is a list of
 old ones, and as in the graph editor these decide little about what is legal: overlapping clips can be drawn, and the compiler says what is wrong and marks the track. What an edit does take care of is references, so
-deleting a bus takes its sends, outputs, sidechains and lanes with it. Placements stay in tick order, because the compiler takes one that goes backwards for an overlap. The grid is 4/4, and nothing stores that:
-a document holds ticks, so a time signature would change how it is drawn and not how it plays.
+deleting a bus takes its sends, outputs, sidechains and lanes with it. Placements stay in tick order, because the compiler takes one that goes backwards for an overlap.
+
+**Bars.** A document holds ticks, and its time signatures say where its bars fall (`TimeSignature.ts`): `meter`, a list of changes,
+each a tick, a number of beats and a beat's note value, and `pickup`, the ticks before bar 1. A song that says none is in 4/4 from its
+first tick. A change starts a bar where it is, and one that falls inside a bar of the meter before it cuts that bar short, as Live and
+Bitwig do, so no tick is outside a bar and moving or changing one change never moves another, or a note. A pickup is the end of a bar
+of the first meter, numbered 0, as a score has it, so Für Elise, in 3/8 after an eighth, starts at 0.3.000 and bar 1 starts after it.
+One `Bars` answers every question about them: the ruler's and the roll's lines and numbers, Snap, positions read and typed as
+bar.beat.tick with the meter's own beat, a new clip's whole bars, how far a clip grows, and the click. Snap's grids start afresh at each
+bar, so a beat grid keeps to the beats a bar has past a pickup or a short bar, and Snap's Bar is whatever bar a tick is in. The
+arrangement's zoom is the width of four quarters, so it holds across a change. The roll numbers bars from the clip's first, as it did,
+and takes their lengths from where the clip is played: the chosen placement, or the first. The click follows the meter too: a beat, or
+three in a compound meter, as 6/8 is beaten in two, accented on each bar's first, and a take's count-in is a bar of the meter where it
+starts. Key signatures, `key`, are a list of changes of a number of fifths, sharps above 0 and flats below, and whether the key is minor
+(`KeySignature.ts`). For now they name the key, in the inspector and on the song layer; the Score view will spell notes by them.
 
 Notes, clips and points go in as most DAWs take them. A click on empty grid in the roll adds a note as long as the Draw length, which sits beside Snap,
 follows the last note added, resized or chosen, as FL Studio's does, and steps with `[` and `]`. Dragging before letting go sets the length in Snap steps,
@@ -1162,7 +1178,11 @@ with focus, and a double-click resets it to 0 dB or the centre. The head stays 1
 inspector open.
 
 Between the loop strip and the first track is the song layer, lanes for what belongs to the whole song rather than to one track
-(`SongLayer.ts`). Its one lane is Tempo, a second view of the same list of changes as the inspector's, which stays for typing exact
+(`SongLayer.ts`). Time & key is one row, never unfolded, with a mark at each tick where the time signature or the key changes, saying
+what to, as "3/4 · E♭ major". A click on a mark opens the inspector at its field, and the lane's menu, or a mark's, adds a change at the
+bar under the pointer, as what plays there, for the inspector to change, or takes one away. The inspector's Time signature and Key list
+the changes, each with its fields, the pickup as a length, and Add a change at the playhead, at the start of the bar it is in. The other
+lane is Tempo, a second view of the same list of changes as the inspector's, which stays for typing exact
 values. Folded, as it starts, it is a row 18 px tall with a flag at each change reading its BPM, and a slope from a change that glides
 to the next one, so the song's tempo reads with no clicks. ▸ in its head, or a double-click on it, unfolds it to 72 px: a curve of BPM
 over the song, steps where a change holds and lines where it glides, scaled to the song's tempos with room above and below, and the
@@ -1172,8 +1192,8 @@ on the grid, never past its neighbours, and the first moves only up and down. A 
 switches it between holding until the next change and gliding to it. ↑ and ↓ nudge the chosen change by 1 BPM, or 10 with Shift, and
 Delete takes it away, except the first. Each gesture is one step of undo, and as with a fader the song compiles when a drag is let go,
 while the curve and the top bar's tempo follow it. An example's lane can be unfolded and read, not changed. Which lanes are unfolded is
-the editor's, kept in localStorage for each timeline, never in the document. Time signatures, open 26, and markers would each be a lane
-here once the format has a field for them. The rules are pure functions in `Tempo.ts`.
+the editor's, kept in localStorage for each timeline, never in the document. Markers would be another lane here once a document has a
+field for them. The rules are pure functions in `Tempo.ts`.
 
 Preview compiles what an export compiles, with no `live`, so a track with no notes isn't in the song's image. A take is the exception: while
 one runs the image keeps every track, so a track recorded into from nothing plays from its first note. `live` keeps unused tracks, so it could pass a document
@@ -1371,9 +1391,10 @@ They decided 24, 26 and 32 too, and chose the direction for open 9, below. Open 
 
 - Events off the frame boundary, section 6.
 - Delivery over BLE, and showing a target's fit in the editor, section 10.
-- **Time signatures and pickups** (open 26), which the user wants. The editor draws every timeline in 4/4 from tick 0, so Für Elise, in 3/8
-  after an eighth's pickup, is in its third bar where the ruler shows bar 2. The plan is a meter map and a pickup in the timeline document,
-  which the editor draws, snaps and numbers bars by and the compiler ignores, as it ignores where a node is drawn. No format change.
+- **A Score view** of a clip, beside the roll, the user asked for in revision 32 as a mode of its own: a read-only score first, from a
+  module that turns ticks into measures, voices, ties, rests, tuplets and beams, notes spelled by the key and drawn with VexFlow, and then
+  entering notes on it. The recommendations it was agreed with: engraved spacing, the piano keys for step entry as they are, a key map in
+  the document (now built), and drum tracks left to the roll at first.
 
 **Built for the board's memory** (revision 20), as section 15 describes: delay lines of 16-bit samples, an author's choice, closing open 32.
 Choices made there that the user hasn't weighed in on:
@@ -1796,6 +1817,30 @@ Choices made here that the user hasn't weighed in on:
   the ruler and the rows, Choose every C4 on a key, Add a point here and Remove this lane on a lane.
 - Not built, since the user picked none of them: number keys for Draw, writing without R whenever the roll has focus, and fast
   typing that overlaps written as single notes rather than a chord.
+
+**Built from time signatures, key signatures and Split** (revision 32). The user asked what sheet music input for clips would take, as a
+mode of its own, then said "Let's do this then" and asked for Split on a clip's menu. This is the first part, open 26 with key signatures,
+which the Score view needs, and Split; the Score view is agreed, above. Nothing in the format, the engine or a compiled image changes.
+- **Time signatures, a pickup and key signatures** in the document, drawn and edited as above, with the examples' own: Für Elise in 3/8
+  in A minor after an eighth, the Invention in 3/4 in F, The Entertainer in 2/4 in C with its trio in F, the Mountain King in B minor,
+  and the chorale in F after a quarter.
+- **Split** on a clip's menu, at the pointer on the clips' grid or at the playhead, and Mod+E for the chosen clip at the playhead. Each
+  part is a clip of its own, with the notes that start in it, so an edit to one leaves the other, and what plays stays as it was: a note
+  that starts before the cut keeps its length and rings on past it, and the second part's lanes and play settings start where they
+  stood, a ramp under way going on to where it was going. Repeats either side of the cut stay repeats, and a cut between two repeats
+  needs no new clip. The first part keeps the clip's name if nothing else plays it, the parts count on from it, as verse-2 makes verse-3,
+  and the second part is chosen and open in the roll.
+
+Choices made here that the user hasn't weighed in on:
+- **A change is at a tick, and cuts a bar short** if it falls inside one, rather than at a bar number that moves when an earlier change
+  does. Changing one moves nothing after it, and a note stays where it is.
+- **A pickup is bar 0,** the first whole bar bar 1, as in a score, rather than the pickup being bar 1.
+- **The roll's bars count from the clip's first,** as before, and a clip played in several places takes its bars from the chosen one.
+- **A position's beat is the meter's own:** eighths in 3/8 and 6/8, as Logic and Cubase count, rather than the felt beat.
+- **The click follows compound meters** in threes of their beat, and a count-in is a bar of the meter where the take starts.
+- **The key names keys only, for now:** the roll still names notes with sharps, until the Score view spells them by the key.
+- **The Passion Chorale is in F major** rather than D minor: one flat either way, and its last chord is F.
+- **Split here snaps to the clips' Snap,** Bar until it is changed, so a cut lands on a bar line unless a finer grid is chosen.
 
 **Declined.** Importing PureData patches, which the user decided against in revision 20 after it was scoped: the graph already has PureData's
 nodes, wires, inlets and subpatches, but its control logic, message envelopes and voice idioms have no counterpart here, and many common

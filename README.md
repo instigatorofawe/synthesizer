@@ -74,8 +74,11 @@ keys play while the song plays is written into the chosen track, each note's sta
 to the clip on each pass round a loop.
 The arrangement is only as tall as its tracks until the tab strip under it is dragged, and clips snap to bars apart from the notes'
 Snap. ⤢ or a double-click on a clip gives the notes the whole view, I folds the inspector,
-and each clip keeps its zoom. Track heads have mute and solo, a volume fader and a pan knob. Above the tracks, a Tempo lane unfolds
-into the song's tempo as a curve, where a click adds a change, a drag sets it and a click on a segment makes it glide. ⌘ or Ctrl with
+and each clip keeps its zoom. Track heads have mute and solo, a volume fader and a pan knob. Above the tracks, the Time & key lane
+marks where the time signature and the key change, and its menu adds changes, which the inspector sets, with a pickup before bar 1:
+bars, Snap, positions and the click all follow them, and the compiler ignores them. A Tempo lane unfolds
+into the song's tempo as a curve, where a click adds a change, a drag sets it and a click on a segment makes it glide. A clip's menu
+splits it at the pointer or the playhead, as ⌘ or Ctrl with E does, into two clips that play as it did. ⌘ or Ctrl with
 C, V and D copy, paste and duplicate notes, clips and nodes. A track's patch is chosen from one searchable list, or dragged from the
 browser onto its track, or below the tracks for a new one, and its name in the track head opens it in the Patch view. An effect dragged
 onto a track or a Mixer strip joins its inserts, WAV files dropped on the song become an instrument on a track, and a track head drags

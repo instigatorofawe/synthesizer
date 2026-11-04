@@ -78,7 +78,9 @@ and each clip keeps its zoom. Track heads have mute and solo, a volume fader and
 marks where the time signature and the key change, and its menu adds changes, which the inspector sets, with a pickup before bar 1:
 bars, Snap, positions and the click all follow them, and the compiler ignores them. A Tempo lane unfolds
 into the song's tempo as a curve, where a click adds a change, a drag sets it and a click on a segment makes it glide. A clip's menu
-splits it at the pointer or the playhead, as ⌘ or Ctrl with E does, into two clips that play as it did. ⌘ or Ctrl with
+splits it at the pointer or the playhead, as ⌘ or Ctrl with E does, into two clips that play as it did. Score, beside Roll in the Notes
+toolbar, shows a clip as a score in the song's time and key signatures, drawn with VexFlow, where a click on a line or a space adds
+that note, the arrows move what is chosen, and step entry writes at a cursor on the staff. ⌘ or Ctrl with
 C, V and D copy, paste and duplicate notes, clips and nodes. A track's patch is chosen from one searchable list, or dragged from the
 browser onto its track, or below the tracks for a new one, and its name in the track head opens it in the Patch view. An effect dragged
 onto a track or a Mixer strip joins its inserts, WAV files dropped on the song become an instrument on a track, and a track head drags

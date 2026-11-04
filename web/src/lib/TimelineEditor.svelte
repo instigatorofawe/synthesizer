@@ -13,6 +13,7 @@
 	import type { ExampleGroup } from '#lib/PatchGroups.ts';
 	import PatchPicker from '#lib/PatchPicker.svelte';
 	import PianoRoll from '#lib/PianoRoll.svelte';
+	import Score from '#lib/Score.svelte';
 	import UnitField from '#lib/UnitField.svelte';
 	import { addTempo, removeTempo, setTempo, tempoAt } from '#lib/Tempo.ts';
 	import {
@@ -184,6 +185,7 @@
 	let stepping = $state(false);
 	const cursors = new Map<string, Cursor>();
 	let roll = $state<ReturnType<typeof PianoRoll>>();
+	let scoreView = $state<ReturnType<typeof Score>>();
 	let rollBar = $state<HTMLElement | null>(null); // Where in the tab strip the roll draws its toolbar
 	const drawChoices = $derived.by(() => {
 		const lengths = drawLengths(doc.ppq, true, clipBar);
@@ -236,6 +238,23 @@
 	const badTracks = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).track ?? [])));
 	const badClips = $derived(new Set(errors.flatMap((e) => placeOfError(e.where).clip ?? [])));
 
+	// The notes show in the roll or as a score, which the Notes toolbar switches between, and the editor remembers across
+	// songs and reloads. The score reads the notes; the roll is where they are written.
+	const NOTE_VIEW_KEY = 'modsynth.noteView';
+	let noteView = $state<'roll' | 'score'>('roll');
+	onMount(() => {
+		if (localStorage.getItem(NOTE_VIEW_KEY) === 'score') noteView = 'score';
+	});
+	function showNotes(as: 'roll' | 'score') {
+		noteView = as;
+		localStorage.setItem(NOTE_VIEW_KEY, as);
+	}
+	let scoreChosen = $state.raw<Set<number>>(new Set());
+	$effect(() => {
+		void clipId;
+		scoreChosen = new Set();
+	});
+
 	// The piano keys write into the roll while step entry is on and the roll shows a clip. The page asks before it routes them.
 	const writing = $derived(stepping && active && !readonly && tab === 'notes' && !!clip);
 	$effect(() => onwriting(writing));
@@ -243,7 +262,8 @@
 
 	// A piano key from the page, for step entry to write. The roll ignores it unless it is writing.
 	export function stepKey(note: number, on: boolean) {
-		roll?.stepKey(note, on);
+		if (noteView === 'score') scoreView?.stepKey(note, on);
+		else roll?.stepKey(note, on);
 	}
 
 	// What a take snaps to and writes at, as a clicked note does: the roll's Snap, and the Vel beside the keys.
@@ -1408,6 +1428,22 @@
 			<div class="rollbar" bind:this={rollBar}></div>
 			<!-- Step is for the notes, and ⤢ for whichever tab is open. -->
 			<div class="rolltools" role="toolbar" aria-label="Notes">
+				{#if tab === 'notes' && clip}
+					<div class="noteview" role="group" aria-label="Show the notes as">
+						<button
+							type="button"
+							aria-pressed={noteView === 'roll'}
+							title="The piano roll, where notes are drawn, moved and written"
+							onclick={() => showNotes('roll')}>Roll</button
+						>
+						<button
+							type="button"
+							aria-pressed={noteView === 'score'}
+							title="The clip as a score, in the song's time and key signatures"
+							onclick={() => showNotes('score')}>Score</button
+						>
+					</div>
+				{/if}
 				{#if tab === 'notes' && clip && !readonly}
 					<button
 						type="button"
@@ -1439,7 +1475,33 @@
 						{/if}
 					</p>
 				{/if}
-				{#if clip}
+				{#if clip && noteView === 'score'}
+					{@const from = rollPlaced?.tick ?? 0}
+					{#key clip.id}
+						<Score
+							{clip}
+							bars={clipBars}
+							keyAt={(at) => keyAt(doc, from + at)}
+							{playhead}
+							{playing}
+							chosen={scoreChosen}
+							{draw}
+							{velocity}
+							{grid}
+							{readonly}
+							{active}
+							bind:stepping
+							bind:this={scoreView}
+							{cursors}
+							canAudition={reported !== undefined || auditionByKeys}
+							cangrow={(length) => !!clip && canGrow(doc, clip.id, length)}
+							onchoose={(indices) => (scoreChosen = indices)}
+							onchange={clipChanged}
+							onaudition={audition}
+							{onsay}
+						/>
+					{/key}
+				{:else if clip}
 					{#key clip.id}
 						<PianoRoll
 							{clip}
@@ -1692,6 +1754,24 @@
 		overflow: hidden; /* What the toolbar can't fit scrolls inside it, and never runs over the inspector */
 		display: flex;
 		padding: 0.2rem 0 0 0.6rem;
+	}
+	.noteview {
+		display: flex;
+	}
+	.noteview button {
+		padding: 0.1rem 0.5rem;
+		border-radius: 0;
+	}
+	.noteview button:first-child {
+		border-radius: 4px 0 0 4px;
+	}
+	.noteview button:last-child {
+		border-radius: 0 4px 4px 0;
+		margin-left: -1px;
+	}
+	.noteview button[aria-pressed='true'] {
+		background: var(--accent);
+		color: var(--bg, #0d1117);
 	}
 	.rolltools {
 		flex: none;

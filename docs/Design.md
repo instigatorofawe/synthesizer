@@ -1,4 +1,4 @@
-# modsynth design, revision 32
+# modsynth design, revision 33
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -1019,7 +1019,23 @@ arrangement's zoom is the width of four quarters, so it holds across a change. T
 and takes their lengths from where the clip is played: the chosen placement, or the first. The click follows the meter too: a beat, or
 three in a compound meter, as 6/8 is beaten in two, accented on each bar's first, and a take's count-in is a bar of the meter where it
 starts. Key signatures, `key`, are a list of changes of a number of fifths, sharps above 0 and flats below, and whether the key is minor
-(`KeySignature.ts`). For now they name the key, in the inspector and on the song layer; the Score view will spell notes by them.
+(`KeySignature.ts`). They name the key in the inspector and on the song layer, and the Score view spells notes by them.
+
+**The Score view.** Roll and Score in the Notes toolbar switch the notes between the piano roll and a score of the same clip,
+which the editor remembers. `Notation.ts` turns a clip into what a score writes, as pure functions: measures by the song's bars,
+from the clip's start to its end; one staff, treble or bass by where the notes' middle is, or both, split at middle C, when the
+notes reach well above and below it; voices where notes overlap, and a chord where they start and end together; each note and rest
+a written value with its dots, tied across bar lines and beats, and in eighth-note triplets where a beat's notes sit nearer them
+than sixteenths; and each pitch spelled in the key, the key's own notes by its letters and any other by whichever letter needs the
+smaller accidental, and then by where it is in the key, as the common chromatic notes are written. What a clip holds is read to the
+nearest sixteenth, or triplet, as Display quantize does in Cubase and Logic, so a played rhythm reads; the roll still shows exactly
+where each note is. `Score.svelte` draws it with VexFlow 5 (MIT), loaded the first time a score is shown, with its music font
+Bravura and its text font Academico (both SIL OFL 1.1, their licences in `web/static/fonts`) carried in its own code, so nothing
+is fetched from elsewhere. Systems wrap to the width there is, spaced as engraved rather than by time. A click on a line or a space
+adds that note, in the key, as long as Draw and on the notes' Snap, with a ghost and a line saying what a click would add; a click
+on a note chooses it, ↑ and ↓ move what is chosen a semitone or with Shift an octave, ← and → a Snap step, and Delete takes it
+away. Step entry writes at a cursor on the staff with the piano keys, at the cursor the roll keeps for the clip, and while the
+song plays the score keeps the playhead's system in sight.
 
 Notes, clips and points go in as most DAWs take them. A click on empty grid in the roll adds a note as long as the Draw length, which sits beside Snap,
 follows the last note added, resized or chosen, as FL Studio's does, and steps with `[` and `]`. Dragging before letting go sets the length in Snap steps,
@@ -1391,10 +1407,6 @@ They decided 24, 26 and 32 too, and chose the direction for open 9, below. Open 
 
 - Events off the frame boundary, section 6.
 - Delivery over BLE, and showing a target's fit in the editor, section 10.
-- **A Score view** of a clip, beside the roll, the user asked for in revision 32 as a mode of its own: a read-only score first, from a
-  module that turns ticks into measures, voices, ties, rests, tuplets and beams, notes spelled by the key and drawn with VexFlow, and then
-  entering notes on it. The recommendations it was agreed with: engraved spacing, the piano keys for step entry as they are, a key map in
-  the document (now built), and drum tracks left to the roll at first.
 
 **Built for the board's memory** (revision 20), as section 15 describes: delay lines of 16-bit samples, an author's choice, closing open 32.
 Choices made there that the user hasn't weighed in on:
@@ -1841,6 +1853,22 @@ Choices made here that the user hasn't weighed in on:
 - **The key names keys only, for now:** the roll still names notes with sharps, until the Score view spells them by the key.
 - **The Passion Chorale is in F major** rather than D minor: one flat either way, and its last chord is F.
 - **Split here snaps to the clips' Snap,** Bar until it is changed, so a cut lands on a bar line unless a finer grid is chosen.
+
+**Built from the Score view** (revision 33), the rest of what the user asked for in revision 32: sheet music input for clips, as a
+mode of its own. It is one PR rather than the read-only score and then its editing, since one wasn't much use without the other.
+It is a view of the clip, as the roll is, so nothing in the document, the format or a compiled image changes, and it was built as
+agreed: engraved spacing, the piano keys for step entry as they are, and drum tracks left to the roll.
+
+Choices made here that the user hasn't weighed in on:
+- **Two staves when the notes reach below G3 and above E4,** split at middle C, and otherwise one, treble from A3 up. There is no way
+  yet to choose a track's clef.
+- **Read to the nearest sixteenth, or an eighth-note triplet** where a beat's notes fit those better, with no choice of how finely.
+  Longer notes, as a pedalled piece holds them, read as they are held, in a voice of their own.
+- **Voices go to the first that is free,** up to four, rather than by register, so an inner line can take the upper voice.
+- **Rests keep to the beats:** none dotted outside a compound meter, and each where it divides the bar, as engravers write them.
+- **The score's step entry says what it can't write,** past the end of a clip that can't grow, rather than offering to lengthen the
+  clip as the roll does.
+- **Bar numbers** begin each system, counted from the clip's first bar, as the roll counts them.
 
 **Declined.** Importing PureData patches, which the user decided against in revision 20 after it was scoped: the graph already has PureData's
 nodes, wires, inlets and subpatches, but its control logic, message envelopes and voice idioms have no counterpart here, and many common

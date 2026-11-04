@@ -29,11 +29,12 @@ TOP = 14000.0
 
 def vibrato(v: Voice, rate: float, depth: float = 0.0, onset: float = 0.0) -> Ref:
     """The pitch with vibrato: the wheel's and pressure's at once, and the sound's own `depth` arriving over `onset`
-    seconds, as a player's does on a long note."""
+    seconds, as a player's does on a long note. Its envelope lets go quickly, since a voice lasts as long as its slowest
+    envelope, and this one shouldn't hold a lead's voice open after its sound has gone."""
     g = v.g
     amount = g.add(g.mul(v.wheel, WHEEL_VIBRATO), g.mul(v.pressure, PRESSURE_VIBRATO))
     if depth:
-        own = g.mul(g.snap(g.env(onset, 0.1, 1.0, 0.1)), depth) if onset else depth
+        own = g.mul(g.snap(g.env(onset, 0.1, 1.0, 0.05)), depth) if onset else depth
         amount = g.add(amount, own)
     return g.add(v.pitch, g.node("lfo", {"rate": rate, "depth": amount}))
 
@@ -57,6 +58,14 @@ def tracked(v: Voice, harmonics, floor: float, top: float = TOP) -> Ref:
     return g.node(
         "math", {"a": g.add(g.mul(v.freq, harmonics), floor), "b": top}, mode="min"
     )
+
+
+def wandering(v: Voice, rate: float, depth: float) -> Ref:
+    """A slow LFO for a pan or a filter, `rate` at C4 and twice as fast two octaves up, so that a chord's notes, which start
+    together, drift apart rather than move as one."""
+    g = v.g
+    faster = g.mtof(g.add(g.mul(v.key.pitch, 0.5), 39.0))
+    return g.node("lfo", {"rate": g.mul(faster, rate / 440.0), "depth": depth})
 
 
 def detuned(v: Voice, f: Ref, cents: float) -> Ref:
@@ -130,12 +139,12 @@ def calliope_lead(v: Voice) -> Ref:
     f = g.mtof(vibrato(v, 6.2, 0.12, 0.25))
     octave = g.mul(g.osc("sine", g.mul(f, 2.0)), g.add(g.mul(v.velocity, 0.2), 0.12))
     hiss = g.node("noise")
-    breath = g.filter("bandpass", hiss, tracked(v, 1.0, 0.0, 9000.0), 4.0)
+    breath = g.filter("bandpass", hiss, tracked(v, 1.0, 0.0, 9000.0), 2.5)
     breath = g.mul(breath, g.env(0.02, 0.25, 0.35, 0.06))
     chiff = g.filter("bandpass", hiss, tracked(v, 3.0, 600.0, 12000.0), 1.5)
     chiff = g.mul(chiff, g.env(0.001, 0.035, 0.0, 0.02))
-    pipe = g.add(g.add(g.osc("triangle", f), octave), g.mul(breath, 0.5))
-    sound = g.add(pipe, g.mul(chiff, g.add(g.mul(v.velocity, 0.9), 0.2)))
+    pipe = g.add(g.add(g.osc("triangle", f), octave), g.mul(breath, 1.1))
+    sound = g.add(pipe, g.mul(chiff, g.add(g.mul(v.velocity, 1.8), 0.4)))
     return g.mul(sound, g.mul(g.env(0.03, 0.1, 0.9, 0.06), loudness(v)))
 
 
@@ -232,7 +241,7 @@ def choir_pad(v: Voice) -> tuple[Ref, Ref]:
     sound = g.add(sound, g.mul(g.filter("bandpass", source, 2600.0, 7.0), 0.25))
     sound = g.add(sound, g.mul(g.filter("bandpass", source, 4200.0, 2.0), 0.12))
     level = g.mul(g.env(0.45, 1.0, 0.9, 0.24), g.mul(loudness(v), lifted(v)))
-    drift = g.node("lfo", {"rate": 0.23, "depth": 0.4})
+    drift = wandering(v, 0.23, 0.35)
     sides = g.node("pan", {"in": g.mul(sound, level), "position": drift})
     return sides.l, sides.r
 
@@ -247,13 +256,15 @@ def crystal(v: Voice) -> tuple[Ref, Ref]:
     g = v.g
     f = g.mtof(vibrato(v, 5.0))
     level = loudness(v)
-    struck = g.mul(hardness(v, 0.7), level)
     high = g.osc("sine", g.mul(f, 5.404))
     upper = g.add(g.osc("sine", g.mul(f, 2.756)), g.mul(high, 0.55))
-    upper = g.mul(upper, g.env(0.001, g.keyed(v.pitch, 0.6), 0.0, 0.24))
-    glass = g.add(g.mul(upper, g.mul(below(v, 3500.0), 0.45)), g.osc("sine", f))
-    glass = g.mul(glass, g.env(0.001, g.keyed(v.pitch, 1.5), 0.2, 0.24))
-    centre = g.mul(glass, struck)
+    fading = g.env(0.001, g.keyed(v.pitch, 0.6), 0.0, 0.24)
+    glass = g.add(
+        g.mul(upper, g.mul(fading, g.mul(below(v, 3500.0), 0.45))), g.osc("sine", f)
+    )
+    # The glass's ring, which the sparkles fade with too.
+    ring = g.env(0.001, g.keyed(v.pitch, 1.5), 0.2, 0.24)
+    centre = g.mul(glass, g.mul(ring, g.mul(hardness(v, 0.7), level)))
     # A falling ramp, curved into a drop, at a rate that rises with the pitch so a chord's sparkles don't fall together.
     rate = g.mtof(g.add(g.mul(v.key.pitch, 0.25), -20.4))
     drop = g.node(
@@ -261,11 +272,8 @@ def crystal(v: Voice) -> tuple[Ref, Ref]:
     )
     noise = g.filter("bandpass", g.node("noise"), tracked(v, 6.0, 2000.0), 3.0)
     sparkle = g.mul(g.add(high, g.mul(noise, 0.6)), drop)
-    fade = g.mul(below(v, 4000.0), g.mul(level, 0.8))
-    sparkle = g.mul(sparkle, g.mul(g.env(0.05, 1.8, 0.15, 0.24), fade))
-    sides = g.node(
-        "pan", {"in": sparkle, "position": g.node("lfo", {"rate": 0.7, "depth": 0.7})}
-    )
+    sparkle = g.mul(sparkle, g.mul(ring, g.mul(below(v, 4000.0), g.mul(level, 0.8))))
+    sides = g.node("pan", {"in": sparkle, "position": wandering(v, 0.7, 0.7)})
     return g.add(centre, sides.l), g.add(centre, sides.r)
 
 
@@ -279,7 +287,7 @@ def atmosphere(v: Voice) -> tuple[Ref, Ref]:
     swell = g.env(0.4, 1.0, 0.7, 0.24)
     shine = g.mul(g.snap(pluck), g.mul(hardness(v, 0.4), 12.0))
     saws = g.add(g.osc("saw", detuned(v, f, -8.0)), g.osc("saw", detuned(v, f, 8.0)))
-    strings = g.filter("lowpass", saws, tracked(v, g.add(shine, 3.0), 600.0), 0.8)
+    strings = g.filter("lowpass", saws, tracked(v, g.add(shine, 5.0), 800.0), 0.8)
     strings = g.mul(strings, g.add(pluck, g.mul(swell, 0.45)))
     air = g.mul(g.filter("highpass", g.node("noise"), 6000.0), g.mul(swell, 0.06))
     centre = g.add(strings, air)
@@ -292,13 +300,13 @@ def atmosphere(v: Voice) -> tuple[Ref, Ref]:
 
 
 def soundtrack(v: Voice) -> tuple[Ref, Ref]:
-    """A dark, slow pad that won't settle: two saws through a resonant low-pass that wanders, and, coming in slowly, a sine
-    ring-modulated by one near its octave whose pitch drifts, which leaves two partials, one either side of the note and one
-    near its twelfth, that slide out of tune and back, and a pitch that wobbles. Goblins and sci-fi come here too."""
+    """A dark, slow pad that won't settle: two saws through a resonant low-pass that wanders, a pitch that wobbles, and,
+    coming in slowly, a sine ring-modulated by one near its octave whose pitch drifts, which leaves two partials, one near
+    the note and one near its twelfth, that slide out of tune and back. Goblins and sci-fi come here too."""
     g = v.g
     pitch = g.add(vibrato(v, 4.0), g.node("lfo", {"rate": 0.27, "depth": 0.08}))
     f = g.mtof(pitch)
-    wander = g.add(g.node("lfo", {"rate": 0.19, "depth": 0.6}), 1.4)
+    wander = g.add(wandering(v, 0.19, 0.6), 1.4)
     saws = g.add(g.osc("saw", detuned(v, f, -6.0)), g.osc("saw", detuned(v, f, 6.0)))
     dark = g.filter("lowpass", saws, tracked(v, wander, 250.0), 3.0)
     drift = g.add(g.node("lfo", {"rate": 0.13, "depth": 0.08}), 2.0)
@@ -314,7 +322,7 @@ def soundtrack(v: Voice) -> tuple[Ref, Ref]:
         "pan",
         {
             "in": g.mul(sound, loudness(v)),
-            "position": g.node("lfo", {"rate": 0.11, "depth": 0.5}),
+            "position": wandering(v, 0.11, 0.5),
         },
     )
     return sides.l, sides.r

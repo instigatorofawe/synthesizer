@@ -178,7 +178,7 @@
      {"id": 4, "type": "param", "param": 4},
      {"id": 5, "type": "mul", "inputs": {"b": 0.25}},
      {"id": 6, "type": "add"},
-     {"id": 7, "type": "env", "inputs": {"attack": 0.6, "decay": 0.1, "sustain": 1.0, "release": 0.1}},
+     {"id": 7, "type": "env", "inputs": {"attack": 0.6, "decay": 0.1, "sustain": 1.0, "release": 0.05}},
      {"id": 8, "type": "snap"},
      {"id": 9, "type": "mul", "inputs": {"b": 0.05}},
      {"id": 10, "type": "add"},
@@ -432,7 +432,7 @@
      {"id": 4, "type": "param", "param": 4},
      {"id": 5, "type": "mul", "inputs": {"b": 0.25}},
      {"id": 6, "type": "add"},
-     {"id": 7, "type": "env", "inputs": {"attack": 0.4, "decay": 0.1, "sustain": 1.0, "release": 0.1}},
+     {"id": 7, "type": "env", "inputs": {"attack": 0.4, "decay": 0.1, "sustain": 1.0, "release": 0.05}},
      {"id": 8, "type": "snap"},
      {"id": 9, "type": "mul", "inputs": {"b": 0.08}},
      {"id": 10, "type": "add"},
@@ -475,15 +475,19 @@
      {"id": 47, "type": "math", "mode": "clip", "inputs": {"b": 0.5, "c": 2.0}},
      {"id": 48, "type": "mul"},
      {"id": 49, "type": "mul"},
-     {"id": 50, "type": "lfo", "inputs": {"rate": 0.23, "depth": 0.4}},
-     {"id": 51, "type": "mul"},
-     {"id": 52, "type": "pan"},
-     {"id": 53, "type": "param", "param": 3},
-     {"id": 54, "type": "mul"},
-     {"id": 55, "type": "mul", "inputs": {"b": 0.4391}},
-     {"id": 56, "type": "mul"},
-     {"id": 57, "type": "mul"},
-     {"id": 58, "type": "out"}
+     {"id": 50, "type": "mul", "inputs": {"b": 0.5}},
+     {"id": 51, "type": "add", "inputs": {"b": 39.0}},
+     {"id": 52, "type": "mtof"},
+     {"id": 53, "type": "mul", "inputs": {"b": 0.000523}},
+     {"id": 54, "type": "lfo", "inputs": {"depth": 0.35}},
+     {"id": 55, "type": "mul"},
+     {"id": 56, "type": "pan"},
+     {"id": 57, "type": "param", "param": 3},
+     {"id": 58, "type": "mul"},
+     {"id": 59, "type": "mul", "inputs": {"b": 0.4441}},
+     {"id": 60, "type": "mul"},
+     {"id": 61, "type": "mul"},
+     {"id": 62, "type": "out"}
     ],
     "edges": [
      {"from": 2, "to": 3, "input": "a"},
@@ -542,19 +546,24 @@
      {"from": 47, "to": 48, "input": "b"},
      {"from": 39, "to": 49, "input": "a"},
      {"from": 48, "to": 49, "input": "b"},
-     {"from": 38, "to": 51, "input": "a"},
-     {"from": 49, "to": 51, "input": "b"},
+     {"from": 1, "port": "pitch", "to": 50, "input": "a"},
+     {"from": 50, "to": 51, "input": "a"},
      {"from": 51, "to": 52, "input": "in"},
-     {"from": 50, "to": 52, "input": "position"},
-     {"from": 53, "to": 54, "input": "a"},
-     {"from": 53, "to": 54, "input": "b"},
-     {"from": 54, "to": 55, "input": "a"},
-     {"from": 52, "port": "l", "to": 56, "input": "a"},
-     {"from": 55, "to": 56, "input": "b"},
-     {"from": 52, "port": "r", "to": 57, "input": "a"},
-     {"from": 55, "to": 57, "input": "b"},
-     {"from": 56, "to": 58, "input": "l"},
-     {"from": 57, "to": 58, "input": "r"}
+     {"from": 52, "to": 53, "input": "a"},
+     {"from": 53, "to": 54, "input": "rate"},
+     {"from": 38, "to": 55, "input": "a"},
+     {"from": 49, "to": 55, "input": "b"},
+     {"from": 55, "to": 56, "input": "in"},
+     {"from": 54, "to": 56, "input": "position"},
+     {"from": 57, "to": 58, "input": "a"},
+     {"from": 57, "to": 58, "input": "b"},
+     {"from": 58, "to": 59, "input": "a"},
+     {"from": 56, "port": "l", "to": 60, "input": "a"},
+     {"from": 59, "to": 60, "input": "b"},
+     {"from": 56, "port": "r", "to": 61, "input": "a"},
+     {"from": 59, "to": 61, "input": "b"},
+     {"from": 60, "to": 62, "input": "l"},
+     {"from": 61, "to": 62, "input": "r"}
     ]
    }
   }
@@ -671,7 +680,7 @@
      }
     ],
     "buses": [],
-    "master": {"gain": 1.2359}
+    "master": {"gain": 1.1852}
    }
   }
  ]

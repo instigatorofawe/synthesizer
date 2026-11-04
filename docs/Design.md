@@ -1,4 +1,4 @@
-# modsynth design, revision 30
+# modsynth design, revision 31
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -886,7 +886,11 @@ each platform's own `system-ui`, CI's text was 11% wider than a Mac's, which onc
   saved stops being one, and leaving with drafts asks first.
 - A patch is a track's instrument. + Track asks which patch the new track plays, and Esc makes no track. The track comes with a clip
   as long as a new song's, at the bar the playhead is in, which the roll opens on, so the keys and step entry write into the track
-  they play. A track head names its patch,
+  they play. A patch dragged out of the browser does the same where it is let go: on a track's head or row it plays there, as
+  its ▾ would choose it, on the row that opens below the tracks while it is dragged it makes a new track whose clip starts at that
+  bar, and an insert joins the effects of the track or Mixer strip it is let go on. WAV files dropped from the desktop become an
+  instrument first, as Import makes one. A track head dragged up or down moves the track, as its menu's Move up and Move down do.
+  A track head names its patch,
   not its id: the name opens that patch in the Patch view, and ▾ beside it chooses another. Wherever a patch is chosen, the inspector's slots too,
   one picker filters as it is typed in, and lists what the song already plays, then the library's own patches, then the built-ins grouped
   as the browser groups the examples. Its last entry, New patch for this track, saves a new patch at once, the same sine and envelope the
@@ -1008,8 +1012,13 @@ the arrangement draws a clip of whole bars, in the gap it was drawn in. A double
 nothing: Delete or the right-click menu does. Mod-drag copies notes and clips, as Alt-drag used to, and no gesture uses Alt. Esc cancels a
 drag in every editor, wherever focus is, since a press often leaves it on the page (`Drag.ts`): a native slider, which the browser goes on
 dragging, is put back and then hears nothing more until it is let go. Shift+F10 opens the menu of what has focus, a clip, the chosen notes or
-a tempo change, on every system, since a Mac's browsers don't turn it into a right-click. A field typed in gives the keys back once it is
-left, so Enter keeps what was typed and leaves it, and Esc leaves it with its number put back (`Fields.ts`). A note past a clip's
+a tempo change, on every system, since a Mac's browsers don't turn it into a right-click. A right-click opens a menu on everything edited by
+pointing (a clip, a row, a head, the ruler, the loop strip, a lane, a point, a note, a key, a node, a wire), so it never does nothing. In an
+example or a built-in patch the items that would change it are greyed out and the menu says why. Fields, buttons, links and panels of them
+keep the browser's own menu. A field typed in gives the keys back once it is
+left, so Enter keeps what was typed and leaves it, and Esc leaves it with its number put back (`Fields.ts`). A toolbar's chooser, Draw,
+Snap or Clips, is a setting rather than a field: chosen with the pointer it gives focus back to what had it, and while it has focus it keeps
+only the keys a select uses, so R, `[`, `]` and the piano keys work as anywhere else. A note past a clip's
 end grows the clip to the bar that holds it, which says so with an Undo. Here the editor does decide what is legal: it won't grow a clip if that
 would run any placement of it into the next on its track, which the compiler would refuse, and offers to lengthen it anyway instead. The roll shows
 four bars past the end, so there is room to do it.
@@ -1763,6 +1772,30 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 | 28 | Importing MIDI files? | Every piece began as a MIDI file or LilyPond source, and the app imports only WAV. A Standard MIDI File reader is 45 lines of `MakePieces.py`. Recommended: import a file as a new timeline, a track for each of its tracks, with its tempo map, and its pedal once open 27 gives it somewhere to go. |
 | 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks section 9's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
 | 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
+
+**Built from the UX gaps the user found** (revision 31). The user said patches can't be dragged onto the timeline, a right-click
+sometimes does nothing, the keys sometimes stick at 1/4 note entry, and notes can fail to reach the timeline. None of this changes the
+format, the compiler or the engine.
+- **Dragging:** patches from the browser onto tracks, below them for a new track, and onto Mixer strips; WAV files from the desktop;
+  track heads to move tracks (above, with the tracks).
+- **A menu on every right-click,** greyed out with the reason in an example or a built-in (above, with the editors' keys).
+- **The keys after a toolbar choice:** a Draw length chosen from its list kept focus there, and the list took R, `[` and the piano keys
+  as typing, so nothing was written. Choosers now give the keys back (above).
+- **Recorded lengths** are as played, as the user chose (the postmortem's decision 21): the start snaps, and a short note stays short.
+  Rounding them to Snap, which a new song starts at 1/4, made every short note a 1/4 note.
+- **Where notes went missing:** Remove from track left its clip in the roll, on no track, so what was written there was never heard or
+  seen in the song. The roll now goes on to what the track still plays, and a clip on no track, which only an address or an undo
+  leaves open, says so and offers to put it on a track. A note a take has nowhere to put says so, rather than going without a word.
+
+Choices made here that the user hasn't weighed in on:
+- **A dropped patch replaces slot 1** of the track it is let go on, as the head's ▾ does, rather than adding a slot.
+- **The new-track row** is there only while a patch that plays notes is dragged, or WAV files are held over the song, so it takes no
+  room otherwise.
+- **The browser over the page** at a laptop's width steps aside while a patch is dragged out of it, and goes once it is dropped.
+- **The menus' new items:** Copy for a clip and notes, Move up and Move down for a track, Move the playhead here and Loop this bar on
+  the ruler and the rows, Choose every C4 on a key, Add a point here and Remove this lane on a lane.
+- Not built, since the user picked none of them: number keys for Draw, writing without R whenever the roll has focus, and fast
+  typing that overlaps written as single notes rather than a chord.
 
 **Declined.** Importing PureData patches, which the user decided against in revision 20 after it was scoped: the graph already has PureData's
 nodes, wires, inlets and subpatches, but its control logic, message envelopes and voice idioms have no counterpart here, and many common

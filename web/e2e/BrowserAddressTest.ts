@@ -207,7 +207,7 @@ test("a patch's tooltip in the browser counts the song's unsaved edits", async (
 	await page.setViewportSize({ width: 1440, height: 900 }); // The browser beside the page
 	await page.goto('/?timeline=song');
 	const square = browser(page).getByRole('link', { name: /^Square/ });
-	await expect(square).toHaveAttribute('title', 'Not used by a song');
+	await expect(square).toHaveAttribute('title', 'Not used by a song. Drag it onto the song to play it.');
 
 	// Lead plays it instead, unsaved
 	await songTab(page, 'JSON').click();
@@ -217,5 +217,5 @@ test("a patch's tooltip in the browser counts the song's unsaved edits", async (
 	await json.fill(JSON.stringify(doc, null, 1));
 	await expect(page.getByTestId('unsaved')).toBeVisible();
 	await square.hover();
-	await expect(square).toHaveAttribute('title', 'Used by Song');
+	await expect(square).toHaveAttribute('title', 'Used by Song. Drag it onto the song to play it.');
 });

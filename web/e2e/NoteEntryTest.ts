@@ -125,8 +125,9 @@ test('a right-click on a note opens its menu, which deletes and duplicates, and 
 	await expect(menu).toHaveCount(0);
 	await expect(notes(page)).toHaveCount(1);
 
-	// The arrows and Enter work in it.
+	// The arrows and Enter work in it: down past Delete to Duplicate.
 	await page.mouse.click(at.x, at.y, { button: 'right' });
+	await page.keyboard.press('ArrowDown');
 	await page.keyboard.press('ArrowDown');
 	await page.keyboard.press('Enter');
 	await expect(notes(page)).toHaveCount(2);

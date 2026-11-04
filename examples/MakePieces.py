@@ -582,17 +582,25 @@ def chorale() -> tuple[dict, str]:
     song.bus("hall", song.standard("MediumHall"))
     # The set plays its trumpet, horn and trombone about 12 dB under where the chorale's own did, and the flugelhorn, still
     # the piece's, is turned down as far, so the master gain makes the 12 dB up. Each part's trim, in dB, takes it the
-    # rest of the way to where it sat in the mix, as measured with each part alone on its old instrument and on the set's.
-    trim = {"Trumpet": -0.7, "Flugelhorn": -12.0, "Horn": 1.6, "Trombone": 0.4}
+    # rest of the way to where it sat in the mix, and its send gives it the balance of wet and dry it had in the church
+    # the chorale had of its own, which the set's hall colours differently for each instrument. Both were measured with
+    # each part alone, before and after.
+    mix = {  # trim, send
+        "Trumpet": (-0.7, 0.81),
+        "Flugelhorn": (-12.0, 0.81),
+        "Horn": (1.6, 0.97),
+        "Trombone": (0.4, 0.92),
+    }
     for name, (notes, pan) in parts.items():
+        trim, send = mix[name]
         song.track(
             name,
             [slots[name]],
             shaped(notes),
             voices=3,
-            gain=round(10 ** (trim[name] / 20), 4),
+            gain=round(10 ** (trim / 20), 4),
             pan=pan,
-            sends={"hall": 0.86},
+            sends={"hall": send},
         )
     listen = (
         "Bach's Passion Chorale for the standard set's trumpet, French horn and trombone and a flugelhorn of its own, "
@@ -855,18 +863,20 @@ def king() -> tuple[dict, str]:
         length,
     )
     # The set plays its instruments about 14 dB under where the piece's own did, which the master gain makes up. Each
-    # part's trim, in dB, takes it the rest of the way to where it sat in the mix, as measured with each part alone on its
-    # old instrument and on the set's, and moves its fader lane with it.
+    # part's trim, in dB, takes it the rest of the way to where it sat in the mix, and moves its fader lane with it. Its
+    # send gives it the balance of wet and dry it had in the concert hall the piece had of its own, which the set's hall
+    # colours differently for each instrument: the timpani's two notes ring in it more, and the pizzicato's less. Both
+    # were measured with each part alone, before and after.
     seats = {  # patch, voices, gain, pan, send, trim
-        "Bassoons": ("Bassoon", 4, 0.9, 0.1, 0.56, 1.9),
-        "Pizzicato": ("PizzicatoStrings", 10, 0.55, 0.3, 0.56, 2.0),
-        "Violins": ("StringEnsemble", 10, 0.8, -0.35, 0.56, 0.1),
-        "Oboes": ("Oboe", 6, 0.35, -0.1, 0.56, 3.2),
-        "Horns": ("FrenchHorn", 8, 0.8, 0.25, 0.75, 0.0),
-        "Trumpets": ("Trumpet", 6, 0.6, 0.15, 0.66, -2.6),
-        "Cellos and basses": ("StringEnsemble", 8, 0.7, 0.4, 0.56, 0.1),
-        "Timpani": ("Timpani", 6, 0.7, 0.0, 0.66, -4.5),
-        "Cymbal": ("KitCrash", 2, 0.5, -0.15, 0.75, -1.5),
+        "Bassoons": ("Bassoon", 4, 0.9, 0.1, 0.68, 1.9),
+        "Pizzicato": ("PizzicatoStrings", 10, 0.55, 0.3, 0.73, 2.0),
+        "Violins": ("StringEnsemble", 10, 0.8, -0.35, 0.66, 0.1),
+        "Oboes": ("Oboe", 6, 0.35, -0.1, 0.64, 3.2),
+        "Horns": ("FrenchHorn", 8, 0.8, 0.25, 0.7, 0.0),
+        "Trumpets": ("Trumpet", 6, 0.6, 0.15, 0.58, -2.6),
+        "Cellos and basses": ("StringEnsemble", 8, 0.7, 0.4, 0.61, 0.1),
+        "Timpani": ("Timpani", 6, 0.7, 0.0, 0.47, -4.5),
+        "Cymbal": ("KitCrash", 2, 0.5, -0.15, 0.85, -1.5),
     }
     for name, (patch, voices, gain, pan, send, trim) in seats.items():
         scale = 10 ** (trim / 20)

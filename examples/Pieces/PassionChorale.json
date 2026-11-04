@@ -1108,7 +1108,7 @@
       "gain": 0.9226,
       "pan": -0.3,
       "placements": [{"clip": "trumpet-chorale", "tick": 0}],
-      "sends": [{"bus": "hall", "gain": 0.86}],
+      "sends": [{"bus": "hall", "gain": 0.81}],
       "inserts": []
      },
      {
@@ -1119,7 +1119,7 @@
       "gain": 0.2512,
       "pan": -0.1,
       "placements": [{"clip": "flugelhorn-chorale", "tick": 0}],
-      "sends": [{"bus": "hall", "gain": 0.86}],
+      "sends": [{"bus": "hall", "gain": 0.81}],
       "inserts": []
      },
      {
@@ -1130,7 +1130,7 @@
       "gain": 1.2023,
       "pan": 0.15,
       "placements": [{"clip": "horn-chorale", "tick": 0}],
-      "sends": [{"bus": "hall", "gain": 0.86}],
+      "sends": [{"bus": "hall", "gain": 0.97}],
       "inserts": []
      },
      {
@@ -1141,12 +1141,12 @@
       "gain": 1.0471,
       "pan": 0.35,
       "placements": [{"clip": "trombone-chorale", "tick": 0}],
-      "sends": [{"bus": "hall", "gain": 0.86}],
+      "sends": [{"bus": "hall", "gain": 0.92}],
       "inserts": []
      }
     ],
     "buses": [{"id": "hall", "gain": 1.0, "inserts": [{"id": 100, "patch": "MediumHall"}]}],
-    "master": {"gain": 0.8875}
+    "master": {"gain": 0.8831}
    }
   }
  ]

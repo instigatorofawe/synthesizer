@@ -4234,7 +4234,7 @@
       "gain": 1.1201,
       "pan": 0.1,
       "placements": [{"clip": "bassoons-theme", "tick": 1920}],
-      "sends": [{"bus": "hall", "gain": 0.56}],
+      "sends": [{"bus": "hall", "gain": 0.68}],
       "inserts": []
      },
      {
@@ -4245,7 +4245,7 @@
       "gain": 0.6924,
       "pan": 0.3,
       "placements": [{"clip": "pizzicato-theme", "tick": 1920}, {"clip": "pizzicato-rising", "tick": 48000}],
-      "sends": [{"bus": "hall", "gain": 0.56}],
+      "sends": [{"bus": "hall", "gain": 0.73}],
       "inserts": []
      },
      {
@@ -4262,7 +4262,7 @@
        {"clip": "violins-shrieks", "tick": 140160},
        {"clip": "violins-roll", "tick": 163200}
       ],
-      "sends": [{"bus": "hall", "gain": 0.56}],
+      "sends": [{"bus": "hall", "gain": 0.66}],
       "inserts": []
      },
      {
@@ -4280,7 +4280,7 @@
        {"clip": "oboes-shrieks", "tick": 140160},
        {"clip": "oboes-roll", "tick": 163200}
       ],
-      "sends": [{"bus": "hall", "gain": 0.56}],
+      "sends": [{"bus": "hall", "gain": 0.64}],
       "inserts": []
      },
      {
@@ -4298,7 +4298,7 @@
        {"clip": "horns-shrieks", "tick": 140160},
        {"clip": "horns-roll", "tick": 163200}
       ],
-      "sends": [{"bus": "hall", "gain": 0.75}],
+      "sends": [{"bus": "hall", "gain": 0.7}],
       "inserts": []
      },
      {
@@ -4313,7 +4313,7 @@
        {"clip": "trumpets-shrieks", "tick": 140160},
        {"clip": "trumpets-roll", "tick": 163200}
       ],
-      "sends": [{"bus": "hall", "gain": 0.66}],
+      "sends": [{"bus": "hall", "gain": 0.58}],
       "inserts": []
      },
      {
@@ -4329,7 +4329,7 @@
        {"clip": "cellosandbasses-shrieks", "tick": 140160},
        {"clip": "cellosandbasses-roll", "tick": 163200}
       ],
-      "sends": [{"bus": "hall", "gain": 0.56}],
+      "sends": [{"bus": "hall", "gain": 0.61}],
       "inserts": []
      },
      {
@@ -4344,7 +4344,7 @@
        {"clip": "timpani-shrieks", "tick": 140160},
        {"clip": "timpani-roll", "tick": 163200}
       ],
-      "sends": [{"bus": "hall", "gain": 0.66}],
+      "sends": [{"bus": "hall", "gain": 0.47}],
       "inserts": []
      },
      {
@@ -4355,12 +4355,12 @@
       "gain": 0.4207,
       "pan": -0.15,
       "placements": [{"clip": "cymbal-stretto", "tick": 94080}, {"clip": "cymbal-roll", "tick": 163200}],
-      "sends": [{"bus": "hall", "gain": 0.75}],
+      "sends": [{"bus": "hall", "gain": 0.85}],
       "inserts": []
      }
     ],
     "buses": [{"id": "hall", "gain": 1.0, "inserts": [{"id": 100, "patch": "MediumHall"}]}],
-    "master": {"gain": 0.6151}
+    "master": {"gain": 0.6189}
    }
   }
  ]

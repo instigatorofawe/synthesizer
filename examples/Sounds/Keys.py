@@ -1,8 +1,9 @@
 """The standard set's keyboards: GM's pianos, its chromatic percussion and its organs.
 
 The harpsichord, the tine piano and the old upright are MakePieces.py's, ported into the set's contract with their numbers
-unchanged, so that the pieces rebuilt on them keep their sound. The rest are built here: a grand piano and its variants,
-an FM piano and a clavinet, struck bars and bells, a hammered dulcimer, tonewheel and pipe organs, and free reeds.
+unchanged, so that the pieces rebuilt on them keep their sound. The tine piano's modulated sine is made more cheaply, as
+`sine` says, and renders within -75 dB of the piece's. The rest are built here: a grand piano and its variants, an FM
+piano and a clavinet, struck bars and bells, a hammered dulcimer, tonewheel and pipe organs, and free reeds.
 """
 
 import math
@@ -10,13 +11,12 @@ import math
 from Graph import Graph, Ref
 from Instrument import Instrument, Voice
 
-CENT = (
-    2 ** (1 / 1200) - 1
-)  # A cent as a fraction of a frequency, near enough for a few of them
+# A cent as a fraction of a frequency, near enough for a few of them.
+CENT = 2 ** (1 / 1200) - 1
 
-# A quarter of a sine, from -1 to 1, for a shape node to bend a triangle into a sine. An osc in mod mode makes a sine
-# whose phase moves a sample at a time, but at about seven times the cost of a triangle bent this way, which sounds the
-# same to -70 dB.
+# Half a sine, from its trough to its peak, for a shape node to bend a triangle into a sine. An osc in mod mode makes a
+# sine whose phase moves a sample at a time, but at about seven times the cost of a triangle bent this way, which sounds
+# the same to -70 dB.
 SINE = [round(math.sin(math.pi / 2 * (-1 + i / 32)), 6) for i in range(65)]
 
 
@@ -91,13 +91,17 @@ def grand(
     thump: float = 1.0,
     damp: float = 0.09,
     unisons: int = 3,
-    thin: float = 40.0,
+    thin: float = 0.0,
     width: float = 0.5,
 ):
     """A grand piano: three strings a note, struck where the hammer leaves a notch in their harmonics, a cent or so
     apart so they beat slowly. Two of them die fast and one rings on, which is a piano's prompt sound and aftersound.
     A harder blow is louder and brighter, and the brightness fades with the prompt sound, faster in the treble. The
-    hammer knocks, the damper stops the note when the key comes up, and the top keys have no damper."""
+    hammer knocks, the damper stops the note when the key comes up, and the top keys have no damper.
+
+    The variants change how bright a blow is and how much of the tone is left when it has faded, the unisons' detuning
+    in cents and how many there are, the prompt sound's and aftersound's decay and the damper's, in seconds at C4, the
+    hammer's knock, a highpass for a thinner sound, and how far the keys spread across the stereo field."""
     g, key, f = v.g, v.key, v.freq
     vel = key.velocity
     # The hammer strikes an eighth of the way along the bass and middle strings and nearer the end in the treble, which
@@ -148,6 +152,7 @@ def grand(
     )
     sound = g.mul(g.add(tone, knock), level)
     if thin:
+        # Pickups, or a small box, that hear little of the bass.
         sound = g.filter("highpass", sound, thin, 0.6)
     return spread(g, sound, key, width)
 
@@ -202,7 +207,7 @@ def fm_piano(v: Voice):
             g.mul(g.add(g.mul(vel, 0.16), 0.03), growl),
         ),
     )
-    # The tine's modulator would only alias at the top, so it fades out over the last two octaves.
+    # Above G5 the tine is out of hearing, and higher still it would alias, so it fades out by G7.
     reach = clamped(g, g.mul(g.add(key.pitch, -103.0), -1 / 24), 0.0, 1.0)
     tine = g.mul(
         g.osc("sine", g.mul(f, 14.0)),
@@ -285,28 +290,31 @@ def bar(
     g, key, f = v.g, v.key, v.freq
     vel = key.velocity
     decay = keyed(g, key.pitch, ring, octaves)
-    sound = None
+    # Modes that fall away together share an envelope.
+    groups: dict[float, Ref] = {}
     for n, (ratio, level, share) in enumerate(modes):
         # Above the first mode a harder blow is brighter, and a mode past what the rate can hold is left out.
         weight = (
             level if n == 0 else g.add(g.mul(vel, hard * level), (1 - hard) * level)
         )
-        partial = g.osc("sine", f if ratio == 1 else g.mul(f, ratio))
         if ratio > 1:
             weight = g.mul(
                 weight, clamped(g, g.add(g.mul(f, -ratio / 2000), 11.0), 0.0, 1.0)
             )
-        partial = g.mul(
-            partial, g.mul(g.env(0.0008, g.mul(decay, share), 0.0, damp), weight)
+        partial = g.osc("sine", f if ratio == 1 else g.mul(f, ratio))
+        if weight != 1.0:
+            partial = g.mul(partial, weight)
+        if n == 0 and beat:
+            # A second tine or bar tuned a few cents away, which beats with the first.
+            twin = g.osc("sine", g.mul(f, 1 + beat * CENT))
+            partial = g.add(partial, g.mul(twin, level * 0.6))
+        groups[share] = (
+            partial if share not in groups else g.add(groups[share], partial)
         )
-        sound = partial if sound is None else g.add(sound, partial)
-    if beat:
-        # A second tine or bar tuned a few cents away, which beats with the first.
-        twin = g.osc("sine", g.mul(f, 1 + beat * CENT))
-        sound = g.add(
-            sound,
-            g.mul(twin, g.mul(g.env(0.0008, decay, 0.0, damp), modes[0][1] * 0.6)),
-        )
+    sound = None
+    for share, partials in groups.items():
+        partials = g.mul(partials, g.env(0.0008, g.mul(decay, share), 0.0, damp))
+        sound = partials if sound is None else g.add(sound, partials)
     if click:
         mallet = g.filter(
             "bandpass", g.node("noise"), lowest(g, g.mul(f, 3.0), 9000.0), 1.2
@@ -317,10 +325,9 @@ def bar(
         )
     if tremolo[1]:
         rate, depth = tremolo
-        # The vibraphone's fans turn in the tubes and swell every note; the wheel makes them go deeper.
-        swing = g.node(
-            "lfo", {"rate": rate, "depth": g.add(g.mul(v.wheel, 0.4), depth)}
-        )
+        # The vibraphone's fans turn in the tubes and swell every note; the wheel makes them go deeper. An lfo would
+        # step the level once a frame, which a bar's pure tone lets through as a buzz, so this is an oscillator.
+        swing = g.mul(g.osc("sine", rate), g.add(g.mul(v.wheel, 0.4), depth))
         sound = g.mul(sound, g.add(swing, 1.0))
     return spread(g, g.mul(sound, loudness(g, vel)), key, width)
 
@@ -329,11 +336,11 @@ def bar(
 STEEL_BAR = [
     (1.0, 1.0, 1.0),
     (2.756, 0.45, 0.45),
-    (5.404, 0.25, 0.22),
-    (8.933, 0.12, 0.12),
+    (5.404, 0.25, 0.16),
+    (8.933, 0.12, 0.16),
 ]
 # A celesta's plates over wooden resonators, which keep the first mode and leave little of the rest.
-CELESTA = [(1.0, 1.0, 1.0), (2.756, 0.14, 0.3), (4.0, 0.12, 0.25), (5.404, 0.05, 0.12)]
+CELESTA = [(1.0, 1.0, 1.0), (2.756, 0.14, 0.28), (4.0, 0.12, 0.28), (5.404, 0.05, 0.12)]
 # A music box's comb: tines clamped at one end, whose upper modes are far from the first, and short.
 COMB = [(1.0, 1.0, 1.0), (5.93, 0.35, 0.18), (16.6, 0.12, 0.06)]
 # A vibraphone's aluminium bars are cut so that the second mode is two octaves up and the third a third above that.
@@ -341,15 +348,16 @@ VIBES = [(1.0, 1.0, 1.0), (3.98, 0.22, 0.28), (9.86, 0.05, 0.1)]
 # A marimba's rosewood bars are tuned like the vibraphone's, but the wood damps the upper modes in an instant.
 MARIMBA = [(1.0, 1.0, 1.0), (3.96, 0.32, 0.22), (9.9, 0.12, 0.06)]
 # A xylophone's are tuned to the twelfth, and struck with hard mallets.
-XYLOPHONE = [(1.0, 1.0, 1.0), (3.0, 0.5, 0.4), (6.1, 0.22, 0.15), (9.4, 0.08, 0.08)]
-# A tubular bell: its strike note is heard where the fourth, fifth and sixth modes of the tube stand as 2, 3 and 4,
-# with the third mode's minor third above the note and a little of the note itself.
+XYLOPHONE = [(1.0, 1.0, 1.0), (3.0, 0.5, 0.4), (6.1, 0.22, 0.11), (9.4, 0.08, 0.11)]
+# A tubular bell: its strike note is heard where the fourth, fifth and sixth modes of the tube stand nearly as 2, 3
+# and 4, which a chime maker tunes them towards, with the third mode's minor third above the note and a little of the
+# note itself.
 CHIME = [
     (1.0, 0.35, 1.0),
-    (1.21, 0.5, 0.9),
+    (1.21, 0.5, 1.0),
     (2.0, 1.0, 0.7),
-    (2.99, 0.7, 0.5),
-    (4.17, 0.45, 0.33),
+    (2.98, 0.7, 0.42),
+    (4.07, 0.45, 0.42),
 ]
 
 
@@ -412,21 +420,19 @@ def drawbar(
         sound, g.mul(contacts, g.mul(g.env(0.0002, 0.003, 0.0, 0.003), click))
     )
     if drive:
-        # A soft clip, x - x^3 / 3, which a louder note drives harder.
-        hot = clamped(
-            g,
-            g.mul(sound, g.mul(g.add(g.mul(key.velocity, 0.6), 0.4), drive)),
-            -1.0,
-            1.0,
-        )
+        # A soft clip, x - x^3 / 3, which a louder note drives harder. `drive` is how far past full the sum of the
+        # drawbars goes at full velocity, however many are out.
+        full = sum(10 ** ((int(setting) - 8) * 3 / 20) for setting in stops)
+        push = g.mul(g.add(g.mul(key.velocity, 0.6), 0.4), drive / full)
+        hot = clamped(g, g.mul(sound, push), -1.0, 1.0)
         sound = g.add(hot, g.mul(g.mul(g.mul(hot, hot), hot), -1 / 3))
     return g.mul(sound, loudness(g, key.velocity))
 
 
 def pipes(v: Voice):
     """A church organ's full chorus: an open diapason at 8', a stopped bourdon an octave below, and an octave, a
-    twelfth and a fifteenth above, each rank a little out with the others. The pipes speak slowly, the bass slowest, with a chiff of
-    wind at the mouth, and stop when the key comes up, leaving the church to ring."""
+    twelfth and a fifteenth above, each rank a little out with the others. The pipes speak slowly, the bass slowest,
+    with a chiff of wind at the mouth, and stop when the key comes up, leaving the church to ring."""
     g, key = v.g, v.key
     f = vibrato(v, 5.5, 0.2)
     speech = keyed(g, key.pitch, 0.05, 3.0)
@@ -486,7 +492,9 @@ def free_reed(
         reed = g.mul(reed, level)
         sound = reed if sound is None else g.add(sound, reed)
     push = g.add(g.mul(vel, 0.6), g.add(g.mul(v.pressure, 0.5), 0.4))
-    cutoff = lowest(g, g.add(g.mul(g.mul(f, bright), push), 300.0), top)
+    # However dark the reed's chamber, a note above `top` keeps its fundamental.
+    ceiling = g.node("math", {"a": g.mul(f, 2.0), "b": top}, mode="max")
+    cutoff = lowest(g, g.add(g.mul(g.mul(f, bright), push), 300.0), ceiling)
     tone = g.filter("lowpass", sound, cutoff, 0.7)
     tone = g.add(tone, g.mul(g.filter("bandpass", tone, formant, 1.6), 0.8))
     if breath:
@@ -504,7 +512,8 @@ def free_reed(
 
 # The set ------------------------------------------------------------------------------------------------------------
 
-PIANO_PHRASE = [  # Soft to loud up the keyboard, then a chord held and one struck and let go at once
+# Soft to loud up the keyboard, then a chord held, one struck and let go at once, and the top keys, which have no damper.
+PIANO_PHRASE = [
     *[
         (i * 0.5, 36 + 12 * (i // 4) + (0, 4, 7, 12)[i % 4], 30 + i * 6, 0.45)
         for i in range(16)
@@ -682,6 +691,7 @@ INSTRUMENTS = [
         53,
         89,
         programs=[11],
+        phrase=keys_phrase(60),
         listen_for="A vibraphone with its motor on: soft mallets, a long ring, and a swell that pulses.",
     ),
     Instrument(
@@ -689,7 +699,7 @@ INSTRUMENTS = [
         "Marimba",
         "Chromatic percussion",
         lambda v: bar(
-            v, MARIMBA, ring=0.32, octaves=1.5, hard=0.7, click=0.35, damp=0.08
+            v, MARIMBA, ring=0.32, octaves=1.5, hard=0.7, click=0.35, damp=0.2
         ),
         36,
         96,
@@ -701,7 +711,7 @@ INSTRUMENTS = [
         "Xylophone",
         "Chromatic percussion",
         lambda v: bar(
-            v, XYLOPHONE, ring=0.16, octaves=2.0, hard=0.8, click=0.6, damp=0.05
+            v, XYLOPHONE, ring=0.16, octaves=2.0, hard=0.8, click=0.6, damp=0.1
         ),
         65,
         108,
@@ -716,6 +726,7 @@ INSTRUMENTS = [
         60,
         77,
         programs=[14],
+        phrase=keys_phrase(60),
         listen_for="Orchestral chimes: a clanging strike and a long, shimmering bell tone.",
     ),
     Instrument(
@@ -737,6 +748,7 @@ INSTRUMENTS = [
         36,
         96,
         programs=[16],
+        phrase=keys_phrase(60),
         listen_for="A tonewheel organ, round and full, speaking at once with a click and stopping as the key lifts.",
     ),
     Instrument(
@@ -747,6 +759,7 @@ INSTRUMENTS = [
         36,
         96,
         programs=[17],
+        phrase=keys_phrase(60),
         listen_for="A jazz organ whose third harmonic pings at the start of every note and dies away.",
     ),
     Instrument(
@@ -757,6 +770,7 @@ INSTRUMENTS = [
         36,
         96,
         programs=[18],
+        phrase=keys_phrase(60),
         listen_for="A tonewheel organ with every low drawbar out, driven into a growl.",
     ),
     Instrument(
@@ -767,6 +781,7 @@ INSTRUMENTS = [
         24,
         96,
         programs=[19],
+        phrase=keys_phrase(48),
         listen_for="A pipe organ's chorus of ranks, slow to speak with a chiff, and stopping when the key lifts.",
     ),
     Instrument(
@@ -783,6 +798,7 @@ INSTRUMENTS = [
         36,
         96,
         programs=[20],
+        phrase=keys_phrase(60),
         listen_for="A harmonium: soft, reedy and a little slow to speak, swaying with its tremulant.",
     ),
     Instrument(
@@ -800,6 +816,7 @@ INSTRUMENTS = [
         41,
         89,
         programs=[21],
+        phrase=keys_phrase(60),
         listen_for="A musette accordion: three reeds a note, tuned apart so that they beat in a fast shimmer.",
     ),
     Instrument(
@@ -819,6 +836,7 @@ INSTRUMENTS = [
         60,
         96,
         programs=[22],
+        phrase=keys_phrase(72),
         listen_for="A blues harp: one reed, breathy, bent up into each note, its vibrato on the wheel.",
     ),
     Instrument(
@@ -835,6 +853,7 @@ INSTRUMENTS = [
         36,
         89,
         programs=[23],
+        phrase=keys_phrase(57),
         listen_for="A bandoneon: reeds in octaves tuned dry, dark and reedy, with no musette.",
     ),
 ]

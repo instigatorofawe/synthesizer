@@ -116,6 +116,13 @@ export const SHORTCUTS = [
 
 	{ id: 'arrangement.delete', code: 'Delete', scope: 'arrangement', description: 'Take the chosen clip off its track' },
 	{
+		id: 'arrangement.split',
+		code: 'KeyE',
+		mod: true,
+		scope: 'arrangement',
+		description: 'Split the chosen clip at the playhead'
+	},
+	{
 		id: 'arrangement.backspace',
 		code: 'Backspace',
 		scope: 'arrangement',

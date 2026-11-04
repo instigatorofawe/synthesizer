@@ -10,6 +10,7 @@
 		pastePlacement,
 		place,
 		placementIndex,
+		placementSpan,
 		removeTrack,
 		setPlacement,
 		setTrack,
@@ -21,7 +22,8 @@
 		type Track
 	} from '#lib/TimelineEdit.ts';
 	import { wholeSong } from '#lib/Transport.ts';
-	import { barOf, noteValue, snapTick, ticksPerBar } from '#lib/Units.ts';
+	import { BAR, noteValue } from '#lib/Units.ts';
+	import { addMeter, barsOf, meterText, metersOf, removeMeter } from '#lib/TimeSignature.ts';
 	import { clipboard } from '#lib/Clipboard.ts';
 	import ContextMenu, { EXAMPLE_NOTE, byKeys, type MenuItem } from '#lib/ContextMenu.svelte';
 	import { escapeCancels } from '#lib/Drag.ts';
@@ -33,7 +35,8 @@
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
 	import { matches, modHeld, modKey, typingIn } from '#lib/Shortcuts.ts';
-	import { LANES_KEY, SONG_LANES, keepOpen, keptOpen, laneHeight, layerHeight } from '#lib/SongLayer.ts';
+	import { LANES_KEY, SONG_LANES, keepOpen, keptOpen, laneHeight, laneTop, layerHeight } from '#lib/SongLayer.ts';
+	import { addKey, keyAt, keyName, keysOf, removeKey } from '#lib/KeySignature.ts';
 	import { TEMPLATE_BARS } from '#lib/Template.ts';
 	import TempoLane from '#lib/TempoLane.svelte';
 
@@ -61,6 +64,7 @@
 		remove: (at: { track: number; placement: number }) => void; // The placement, and not its clip
 		delete: (at: { track: number; placement: number }) => void; // The clip, and every placement of it
 		loop: (at: { track: number; placement: number }) => void; // The loop, over the placement and its repeats, and on
+		split: (at: { track: number; placement: number }, tick: number) => void; // In two there, each its own clip
 	}
 
 	let {
@@ -96,6 +100,7 @@
 		onmix = () => {},
 		onzoom = () => {},
 		ondropped = () => {},
+		onsignature,
 		actions
 	}: {
 		id?: string; // Which timeline this is, for what the arrangement keeps about it between visits: which song lanes are open
@@ -130,6 +135,7 @@
 		onmix?: (track: number, change: { gain?: number; pan?: number }, done: boolean) => void; // A head's fader or pan
 		onzoom?: (by: number) => void; // Mod with the wheel, or a pinch: bars this many times as wide
 		ondropped?: (drop: Dropped) => void; // A patch from the browser, or WAV files from the desktop, let go of here
+		onsignature?: (at: { kind: 'meter' | 'key'; tick: number }) => void; // A change on the Time & key lane, to edit
 		actions?: PlacementActions;
 	} = $props();
 
@@ -164,11 +170,20 @@
 	let view: HTMLDivElement; // What scrolls, with the track heads held at its left
 	let heads: HTMLDivElement;
 	let gesture = $state.raw<Gesture | null>(null);
-	let menu = $state.raw<{ x: number; y: number; track: number; placement: number; clip: string } | null>(null);
+	// A clip's menu, and where along the song it was opened, which is where Split here splits it: the pointer, snapped to the
+	// clips' grid, or the playhead for a menu opened from the keys.
+	let menu = $state.raw<{ x: number; y: number; track: number; placement: number; clip: string; tick: number } | null>(
+		null
+	);
 
-	const perTick = $derived(barWidth / ticksPerBar(doc));
-	const bars = $derived(Math.min(MOST_BARS_DRAWN, Math.max(16, Math.ceil(songLength(doc) / ticksPerBar(doc)) + 8)));
-	const width = $derived(bars * barWidth);
+	// Where the song's bars fall (TimeSignature.ts). `barWidth` is how wide four beats of a quarter are, a bar of 4/4, so a zoom holds
+	// across a change of meter.
+	const songBars = $derived(barsOf(doc));
+	const perTick = $derived(barWidth / (4 * doc.ppq));
+	const drawnBars = $derived(
+		songBars.between(0, Math.max(songBars.after(0, 16), songBars.after(songLength(doc), 8)), MOST_BARS_DRAWN)
+	);
+	const width = $derived((drawnBars.at(-1)?.end ?? 0) * perTick);
 	// The song layer sits between the loop strip and the first track, with a lane for each thing that belongs to the whole song
 	// rather than to one track. Which of its lanes are unfolded is the editor's, kept for each timeline.
 	let unfolded = $state<ReadonlySet<string>>(new Set());
@@ -348,17 +363,17 @@
 				return;
 			}
 		}
-		const at = snapTick(ticksAt(x), grid);
+		const at = songBars.snap(ticksAt(x), grid);
 		gesture = { kind: 'loop', from: at, to: at, x, drawn: false };
 	}
 
 	function changeLoop(held: Extract<Gesture, { kind: 'loop-change' }>, x: number): Loop {
 		const { was } = held;
 		if (held.hold === 'both') {
-			const by = Math.max(-was.start, snapTick(ticksAt(x) - held.grab + was.start, grid) - was.start);
+			const by = Math.max(-was.start, songBars.snap(ticksAt(x) - held.grab + was.start, grid) - was.start);
 			return { start: was.start + by, end: was.end + by };
 		}
-		const at = snapTick(Math.max(0, ticksAt(x)), grid);
+		const at = songBars.snap(Math.max(0, ticksAt(x)), grid);
 		const other = held.hold === 'start' ? was.end : was.start;
 		if (at === other) return held.now; // A loop is never empty
 		return { start: Math.min(at, other), end: Math.max(at, other) };
@@ -368,7 +383,7 @@
 		if (!gesture) return;
 		const at = canvas(event);
 		if (gesture.kind === 'move') {
-			gesture = { ...gesture, tick: snapTick(ticksAt(at.x) - gesture.grab, grid), row: rowAt(at.y) };
+			gesture = { ...gesture, tick: songBars.snap(ticksAt(at.x) - gesture.grab, grid), row: rowAt(at.y) };
 		} else if (gesture.kind === 'repeat') {
 			const repeat = Math.round((ticksAt(at.x) - gesture.start) / gesture.length);
 			gesture = { ...gesture, repeat: Math.max(1, repeat) };
@@ -383,7 +398,7 @@
 			gesture = { ...gesture, to: rowAt(at.y), moved: true };
 		} else {
 			if (!gesture.drawn && Math.abs(at.x - gesture.x) < DRAG) return;
-			gesture = { ...gesture, to: snapTick(ticksAt(at.x), grid), drawn: true };
+			gesture = { ...gesture, to: songBars.snap(ticksAt(at.x), grid), drawn: true };
 		}
 	}
 
@@ -455,10 +470,9 @@
 		if (!what || readonly || (event.target as Element).closest('.band, .corner')) return null;
 		const box = svg.getBoundingClientRect();
 		const row = Math.floor((event.clientY - box.top - tracksTop) / ROW);
-		const bar = ticksPerBar(doc);
 		const onHeads = !!(event.target as Element).closest('.heads');
 		const over = onHeads ? tick : Math.max(0, ticksAt(event.clientX - box.left));
-		const at = { tick: Math.floor(over / bar) * bar, kind: what.kind };
+		const at = { tick: songBars.floor(over, BAR), kind: what.kind };
 		if (row >= 0 && row < doc.tracks.length) return { ...at, track: doc.tracks[row].id };
 		const insert = what.kind === 'patch' && what.patch.insert;
 		return row >= doc.tracks.length && !insert ? { ...at, track: null } : null;
@@ -528,13 +542,13 @@
 	let renaming = $state<number | null>(null); // The track whose name is being typed in its head
 
 	function headItems(track: Track): MenuItem[] {
-		const bar = ticksPerBar(doc);
 		const index = doc.tracks.findIndex((t) => t.id === track.id);
+		const at = songBars.floor(tick, BAR);
 		return [
 			{ label: 'Rename…', action: () => (renaming = track.id), disabled: readonly },
 			{
 				label: 'New clip at the playhead',
-				action: () => onnew(track.id, Math.floor(tick / bar) * bar, TEMPLATE_BARS * bar),
+				action: () => onnew(track.id, at, songBars.after(at, TEMPLATE_BARS) - at),
 				disabled: readonly
 			},
 			// Its head drags up or down too.
@@ -595,7 +609,7 @@
 		const at = canvas(event);
 		const track = doc.tracks[rowAt(at.y)];
 		if (!track) return;
-		const tick = Math.floor(ticksAt(at.x) / grid) * grid;
+		const tick = songBars.floor(ticksAt(at.x), grid);
 		const copied = clipboard.placement;
 		const items: MenuItem[] = [{ label: 'New clip here', action: () => onnew(track.id, tick), disabled: readonly }];
 		if (copied) {
@@ -620,12 +634,11 @@
 	// What can be done anywhere along the song: the playhead, and the loop, which are the editor's, so an example has them too.
 	const locateItem = (x: number): MenuItem => ({
 		label: 'Move the playhead here',
-		action: () => onlocate(snapTick(Math.max(0, ticksAt(x)), grid))
+		action: () => onlocate(songBars.snap(Math.max(0, ticksAt(x)), grid))
 	});
 	function barLoop(x: number): Loop {
-		const bar = ticksPerBar(doc);
-		const start = Math.floor(Math.max(0, ticksAt(x)) / bar) * bar;
-		return { start, end: start + bar };
+		const start = songBars.floor(Math.max(0, ticksAt(x)), BAR);
+		return { start, end: songBars.at(start).end };
 	}
 
 	// The ruler's menu and the loop strip's. A right-click there doesn't move the playhead or the loop as a click does.
@@ -643,6 +656,99 @@
 				? [locateItem(x), ...loopItems]
 				: [{ label: looping ? 'Turn the loop off' : 'Turn the loop on', action: toggleLoop }, ...loopItems];
 		other = { x: event.clientX, y: event.clientY, label: strip === 'ruler' ? 'Ruler' : 'Loop', items };
+	}
+
+	// The Time & key lane: a mark at each tick where the time signature or the key changes, or both, saying what it changes to.
+	// A click on one edits it in the inspector, and its menu, or the lane's, adds and removes them.
+	type Mark = { tick: number; bar: number; meter: number | null; key: number | null; words: string };
+	const marks = $derived.by((): Mark[] => {
+		const meters = metersOf(doc);
+		const keys = keysOf(doc);
+		const ticks = [...new Set([...meters, ...keys].map((change) => change.tick))].sort((a, b) => a - b);
+		return ticks.map((at) => {
+			const meter = meters.findIndex((change) => change.tick === at);
+			const key = keys.findIndex((change) => change.tick === at);
+			const words = [meter >= 0 ? meterText(meters[meter]) : '', key >= 0 ? keyName(keys[key]) : '']
+				.filter(Boolean)
+				.join(' · ');
+			return {
+				tick: at,
+				bar: songBars.at(at).number,
+				meter: meter >= 0 ? meter : null,
+				key: key >= 0 ? key : null,
+				words
+			};
+		});
+	});
+
+	// A change added where a bar starts, as what plays there already, for the inspector to change.
+	function addSignature(kind: 'meter' | 'key', at: number) {
+		onchange(kind === 'meter' ? addMeter(doc, at, songBars.meterAt(at)) : addKey(doc, at, keyAt(doc, at)));
+		onsignature?.({ kind, tick: at });
+	}
+
+	function markItems(mark: Mark): MenuItem[] {
+		const items: MenuItem[] = [];
+		if (mark.meter !== null) {
+			items.push({
+				label: 'Change the time signature…',
+				action: () => onsignature?.({ kind: 'meter', tick: mark.tick })
+			});
+		} else {
+			items.push({
+				label: 'Time signature from here…',
+				action: () => addSignature('meter', mark.tick),
+				disabled: readonly
+			});
+		}
+		if (mark.key !== null) {
+			items.push({ label: 'Change the key…', action: () => onsignature?.({ kind: 'key', tick: mark.tick }) });
+		} else items.push({ label: 'Key from here…', action: () => addSignature('key', mark.tick), disabled: readonly });
+		const meter = mark.meter;
+		const key = mark.key;
+		if (meter) {
+			items.push({
+				label: 'Remove the time signature change',
+				action: () => onchange(removeMeter(doc, meter)),
+				disabled: readonly
+			});
+		}
+		if (key)
+			items.push({ label: 'Remove the key change', action: () => onchange(removeKey(doc, key)), disabled: readonly });
+		return items;
+	}
+
+	function signatureMenu(event: MouseEvent, mark: Mark | null) {
+		event.preventDefault();
+		event.stopPropagation();
+		gesture = null;
+		menu = null;
+		const x = canvas(event).x;
+		const at = songBars.floor(Math.max(0, ticksAt(x)), BAR);
+		const bar = songBars.at(at).number;
+		const items: MenuItem[] = mark
+			? markItems(mark)
+			: [
+					{ label: `Time signature from bar ${bar}…`, action: () => addSignature('meter', at), disabled: readonly },
+					{ label: `Key from bar ${bar}…`, action: () => addSignature('key', at), disabled: readonly }
+				];
+		items.push(locateItem(x));
+		const label = mark ? `Time & key at bar ${mark.bar}` : 'Time & key lane';
+		other = { x: event.clientX, y: event.clientY, label, items, note };
+	}
+
+	function markKeys(event: KeyboardEvent, mark: Mark) {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			onsignature?.({ kind: mark.meter !== null ? 'meter' : 'key', tick: mark.tick });
+		} else if (matches(event, 'menu')) {
+			event.preventDefault();
+			const box = (event.currentTarget as Element).getBoundingClientRect();
+			gesture = null;
+			menu = null;
+			const label = `Time & key at bar ${mark.bar}`;
+			other = { x: box.left, y: box.bottom, label, items: [...markItems(mark), locateItem(mark.tick * perTick)], note };
+		}
 	}
 
 	// Anywhere else on the tracks' canvas, such as a song with no tracks yet.
@@ -683,7 +789,8 @@
 			y: at?.y ?? box.bottom,
 			track: block.track.id,
 			placement: block.index,
-			clip: block.name
+			clip: block.name,
+			tick: at ? songBars.snap(ticksAt(canvas({ clientX: at.x, clientY: at.y }).x), grid) : tick
 		};
 	}
 
@@ -702,10 +809,23 @@
 	function placementItems(opened: NonNullable<typeof menu>): MenuItem[] {
 		const at = { track: opened.track, placement: opened.placement };
 		if (!actions) return [];
-		const { open, duplicate, unique, remove, delete: deleteClip, loop: loopThis } = actions;
+		const { open, duplicate, unique, remove, delete: deleteClip, loop: loopThis, split } = actions;
+		const placed = doc.tracks.find((t) => t.id === opened.track)?.placements[opened.placement];
+		const inside = (at: number) => !!placed && at > placed.tick && at < placed.tick + placementSpan(doc, placed);
 		return [
 			{ label: 'Open notes', action: () => open(at) },
 			{ label: 'Loop this clip', action: () => loopThis(at) },
+			{
+				label: `Split here, at ${songBars.position(opened.tick)}`,
+				action: () => split(at, opened.tick),
+				disabled: readonly || !inside(opened.tick)
+			},
+			{
+				label: 'Split at the playhead',
+				keys: 'arrangement.split',
+				action: () => split(at, tick),
+				disabled: readonly || !inside(tick)
+			},
 			{ label: 'Copy', keys: 'copy', action: () => copyPlacement(at) },
 			{ label: 'Duplicate after', keys: 'duplicate', action: () => duplicate(at), disabled: readonly },
 			{ label: 'Make unique', action: () => unique(at), disabled: readonly || uses(opened.clip) < 2 },
@@ -728,7 +848,7 @@
 		if (readonly) return;
 		const at = canvas(event);
 		const track = doc.tracks[rowAt(at.y)];
-		if (track) onnew(track.id, Math.floor(ticksAt(at.x) / grid) * grid);
+		if (track) onnew(track.id, songBars.floor(ticksAt(at.x), grid));
 	}
 
 	// Mod+C, Mod+V and Mod+D for the chosen clip, while the Song view is on screen and the key isn't the roll's or a field's.
@@ -743,6 +863,9 @@
 		if (matches(event, 'duplicate')) {
 			event.preventDefault();
 			if (at && !readonly) actions?.duplicate(at);
+		} else if (matches(event, 'arrangement.split') && at) {
+			event.preventDefault();
+			if (!readonly) actions?.split(at, tick);
 		} else if (matches(event, 'copy') && at) {
 			if (copyPlacement(at)) event.preventDefault();
 		} else if (matches(event, 'paste') && clipboard.placement && !readonly) {
@@ -829,15 +952,24 @@
 			<div class="layer" role="group" aria-label="Song lanes" style:height="{layer}px">
 				{#each SONG_LANES as lane (lane.id)}
 					{@const open = unfolded.has(lane.id)}
-					<div class="lanehead" class:open style:height="{laneHeight(open)}px" data-testid={`lane-head-${lane.id}`}>
-						<button
-							type="button"
-							class="fold"
-							aria-expanded={open}
-							aria-label={`${lane.name} lane`}
-							title={open ? `Fold the ${lane.name} lane` : `Unfold the ${lane.name} lane`}
-							onclick={() => fold(lane.id)}><span aria-hidden="true">{open ? '▾' : '▸'}</span> {lane.name}</button
-						>
+					<div
+						class="lanehead"
+						class:open
+						style:height="{laneHeight(open, lane)}px"
+						data-testid={`lane-head-${lane.id}`}
+					>
+						{#if lane.fixed}
+							<span class="fixedname">{lane.name}</span>
+						{:else}
+							<button
+								type="button"
+								class="fold"
+								aria-expanded={open}
+								aria-label={`${lane.name} lane`}
+								title={open ? `Fold the ${lane.name} lane` : `Unfold the ${lane.name} lane`}
+								onclick={() => fold(lane.id)}><span aria-hidden="true">{open ? '▾' : '▸'}</span> {lane.name}</button
+							>
+						{/if}
 						{#if open && lane.id === 'tempo'}
 							<!-- The lane's scale, the BPM at its top and at its foot. -->
 							<span class="scale" aria-hidden="true">
@@ -994,7 +1126,7 @@
 					role="presentation"
 					data-testid="ruler"
 					onpointerdown={(event) => {
-						if (!secondary(event)) onlocate(snapTick(ticksAt(canvas(event).x), grid));
+						if (!secondary(event)) onlocate(songBars.snap(ticksAt(canvas(event).x), grid));
 					}}
 					oncontextmenu={(event) => bandMenu(event, 'ruler')}
 				/>
@@ -1026,17 +1158,46 @@
 					/>
 				{/if}
 
-				{#each { length: bars + 1 }, bar}
-					<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={0} y2={tracksTop} />
-					{#if bar < bars}
-						<text class="number" x={bar * barWidth + 4} y={14}>{bar + 1}</text>
+				{#each drawnBars as bar (bar.number)}
+					{#if bar.start >= 0}
+						<line class="bar" x1={bar.start * perTick} x2={bar.start * perTick} y1={0} y2={tracksTop} />
+						<text class="number" x={bar.start * perTick + 4} y={14}>{bar.number}</text>
 					{/if}
 				{/each}
+				<line class="bar" x1={width} x2={width} y1={0} y2={tracksTop} />
+				<!-- The Time & key lane, its marks over the bar lines. -->
+				<g transform={`translate(0 ${TOP + laneTop(unfolded, 'signatures')})`} data-testid="signature-lane">
+					<rect
+						class="signatures"
+						{width}
+						height={laneHeight(false)}
+						role="presentation"
+						oncontextmenu={(event) => signatureMenu(event, null)}
+						><title>Where the time signature and the key change. Right-click to add a change.</title></rect
+					>
+					{#each marks as mark (mark.tick)}
+						<g
+							class="mark"
+							transform={`translate(${mark.tick * perTick} 0)`}
+							role="button"
+							tabindex="0"
+							aria-label={`Time & key at bar ${mark.bar}: ${mark.words}`}
+							data-testid={`signature-${mark.tick}`}
+							onclick={() => onsignature?.({ kind: mark.meter !== null ? 'meter' : 'key', tick: mark.tick })}
+							onkeydown={(event) => markKeys(event, mark)}
+							oncontextmenu={(event) => signatureMenu(event, mark)}
+						>
+							<rect class="markground" width={mark.words.length * 6.4 + 8} height={laneHeight(false)} />
+							<line class="markline" x1="0" x2="0" y1="0" y2={laneHeight(false)} />
+							<text x="4" y="13">{mark.words}</text>
+						</g>
+					{/each}
+				</g>
 				<line class="playhead" x1={tick * perTick} x2={tick * perTick} y1={0} y2={tracksTop} />
 			</svg>
 			<TempoLane
 				{doc}
-				y={TOP}
+				y={TOP + laneTop(unfolded, 'tempo')}
 				{width}
 				{perTick}
 				{grid}
@@ -1085,8 +1246,14 @@
 				/>
 			{/if}
 
-			{#each { length: bars + 1 }, bar}
-				<line class="bar" x1={bar * barWidth} x2={bar * barWidth} y1={tracksTop} y2={height} />
+			{#each drawnBars as bar (bar.number)}
+				<line
+					class="bar"
+					x1={Math.max(0, bar.start) * perTick}
+					x2={Math.max(0, bar.start) * perTick}
+					y1={tracksTop}
+					y2={height}
+				/>
 			{/each}
 
 			{#each blocks as block (block.key)}
@@ -1108,7 +1275,7 @@
 						rx="3"
 						role="button"
 						tabindex="0"
-						aria-label={`${block.name} at bar ${barOf(block.tick, doc.ppq)}`}
+						aria-label={`${block.name} at bar ${songBars.at(block.tick).number}`}
 						onpointerdown={(event) => startMove(event, block)}
 						ondblclick={() => onexpand({ track: block.track.id, placement: block.index })}
 						oncontextmenu={(event) => blockMenu(event, block)}
@@ -1136,7 +1303,13 @@
 			{#if drawing && gesture?.kind === 'draw'}
 				<g class="drawn" transform={`translate(${drawing.tick * perTick} ${tracksTop + gesture.row * ROW + 4})`}>
 					<rect width={drawing.length * perTick} height={BLOCK} rx="3" data-testid="drawn-clip" />
-					<text x="5" y="12">{noteValue(drawing.length, doc.ppq)}</text>
+					<text x="5" y="12"
+						>{noteValue(
+							drawing.length,
+							doc.ppq,
+							songBars.at(drawing.tick).beat * songBars.at(drawing.tick).meter.beats
+						)}</text
+					>
 				</g>
 			{/if}
 
@@ -1144,7 +1317,7 @@
 				<!-- The clip the new track starts with, where it would go. -->
 				<g class="drawn" transform={`translate(${dropAt.tick * perTick} ${tracksTop + doc.tracks.length * ROW + 4})`}>
 					<rect
-						width={TEMPLATE_BARS * barWidth}
+						width={(songBars.after(dropAt.tick, TEMPLATE_BARS) - dropAt.tick) * perTick}
 						height={BLOCK}
 						rx="3"
 						data-testid="dropped-clip"
@@ -1412,6 +1585,35 @@
 		line-height: 17px;
 		text-align: left;
 		white-space: nowrap;
+	}
+	.lanehead .fixedname {
+		padding: 0 0.2rem;
+		color: var(--muted);
+		font-size: 0.75rem;
+		line-height: 17px;
+		white-space: nowrap;
+	}
+	.signatures {
+		fill: transparent;
+	}
+	.mark {
+		cursor: pointer;
+		outline: none;
+	}
+	.mark .markground {
+		fill: transparent;
+	}
+	.mark .markline {
+		stroke: var(--accent, #6cf);
+	}
+	.mark text {
+		fill: var(--text);
+		font-size: 11px;
+		pointer-events: none;
+	}
+	.mark:hover .markground,
+	.mark:focus-visible .markground {
+		fill: #ffffff14;
 	}
 	.lanehead .fold:hover {
 		color: var(--text);

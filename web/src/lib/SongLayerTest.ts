@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { FOLDED, SONG_LANES, UNFOLDED, keepOpen, keptOpen, laneHeight, layerHeight } from '#lib/SongLayer.ts';
+import { FOLDED, SONG_LANES, UNFOLDED, keepOpen, keptOpen, laneHeight, laneTop, layerHeight } from '#lib/SongLayer.ts';
 
 describe('the song layer', () => {
-	it('has a Tempo lane, folded to a thin row until it is unfolded', () => {
-		expect(SONG_LANES.map((lane) => lane.name)).toEqual(['Tempo']);
+	it('has a Time & key lane of one row, and a Tempo lane, folded to a thin row until it is unfolded', () => {
+		expect(SONG_LANES.map((lane) => lane.name)).toEqual(['Time & key', 'Tempo']);
+		expect(laneHeight(true, SONG_LANES[0])).toBe(FOLDED);
 		expect(laneHeight(false)).toBe(FOLDED);
 		expect(laneHeight(true)).toBe(UNFOLDED);
 		expect(FOLDED).toBeLessThan(24);
@@ -12,8 +13,10 @@ describe('the song layer', () => {
 	});
 
 	it('is as tall as its lanes', () => {
-		expect(layerHeight(new Set())).toBe(FOLDED);
-		expect(layerHeight(new Set(['tempo']))).toBe(UNFOLDED);
+		expect(layerHeight(new Set())).toBe(2 * FOLDED);
+		expect(layerHeight(new Set(['tempo', 'signatures']))).toBe(FOLDED + UNFOLDED);
+		expect(laneTop(new Set(['tempo']), 'tempo')).toBe(FOLDED);
+		expect(laneTop(new Set(['tempo']), 'signatures')).toBe(0);
 		const two = [
 			{ id: 'tempo', name: 'Tempo' },
 			{ id: 'markers', name: 'Markers' }

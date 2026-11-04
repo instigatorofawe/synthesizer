@@ -65,7 +65,9 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 		this.recording = 0;
 		this.countIn = null; // { start, left, frames, ticks, beats }: the tick the song starts from, and the frames to go
 		this.ppq = 0;
-		this.beatsPerBar = 4;
+		// The song's meters, as Meter.ts's `segments` sends them: from where each starts, in ticks, a whole bar's length, a
+		// click's, and a tick its bars start on. 4/4 from tick 0 until a take says otherwise.
+		this.meter = [];
 		this.history = new Float64Array(HISTORY * 5);
 		this.kept = 0; // Quanta written into the history
 		this.elapsed = 0; // Ticks the song has gone, counting through a loop's wrap, which a note's length is taken from
@@ -145,14 +147,16 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 
 	// A take begins, with a bar counted in first if the song isn't playing. The song starts from `start`, which a locate sent
 	// just before can't have reached the engine yet, since the engine takes events as it renders.
+	// The bar counted in is `ticks` long, the bar of the song's meter where it starts, with `pulses` clicks in it.
 	beginTake(e) {
 		this.ppq = e.ppq;
-		this.beatsPerBar = e.beatsPerBar;
+		this.meter = e.meter ?? [{ from: -1e15, bar: e.ppq * (e.beatsPerBar ?? 4), pulse: e.ppq, anchor: 0 }];
 		if (e.bpm > 0 && !this.engine._ms_playing()) {
-			const perBeat = (sampleRate * 60) / e.bpm;
-			const frames = Math.max(FRAME, Math.round((e.beats * perBeat) / FRAME) * FRAME);
+			const perBeat = (sampleRate * 60) / e.bpm; // A quarter's frames, since a tempo is in quarters
+			const ticks = e.ticks ?? e.beats * e.ppq;
+			const frames = Math.max(FRAME, Math.round(((ticks / e.ppq) * perBeat) / FRAME) * FRAME);
 			const start = e.start ?? this.engine._ms_tick();
-			this.countIn = { start, left: frames, frames, ticks: e.beats * e.ppq, beats: e.beats };
+			this.countIn = { start, left: frames, frames, ticks, beats: e.pulses ?? e.beats };
 			this.recording = 1;
 		} else {
 			this.countIn = null;
@@ -205,17 +209,24 @@ class ModsynthProcessor extends AudioWorkletProcessor {
 	}
 
 	// The click on each beat that starts in this quantum, between where the song was and where it is now, accented on a bar's
-	// first. Round a loop the quantum is taken to have gone as far as the one before, back from where it ended.
+	// first. A beat is the meter's, or three of them in a compound meter, as 6/8 is clicked in two. Round a loop the quantum is
+	// taken to have gone as far as the one before, back from where it ended.
 	clickBeat(from, to, delta) {
-		if (!this.recording || this.ppq <= 0) return;
+		if (!this.recording || this.ppq <= 0 || !this.meter.length) return;
 		const low = to >= from ? from : to - delta;
 		const span = to - low;
 		if (span <= 0) return;
-		const beat = Math.ceil(low / this.ppq) * this.ppq;
+		const segments = this.meter;
+		let at = segments.length - 1;
+		while (at > 0 && low < segments[at].from) --at;
+		let segment = segments[at];
+		let beat = segment.anchor + Math.ceil((low - segment.anchor) / segment.pulse) * segment.pulse;
+		const next = segments[at + 1];
+		if (next && beat >= next.from) [beat, segment] = [next.from, next];
 		if (beat >= to) return;
-		const bar = this.ppq * this.beatsPerBar;
+		const into = (((beat - segment.anchor) % segment.bar) + segment.bar) % segment.bar;
 		this.clickAt = -Math.min(FRAME - 1, Math.floor(((beat - low) / span) * FRAME));
-		this.clickHz = ((beat % bar) + bar) % bar === 0 ? 1760 : 1320;
+		this.clickHz = into === 0 ? 1760 : 1320;
 		++this.clicks;
 	}
 

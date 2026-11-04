@@ -22,6 +22,7 @@ import {
 	duplicatePlacement,
 	growToHold,
 	laneChoices,
+	clipWindow,
 	laneCurve,
 	laneKey,
 	lanePoints,
@@ -75,6 +76,7 @@ import {
 	setTrack,
 	soloed,
 	songLength,
+	splitPlacement,
 	trackKey,
 	type Clip,
 	type Lane,
@@ -82,7 +84,8 @@ import {
 	type PatchLike,
 	type Point
 } from '#lib/TimelineEdit.ts';
-import { barOf, drawLengths, grids, noteName, noteValue, position, snapTick, stepLength } from '#lib/Units.ts';
+import { Bars } from '#lib/TimeSignature.ts';
+import { drawLengths, grids, noteName, noteValue, snapTick, stepLength } from '#lib/Units.ts';
 
 // A point given a ramp as a document can hold it, for the lanes' own tests to draw.
 const ramped = (clip: Clip, index: number, change: { ramp: number; curve?: 'exp' }): Clip => ({
@@ -188,9 +191,9 @@ describe('the grid', () => {
 		expect(noteName(61)).toBe('C#4');
 		expect(noteName(0)).toBe('C-1');
 		expect(noteName(127)).toBe('G9');
-		expect(barOf(0, 480)).toBe(1);
-		expect(barOf(1919, 480)).toBe(1);
-		expect(barOf(1920, 480)).toBe(2);
+		expect(Bars.of(480).at(0).number).toBe(1);
+		expect(Bars.of(480).at(1919).number).toBe(1);
+		expect(Bars.of(480).at(1920).number).toBe(2);
 	});
 
 	it('measures a song to the end of its last repeat', () => {
@@ -377,11 +380,11 @@ describe('notes', () => {
 
 describe('note entry', () => {
 	it('reads a position as bar.beat.tick, counting bars and beats from one', () => {
-		expect(position(0, 480)).toBe('1.1.000');
-		expect(position(1440, 480)).toBe('1.4.000');
-		expect(position(1920 + 480 + 60, 480)).toBe('2.2.060');
-		expect(position(7, 96)).toBe('1.1.007');
-		expect(position(1000, 960)).toBe('1.2.040');
+		expect(Bars.of(480).position(0)).toBe('1.1.000');
+		expect(Bars.of(480).position(1440)).toBe('1.4.000');
+		expect(Bars.of(480).position(1920 + 480 + 60)).toBe('2.2.060');
+		expect(Bars.of(96).position(7)).toBe('1.1.007');
+		expect(Bars.of(960).position(1000)).toBe('1.2.040');
 	});
 
 	it('names a length as a note value, or in ticks when none fits', () => {
@@ -433,11 +436,11 @@ describe('note entry', () => {
 describe('growing a clip', () => {
 	it('grows to the end of the bar that holds a note, and not for a note it holds already', () => {
 		const clip = clipNamed('c', 1920);
-		expect(growToHold(clip, 1919, 480)).toBe(clip);
-		expect(growToHold(clip, 1920, 480).length).toBe(3840);
-		expect(growToHold(clip, 5000, 480).length).toBe(5760);
-		expect(growToHold(clipNamed('c', 5280), 5300, 480).length).toBe(5760); // From 2.75 bars to 3
-		expect(growToHold(clip, 2000, 480).notes).toBe(clip.notes);
+		expect(growToHold(clip, 1919, Bars.of(480))).toBe(clip);
+		expect(growToHold(clip, 1920, Bars.of(480)).length).toBe(3840);
+		expect(growToHold(clip, 5000, Bars.of(480)).length).toBe(5760);
+		expect(growToHold(clipNamed('c', 5280), 5300, Bars.of(480)).length).toBe(5760); // From 2.75 bars to 3
+		expect(growToHold(clip, 2000, Bars.of(480)).notes).toBe(clip.notes);
 	});
 
 	it('is safe while no repeat of any placement of the clip runs into the next placement on its track', () => {
@@ -1341,5 +1344,127 @@ describe('lane points', () => {
 				expect(setLanePoint(clip as Clip, index, { value: (clip.automation[index] as Point).value }).clip).toBe(clip);
 			}
 		}
+	});
+});
+
+describe('splitting a placement', () => {
+	const notes = [
+		{ tick: 0, note: 60 },
+		{ tick: 900, note: 62, dur: 300 }, // Rings across a split at 960
+		{ tick: 960, note: 64 },
+		{ tick: 1440, note: 65 }
+	];
+	const one = (): Timeline =>
+		timelineSchema.parse({
+			clips: [{ ...clipNamed('verse', 1920, notes), play: [{ tick: 0, mode: 'mono' }] }],
+			tracks: [{ id: 1, slots: ['lead'], placements: [{ clip: 'verse', tick: 3840, transpose: 2 }] }]
+		});
+
+	it('cuts it in two clips, each with the notes that start in it, the second starting where it was cut', () => {
+		const done = splitPlacement(one(), 1, 0, 3840 + 960)!;
+		const placements = done.doc.tracks[0].placements;
+		expect(placements).toEqual([
+			{ clip: 'verse', tick: 3840, repeat: 1, transpose: 2 },
+			{ clip: 'verse-2', tick: 4800, repeat: 1, transpose: 2 }
+		]);
+		expect(done.index).toBe(1);
+		const [first, second] = ['verse', 'verse-2'].map((id) => done.doc.clips.find((clip) => clip.id === id)!);
+		expect(first.length).toBe(960);
+		expect(first.notes.map((n) => [n.tick, n.note, n.dur])).toEqual([
+			[0, 60, 240],
+			[900, 62, 300]
+		]);
+		expect(second.length).toBe(960);
+		expect(second.notes.map((n) => [n.tick, n.note])).toEqual([
+			[0, 64],
+			[480, 65]
+		]);
+		expect(second.play).toEqual([{ tick: 0, mode: 'mono', priority: 'last', glide: 0 }]);
+	});
+
+	it('is nothing outside it or at its ends', () => {
+		for (const at of [0, 3840, 3840 + 1920, 9999]) expect(splitPlacement(one(), 1, 0, at), String(at)).toBeNull();
+	});
+
+	it('keeps the clip as it was for the other placements that play it', () => {
+		const doc = splitPlacement(song(), 2, 0, 480)!.doc;
+		expect(doc.clips.find((clip) => clip.id === 'a')?.length).toBe(1920);
+		expect(doc.tracks[0].placements[0]).toEqual({ clip: 'a', tick: 0, repeat: 2 });
+		expect(doc.tracks[1].placements.map((p) => [p.clip, p.tick])).toEqual([
+			['a-2', 0],
+			['a-3', 480]
+		]);
+	});
+
+	it('leaves repeats either side as repeats, and cuts only the one the tick is in', () => {
+		const looped = timelineSchema.parse({
+			clips: [clipNamed('a', 1920, notes)],
+			tracks: [{ id: 1, slots: ['x'], placements: [{ clip: 'a', tick: 0, repeat: 4 }] }]
+		});
+		const done = splitPlacement(looped, 1, 0, 1920 + 960)!;
+		expect(done.doc.tracks[0].placements.map((p) => [p.clip, p.tick, p.repeat])).toEqual([
+			['a', 0, 1],
+			['a-2', 1920, 1],
+			['a-3', 2880, 1],
+			['a', 3840, 2]
+		]);
+		const between = splitPlacement(looped, 1, 0, 2 * 1920)!;
+		expect(between.doc.tracks[0].placements.map((p) => [p.clip, p.tick, p.repeat])).toEqual([
+			['a', 0, 2],
+			['a', 3840, 2]
+		]);
+		expect(between.doc.clips).toHaveLength(1);
+	});
+
+	it('cuts what a window plays, from where the window starts', () => {
+		const windowed = timelineSchema.parse({
+			clips: [clipNamed('a', 1920, notes)],
+			tracks: [{ id: 1, slots: ['x'], placements: [{ clip: 'a', tick: 0, start: 480, length: 1200 }] }]
+		});
+		const done = splitPlacement(windowed, 1, 0, 600)!;
+		const [first, second] = done.doc.tracks[0].placements;
+		expect(first).toEqual({ clip: 'a', tick: 0, repeat: 1 });
+		expect(second).toEqual({ clip: 'a-2', tick: 600, repeat: 1 });
+		// The window plays the clip from 480, so the split at 600 is at the clip's 1080.
+		const clipOf = (id: string) => done.doc.clips.find((c) => c.id === id)!;
+		expect(clipOf('a').length).toBe(600);
+		expect(clipOf('a').notes.map((n) => [n.tick, n.note])).toEqual([
+			[420, 62],
+			[480, 64]
+		]);
+		expect(clipOf('a-2').length).toBe(600);
+		expect(clipOf('a-2').notes.map((n) => [n.tick, n.note])).toEqual([[360, 65]]);
+	});
+});
+
+describe('a window of a clip, as a clip of its own', () => {
+	it('starts its lanes where they stood, and a ramp under way goes on to where it was going', () => {
+		const clip: Clip = {
+			...clipNamed('a', 1920),
+			automation: [
+				{ param: 1, tick: 0, value: 0 },
+				{ param: 1, tick: 0, value: 1, ramp: 960 }, // From 0 to 1 over the first half
+				{ param: 2, tick: 1200, value: 5 }
+			]
+		};
+		const half = clipWindow(clip, 480, 1920);
+		expect(half.automation).toEqual([
+			{ param: 1, tick: 0, value: 0.5 },
+			{ param: 1, tick: 0, value: 1, ramp: 480 },
+			{ param: 2, tick: 720, value: 5 }
+		]);
+		const lane = (c: Clip) =>
+			laneCurve(
+				lanesOf(c).find((l) => l.param === 1)!,
+				c.length
+			);
+		const whole = lane(clip)
+			.filter((p) => p.tick >= 480)
+			.map((p) => ({ tick: p.tick - 480, value: p.value }));
+		expect(lane(half)).toEqual([{ tick: 0, value: 0.5 }, ...whole]);
+		expect(clipWindow(clip, 1500, 1920).automation).toEqual([
+			{ param: 1, tick: 0, value: 1 },
+			{ param: 2, tick: 0, value: 5 }
+		]);
 	});
 });

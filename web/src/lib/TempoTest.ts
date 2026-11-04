@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Bars } from '#lib/TimeSignature.ts';
 import { timelineSchema, type Timeline } from '#lib/Schema.ts';
 import {
 	addTempoAt,
@@ -18,6 +19,8 @@ import {
 	toggleGlide,
 	yToBpm
 } from '#lib/Tempo.ts';
+
+const BARS = Bars.of(480);
 import type { Tempo } from '#lib/TimelineEdit.ts';
 
 const BAR = 1920; // At 480 ticks a beat
@@ -76,16 +79,16 @@ describe('moving a change', () => {
 	];
 
 	it('snaps it to the grid', () => {
-		expect(tempoTick(tempo, 1, 2 * BAR + 300, 480)).toBe(2 * BAR + 480);
-		expect(tempoTick(tempo, 1, BAR + 100, BAR)).toBe(BAR);
+		expect(tempoTick(tempo, 1, 2 * BAR + 300, 480, BARS)).toBe(2 * BAR + 480);
+		expect(tempoTick(tempo, 1, BAR + 100, BAR, BARS)).toBe(BAR);
 	});
 
 	it('keeps it between its neighbours, on the nearest line of the grid still between them', () => {
-		expect(tempoTick(tempo, 1, 9 * BAR, BAR)).toBe(3 * BAR);
-		expect(tempoTick(tempo, 1, 0, BAR)).toBe(BAR);
-		expect(tempoTick(tempo, 1, 0, 1)).toBe(1);
-		expect(tempoTick(tempo, 2, 2 * BAR, BAR)).toBe(3 * BAR);
-		expect(tempoTick(tempo, 2, 99 * BAR, BAR)).toBe(99 * BAR); // The last can go on past the song
+		expect(tempoTick(tempo, 1, 9 * BAR, BAR, BARS)).toBe(3 * BAR);
+		expect(tempoTick(tempo, 1, 0, BAR, BARS)).toBe(BAR);
+		expect(tempoTick(tempo, 1, 0, 1, BARS)).toBe(1);
+		expect(tempoTick(tempo, 2, 2 * BAR, BAR, BARS)).toBe(3 * BAR);
+		expect(tempoTick(tempo, 2, 99 * BAR, BAR, BARS)).toBe(99 * BAR); // The last can go on past the song
 	});
 
 	it('leaves it where it is when no line of the grid is left between them', () => {
@@ -94,24 +97,24 @@ describe('moving a change', () => {
 			{ tick: 100, bpm: 100 },
 			{ tick: 200, bpm: 80 }
 		];
-		expect(tempoTick(close, 1, 900, BAR)).toBe(100);
+		expect(tempoTick(close, 1, 900, BAR, BARS)).toBe(100);
 	});
 
 	it('never moves the first change sideways', () => {
-		expect(tempoTick(tempo, 0, 3 * BAR, BAR)).toBe(0);
-		const doc = moveTempo(song(tempo), 0, 3 * BAR, 100, BAR);
+		expect(tempoTick(tempo, 0, 3 * BAR, BAR, BARS)).toBe(0);
+		const doc = moveTempo(song(tempo), 0, 3 * BAR, 100, BAR, BARS);
 		expect(doc.tempo[0]).toEqual({ tick: 0, bpm: 100 });
 	});
 
 	it('moves its tempo and tick, keeping its glide, and is the same song if neither moved', () => {
 		const doc = song(tempo);
-		expect(moveTempo(doc, 1, 3 * BAR, 96, BAR).tempo).toEqual([
+		expect(moveTempo(doc, 1, 3 * BAR, 96, BAR, BARS).tempo).toEqual([
 			{ tick: 0, bpm: 120 },
 			{ tick: 3 * BAR, bpm: 96, ramp: true },
 			{ tick: 4 * BAR, bpm: 140 }
 		]);
-		expect(moveTempo(doc, 1, 2 * BAR, 90, BAR)).toBe(doc);
-		expect(moveTempo(doc, 7, 2 * BAR, 90, BAR)).toBe(doc);
+		expect(moveTempo(doc, 1, 2 * BAR, 90, BAR, BARS)).toBe(doc);
+		expect(moveTempo(doc, 7, 2 * BAR, 90, BAR, BARS)).toBe(doc);
 	});
 
 	it('works on a list that is out of order, by tick', () => {
@@ -120,10 +123,10 @@ describe('moving a change', () => {
 			{ tick: 0, bpm: 120 },
 			{ tick: 2 * BAR, bpm: 90 }
 		];
-		expect(tempoTick(muddled, 2, 9 * BAR, BAR)).toBe(3 * BAR);
+		expect(tempoTick(muddled, 2, 9 * BAR, BAR, BARS)).toBe(3 * BAR);
 		expect(isFirstTempo(muddled, 1)).toBe(true);
 		expect(isFirstTempo(muddled, 0)).toBe(false);
-		expect(moveTempo(song(muddled), 2, 3 * BAR, 90, BAR).tempo.map((t) => t.tick)).toEqual([0, 3 * BAR, 4 * BAR]);
+		expect(moveTempo(song(muddled), 2, 3 * BAR, 90, BAR, BARS).tempo.map((t) => t.tick)).toEqual([0, 3 * BAR, 4 * BAR]);
 	});
 });
 
@@ -231,7 +234,7 @@ describe('what the lane draws', () => {
 
 describe('the tempo in words', () => {
 	it('reads the song’s changes, and how each one is reached', () => {
-		expect(tempoSummary([{ tick: 0, bpm: 140 }], 480)).toBe('140 BPM');
+		expect(tempoSummary([{ tick: 0, bpm: 140 }], BARS)).toBe('140 BPM');
 		expect(
 			tempoSummary(
 				[
@@ -239,10 +242,10 @@ describe('the tempo in words', () => {
 					{ tick: 2 * BAR, bpm: 100 },
 					{ tick: 4 * BAR, bpm: 120 }
 				],
-				480
+				BARS
 			)
 		).toBe('140 BPM, gliding to 100 by bar 3, 120 from bar 5');
-		expect(tempoSummary([{ tick: BAR, bpm: 96.5 }], 480)).toBe('96.5 BPM from bar 2');
+		expect(tempoSummary([{ tick: BAR, bpm: 96.5 }], BARS)).toBe('96.5 BPM from bar 2');
 	});
 
 	it('writes a tempo as it is, to a hundredth', () => {

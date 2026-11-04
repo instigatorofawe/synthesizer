@@ -46,24 +46,14 @@
 		type LaneChoice,
 		type Note
 	} from '#lib/TimelineEdit.ts';
-	import {
-		BEATS_PER_BAR,
-		isBlackKey,
-		noteName,
-		noteValue,
-		position,
-		snapTick,
-		ticksPerBar,
-		noteLengths,
-		readLength,
-		readPitch,
-		readPosition
-	} from '#lib/Units.ts';
+	import { Bars } from '#lib/TimeSignature.ts';
+	import { isBlackKey, noteName, noteValue, noteLengths, readLength, readPitch, readPosition } from '#lib/Units.ts';
 	import UnitField from '#lib/UnitField.svelte';
 
 	let {
 		clip,
 		ppq,
+		bars = Bars.of(ppq).shifted(0, true),
 		grid,
 		slots,
 		choices,
@@ -90,6 +80,7 @@
 	}: {
 		clip: Clip;
 		ppq: number;
+		bars?: Bars; // The song's bars where the clip is placed, in its own ticks and counted from its own first (TimeSignature.ts)
 		grid: number;
 		slots: string[]; // The track's patches, for notes that choose one
 		choices: LaneChoice[];
@@ -178,7 +169,13 @@
 	const refused = new Set<number>();
 
 	const perTick = $derived(beatWidth / ppq);
-	const bar = $derived(ticksPerBar({ ppq }));
+	// A bar's length at the clip's end, which is how far past it the roll goes on.
+	const bar = $derived(Math.max(1, bars.at(clip.length).end - bars.at(clip.length).start));
+	// How long a whole bar is where a tick is, for the lengths that read in bars.
+	const barAt = (tick: number) => {
+		const there = bars.at(tick);
+		return there.beat * there.meter.beats;
+	};
 	const shown = $derived(gesture && 'clip' in gesture ? gesture.clip : clip);
 	const widthTicks = $derived(
 		Math.max(
@@ -188,7 +185,18 @@
 		)
 	);
 	const width = $derived(widthTicks * perTick);
-	const beats = $derived(Math.ceil(widthTicks / ppq));
+	// The roll's beat lines, in the meter's own beats, and its bar lines, numbered from the clip's first bar.
+	const beatLines = $derived.by(() => {
+		const lines: { tick: number; bar: boolean; number: number; beat: number; wide: boolean }[] = [];
+		for (const bar of bars.between(0, widthTicks + 1, 4000)) {
+			const wide = bar.beat * perTick >= 48;
+			for (let at = bar.start, beat = 1; at < bar.end; at += bar.beat, ++beat) {
+				if (at >= 0 && at <= widthTicks)
+					lines.push({ tick: at, bar: at === bar.start, number: bar.number, beat, wide });
+			}
+		}
+		return lines;
+	});
 	const lanes = $derived(lanesOf(clip));
 	const free = $derived(choices.filter((choice) => !lanes.some((lane) => lane.key === choice.key)));
 	// The choices under what each belongs to, in the order they come: the track's patch, inserts, then the mix.
@@ -207,28 +215,28 @@
 	// The cell under the pointer, at the line of the grid before it, which is where a click puts a note.
 	function cellAt(event: { clientX: number; clientY: number }) {
 		const at = canvas(event);
-		return { tick: Math.max(0, Math.floor(at.x / perTick / grid) * grid), note: noteAt(at.y) };
+		return { tick: bars.floor(at.x / perTick, grid), note: noteAt(at.y) };
 	}
 
 	// The line of the grid nearest the pointer, which is where a click in step entry puts the cursor.
 	function lineAt(event: { clientX: number; clientY: number }) {
 		const at = canvas(event);
-		return { tick: snapTick(at.x / perTick, grid), note: noteAt(at.y) };
+		return { tick: bars.snap(at.x / perTick, grid), note: noteAt(at.y) };
 	}
 
 	// A right-click chooses what it is on and opens its menu, and Ctrl-click is a right-click on a Mac, so neither drags.
 	const secondary = (event: PointerEvent) => event.button !== 0 || (event.ctrlKey && modKey() === 'Meta');
 
 	const describe = (note: Pick<Note, 'tick' | 'note' | 'dur'>) =>
-		`${noteName(note.note)} · ${noteValue(note.dur, ppq)} · ${position(note.tick, ppq)}`;
+		`${noteName(note.note)} · ${noteValue(note.dur, ppq, barAt(note.tick))} · ${bars.position(note.tick)}`;
 
 	// What the ghost says: the note a click would add, or the one being drawn. Past the end it says what that does to the clip.
 	const ghostLabel = $derived.by(() => {
 		const note = gesture?.kind === 'draw' ? gesture.note : ghost && !stepping && { ...ghost, dur: draw };
 		if (!note) return null;
-		const grown = growToHold(clip, note.tick, ppq);
+		const grown = growToHold(clip, note.tick, bars);
 		if (grown === clip) return describe(note);
-		return `${describe(note)} · ${cangrow(grown.length) ? `makes the clip ${bars(grown.length)}` : 'past the end'}`;
+		return `${describe(note)} · ${cangrow(grown.length) ? `makes the clip ${barsText(grown.length)}` : 'past the end'}`;
 	});
 
 	// The lanes' hint, cut short at a laptop's width, and so its title too.
@@ -240,7 +248,12 @@
 		'Add a note first for a lane that moves the mix, an insert or a global: a track with no notes never plays, so ' +
 		"such a lane couldn't run.";
 
-	const bars = (length: number) => `${length / bar} bar${length === bar ? '' : 's'}`;
+	// A clip's length as bars, counted from its first, which a pickup or a placement part way into a bar makes a part of one.
+	function barsText(length: number) {
+		const end = bars.at(length);
+		const count = end.start === length ? end.number - 1 : (length - Math.max(0, bars.at(0).start)) / bar;
+		return `${count} bar${count === 1 ? '' : 's'}`;
+	}
 
 	function pressNote(event: PointerEvent, index: number, kind: 'move' | 'size') {
 		event.stopPropagation();
@@ -330,7 +343,7 @@
 	// A note past the end grows the clip to the bar that holds it, unless that would run a placement of the clip into the
 	// next one on its track. Then the note waits, with an offer to lengthen the clip anyway.
 	function place(note: Note) {
-		const grown = growToHold(clip, note.tick, ppq);
+		const grown = growToHold(clip, note.tick, bars);
 		if (grown !== clip && !cangrow(grown.length)) {
 			chosen = new Set();
 			offer = { note, length: grown.length };
@@ -341,7 +354,7 @@
 		draw = note.dur;
 		chosen = new Set([clip.notes.length]);
 		onchange(addNote(grown, note));
-		if (grows) tell(`Clip is now ${bars(grown.length)}`);
+		if (grows) tell(`Clip is now ${barsText(grown.length)}`);
 	}
 
 	function lengthen() {
@@ -351,7 +364,7 @@
 		offer = null;
 		if (step) {
 			// The step that was refused is written after all, and the cursor moves on past it.
-			const written = write({ ...clip, length }, cursor, { start: note.tick, notes: [note], held: [] }, ppq);
+			const written = write({ ...clip, length }, cursor, { start: note.tick, notes: [note], held: [] }, bars);
 			chosen = new Set();
 			moveCursor(written.cursor);
 			onchange(written.clip);
@@ -360,7 +373,7 @@
 			chosen = new Set([clip.notes.length]);
 			onchange(addNote({ ...clip, length }, note));
 		}
-		tell(`Clip is now ${bars(length)}`);
+		tell(`Clip is now ${barsText(length)}`);
 	}
 
 	function undoGrowth() {
@@ -399,7 +412,7 @@
 
 	function moved(g: Extract<Gesture, { kind: 'move' }>, at: Point): Clip {
 		const anchor = g.base.notes[g.anchor];
-		const wanted = snapTick(anchor.tick + (at.x - g.from.x) / perTick, grid) - anchor.tick;
+		const wanted = bars.snap(anchor.tick + (at.x - g.from.x) / perTick, grid) - anchor.tick;
 		const last = Math.max(...[...g.indices].map((i) => g.base.notes[i].tick));
 		const dt = Math.min(wanted, clip.length - 1 - last);
 		return moveNotes(g.base, g.indices, dt, Math.round((g.from.y - at.y) / rowHeight));
@@ -413,8 +426,8 @@
 
 	function resized(g: Extract<Gesture, { kind: 'size' }>, at: Point): Clip {
 		const anchor = clip.notes[g.anchor];
-		const end = snapTick(anchor.tick + anchor.dur + (at.x - g.from.x) / perTick, grid);
-		return resizeNotes(clip, chosen, end - anchor.tick - anchor.dur, grid);
+		const end = bars.snap(anchor.tick + anchor.dur + (at.x - g.from.x) / perTick, grid);
+		return resizeNotes(clip, chosen, end - anchor.tick - anchor.dur, bars.step(anchor.tick, grid));
 	}
 
 	function pointerMove(event: PointerEvent) {
@@ -426,13 +439,14 @@
 			const at = canvas(event);
 			if (!gesture.drawn && Math.abs(at.x - gesture.from.x) < DRAG) return;
 			// The note reaches the end of the cell under the pointer, so it covers what the pointer has crossed.
-			const end = (Math.floor(at.x / perTick / grid) + 1) * grid;
-			const note = { ...gesture.note, dur: Math.max(grid, end - gesture.note.tick) };
+			const line = bars.floor(at.x / perTick, grid);
+			const end = bars.ceil(line + 1, grid);
+			const note = { ...gesture.note, dur: Math.max(bars.step(gesture.note.tick, grid), end - gesture.note.tick) };
 			gesture = { ...gesture, drawn: true, note, clip: addNote(clip, note) };
 		} else if (gesture.kind === 'velocity') {
 			gesture = painted(gesture, canvas(event, gesture.lane));
 		} else if (gesture.kind === 'length') {
-			const length = Math.max(grid, snapTick(canvas(event).x / perTick, grid));
+			const length = Math.max(bars.step(0, grid), bars.snap(canvas(event).x / perTick, grid));
 			gesture = { ...gesture, clip: { ...clip, length } };
 		}
 	}
@@ -513,10 +527,10 @@
 	// Notes a duplicate or a paste put past the clip's end grow it to the bar that holds the last of them, as a note put there
 	// does, unless that would run a placement of the clip into the next one. Then they wait past the end, dimmed, as before.
 	function withRoom(next: Clip) {
-		const grown = growToHold(next, Math.max(...next.notes.map((n) => n.tick)), ppq);
+		const grown = growToHold(next, Math.max(...next.notes.map((n) => n.tick)), bars);
 		const grows = grown !== next && cangrow(grown.length);
 		onchange(grows ? grown : next);
-		if (grows) tell(`Clip is now ${bars(grown.length)}`);
+		if (grows) tell(`Clip is now ${barsText(grown.length)}`);
 	}
 
 	function duplicate() {
@@ -585,7 +599,8 @@
 			nudge(0, (event.code === 'ArrowUp' ? 1 : -1) * (event.shiftKey ? 12 : 1));
 		} else if (by('roll.earlier') || by('roll.later')) {
 			event.preventDefault();
-			nudge((event.code === 'ArrowLeft' ? -1 : 1) * grid, 0);
+			const from = Math.min(...[...chosen].map((i) => clip.notes[i]?.tick ?? 0));
+			nudge((event.code === 'ArrowLeft' ? -1 : 1) * bars.step(from, grid), 0);
 		}
 	}
 
@@ -633,7 +648,7 @@
 
 	// Whether a step at `tick` fits the clip, or can grow it to fit. If not, lengthening is offered for `note`.
 	function mayWrite(tick: number, note: Note) {
-		const grown = growToHold(clip, tick, ppq);
+		const grown = growToHold(clip, tick, bars);
 		if (grown === clip || cangrow(grown.length)) return true;
 		offer = { note, length: grown.length, step: true };
 		return false;
@@ -642,12 +657,12 @@
 	function writeChord(done: Chord) {
 		chord = null;
 		if (!done.notes.length || !mayWrite(done.start, done.notes[0])) return;
-		const grows = growToHold(clip, done.start, ppq) !== clip; // Asked before the change, which reaches `clip` at once
-		const written = write(clip, cursor, done, ppq);
+		const grows = growToHold(clip, done.start, bars) !== clip; // Asked before the change, which reaches `clip` at once
+		const written = write(clip, cursor, done, bars);
 		chosen = new Set(); // A note it replaces moves the others' places
 		moveCursor(written.cursor);
 		onchange(written.clip);
-		if (grows) tell(`Clip is now ${bars(written.clip.length)}`);
+		if (grows) tell(`Clip is now ${barsText(written.clip.length)}`);
 	}
 
 	function moveCursor(next: Cursor) {
@@ -690,7 +705,7 @@
 		if (typingIn(target, event.key) || target?.closest?.('[role="menu"], dialog, nav')) return;
 		if (matches(event, 'step.rest')) {
 			offer = null;
-			if (chord) chord = lengthenHeld(chord, grid);
+			if (chord) chord = lengthenHeld(chord, bars.step(chordEnd(chord), grid));
 			else moveCursor(rest(cursor, draw));
 		} else if (matches(event, 'step.back')) {
 			offer = null;
@@ -902,7 +917,7 @@
 
 	// The clip's bars across the roll, and its notes in the middle of it, at the rows' height as it is. `.` does it too.
 	export async function fit() {
-		const fitted = fitRoll(clip, ppq, { width: scroller.clientWidth - KEYS, height: rowsSeen() }, rowHeight);
+		const fitted = fitRoll(clip, ppq, { width: scroller.clientWidth - KEYS, height: rowsSeen() }, rowHeight, bars);
 		beatWidth = fitted.beat;
 		await settle();
 		scroller.scrollLeft = fitted.left;
@@ -978,7 +993,7 @@
 			>Fit</button
 		>
 		{#if stepping}
-			<span class="at" data-testid="step-at">Step at {position(cursor.tick, ppq)}</span>
+			<span class="at" data-testid="step-at">Step at {bars.position(cursor.tick)}</span>
 		{/if}
 		{#if one}
 			<fieldset disabled={readonly}>
@@ -998,8 +1013,8 @@
 						>at <UnitField
 							label="Note tick"
 							value={one.tick}
-							format={(tick) => position(tick, ppq)}
-							read={readPosition(ppq)}
+							format={(tick) => bars.position(tick)}
+							read={readPosition(bars)}
 							onvalue={(tick) => withRoom(setNotes(clip, chosen, { tick }))}
 							{onsay}
 							width="5.2rem"
@@ -1012,9 +1027,9 @@
 					>length <UnitField
 						label="Note length"
 						value={one.dur}
-						format={(dur) => noteValue(dur, ppq)}
-						read={readLength(ppq)}
-						choices={noteLengths(ppq)}
+						format={(dur) => noteValue(dur, ppq, barAt(one?.tick ?? 0))}
+						read={readLength(ppq, 1, barAt(one?.tick ?? 0))}
+						choices={noteLengths(ppq, barAt(one?.tick ?? 0))}
 						onvalue={(dur) => {
 							draw = dur;
 							onchange(setNotes(clip, chosen, { dur }));
@@ -1076,7 +1091,7 @@
 					<button
 						type="button"
 						title="Move each start to the nearest line of the grid"
-						onclick={() => shape(quantize(clip, chosen, grid))}>Quantize</button
+						onclick={() => shape(quantize(clip, chosen, grid, 1, bars))}>Quantize</button
 					>
 				</span>
 				{#if slots.length > 1}
@@ -1124,16 +1139,14 @@
 						width={Math.max(0, width - shown.length * perTick)}
 						height={RULER}
 					/>
-					{#each { length: beats + 1 }, beat}
-						{@const x = beat * ppq * perTick}
-						{#if beat % BEATS_PER_BAR === 0}
+					{#each beatLines as line (line.tick)}
+						{@const x = line.tick * perTick}
+						{#if line.bar}
 							<line class="bar" x1={x} x2={x} y1="0" y2={RULER} />
-							<text x={x + 3} y={RULER - 4}>{beat / BEATS_PER_BAR + 1}</text>
+							<text x={x + 3} y={RULER - 4}>{line.number}</text>
 						{:else}
 							<line class="tick" x1={x} x2={x} y1={RULER - 4} y2={RULER} />
-							{#if beatWidth >= 48}<text class="beatno" x={x + 3} y={RULER - 4}
-									>{Math.floor(beat / BEATS_PER_BAR) + 1}.{(beat % BEATS_PER_BAR) + 1}</text
-								>{/if}
+							{#if line.wide}<text class="beatno" x={x + 3} y={RULER - 4}>{line.number}.{line.beat}</text>{/if}
 						{/if}
 					{/each}
 					{#if playhead !== null}
@@ -1188,12 +1201,12 @@
 							ondblclick={doubleGround}
 						/>
 					{/each}
-					{#each { length: beats + 1 }, beat}
+					{#each beatLines as line (line.tick)}
 						<line
-							class:bar={beat % BEATS_PER_BAR === 0}
+							class:bar={line.bar}
 							class="beat"
-							x1={beat * ppq * perTick}
-							x2={beat * ppq * perTick}
+							x1={line.tick * perTick}
+							x2={line.tick * perTick}
 							y1="0"
 							y2={rollHeight}
 						/>
@@ -1317,8 +1330,8 @@
 	</div>
 	{#if offer}
 		<div class="notice" role="alert" data-testid="lengthen-offer">
-			<span>Growing this clip to {bars(offer.length)} would run it into the next clip on its track.</span>
-			<button type="button" onclick={lengthen}>Lengthen to {bars(offer.length)}</button>
+			<span>Growing this clip to {barsText(offer.length)} would run it into the next clip on its track.</span>
+			<button type="button" onclick={lengthen}>Lengthen to {barsText(offer.length)}</button>
 			<button type="button" aria-label="Leave the clip as it is" onclick={() => (offer = null)}>×</button>
 		</div>
 	{:else if notice}
@@ -1395,6 +1408,7 @@
 					max={about.max}
 					start={about.start}
 					{ppq}
+					{bars}
 					{perTick}
 					{width}
 					{grid}

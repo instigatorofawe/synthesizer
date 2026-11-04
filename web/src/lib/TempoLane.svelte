@@ -24,7 +24,7 @@
 		removeTempo
 	} from '#lib/Tempo.ts';
 	import type { Tempo } from '#lib/TimelineEdit.ts';
-	import { barOf, position, snapTick } from '#lib/Units.ts';
+	import { barsOf } from '#lib/TimeSignature.ts';
 
 	// The song's tempo as a lane of the song layer, over the arrangement's bars, so the playhead and the bar lines pass through
 	// it. Folded it is a thin row of flags, each change's BPM where it starts, with a slope where one glides to the next, so the
@@ -99,7 +99,8 @@
 					? null
 					: 'A click on the line after a change makes it glide to the next.'
 	);
-	const summary = $derived(tempoSummary(doc.tempo, doc.ppq));
+	const bars = $derived(barsOf(doc));
+	const summary = $derived(tempoSummary(doc.tempo, bars));
 
 	const xOf = (tick: number) => tick * perTick;
 	const yOf = (bpm: number) => bpmToY(bpm, range, height, PAD);
@@ -135,7 +136,7 @@
 		const at = take(event);
 		chosen = null;
 		if (!open || readonly || secondary(event)) return;
-		const tick = snapTick(at.x / perTick, grid);
+		const tick = bars.snap(at.x / perTick, grid);
 		const there = doc.tempo.findIndex((change) => change.tick === tick);
 		if (there >= 0) return holdPoint(there, at, false);
 		const added = addTempoAt(doc, tick, tempoThere(doc.tempo, tick));
@@ -195,8 +196,8 @@
 		const by = yToBpm(at.y, range, height, PAD) - yToBpm(gesture.from.y, range, height, PAD);
 		const bpm = Math.abs(dy) < DRAG ? gesture.bpm : roundBpm(gesture.bpm + by, event.shiftKey);
 		const tick = gesture.added || Math.abs(dx) < DRAG ? gesture.tick : gesture.tick + dx / perTick;
-		const to = { tick: tempoTick(gesture.base.tempo, gesture.index, tick, grid), bpm };
-		const now = moveTempo(gesture.base, gesture.index, tick, bpm, grid);
+		const to = { tick: tempoTick(gesture.base.tempo, gesture.index, tick, grid, bars), bpm };
+		const now = moveTempo(gesture.base, gesture.index, tick, bpm, grid, bars);
 		gesture = { ...gesture, now, at: to, moved: true };
 		onpreview(now.tempo);
 	}
@@ -263,7 +264,7 @@
 		event.stopPropagation();
 		gesture = null;
 		if (index !== null) chosen = index;
-		menu = { x: event.clientX, y: event.clientY, index, tick: snapTick(canvas(event).x / perTick, grid) };
+		menu = { x: event.clientX, y: event.clientY, index, tick: bars.snap(canvas(event).x / perTick, grid) };
 	}
 
 	// The lane's own menu, where no change is. The menu key and Shift+F10 open the chosen change's, at its point.
@@ -325,7 +326,7 @@
 	const readout = $derived.by(() => {
 		if (gesture?.kind !== 'point' || !(gesture.moved || gesture.added)) return null;
 		const moved = gesture.at;
-		const text = `${bpmText(moved.bpm)} BPM · ${position(moved.tick, doc.ppq)}`;
+		const text = `${bpmText(moved.bpm)} BPM · ${bars.position(moved.tick)}`;
 		const x = Math.min(Math.max(0, xOf(moved.tick) + 8), Math.max(0, width - text.length * CHAR));
 		const above = drawnY(moved.bpm) > height / 2;
 		return { text, x, y: above ? drawnY(moved.bpm) - 8 : drawnY(moved.bpm) + 16 };
@@ -435,7 +436,7 @@
 					data-bpm={change.bpm}
 					onpointerdown={(event) => pressPoint(event, index)}
 					oncontextmenu={(event) => openMenu(event, index)}
-					><title>{`${bpmText(change.bpm)} BPM from bar ${barOf(change.tick, doc.ppq)}`}</title></circle
+					><title>{`${bpmText(change.bpm)} BPM from bar ${bars.at(change.tick).number}`}</title></circle
 				>
 				{#if label}
 					<text
@@ -470,7 +471,7 @@
 			<g class="flag" data-testid={`tempo-flag-${index}`} data-bpm={change.bpm}>
 				<path d={`M${xOf(change.tick) + 0.5} 2V${FOLDED - 2}M${xOf(change.tick) + 0.5} 2h5l-2 2.5l2 2.5h-5`} />
 				{#if label}<text x={xOf(change.tick) + 7} y={FOLDED - 5}>{bpmText(change.bpm)}</text>{/if}
-				<title>{`${bpmText(change.bpm)} BPM from bar ${barOf(change.tick, doc.ppq)}`}</title>
+				<title>{`${bpmText(change.bpm)} BPM from bar ${bars.at(change.tick).number}`}</title>
 			</g>
 		{/each}
 	{/if}
@@ -481,7 +482,7 @@
 	<ContextMenu
 		x={menu.x}
 		y={menu.y}
-		label={menu.index === null ? 'Tempo lane' : `Tempo at bar ${barOf(at, doc.ppq)}`}
+		label={menu.index === null ? 'Tempo lane' : `Tempo at bar ${bars.at(at).number}`}
 		items={menu.index === null ? laneItems(menu.tick) : changeItems(menu.index)}
 		note={readonly && (open || menu.index !== null) ? EXAMPLE_NOTE : undefined}
 		onclose={() => (menu = null)}

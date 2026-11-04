@@ -5,6 +5,7 @@
 // wrong key.
 //
 // These are pure functions over a clip and a cursor, so they can be tested without a page. The roll wires them to keys.
+import type { Bars } from '#lib/TimeSignature.ts';
 import { growToHold, type Clip, type Note } from '#lib/TimelineEdit.ts';
 
 // A step written: where it started and where it left the cursor, the notes it wrote, none for a rest, and the notes they
@@ -72,9 +73,10 @@ const same = (a: Note, b: Note) => a.tick === b.tick && a.note === b.note && a.d
 
 // A chord written into the clip at its start, and the cursor moved on past it. A note already there at the same start and
 // pitch gives way to the new one, so going over a passage again doesn't double it. The clip grows to the bar that holds the
-// chord's start, as it does for a clicked note: whether it may is the caller's to ask first, with `canGrow`.
-export function write(clip: Clip, cursor: Cursor, chord: Chord, ppq: number): { clip: Clip; cursor: Cursor } {
-	const grown = growToHold(clip, chord.start, ppq);
+// chord's start, by `bars` in the clip's ticks, as it does for a clicked note: whether it may is the caller's to ask first,
+// with `canGrow`.
+export function write(clip: Clip, cursor: Cursor, chord: Chord, bars: Bars): { clip: Clip; cursor: Cursor } {
+	const grown = growToHold(clip, chord.start, bars);
 	const pitches = new Set(chord.notes.map((note) => note.note));
 	const replacing = (note: Note) => note.tick === chord.start && pitches.has(note.note);
 	const end = chordEnd(chord);

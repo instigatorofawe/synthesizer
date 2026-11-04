@@ -1,28 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { timelineSchema } from '#lib/Schema.ts';
 import { gliding, parseBpm, shownTempo, tempoIndexAt, tempoTyped, tempoWords } from '#lib/Tempo.ts';
-import { position, parsePosition } from '#lib/Units.ts';
+import { Bars } from '#lib/TimeSignature.ts';
 
 const PPQ = 480;
+const BARS = Bars.of(PPQ);
 
 describe('a typed position', () => {
 	it('reads as the ghost note does, bars and beats from 1 and the tick from 0', () => {
-		expect(parsePosition('1.1.000', PPQ)).toBe(0);
-		expect(parsePosition('1.4.000', PPQ)).toBe(3 * PPQ);
-		expect(parsePosition('3.2.240', PPQ)).toBe(2 * 4 * PPQ + PPQ + 240);
-		for (const tick of [0, 1, 479, 480, 1920, 7777]) expect(parsePosition(position(tick, PPQ), PPQ)).toBe(tick);
+		expect(BARS.parse('1.1.000')).toBe(0);
+		expect(BARS.parse('1.4.000')).toBe(3 * PPQ);
+		expect(BARS.parse('3.2.240')).toBe(2 * 4 * PPQ + PPQ + 240);
+		for (const tick of [0, 1, 479, 480, 1920, 7777]) expect(BARS.parse(BARS.position(tick))).toBe(tick);
 	});
 
 	it('takes a bar alone, or a bar and a beat, and other marks between them', () => {
-		expect(parsePosition('9', PPQ)).toBe(8 * 4 * PPQ);
-		expect(parsePosition(' 2.3 ', PPQ)).toBe(4 * PPQ + 2 * PPQ);
-		expect(parsePosition('2 3 10', PPQ)).toBe(4 * PPQ + 2 * PPQ + 10);
-		expect(parsePosition('2:3', PPQ)).toBe(4 * PPQ + 2 * PPQ);
+		expect(BARS.parse('9')).toBe(8 * 4 * PPQ);
+		expect(BARS.parse(' 2.3 ')).toBe(4 * PPQ + 2 * PPQ);
+		expect(BARS.parse('2 3 10')).toBe(4 * PPQ + 2 * PPQ + 10);
+		expect(BARS.parse('2:3')).toBe(4 * PPQ + 2 * PPQ);
 	});
 
 	it('is nothing when it names no place', () => {
 		for (const text of ['', '0', '1.0', '1.5', '1.1.480', '-1', 'two', '1.1.1.1', '1..2', '1.2x']) {
-			expect(parsePosition(text, PPQ), text).toBeNull();
+			expect(BARS.parse(text), text).toBeNull();
 		}
 	});
 });
@@ -75,8 +76,8 @@ describe('the tempo at the playhead', () => {
 	});
 
 	it('says what typing changes', () => {
-		expect(tempoWords([{ tick: 0, bpm: 120 }], 0, PPQ)).toMatch(/song's tempo/);
-		expect(tempoWords(doc.tempo, 0, PPQ)).toMatch(/from bar 1, one of the song's 3 tempos/);
-		expect(tempoWords(doc.tempo, 5760, PPQ)).toMatch(/Gliding from 120 BPM at bar 3 to 160 at bar 5/);
+		expect(tempoWords([{ tick: 0, bpm: 120 }], 0, BARS)).toMatch(/song's tempo/);
+		expect(tempoWords(doc.tempo, 0, BARS)).toMatch(/from bar 1, one of the song's 3 tempos/);
+		expect(tempoWords(doc.tempo, 5760, BARS)).toMatch(/Gliding from 120 BPM at bar 3 to 160 at bar 5/);
 	});
 });

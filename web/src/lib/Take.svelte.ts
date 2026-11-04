@@ -5,7 +5,7 @@
 import type { PlayedKey } from '#lib/AudioEngine.ts';
 import { newTake, recordNote, snapPlayed, type Stamp, type Take } from '#lib/Recording.ts';
 import type { Timeline } from '#lib/Schema.ts';
-import { barOf } from '#lib/Units.ts';
+import { barsOf } from '#lib/TimeSignature.ts';
 
 // What a take asks of the page.
 export interface TakeHost {
@@ -74,12 +74,13 @@ export class TakeRun {
 	#written(note: number, on: Stamp, off: Stamp) {
 		const doc = this.#host.doc(this.key);
 		if (!doc) return;
-		const snapped = snapPlayed({ note, vel: this.#velocity, on, off }, this.#grid, this.#host.loop());
+		const bars = barsOf(doc);
+		const snapped = snapPlayed({ note, vel: this.#velocity, on, off }, this.#grid, this.#host.loop(), bars);
 		if (!snapped) return;
 		const done = recordNote(doc, this.#write, snapped);
 		// A note never goes without a word. One with nowhere to go, such as on a track deleted while the take went on, says so.
 		if (!done) {
-			this.#host.say(`The note played at bar ${barOf(snapped.tick, doc.ppq)} had nowhere to go, so it wasn't written.`);
+			this.#host.say(`The note played at bar ${bars.at(snapped.tick).number} had nowhere to go, so it wasn't written.`);
 			return;
 		}
 		this.#write = done.take;

@@ -14,7 +14,8 @@
 		type LanePoint,
 		type Shape
 	} from '#lib/TimelineEdit.ts';
-	import { noteValue, position, snapTick, noteLengths, readLength, readPosition } from '#lib/Units.ts';
+	import type { Bars } from '#lib/TimeSignature.ts';
+	import { noteValue, noteLengths, readLength, readPosition } from '#lib/Units.ts';
 	import UnitField from '#lib/UnitField.svelte';
 
 	let {
@@ -25,6 +26,7 @@
 		max,
 		start,
 		ppq,
+		bars,
 		perTick,
 		width,
 		grid,
@@ -41,6 +43,7 @@
 		max: number;
 		start?: number; // Where what the lane moves stands before it moves it, if the page knows, which a first ramp starts from
 		ppq: number;
+		bars: Bars; // The song's bars in the clip's own ticks
 		perTick: number;
 		width: number;
 		grid: number;
@@ -80,7 +83,7 @@
 	const valueText = (value: number) => String(Number(value.toPrecision(3)));
 
 	// The ghost's words, kept inside the lane at either end.
-	const ghostText = $derived(ghost ? `${valueText(ghost.value)} · ${position(ghost.tick, ppq)}` : '');
+	const ghostText = $derived(ghost ? `${valueText(ghost.value)} · ${bars.position(ghost.tick)}` : '');
 	const ghostX = $derived(
 		ghost ? Math.min(Math.max(0, ghost.tick * perTick + 8), Math.max(0, width - ghostText.length * 6.2)) : 0
 	);
@@ -101,7 +104,7 @@
 		const box = svg.getBoundingClientRect();
 		const y = Math.min(HEIGHT - PAD, Math.max(PAD, event.clientY - box.top));
 		const fraction = 1 - (y - PAD) / (HEIGHT - 2 * PAD);
-		const at = snapTick((event.clientX - box.left) / perTick, grid);
+		const at = bars.snap((event.clientX - box.left) / perTick, grid);
 		const tick = Math.min(clip.length - 1, at);
 		return { tick, value: Number((min + fraction * (max - min)).toPrecision(4)), past: at >= clip.length };
 	}
@@ -251,8 +254,8 @@
 				>at <UnitField
 					label={`${label} point tick`}
 					value={current.tick}
-					format={(tick) => position(tick, ppq)}
-					read={readPosition(ppq, clip.length)}
+					format={(tick) => bars.position(tick)}
+					read={readPosition(bars, clip.length)}
 					onvalue={(tick) => change(index, { tick })}
 					{onsay}
 					width="5rem"
@@ -341,7 +344,7 @@
 			r="5"
 			role="button"
 			tabindex="-1"
-			aria-label={`Point at ${position(point.tick, ppq)}`}
+			aria-label={`Point at ${bars.position(point.tick)}`}
 			data-testid={`${testid}-point-${point.index}`}
 			data-tick={point.tick}
 			data-value={point.value}

@@ -1,23 +1,32 @@
-// The song layer: lanes above the tracks for what belongs to the whole song rather than to one track. Tempo is the one there
-// is. Time signatures and markers would join it, each as a lane here, once the format has a field for them, since nothing
-// in a document says either today.
+// The song layer: lanes above the tracks for what belongs to the whole song rather than to one track. Time & key marks
+// where the time signature and the key change, and Tempo draws the tempo. Markers would join them, each as a lane here.
 
 export interface SongLane {
 	id: string;
 	name: string;
+	fixed?: boolean; // One row that says all it has, which never unfolds
 }
 
-export const SONG_LANES: readonly SongLane[] = [{ id: 'tempo', name: 'Tempo' }];
+export const SONG_LANES: readonly SongLane[] = [
+	{ id: 'signatures', name: 'Time & key', fixed: true },
+	{ id: 'tempo', name: 'Tempo' }
+];
 
 // A folded lane is a thin row that reads at a glance, and an unfolded one is tall enough to draw a curve and drag it.
 export const FOLDED = 18;
 export const UNFOLDED = 72;
 
-export const laneHeight = (open: boolean) => (open ? UNFOLDED : FOLDED);
+export const laneHeight = (open: boolean, lane?: SongLane) => (open && !lane?.fixed ? UNFOLDED : FOLDED);
 
 // How tall the layer is, with these lanes unfolded.
 export const layerHeight = (open: ReadonlySet<string>, lanes: readonly SongLane[] = SONG_LANES) =>
-	lanes.reduce((sum, lane) => sum + laneHeight(open.has(lane.id)), 0);
+	lanes.reduce((sum, lane) => sum + laneHeight(open.has(lane.id), lane), 0);
+
+// How far down the layer a lane starts, with these lanes unfolded.
+export function laneTop(open: ReadonlySet<string>, id: string, lanes: readonly SongLane[] = SONG_LANES): number {
+	const at = lanes.findIndex((lane) => lane.id === id);
+	return layerHeight(open, lanes.slice(0, Math.max(0, at)));
+}
 
 // Which lanes are unfolded is the editor's, kept for each timeline across a reload in one entry of localStorage, never in the
 // document, which the compiler would refuse. A timeline with every lane folded, as they start, has no entry. The newest come

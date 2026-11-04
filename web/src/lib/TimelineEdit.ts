@@ -3,7 +3,8 @@
 // the compiler says what is wrong and where. What these do take care of is taking references along, because deleting a bus
 // shouldn't leave a trail of errors about a name nobody can see any more.
 import type { Graph, Param, Timeline } from '#lib/Schema.ts';
-import { BEATS_PER_BAR, barOf, snapTick, ticksPerBar } from '#lib/Units.ts';
+import { barsOf, type Bars } from '#lib/TimeSignature.ts';
+import { snapTick } from '#lib/Units.ts';
 
 export type Track = Timeline['tracks'][number];
 export type Bus = Timeline['buses'][number];
@@ -556,6 +557,93 @@ export function duplicatePlacement(doc: Timeline, track: number, index: number):
 	return { doc: next, index: (next.tracks.find((t) => t.id === track)?.placements ?? []).lastIndexOf(copy) };
 }
 
+// A placement split in two at a song tick inside it, as Split does in a DAW: what it played before the tick and what it
+// played from it, each a clip of its own, so an edit to one leaves the other. What plays stays as it was. A note that starts
+// before the tick keeps its length and rings on past it, as it did, and the second clip's lanes and play settings start where
+// they stood at the tick. Repeats before the one the tick is in, and after it, stay repeats of the clip they were. At the
+// line between two repeats nothing needs cutting, so both sides go on playing the same clip. The first part keeps the clip's
+// name if nothing else plays it. Null if the tick isn't inside the placement.
+export function splitPlacement(
+	doc: Timeline,
+	track: number,
+	index: number,
+	at: number
+): { doc: Timeline; index: number } | null {
+	const placed = doc.tracks.find((t) => t.id === track)?.placements[index];
+	const clip = placed && clipOf(doc, placed.clip);
+	if (!placed || !clip) return null;
+	const { start, length } = windowOf(doc, placed);
+	const into = at - placed.tick;
+	if (length <= 0 || into <= 0 || into >= placed.repeat * length) return null;
+	const repeat = Math.floor(into / length);
+	const cut = into - repeat * length;
+	const { start: _start, length: _length, ...plain } = placed;
+	const pieces: Placement[] = [];
+	let next = doc;
+	if (cut === 0) {
+		pieces.push({ ...placed, repeat }, { ...placed, tick: at, repeat: placed.repeat - repeat });
+	} else {
+		const uses = doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clip.id).length;
+		const alone = uses === 1 && repeat === 0 && repeat + 1 === placed.repeat;
+		const first = alone ? clip.id : freshClipId(next, clip.id);
+		next = alone ? next : { ...next, clips: [...next.clips, { ...clipWindow(clip, start, start + cut), id: first }] };
+		if (alone) next = setClip(next, clip.id, { ...clipWindow(clip, start, start + cut), id: first });
+		const second = freshClipId(next, clip.id);
+		next = { ...next, clips: [...next.clips, { ...clipWindow(clip, start + cut, start + length), id: second }] };
+		if (repeat > 0) pieces.push({ ...placed, repeat });
+		pieces.push({ ...plain, clip: first, tick: placed.tick + repeat * length, repeat: 1 });
+		pieces.push({ ...plain, clip: second, tick: at, repeat: 1 });
+		if (repeat + 1 < placed.repeat) {
+			pieces.push({ ...placed, tick: placed.tick + (repeat + 1) * length, repeat: placed.repeat - repeat - 1 });
+		}
+	}
+	const after = pieces.find((piece) => piece.tick === at)!;
+	next = mapChain(next, trackKey(track), (chain) => {
+		const kept = (chain as Track).placements.filter((_, i) => i !== index);
+		return { ...chain, placements: inOrder([...kept, ...pieces]) };
+	});
+	return { doc: next, index: (next.tracks.find((t) => t.id === track)?.placements ?? []).indexOf(after) };
+}
+
+// What a clip plays from `from` up to `to` of its own ticks, as a clip that starts there: the notes that start in it, each as
+// long as it was, its lanes from where they stood at `from`, a ramp under way there going on to where it was going, and the
+// play setting in effect there.
+export function clipWindow(clip: Clip, from: number, to: number): Clip {
+	const notes = clip.notes.filter((n) => n.tick >= from && n.tick < to).map((n) => ({ ...n, tick: n.tick - from }));
+	const automation: Point[] = [];
+	for (const lane of lanesOf(clip)) {
+		const where = {
+			...(lane.param !== undefined && { param: lane.param }),
+			...(lane.target && { target: lane.target })
+		};
+		const runs = runsOf(lane);
+		const standing = runs.findLast((run) => run.begin < from);
+		if (from > 0 && standing) {
+			automation.push({ ...where, tick: 0, value: runValue(standing, Math.min(from, standing.end)) });
+			if (from < standing.end) {
+				const { point } = standing;
+				automation.push({
+					...where,
+					tick: 0,
+					value: point.value,
+					ramp: standing.due - from,
+					...(point.curve && { curve: point.curve })
+				});
+			}
+		}
+		for (const { point } of lane.points) {
+			if (point.tick >= from && point.tick < to) automation.push({ ...point, tick: point.tick - from });
+		}
+	}
+	const play = clip.play.filter((p) => p.tick >= from && p.tick < to).map((p) => ({ ...p, tick: p.tick - from }));
+	const chased = clip.play
+		.filter((p) => p.tick < from)
+		.sort((a, b) => a.tick - b.tick)
+		.at(-1);
+	if (from > 0 && chased && !play.some((p) => p.tick === 0)) play.unshift({ ...chased, tick: 0 });
+	return { ...clip, length: to - from, notes, automation, play };
+}
+
 // What Mod+C takes from the arrangement: a placement, and its clip as it was then, which is what reaches another timeline.
 export interface CopiedPlacement {
 	placement: Placement;
@@ -608,9 +696,7 @@ export function drawnClip(
 	from: number,
 	to: number
 ): { tick: number; length: number } | null {
-	const bar = ticksPerBar(doc);
-	let tick = Math.floor(Math.min(from, to) / bar) * bar;
-	let end = (Math.floor(Math.max(from, to) / bar) + 1) * bar;
+	let { start: tick, end } = barsOf(doc).whole(from, to);
 	for (const placed of doc.tracks.find((t) => t.id === track)?.placements ?? []) {
 		if (placed.tick <= from) tick = Math.max(tick, placed.tick + placementSpan(doc, placed));
 		else end = Math.min(end, placed.tick);
@@ -618,10 +704,11 @@ export function drawnClip(
 	return end > tick ? { tick, length: end - tick } : null;
 }
 
-// A clip long enough to hold a note that starts at `tick`:to the end of the bar it falls in, or as it was if it holds it already.
-export function growToHold(clip: Clip, tick: number, ppq: number): Clip {
+// A clip long enough to hold a note that starts at `tick`: to the end of the bar it falls in, by `bars` in the clip's own
+// ticks, or as it was if it holds it already.
+export function growToHold(clip: Clip, tick: number, bars: Bars): Clip {
 	if (tick < clip.length) return clip;
-	return { ...clip, length: barOf(tick, ppq) * ppq * BEATS_PER_BAR };
+	return { ...clip, length: bars.at(tick).end };
 }
 
 // Whether a clip can be `length` long without any of its placements running into the one after it on its track. A placement
@@ -720,12 +807,14 @@ export function humanize(clip: Clip, indices: Set<number>, ticks: number, veloci
 }
 
 // Each chosen note's start moved `strength` of the way to the nearest line of the grid.
-export function quantize(clip: Clip, indices: Set<number>, grid: number, strength = 1): Clip {
+// The grid starts afresh at each bar, by `bars` in the clip's own ticks, as Snap's does.
+export function quantize(clip: Clip, indices: Set<number>, grid: number, strength = 1, bars?: Bars): Clip {
+	const snap = (tick: number) => (bars ? bars.snap(tick, grid) : snapTick(tick, grid));
 	return {
 		...clip,
 		notes: clip.notes.map((n, i) => {
 			if (!indices.has(i)) return n;
-			const tick = Math.round(n.tick + (snapTick(n.tick, grid) - n.tick) * strength);
+			const tick = Math.round(n.tick + (snap(n.tick) - n.tick) * strength);
 			return { ...n, tick: Math.min(clip.length - 1, tick) };
 		})
 	};

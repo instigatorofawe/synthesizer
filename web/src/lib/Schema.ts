@@ -152,6 +152,8 @@ const placementSchema = z.strictObject({
 	length: z.number().int().min(1).max(0x7fffffff).optional()
 });
 
+const distinct = (ids: unknown[]) => new Set(ids).size === ids.length;
+
 const trackSchema = z.strictObject({
 	id: id16,
 	name: z.string().max(100).default(''),
@@ -161,12 +163,22 @@ const trackSchema = z.strictObject({
 	placements: z.array(placementSchema).default([]),
 	play: playSchema.optional(),
 	steal: z.enum(['cut', 'fade']).optional(), // What happens to a note whose voice a new one takes
+	// A drum track's kit: which of its slots each key plays, and the key's name. The editor writes each note's slot from it,
+	// and the compiler ignores it, as it does the time signatures.
+	kit: z
+		.array(
+			z.strictObject({
+				note: z.number().int().min(0).max(127),
+				name: z.string().max(100),
+				slot: z.number().int().min(0)
+			})
+		)
+		.refine((kit) => distinct(kit.map((key) => key.note)), 'A kit names each key once')
+		.optional(),
 	...routing
 });
 
 const busSchema = z.strictObject({ id: z.string().min(1), ...routing });
-
-const distinct = (ids: unknown[]) => new Set(ids).size === ids.length;
 
 export const timelineSchema = z
 	.strictObject({

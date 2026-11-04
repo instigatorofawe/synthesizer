@@ -1569,10 +1569,12 @@ inline void check_timeline(const json& doc, const std::string& where) {
     };
     for (const json& t : list(doc, "tracks", where)) {
         const std::string at = where + "/track:" + (t.is_object() && t.contains("id") ? t.at("id").dump() : "");
+        // `kit` is the editor's too: which sound each key of a drum track plays, which it writes into each note's slot.
         check_keys(t,
                    {"id", "name", "voices", "slots", "params", "placements", "play", "steal", "gain", "pan", "mute",
-                    "output", "sends", "inserts"},
+                    "output", "sends", "inserts", "kit"},
                    at, "a track");
+        for (const json& k : list(t, "kit", at)) check_keys(k, {"note", "name", "slot"}, at, "a kit key");
         for (const json& p : list(t, "placements", at)) {
             check_keys(p, {"clip", "tick", "repeat", "transpose", "velocity", "start", "length"}, at, "a placement");
         }

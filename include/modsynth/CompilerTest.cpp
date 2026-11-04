@@ -1385,6 +1385,18 @@ TEST(Timeline, MetersAndKeysAreTheEditorsAndChangeNoByte) {
     }
 }
 
+TEST(Timeline, AKitIsTheEditorsAndChangesNoByte) {
+    const json plain = lane_project(json::parse(R"([{"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5}])"));
+    json kitted = plain;
+    kitted["programs"][0]["timeline"]["tracks"][0]["kit"] = json::parse(
+        R"([{"note": 36, "name": "Bass Drum 1", "slot": 0}, {"note": 38, "name": "Acoustic Snare", "slot": 0}])");
+    EXPECT_EQ(lane_error(kitted), "");
+    EXPECT_EQ(compile_image(plain).image, compile_image(kitted).image);
+    json bad = kitted;
+    bad["programs"][0]["timeline"]["tracks"][0]["kit"][1]["key"] = 38;
+    EXPECT_NE(lane_error(bad).find("a kit key has no 'key'"), std::string::npos) << lane_error(bad);
+}
+
 namespace {
 
 // One track playing one clip through a placement the test describes.

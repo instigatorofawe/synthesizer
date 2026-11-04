@@ -631,6 +631,11 @@
 		session.goodSong?.report.programs[0]?.tracks.find((t) => t.id === selectedTrack)?.index ?? null
 	);
 	const chosenName = $derived(songDoc?.tracks.find((t) => t.id === selectedTrack)?.name ?? '');
+	// On a kit track the keys are named by its sounds, as the roll's keys are (Kit.ts).
+	const keySounds = $derived.by(() => {
+		const kit = view === 'song' ? songDoc?.tracks.find((t) => t.id === selectedTrack)?.kit : undefined;
+		return kit ? new Map(kit.map((key) => [key.note, key.name])) : null;
+	});
 	const keysPlay = $derived(view === 'song' ? chosenIndex !== null || aloneTrack !== null : hears.kind !== 'none');
 	const keysWhere = $derived.by(() => {
 		if (view === 'song') {
@@ -1650,6 +1655,7 @@
 			onhold={holdKeys}
 			onletgo={() => letGo(latched)}
 			stripIn={view === 'patch' ? keyStrip : null}
+			sounds={keySounds}
 		/>
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={session.engineState} /></div>
 		<span class="grow"></span>

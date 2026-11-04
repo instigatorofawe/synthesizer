@@ -30,7 +30,7 @@
 	import { followScroll } from '#lib/Follow.ts';
 	import HeadMix from '#lib/HeadMix.svelte';
 	import Meter from '#lib/Meter.svelte';
-	import { bringing, patchDrag, wavFiles, type DraggedPatch } from '#lib/PatchDrag.svelte.ts';
+	import { bringing, midiFiles, patchDrag, wavFiles, type DraggedPatch } from '#lib/PatchDrag.svelte.ts';
 	import { anchored, wheelAction } from '#lib/RollView.ts';
 	import type { Timeline } from '#lib/Schema.ts';
 	import type { Ring } from '#lib/ScopeMath.ts';
@@ -51,10 +51,12 @@
 		end: number;
 	}
 
-	// What was dropped on the arrangement, and where: on a track, or on the row below the tracks for a new one, at a bar.
+	// What was dropped on the arrangement, and where: on a track, or on the row below the tracks for a new one, at a bar. MIDI
+	// files go nowhere in this song: each is imported as a song of its own.
 	export type Dropped =
 		| { kind: 'patch'; patch: DraggedPatch; track: number | null; tick: number }
-		| { kind: 'files'; files: File[]; track: number | null; tick: number };
+		| { kind: 'files'; files: File[]; track: number | null; tick: number }
+		| { kind: 'midi'; files: File[] };
 
 	// What a clip's right-click menu does, each to the placement it was opened on.
 	export interface PlacementActions {
@@ -134,7 +136,7 @@
 		ontempo?: (tempo: Tempo[] | null) => void; // The tempo while the Tempo lane is dragged, and null once the drag is over
 		onmix?: (track: number, change: { gain?: number; pan?: number }, done: boolean) => void; // A head's fader or pan
 		onzoom?: (by: number) => void; // Mod with the wheel, or a pinch: bars this many times as wide
-		ondropped?: (drop: Dropped) => void; // A patch from the browser, or WAV files from the desktop, let go of here
+		ondropped?: (drop: Dropped) => void; // A patch from the browser, or WAV or MIDI files from the desktop, let go of here
 		onsignature?: (at: { kind: 'meter' | 'key'; tick: number }) => void; // A change on the Time & key lane, to edit
 		actions?: PlacementActions;
 	} = $props();
@@ -191,7 +193,7 @@
 	const tracksTop = $derived(TOP + layer);
 	// While a patch that plays notes is dragged out of the browser, or WAV files are held over the arrangement, a row below the
 	// tracks takes them for a new track. It is there from the start of a patch's drag, so where it can go is in sight.
-	let dropAt = $state.raw<{ track: number | null; tick: number; kind: 'patch' | 'files' } | null>(null);
+	let dropAt = $state.raw<{ track: number | null; tick: number; kind: 'patch' | 'files' | 'midi' } | null>(null);
 	const newRow = $derived(
 		!readonly && ((patchDrag.patch !== null && !patchDrag.patch.insert) || dropAt?.kind === 'files')
 	);
@@ -464,9 +466,11 @@
 
 	// A drop's place: the track under the pointer, by its head or its row, or the row below the tracks for a new one, at the
 	// bar under the pointer, or the playhead's bar from the heads. An insert has no notes to play, so it goes only on a track.
-	// Nothing goes in an example, which can't change, or on the ruler, the loop strip or the song's lanes.
+	// Nothing goes in an example, which can't change, or on the ruler, the loop strip or the song's lanes. A MIDI file changes
+	// nothing here, so it is taken anywhere, from an example too, for a song of its own.
 	function dropPlace(event: DragEvent) {
 		const what = bringing(event);
+		if (what?.kind === 'midi') return { track: null, tick: 0, kind: 'midi' as const };
 		if (!what || readonly || (event.target as Element).closest('.band, .corner')) return null;
 		const box = svg.getBoundingClientRect();
 		const row = Math.floor((event.clientY - box.top - tracksTop) / ROW);
@@ -489,12 +493,19 @@
 		if (place.track !== dropAt?.track || place.tick !== dropAt?.tick || place.kind !== dropAt?.kind) dropAt = place;
 	}
 
+	// The files' names are known only now, so MIDI files whose kind the system didn't say are told apart here.
 	function drop(event: DragEvent) {
 		const place = dropPlace(event);
 		dropAt = null;
 		const what = bringing(event);
 		if (!place || !what) return;
 		event.preventDefault();
+		const midi = what.kind === 'patch' ? [] : midiFiles(event);
+		if (midi.length) {
+			ondropped({ kind: 'midi', files: midi });
+			return;
+		}
+		if (place.kind === 'midi') return;
 		const at = { track: place.track, tick: place.tick };
 		if (what.kind === 'patch') ondropped({ kind: 'patch', patch: what.patch, ...at });
 		else {
@@ -510,7 +521,7 @@
 
 	// What a head shows a drop would do to its track.
 	const dropWords = $derived.by(() => {
-		if (dropAt === null || dropAt.track === null) return null;
+		if (dropAt === null || dropAt.track === null || dropAt.kind === 'midi') return null;
 		if (dropAt.kind === 'files') return 'plays the WAV files';
 		const patch = patchDrag.patch;
 		return patch ? (patch.insert ? `+ ${patch.name}` : `plays ${patch.name}`) : null;
@@ -938,6 +949,7 @@
 <div
 	class="arrangement"
 	class:sized={dragged !== null}
+	class:importing={dropAt?.kind === 'midi'}
 	style:height={dragged === null ? undefined : `${dragged}px`}
 	bind:this={view}
 	data-testid="arrangement-view"
@@ -949,6 +961,10 @@
 		<!-- The ruler's corner and the song layer's heads, which stay at the top as the tracks scroll under them. ▸ or a
 			 double-click on a folded lane unfolds it, and ▾ folds it again. -->
 		<div class="corner" style:padding-top="{TOP}px">
+			{#if dropAt?.kind === 'midi'}
+				<!-- Over the ruler's corner, which is in sight however the tracks are scrolled. -->
+				<span class="midiwords" style:height="{TOP}px" data-testid="midi-drop">Import as a new song</span>
+			{/if}
 			<div class="layer" role="group" aria-label="Song lanes" style:height="{layer}px">
 				{#each SONG_LANES as lane (lane.id)}
 					{@const open = unfolded.has(lane.id)}
@@ -1313,7 +1329,7 @@
 				</g>
 			{/if}
 
-			{#if dropAt !== null && dropAt.track === null}
+			{#if dropAt !== null && dropAt.track === null && dropAt.kind !== 'midi'}
 				<!-- The clip the new track starts with, where it would go. -->
 				<g class="drawn" transform={`translate(${dropAt.tick * perTick} ${tracksTop + doc.tracks.length * ROW + 4})`}>
 					<rect
@@ -1526,6 +1542,23 @@
 		border-style: dashed;
 	}
 	.newwords,
+	/* A MIDI file held over the song, which a drop imports as a song of its own. */
+	.arrangement.importing {
+		border-color: var(--accent);
+		box-shadow: inset 0 0 0 1px var(--accent);
+	}
+	.midiwords {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		display: flex;
+		align-items: center;
+		padding: 0 0.5rem;
+		font-size: 0.72rem;
+		color: var(--accent);
+		white-space: nowrap;
+	}
 	.dropwords {
 		font-size: 0.72rem;
 		color: var(--accent);

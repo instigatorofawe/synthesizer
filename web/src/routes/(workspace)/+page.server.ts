@@ -5,6 +5,7 @@ import { isError, parseDocument, toBase64 } from '#lib/Form.ts';
 import { compileSnapshot } from '#lib/server/Compile.ts';
 import { db } from '#lib/server/Db.ts';
 import { importInstrument, ImportError, type Upload } from '#lib/server/Import.ts';
+import { importMidi, MidiError, type Imported } from '#lib/MidiImport.ts';
 import { addRecipe, editCopy, readCatalogue } from '#lib/server/Builtins.ts';
 import { readRecipe, recipeInLibrary, recipeTimelineId, RECIPES } from '#lib/server/Recipes.ts';
 import {
@@ -148,6 +149,22 @@ export const actions = {
 		const name = field(form, 'name');
 		if (!name) return fail(400, { message: 'a song needs a name' });
 		redirect(303, back(form, { timeline: createTimeline(db(), name, NEW_TIMELINE), recipe: null, part: null }));
+	},
+	// A MIDI file as a new song, played on the standard set (MidiImport.ts), named after the file. The page opens it, and says
+	// what it holds and what was left out of it, so the song's id comes back rather than a redirect.
+	importMidi: async ({ request }) => {
+		const form = await request.formData();
+		const file = form.get('file');
+		if (!(file instanceof File) || !file.size) return fail(400, { message: 'choose a MIDI file' });
+		let made: Imported;
+		try {
+			made = importMidi(new Uint8Array(await file.arrayBuffer()));
+		} catch (e) {
+			if (e instanceof MidiError) return fail(400, { message: `${file.name} can't be imported. ${e.message}` });
+			throw e;
+		}
+		const name = field(form, 'name') || file.name.replace(/\.[^.]*$/, '').trim() || 'Imported song';
+		return guarded(() => ({ imported: { id: createTimeline(db(), name, made.doc), summary: made.summary.text } }));
 	},
 	createBundle: async ({ request }) => {
 		const form = await request.formData();

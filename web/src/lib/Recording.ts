@@ -101,7 +101,7 @@ export function recordNote(
 	const write = (placed: Placement, at: number) => {
 		const clip = clipOf(placed.clip);
 		if (!clip) return null;
-		const grown = growToHold(clip, at, barsOf(doc, placed.tick - (placed.start ?? 0)));
+		const grown = growToHold(clip, at, barsOf(doc).shifted(placed.tick, true));
 		if (grown !== clip && !canGrow(doc, clip.id, grown.length)) return null;
 		return {
 			doc: setClip(doc, clip.id, withNote(grown, inClip(placed, note, at))),

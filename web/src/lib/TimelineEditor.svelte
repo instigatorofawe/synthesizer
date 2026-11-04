@@ -197,7 +197,8 @@
 	const placed = $derived(selection.placement === null ? undefined : track?.placements[selection.placement]);
 	const clip = $derived(doc.clips.find((c) => c.id === clipId));
 	// Where bars fall (TimeSignature.ts): the song's, and the roll's, in its clip's own ticks. A clip's bars are those of where it is
-	// played: the chosen placement, or else the first that plays it, or the song's start for a clip on no track.
+	// played: the chosen placement, or else the first that plays it, or the song's start for a clip on no track. They line up with
+	// where the placement starts, which a window doesn't move, so the window's own fields never move the bars they read in.
 	const bars = $derived(barsOf(doc));
 	const rollPlaced = $derived(
 		placed?.clip === clipId
@@ -205,7 +206,7 @@
 			: (track?.placements.find((p) => p.clip === clipId) ??
 					doc.tracks.flatMap((t) => t.placements).find((p) => p.clip === clipId))
 	);
-	const clipBars = $derived(bars.shifted(rollPlaced ? rollPlaced.tick - (rollPlaced.start ?? 0) : 0, true));
+	const clipBars = $derived(bars.shifted(rollPlaced?.tick ?? 0, true));
 	// A whole bar where the clip starts, which a clip's length and a Draw length of bars read in.
 	const clipBar = $derived.by(() => {
 		const first = clipBars.at(0);

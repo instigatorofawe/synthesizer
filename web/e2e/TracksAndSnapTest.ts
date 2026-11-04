@@ -68,7 +68,7 @@ test('clips snap to bars, apart from the Snap notes take, and a finer clip snap 
 	page
 }) => {
 	await newSong(page, 'Snapped clips');
-	await expect(page.getByLabel('Clip snap')).toHaveValue(String(BAR));
+	await expect(page.getByLabel('Clip snap').locator('option:checked')).toHaveText('Bar');
 	await page.getByLabel('Snap', { exact: true }).selectOption({ label: '1/16' });
 
 	// A drag of most of a bar lands on the next bar, where notes' 1/16 would have put it part way.

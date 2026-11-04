@@ -170,9 +170,9 @@ test('a tempo change inside a bar reads as where it is', async ({ page }) => {
 		)
 	);
 	await page.getByRole('region', { name: 'Song editor' }).getByText('Tempo, 120 BPM').click();
-	const inspector = page.locator('#inspector');
-	await expect(inspector.getByText('bar 1', { exact: true })).toBeVisible();
-	await expect(inspector.getByText('3.2.000', { exact: true })).toBeVisible();
+	const tempo = page.locator('#inspector details', { hasText: 'Tempo, 120 BPM' });
+	await expect(tempo.getByText('bar 1', { exact: true })).toBeVisible();
+	await expect(tempo.getByText('3.2.000', { exact: true })).toBeVisible();
 });
 
 test('velocity stems are as wide as their notes, and a drag across them paints, undone in one step', async ({

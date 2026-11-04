@@ -74,26 +74,34 @@ def soft_clip(v: Voice, signal: Ref, drive: float) -> Ref:
     return v.g.node("shape", {"in": signal}, curve=shape)
 
 
+def lifted(v: Voice) -> Ref:
+    """A formant sound's level by its pitch: twice as loud two octaves under C4 and half as loud two octaves over it, and
+    no more than that either way. Formants that stay where they are reach fewer of a low note's harmonics, and a high note's
+    first formant follows its fundamental, so without this a low note is quiet and a high one loud."""
+    g = v.g
+    return g.node(
+        "math", {"a": g.keyed(v.key.pitch, 1.0), "b": 0.5, "c": 2.0}, mode="clip"
+    )
+
+
 def below(v: Voice, highest: float) -> Ref:
     """1 up to `highest` Hz and falling away above it, for a partial at a multiple of the pitch that would otherwise pass
     the top of the band and fold back, so a ring modulator's or a bell's upper partials leave as the note climbs."""
     g = v.g
     over = g.node("math", {"a": g.mul(v.freq, 1.0 / highest), "b": 1.0}, mode="max")
-    return g.node("math", {"a": g.mul(over, over), "b": 0.0}, mode="divide")
+    return g.node("math", {"a": 1.0, "b": g.mul(over, over)}, mode="divide")
 
 
 # Leads ----------------------------------------------------------------------------------------------------------------
 
 
 def square_lead(v: Voice) -> Ref:
-    """Two square waves a few cents apart, which beat slowly, through a low-pass that opens at the attack and follows the
-    pitch. Pressure brightens it."""
+    """A square wave whose width drifts a little either side of half, so it lives without beating, through a low-pass that
+    opens at the attack and follows the pitch. Pressure brightens it."""
     g = v.g
     f = g.mtof(vibrato(v, 5.6))
-    tone = g.add(
-        g.osc("square", f, width=0.5),
-        g.mul(g.osc("square", detuned(v, f, 7.0), width=0.5), 0.45),
-    )
+    width = g.add(g.node("lfo", {"rate": 0.7, "depth": 0.05}), 0.5)
+    tone = g.osc("square", f, width=width)
     bite = g.mul(g.snap(g.env(0.002, 0.25, 0.45, 0.06)), hardness(v, 0.4))
     harmonics = g.add(g.add(g.mul(bite, 9.0), 3.0), g.mul(v.pressure, 4.0))
     tone = g.filter("lowpass", tone, tracked(v, harmonics, 400.0), 1.0)
@@ -111,7 +119,7 @@ def saw_lead(v: Voice) -> Ref:
     bite = g.mul(g.snap(g.env(0.001, 0.3, 0.35, 0.06)), hardness(v, 0.3))
     harmonics = g.add(g.add(g.mul(bite, 12.0), 2.5), g.mul(v.pressure, 5.0))
     tone = g.filter("lowpass", tone, tracked(v, harmonics, 300.0), 1.4)
-    driven = soft_clip(v, g.mul(tone, g.add(g.mul(v.velocity, 0.25), 0.18)), 2.0)
+    driven = soft_clip(v, g.mul(tone, g.add(g.mul(v.velocity, 0.18), 0.22)), 2.0)
     return g.mul(driven, g.mul(g.env(0.004, 0.25, 0.8, 0.06), loudness(v)))
 
 
@@ -139,11 +147,11 @@ def voice_lead(v: Voice) -> Ref:
     f = g.mtof(vibrato(v, 5.2, 0.18, 0.3))
     source = g.add(g.osc("saw", f), g.mul(g.node("noise"), 0.12))
     first = g.node("math", {"a": g.mul(v.freq, 1.1), "b": 750.0}, mode="max")
-    sound = g.filter("bandpass", source, first, 5.0)
-    sound = g.add(sound, g.mul(g.filter("bandpass", source, 1150.0, 8.0), 0.6))
-    upper = g.mul(g.filter("bandpass", source, 2700.0, 10.0), hardness(v, 0.3))
+    sound = g.filter("bandpass", source, first, 3.5)
+    sound = g.add(sound, g.mul(g.filter("bandpass", source, 1150.0, 6.0), 0.6))
+    upper = g.mul(g.filter("bandpass", source, 2700.0, 8.0), hardness(v, 0.3))
     sound = g.add(sound, g.mul(upper, 0.4))
-    level = g.mul(loudness(v), g.keyed(v.key.pitch, 1.0))
+    level = g.mul(loudness(v), lifted(v))
     return g.mul(sound, g.mul(g.env(0.04, 0.2, 0.9, 0.06), level))
 
 
@@ -152,8 +160,7 @@ def voice_lead(v: Voice) -> Ref:
 
 def new_age_pad(v: Voice) -> tuple[Ref, Ref]:
     """A bell struck over a pad: a sine ring-modulated by one at three and a half times its pitch, whose clang fades faster
-    than the sine does, over two triangles a few cents apart, one each side, and a soft saw, which swell in. Metallic comes
-    here too."""
+    than the sine does, over two soft saws a few cents apart, one each side, which swell in. Metallic comes here too."""
     g = v.g
     f = g.mtof(vibrato(v, 4.5))
     sine = g.osc("sine", f)
@@ -162,16 +169,15 @@ def new_age_pad(v: Voice) -> tuple[Ref, Ref]:
     )
     ring = g.env(0.001, g.keyed(v.pitch, 1.6), 0.0, 0.24)
     shimmer = g.env(0.001, g.keyed(v.pitch, 0.5), 0.0, 0.24)
-    struck = g.mul(hardness(v, 0.4), 0.9)
+    struck = g.mul(hardness(v, 0.65), 0.9)
     bell = g.mul(g.add(g.mul(sine, ring), g.mul(clang, shimmer)), struck)
-    body = g.filter("lowpass", g.osc("saw", f), tracked(v, 2.0, 300.0, 6000.0), 0.7)
-    body = g.add(bell, g.mul(body, g.mul(g.env(0.5, 1.0, 0.85, 0.24), 0.3)))
-    swell = g.mul(g.env(0.6, 1.0, 0.85, 0.24), 0.8)
-    level = loudness(v)
+    swell = g.mul(g.env(0.6, 1.0, 0.85, 0.24), 0.5)
+    cutoff = tracked(v, 2.5, 300.0, 8000.0)
+    level = loudness(v, 0.1)
     out = []
-    for cents in (-7.0, 7.0):
-        side = g.add(body, g.mul(g.osc("triangle", detuned(v, f, cents)), swell))
-        out.append(g.mul(side, level))
+    for cents in (-6.0, 6.0):
+        pad = g.filter("lowpass", g.osc("saw", detuned(v, f, cents)), cutoff, 0.7)
+        out.append(g.mul(g.add(bell, g.mul(pad, swell)), level))
     return out[0], out[1]
 
 
@@ -182,10 +188,10 @@ def warm_pad(v: Voice) -> tuple[Ref, Ref]:
     f = g.mtof(vibrato(v, 4.8, 0.05, 0.6))
     swell = g.snap(g.env(0.8, 1.5, 0.6, 0.24))
     harmonics = g.add(g.mul(swell, g.add(g.mul(v.velocity, 2.0), 1.0)), 1.6)
-    cutoff = tracked(v, harmonics, 500.0, 9000.0)
+    cutoff = tracked(v, harmonics, 500.0)
     level = g.mul(g.env(0.35, 1.0, 0.85, 0.24), loudness(v))
     out = []
-    for a, b in ((-10.0, 4.0), (10.0, -4.0)):
+    for a, b in ((-7.0, 3.0), (7.0, -3.0)):
         saws = g.add(g.osc("saw", detuned(v, f, a)), g.osc("saw", detuned(v, f, b)))
         out.append(g.mul(g.filter("lowpass", saws, cutoff, 0.7), level))
     return out[0], out[1]
@@ -202,7 +208,7 @@ def polysynth_pad(v: Voice) -> tuple[Ref, Ref]:
     cutoff = tracked(v, harmonics, 250.0, 12000.0)
     level = g.mul(g.env(0.03, 0.4, 0.85, 0.22), loudness(v))
     out = []
-    for cents, width in ((-5.0, 0.3), (5.0, 0.7)):
+    for cents, width in ((-3.0, 0.3), (3.0, 0.7)):
         tone = g.add(
             g.osc("saw", detuned(v, f, cents)),
             g.mul(g.osc("square", detuned(v, f, -cents), width=width), 0.6),
@@ -221,13 +227,11 @@ def choir_pad(v: Voice) -> tuple[Ref, Ref]:
         g.add(g.osc("saw", f), g.mul(g.node("noise"), 0.25)),
     )
     first = g.node("math", {"a": g.mul(v.freq, 1.1), "b": 650.0}, mode="max")
-    sound = g.filter("bandpass", source, first, 4.0)
-    sound = g.add(sound, g.mul(g.filter("bandpass", source, 1080.0, 7.0), 0.55))
-    sound = g.add(sound, g.mul(g.filter("bandpass", source, 2600.0, 9.0), 0.25))
+    sound = g.filter("bandpass", source, first, 3.0)
+    sound = g.add(sound, g.mul(g.filter("bandpass", source, 1080.0, 5.0), 0.55))
+    sound = g.add(sound, g.mul(g.filter("bandpass", source, 2600.0, 7.0), 0.25))
     sound = g.add(sound, g.mul(g.filter("bandpass", source, 4200.0, 2.0), 0.12))
-    level = g.mul(
-        g.env(0.45, 1.0, 0.9, 0.24), g.mul(loudness(v), g.keyed(v.key.pitch, 1.0))
-    )
+    level = g.mul(g.env(0.45, 1.0, 0.9, 0.24), g.mul(loudness(v), lifted(v)))
     drift = g.node("lfo", {"rate": 0.23, "depth": 0.4})
     sides = g.node("pan", {"in": g.mul(sound, level), "position": drift})
     return sides.l, sides.r
@@ -237,41 +241,32 @@ def choir_pad(v: Voice) -> tuple[Ref, Ref]:
 
 
 def crystal(v: Voice) -> tuple[Ref, Ref]:
-    """Glass struck over a soft tone: the inharmonic partials of a free bar, the upper ones dying faster, and sparkles that
-    fall again and again and fade, a high partial and a drop of noise each time, wandering from side to side. Rain comes
-    here too."""
+    """Glass struck and left ringing softly: the inharmonic partials of a free bar, the upper ones dying away and the lowest
+    settling to a tone that lasts while the note is held, and sparkles that fall again and again and fade, the highest
+    partial and a drop of noise each time, wandering from side to side. Rain comes here too."""
     g = v.g
     f = g.mtof(vibrato(v, 5.0))
-    struck = hardness(v, 0.5)
-    fundamental = g.mul(
-        g.osc("sine", f), g.env(0.001, g.keyed(v.pitch, 2.0), 0.0, 0.24)
-    )
-    upper = g.add(
-        g.osc("sine", g.mul(f, 2.756)), g.mul(g.osc("sine", g.mul(f, 5.404)), 0.55)
-    )
-    upper = g.mul(
-        upper,
-        g.mul(
-            g.env(0.001, g.keyed(v.pitch, 0.6), 0.0, 0.24),
-            g.mul(below(v, 3500.0), 0.45),
-        ),
-    )
-    tone = g.mul(g.osc("triangle", f), g.mul(g.env(0.3, 1.0, 0.6, 0.24), 0.35))
-    centre = g.add(g.mul(g.add(fundamental, upper), struck), tone)
+    level = loudness(v)
+    struck = g.mul(hardness(v, 0.7), level)
+    high = g.osc("sine", g.mul(f, 5.404))
+    upper = g.add(g.osc("sine", g.mul(f, 2.756)), g.mul(high, 0.55))
+    upper = g.mul(upper, g.env(0.001, g.keyed(v.pitch, 0.6), 0.0, 0.24))
+    glass = g.add(g.mul(upper, g.mul(below(v, 3500.0), 0.45)), g.osc("sine", f))
+    glass = g.mul(glass, g.env(0.001, g.keyed(v.pitch, 1.5), 0.2, 0.24))
+    centre = g.mul(glass, struck)
     # A falling ramp, curved into a drop, at a rate that rises with the pitch so a chord's sparkles don't fall together.
     rate = g.mtof(g.add(g.mul(v.key.pitch, 0.25), -20.4))
     drop = g.node(
         "shape", {"in": g.osc("saw", rate)}, curve=curve(lambda x: ((1 - x) / 2) ** 3)
     )
     noise = g.filter("bandpass", g.node("noise"), tracked(v, 6.0, 2000.0), 3.0)
-    sparkle = g.add(g.osc("sine", g.mul(f, 4.0)), g.mul(noise, 0.6))
-    fade = g.mul(g.env(0.05, 1.8, 0.15, 0.24), g.mul(below(v, 4000.0), 0.5))
-    sparkle = g.mul(g.mul(sparkle, drop), fade)
+    sparkle = g.mul(g.add(high, g.mul(noise, 0.6)), drop)
+    fade = g.mul(below(v, 4000.0), g.mul(level, 0.8))
+    sparkle = g.mul(sparkle, g.mul(g.env(0.05, 1.8, 0.15, 0.24), fade))
     sides = g.node(
         "pan", {"in": sparkle, "position": g.node("lfo", {"rate": 0.7, "depth": 0.7})}
     )
-    level = loudness(v)
-    return g.mul(g.add(centre, sides.l), level), g.mul(g.add(centre, sides.r), level)
+    return g.add(centre, sides.l), g.add(centre, sides.r)
 
 
 def atmosphere(v: Voice) -> tuple[Ref, Ref]:
@@ -286,7 +281,7 @@ def atmosphere(v: Voice) -> tuple[Ref, Ref]:
     saws = g.add(g.osc("saw", detuned(v, f, -8.0)), g.osc("saw", detuned(v, f, 8.0)))
     strings = g.filter("lowpass", saws, tracked(v, g.add(shine, 3.0), 600.0), 0.8)
     strings = g.mul(strings, g.add(pluck, g.mul(swell, 0.45)))
-    air = g.mul(g.filter("highpass", g.node("noise"), 6000.0), g.mul(swell, 0.25))
+    air = g.mul(g.filter("highpass", g.node("noise"), 6000.0), g.mul(swell, 0.06))
     centre = g.add(strings, air)
     level = loudness(v)
     out = []
@@ -297,20 +292,20 @@ def atmosphere(v: Voice) -> tuple[Ref, Ref]:
 
 
 def soundtrack(v: Voice) -> tuple[Ref, Ref]:
-    """A dark, slow pad that won't settle: two saws through a resonant low-pass that wanders, and a sine ring-modulated by
-    one whose pitch drifts, so its overtones slide out of tune and back, coming in slowly, and a pitch that wobbles.
-    Goblins and sci-fi come here too."""
+    """A dark, slow pad that won't settle: two saws through a resonant low-pass that wanders, and, coming in slowly, a sine
+    ring-modulated by one near its octave whose pitch drifts, which leaves two partials, one either side of the note and one
+    near its twelfth, that slide out of tune and back, and a pitch that wobbles. Goblins and sci-fi come here too."""
     g = v.g
     pitch = g.add(vibrato(v, 4.0), g.node("lfo", {"rate": 0.27, "depth": 0.08}))
     f = g.mtof(pitch)
     wander = g.add(g.node("lfo", {"rate": 0.19, "depth": 0.6}), 1.4)
     saws = g.add(g.osc("saw", detuned(v, f, -6.0)), g.osc("saw", detuned(v, f, 6.0)))
-    dark = g.filter("lowpass", saws, tracked(v, wander, 250.0, 6000.0), 3.0)
-    drift = g.add(g.node("lfo", {"rate": 0.13, "depth": 0.1}), 1.5)
+    dark = g.filter("lowpass", saws, tracked(v, wander, 250.0), 3.0)
+    drift = g.add(g.node("lfo", {"rate": 0.13, "depth": 0.08}), 2.0)
     eerie = g.mul(g.osc("sine", f), g.osc("sine", g.mul(f, drift)))
     creep = g.mul(
         g.env(1.5, 2.0, 0.7, 0.24),
-        g.mul(below(v, 5000.0), g.mul(hardness(v, 0.3), 1.6)),
+        g.mul(below(v, 5000.0), g.mul(hardness(v, 0.6), 1.6)),
     )
     sound = g.add(
         g.mul(dark, g.mul(g.env(0.8, 1.5, 0.85, 0.24), 0.6)), g.mul(eerie, creep)
@@ -326,8 +321,9 @@ def soundtrack(v: Voice) -> tuple[Ref, Ref]:
 
 
 def echoes(v: Voice) -> tuple[Ref, Ref]:
-    """A soft tone and its echoes, repeating as they fade and darken, from two combs inside the patch, one each side at its
-    own time, so the repeats fall left and right. They stop soon after the note does."""
+    """A soft tone struck and sustained quietly, and its echoes, repeating as they fade and darken, from two combs inside the
+    patch, one each side at its own time, so the repeats fall left and right. The echoes go on after the note ends, as
+    echoes do, and are gone within two seconds."""
     g = v.g
     f = g.mtof(vibrato(v, 5.0))
     tone = g.add(g.osc("square", f, width=0.4), g.mul(g.osc("saw", f), 0.5))
@@ -335,13 +331,14 @@ def echoes(v: Voice) -> tuple[Ref, Ref]:
     tone = g.filter(
         "lowpass", tone, tracked(v, g.add(g.mul(bright, 8.0), 2.0), 300.0, 9000.0), 0.8
     )
-    dry = g.mul(tone, g.mul(g.env(0.008, 0.9, 0.35, 0.24), loudness(v)))
-    hold = g.mul(g.env(0.001, 0.1, 1.0, 0.22), 0.7)
+    dry = g.mul(tone, g.mul(g.env(0.005, 0.3, 0.25, 0.12), loudness(v)))
+    # The voice lasts as long as its envelopes, so this one holds it open for the echoes, and fades them once it is let go.
+    hold = g.mul(g.env(0.001, 0.1, 1.0, 0.45), 0.8)
     out = []
-    for seconds in (0.32, 0.24):
+    for seconds in (0.36, 0.27):
         echo = g.node(
             "comb",
-            {"in": dry, "time": seconds, "feedback": 0.5, "damp": 0.35},
+            {"in": dry, "time": seconds, "feedback": 0.6, "damp": 0.3},
             max=seconds,
         )
         out.append(g.add(dry, g.mul(echo, hold)))

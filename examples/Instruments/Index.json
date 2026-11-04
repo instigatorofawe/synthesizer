@@ -1,1 +1,146 @@
-[]
+[
+ {
+  "name": "Piano",
+  "file": "Piano.json",
+  "seconds": 72.25,
+  "group": "instruments",
+  "family": "Piano",
+  "listen_for": "The set's piano instruments in turn: Grand piano, Bright piano, Electric grand, Honky-tonk piano, Electric piano, FM electric piano, Harpsichord, Clavinet."
+ },
+ {
+  "name": "ChromaticPercussion",
+  "file": "ChromaticPercussion.json",
+  "seconds": 62.5,
+  "group": "instruments",
+  "family": "Chromatic percussion",
+  "listen_for": "The set's chromatic percussion instruments in turn: Celesta, Glockenspiel, Music box, Vibraphone, Marimba, Xylophone, Tubular bells, Dulcimer."
+ },
+ {
+  "name": "Organ",
+  "file": "Organ.json",
+  "seconds": 77.0,
+  "group": "instruments",
+  "family": "Organ",
+  "listen_for": "The set's organ instruments in turn: Drawbar organ, Percussive organ, Rock organ, Church organ, Reed organ, Accordion, Harmonica, Tango accordion."
+ },
+ {
+  "name": "Guitar",
+  "file": "Guitar.json",
+  "seconds": 81.75,
+  "group": "instruments",
+  "family": "Guitar",
+  "listen_for": "The set's guitar instruments in turn: Nylon guitar, Steel guitar, Jazz guitar, Clean guitar, Muted guitar, Overdriven guitar, Distortion guitar, Guitar harmonics."
+ },
+ {
+  "name": "Bass",
+  "file": "Bass.json",
+  "seconds": 50.5,
+  "group": "instruments",
+  "family": "Bass",
+  "listen_for": "The set's bass instruments in turn: Acoustic bass, Finger bass, Fretless bass, Slap bass, Synth bass."
+ },
+ {
+  "name": "Strings",
+  "file": "Strings.json",
+  "seconds": 92.25,
+  "group": "instruments",
+  "family": "Strings",
+  "listen_for": "The set's strings instruments in turn: Violin, Viola, Cello, Contrabass, Tremolo strings, Pizzicato strings, Orchestral harp, Timpani."
+ },
+ {
+  "name": "Ensemble",
+  "file": "Ensemble.json",
+  "seconds": 74.5,
+  "group": "instruments",
+  "family": "Ensemble",
+  "listen_for": "The set's ensemble instruments in turn: String ensemble, Slow strings, Synth strings, Soft synth strings, Choir aahs, Voice oohs, Synth voice, Orchestra hit."
+ },
+ {
+  "name": "Brass",
+  "file": "Brass.json",
+  "seconds": 67.5,
+  "group": "instruments",
+  "family": "Brass",
+  "listen_for": "The set's brass instruments in turn: Trumpet, Trombone, Tuba, Muted trumpet, French horn, Brass section, Synth brass."
+ },
+ {
+  "name": "Reed",
+  "file": "Reed.json",
+  "seconds": 57.75,
+  "group": "instruments",
+  "family": "Reed",
+  "listen_for": "The set's reed instruments in turn: Alto sax, Tenor sax, Oboe, English horn, Bassoon, Clarinet."
+ },
+ {
+  "name": "Pipe",
+  "file": "Pipe.json",
+  "seconds": 57.75,
+  "group": "instruments",
+  "family": "Pipe",
+  "listen_for": "The set's pipe instruments in turn: Flute, Recorder, Pan flute, Blown bottle, Shakuhachi, Ocarina."
+ },
+ {
+  "name": "SynthLead",
+  "file": "SynthLead.json",
+  "seconds": 29.0,
+  "group": "instruments",
+  "family": "Synth lead",
+  "listen_for": "The set's synth lead instruments in turn: Square lead, Saw lead, Calliope lead, Voice lead."
+ },
+ {
+  "name": "SynthPad",
+  "file": "SynthPad.json",
+  "seconds": 48.25,
+  "group": "instruments",
+  "family": "Synth pad",
+  "listen_for": "The set's synth pad instruments in turn: New age pad, Warm pad, Polysynth pad, Choir pad."
+ },
+ {
+  "name": "SynthEffects",
+  "file": "SynthEffects.json",
+  "seconds": 42.0,
+  "group": "instruments",
+  "family": "Synth effects",
+  "listen_for": "The set's synth effects instruments in turn: Crystal, Atmosphere, Soundtrack, Echoes."
+ },
+ {
+  "name": "Ethnic",
+  "file": "Ethnic.json",
+  "seconds": 72.25,
+  "group": "instruments",
+  "family": "Ethnic",
+  "listen_for": "The set's ethnic instruments in turn: Sitar, Banjo, Koto, Kalimba, Bagpipe, Fiddle, Shanai."
+ },
+ {
+  "name": "Percussive",
+  "file": "Percussive.json",
+  "seconds": 41.0,
+  "group": "instruments",
+  "family": "Percussive",
+  "listen_for": "The set's percussive instruments in turn: Tinkle bell, Steel drums, Woodblock, Taiko drum, Synth drum, Reverse cymbal."
+ },
+ {
+  "name": "SoundEffects",
+  "file": "SoundEffects.json",
+  "seconds": 56.75,
+  "group": "instruments",
+  "family": "Sound effects",
+  "listen_for": "The set's sound effects instruments in turn: Guitar fret noise, Seashore, Bird tweet, Telephone ring, Helicopter, Applause, Gunshot."
+ },
+ {
+  "name": "DrumKit",
+  "file": "DrumKit.json",
+  "seconds": 24.25,
+  "group": "instruments",
+  "family": "Drum kit",
+  "listen_for": "Every drum of the kit in turn, by its GM key, and then a groove on the kit."
+ },
+ {
+  "name": "Effects",
+  "file": "Effects.json",
+  "seconds": 77.0,
+  "group": "instruments",
+  "family": "Effects",
+  "listen_for": "Each effect in turn, on the same phrase: Small room, Medium room, Large room, Medium hall, Large hall, Plate, Chorus, Stereo tremolo."
+ }
+]

@@ -25,9 +25,9 @@
 namespace modsynth {
 
 enum class EventKind : u8 {
-    NoteOn,          // target: track, note, velocity
-    NoteOff,         // target: track, note
-    SetParam,        // target: track, param, value
+    NoteOn,    // target: track, note, velocity; param: 0, or a slot plus one for the note to play in (a kit's key)
+    NoteOff,   // target: track, note
+    SetParam,  // target: track, param, value
     SetInsertParam,  // target: insert, param, value
     SetMix,          // param: mix register, value
     SetTap,          // param: tap slot, target: mix step, note: bus register, channel
@@ -1510,7 +1510,13 @@ class Synth {
             case EventKind::NoteOn:
                 if (e.target < h.tracks) {
                     Track& t = g.tracks[e.target];
+                    // A live note can name the slot it plays in, as a drum kit's key does, and then plays there as if a
+                    // SetPatch came just before it. The track's own slot is put back, because its stream sets one only
+                    // when it changes. A slot the track hasn't got plays the track's own.
+                    const u8 own = t.slot;
+                    if (e.param > 0 && e.param - 1u < t.desc.slot_count) t.slot = static_cast<u8>(e.param - 1u);
                     note_on(g, t, e.note, e.velocity, 0, kNoTick, t.ordinal++);
+                    t.slot = own;
                 }
                 break;
             case EventKind::NoteOff:

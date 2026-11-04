@@ -290,6 +290,32 @@ TEST(Synth, SetPatchLetsHeldNotesFinishOnTheOldPatch) {
     EXPECT_EQ(rig.engine.active_voices(), 2u);
 }
 
+TEST(Synth, ALiveNoteCanPlayInASlotOfItsOwn) {
+    json request = demo();
+    // A note far past where the test plays keeps the track in the image.
+    json timeline =
+        json::parse(R"({"clips": [{"id": "c", "length": 1920, "notes": [{"tick": 1440, "note": 60, "dur": 9}]}],
+        "tracks": [{"id": 1, "voices": 4, "slots": ["lead", "pluck"], "placements": [{"clip": "c", "tick": 96000}]}]})");
+    request["programs"] = {{{"id", "t"}, {"name", "t"}, {"timeline", timeline}}};
+    request["live"] = true;  // Which keeps the slot no note plays
+    const auto image = compile_image(request).image;
+    // Two live notes, the first in `first`'s slot and the second in `second`'s, as a NoteOn's param says: 0 for the
+    // track's own, or a slot plus one.
+    const auto notes = [&](u16 first, u16 second) {
+        Rig<kStereo> rig(image);
+        EXPECT_TRUE(rig.engine.send({.kind = EventKind::NoteOn, .note = 60, .velocity = 100, .param = first}));
+        auto audio = render_stereo(rig, 20);
+        EXPECT_TRUE(rig.engine.send({.kind = EventKind::NoteOn, .note = 67, .velocity = 100, .param = second}));
+        const auto more = render_stereo(rig, 20);
+        audio.insert(audio.end(), more.begin(), more.end());
+        return audio;
+    };
+    EXPECT_NE(notes(0, 0), notes(2, 0));  // The pluck isn't the lead
+    EXPECT_EQ(notes(1, 1), notes(0, 0));  // Slot 0 named is the track's own
+    EXPECT_EQ(notes(2, 0), notes(2, 1));  // After a note in the pluck's slot, the track's own is still the lead's
+    EXPECT_EQ(notes(9, 0), notes(0, 0));  // A slot the track hasn't got plays its own
+}
+
 TEST(Synth, ASecondProgramBindsFromTheSameBundle) {
     const auto image = compile_demo();
     Rig<kStereo> song(image, 0), ballad(image, 1);

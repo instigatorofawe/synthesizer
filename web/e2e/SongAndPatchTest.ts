@@ -129,7 +129,8 @@ test('a new patch with a name that is taken is numbered, and the built-in patche
 	const builtins = browser(page).getByTestId('builtins');
 	await builtins.locator('summary').click();
 	await expect(builtins.locator('li.family').first()).toBeVisible();
-	await expect(builtins.locator('li.family', { hasText: /^drums$/ })).toHaveCount(1);
+	await expect(builtins.locator('li.family', { hasText: /^Techniques$/ })).toHaveCount(1);
+	await expect(builtins.locator('li.family').last()).toHaveText('Techniques'); // After the standard set's families
 });
 
 test('a value on a node drags across to change it, and the keys can go full width in the Patch view', async ({

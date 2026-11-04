@@ -185,6 +185,14 @@ describe('fixing the last step’s pitch', () => {
 		const changed = { ...written.clip, notes: [note(0, 120, SIXTEENTH)] };
 		expect(repitch(changed, written.cursor, 1).clip).toBe(changed);
 	});
+
+	it('keeps what the clip gave its notes since, such as the slot a kit gave them', () => {
+		const written = chord(clipOf(), START, [38]);
+		const slotted = { ...written.clip, notes: [{ ...written.clip.notes[0], slot: 1 }] };
+		const moved = repitch(slotted, written.cursor, 2);
+		expect(moved.clip.notes).toEqual([{ ...note(0, 40), slot: 1 }]);
+		expect(stepBack(moved.clip, moved.cursor, EIGHTH).clip.notes).toEqual([]);
+	});
 });
 
 describe('moving the cursor by hand', () => {

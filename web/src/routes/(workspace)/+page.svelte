@@ -10,7 +10,7 @@
 	import BundleDialog from '#lib/BundleDialog.svelte';
 	import ContextMenu, { type MenuItem } from '#lib/ContextMenu.svelte';
 	import QuickOpen from '#lib/QuickOpen.svelte';
-	import type { Openable } from '#lib/QuickOpen.ts';
+	import { PATCH_KINDS, patchKind, type Openable } from '#lib/QuickOpen.ts';
 	import ShortcutsSheet from '#lib/ShortcutsSheet.svelte';
 	import type { SideTab } from '#lib/GraphEditor.svelte';
 	import CompileLight from '#lib/CompileLight.svelte';
@@ -36,6 +36,7 @@
 	import { stepVelocity } from '#lib/StepEntry.ts';
 	import { bpmText, tempoAt, gliding, parseBpm, shownTempo, tempoTyped, tempoWords } from '#lib/Tempo.ts';
 	import { patchUses, addSlot, replacePatch, setSlot, soloed, type PatchUse } from '#lib/TimelineEdit.ts';
+	import { liveSlot } from '#lib/Kit.ts';
 	import { wholeSong } from '#lib/Transport.ts';
 	import { barsOf } from '#lib/TimeSignature.ts';
 	import TimelineEditor from '#lib/TimelineEditor.svelte';
@@ -627,10 +628,14 @@
 
 	// The top bar's keys play what the view on screen is about: the chosen track in the Song view, and in the Patch view its
 	// patch, wherever it is heard. A track the image leaves out, because it has no notes yet, is played on its own.
-	const chosenIndex = $derived(
-		session.goodSong?.report.programs[0]?.tracks.find((t) => t.id === selectedTrack)?.index ?? null
-	);
+	const chosenReport = $derived(session.goodSong?.report.programs[0]?.tracks.find((t) => t.id === selectedTrack));
+	const chosenIndex = $derived(chosenReport?.index ?? null);
 	const chosenName = $derived(songDoc?.tracks.find((t) => t.id === selectedTrack)?.name ?? '');
+	// On a kit track the keys are named by its sounds, as the roll's keys are (Kit.ts).
+	const keySounds = $derived.by(() => {
+		const kit = view === 'song' ? songDoc?.tracks.find((t) => t.id === selectedTrack)?.kit : undefined;
+		return kit ? new Map(kit.map((key) => [key.note, key.name])) : null;
+	});
 	const keysPlay = $derived(view === 'song' ? chosenIndex !== null || aloneTrack !== null : hears.kind !== 'none');
 	const keysWhere = $derived.by(() => {
 		if (view === 'song') {
@@ -649,14 +654,22 @@
 
 	// Where each key held down went, so it is let go there though the view or the chosen track changed meanwhile.
 	// When it went down, and when the engine was sent it, which is later while audio or an image is still on its way.
-	type Held = { source: Source; track: number; stamped: boolean; down: number; sent: number | null };
+	// A key on a kit track plays in its sound's slot, which `slot` holds as the image numbers it (Kit.ts' liveSlot).
+	type Held = {
+		source: Source;
+		track: number;
+		stamped: boolean;
+		down: number;
+		sent: number | null;
+		slot?: number;
+	};
 	const sounding = new Map<number, Held>();
 
 	// Sends a note to where it is held, and keeps when that was.
 	function sendOn(held: Held, note: number, vel: number, at?: number) {
 		session.use(held.source, () => {
 			held.sent = performance.now();
-			engine.noteOn(held.track, note, vel, held.stamped ? at : undefined);
+			engine.noteOn(held.track, note, vel, held.stamped ? at : undefined, held.slot);
 		});
 	}
 
@@ -769,7 +782,12 @@
 		if (!to) return;
 		// A take records the keys that play its track, from the count-in on, and stamps them with when they were pressed.
 		const stamped = at !== undefined && take?.phase === 'started' && to.source === 'song' && to.track === takeIndex;
-		const held: Held = { ...to, stamped, down: performance.now(), sent: null };
+		// On a kit track in the Song view, the key plays its sound, and isn't heard while the image doesn't hold it yet. The image
+		// a track plays on its own keeps every slot, so its slots need no translating.
+		const kit = view === 'song' ? songDoc?.tracks.find((t) => t.id === selectedTrack)?.kit : undefined;
+		const slot = liveSlot(kit, to.source === 'song' ? chosenReport?.slots : undefined, note);
+		if (slot === null) return;
+		const held: Held = { ...to, stamped, down: performance.now(), sent: null, slot };
 		sounding.set(note, held);
 		sendOn(held, note, vel, at);
 	}
@@ -1353,7 +1371,8 @@
 	let quickOpen = $state(false); // Mod+K's search
 	let keyStrip = $state<HTMLElement | null>(null); // The Patch view's strip, where the keys are drawn while it is open
 
-	// What Mod+K finds: the library's timelines, the examples, and the patches, the library's own before the built-in ones.
+	// What Mod+K finds: the library's timelines, the examples, and the patches, the library's own, then the set's, then the
+	// other built-in ones.
 	const openables = $derived.by((): Openable[] => [
 		...data.library.timelines.map((t) => ({
 			kind: 'Song' as const,
@@ -1368,9 +1387,9 @@
 			}))
 		),
 		...[...library]
-			.sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin))
+			.sort((a, b) => PATCH_KINDS.indexOf(patchKind(a)) - PATCH_KINDS.indexOf(patchKind(b)))
 			.map((p) => ({
-				kind: p.builtin ? ('Built-in' as const) : ('Patch' as const),
+				kind: patchKind(p),
 				name: p.name,
 				href: patchHref(search, p.id)
 			}))
@@ -1684,6 +1703,7 @@
 			onhold={holdKeys}
 			onletgo={() => letGo(latched)}
 			stripIn={view === 'patch' ? keyStrip : null}
+			sounds={keySounds}
 		/>
 		<div class="master"><Meter ring={masterRing} label="Master level" limiter={session.engineState} /></div>
 		<span class="grow"></span>

@@ -7,7 +7,7 @@ import { db } from '#lib/server/Db.ts';
 import { importInstrument, ImportError, type Upload } from '#lib/server/Import.ts';
 import { importMidi, MidiError, type Imported } from '#lib/MidiImport.ts';
 import { addRecipe, editCopy, readCatalogue } from '#lib/server/Builtins.ts';
-import { readRecipe, recipeInLibrary, recipeTimelineId, RECIPES } from '#lib/server/Recipes.ts';
+import { inSet, readRecipe, recipeInLibrary, recipeTimelineId, RECIPES } from '#lib/server/Recipes.ts';
 import {
 	createBundle,
 	createPatch,
@@ -46,9 +46,10 @@ export const load = async ({ url }) => {
 				project,
 				// The same documents with their defaults filled in, for the editors to draw. What plays is `project`, as it ships.
 				// An example's one patch is called after the example, as its built-in copy is: most call it "p", which says nothing.
+				// The set's are instruments, called what they are, as their built-in copies are.
 				patches: Object.entries(project.patches).map(([id, patch], _, all) => ({
 					id,
-					name: all.length === 1 ? recipe : patch.name || id,
+					name: all.length === 1 && !inSet(entry) ? recipe : patch.name || id,
 					graph: graphSchema.parse(patch.graph)
 				})),
 				timeline: timelineSchema.parse(project.programs[0].timeline),

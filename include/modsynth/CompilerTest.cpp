@@ -1385,6 +1385,22 @@ TEST(Timeline, MetersAndKeysAreTheEditorsAndChangeNoByte) {
     }
 }
 
+TEST(Timeline, TheReportSaysWhichSlotsATrackKept) {
+    json request = lane_project(json::array());
+    json& timeline = request["programs"][0]["timeline"];
+    timeline["tracks"][0]["slots"] = {"tone", "tone", "tone"};
+    timeline["clips"][0]["notes"] =
+        json::parse(R"([{"tick": 0, "note": 60, "dur": 100, "slot": 2}, {"tick": 480, "note": 62, "dur": 100}])");
+    const auto slots_of = [](const json& report) {
+        for (const json& t : report.at("programs")[0].at("tracks"))
+            if (t.at("id") == 1) return t.at("slots");
+        return json();
+    };
+    EXPECT_EQ(slots_of(compile_image(request).report), json::array({0, 2}));  // Slot 1 plays no note
+    request["live"] = true;
+    EXPECT_EQ(slots_of(compile_image(request).report), json::array({0, 1, 2}));
+}
+
 TEST(Timeline, AKitIsTheEditorsAndChangesNoByte) {
     const json plain = lane_project(json::parse(R"([{"target": {"insert": 1}, "param": 1, "tick": 0, "value": 0.5}])"));
     json kitted = plain;

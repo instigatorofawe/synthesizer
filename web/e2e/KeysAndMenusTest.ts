@@ -51,6 +51,7 @@ test('a track head, an empty row and the empty roll each have a menu, and the me
 		'Move down',
 		'Mute',
 		'Solo',
+		'Use the standard kit',
 		'Delete track'
 	]);
 	await head.getByRole('menuitem', { name: 'Rename…' }).click();

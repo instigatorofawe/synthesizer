@@ -42,8 +42,8 @@ test('+ Track asks which patch the track plays, and Esc makes no track', async (
 	await expect(list.getByRole('group', { name: 'My patches' }).getByRole('option').first()).toBeVisible();
 	// The list opens tall enough to show patches, not just the field: the tenth is in sight, not scrolled off a sliver.
 	await expect(list.getByRole('option').nth(9)).toBeInViewport();
-	// Built-in patches are grouped as the browser groups the examples.
-	await expect(list.getByRole('group', { name: 'Built in drums' })).toContainText('Kick808');
+	// The examples' own built-in patches are the techniques, after the standard set's (StandardSetTest.ts).
+	await expect(list.getByRole('group', { name: 'Built in Techniques' })).toContainText('Kick808');
 	await expect(list.getByRole('option').last()).toHaveText('+New patch for this track');
 
 	await page.keyboard.press('Escape');

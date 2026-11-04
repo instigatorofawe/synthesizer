@@ -1,8 +1,10 @@
 <script lang="ts">
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
 	import { rangeEscape } from '#lib/Drag.ts';
+	import { GM } from '#lib/GeneralMidi.ts';
 	import ParamSlider from '#lib/ParamSlider.svelte';
 	import { bringing } from '#lib/PatchDrag.svelte.ts';
+	import { TECHNIQUES } from '#lib/PatchGroups.ts';
 	import { unitOf } from '#lib/ParamValues.ts';
 	import type { ProgramReport } from '#lib/Request.ts';
 	import type { Param, Timeline } from '#lib/Schema.ts';
@@ -101,6 +103,18 @@
 	const patchOf = (id: string) => patches.find((patch) => patch.id === id);
 	const insertPatches = $derived(
 		byOwner(patches.filter((patch) => patch.graph.nodes.some((node) => node.type === 'in')))
+	);
+	// The built-in ones as the patch picker has them: the standard set's effects by name, then the examples' own.
+	const builtinInserts = $derived(
+		[
+			{
+				label: 'Effects',
+				patches: insertPatches.builtin
+					.filter((patch) => patch.id.startsWith(GM.prefix))
+					.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+			},
+			{ label: TECHNIQUES, patches: insertPatches.builtin.filter((patch) => !patch.id.startsWith(GM.prefix)) }
+		].filter((group) => group.patches.length)
 	);
 	const hasSidechain = (id: string) =>
 		patchOf(id)?.graph.nodes.some((node) => node.type === 'in' && node.index === 1) ?? false;
@@ -296,12 +310,11 @@
 
 {#snippet choices()}
 	{#each insertPatches.own as candidate (candidate.id)}<option value={candidate.id}>{candidate.name}</option>{/each}
-	{#if insertPatches.builtin.length}
-		<optgroup label="Built in">
-			{#each insertPatches.builtin as candidate (candidate.id)}<option value={candidate.id}>{candidate.name}</option
-				>{/each}
+	{#each builtinInserts as group (group.label)}
+		<optgroup label={group.label}>
+			{#each group.patches as candidate (candidate.id)}<option value={candidate.id}>{candidate.name}</option>{/each}
 		</optgroup>
-	{/if}
+	{/each}
 {/snippet}
 
 {#snippet routing(key: string, label: string, chain: Track | Bus)}

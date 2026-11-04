@@ -3,8 +3,21 @@
 	import { on } from 'svelte/events';
 	import Arrangement, { type Dropped, type Loop, type PlacementActions, type Selection } from '#lib/Arrangement.svelte';
 	import type { SongControls, TapTarget } from '#lib/AudioEngine.ts';
+	import { EXAMPLE_NOTE } from '#lib/ContextMenu.svelte';
 	import { escapeCancels } from '#lib/Drag.ts';
 	import { chooser, leavesFields } from '#lib/Fields.ts';
+	import {
+		KIT_VOICES,
+		STANDARD_KIT,
+		clipKit,
+		dropKit,
+		kitStrangers,
+		liveSlot,
+		soundsText,
+		standardKitWhy,
+		useKit,
+		withKitSlots
+	} from '#lib/Kit.ts';
 	import type { CatalogEntry } from '#lib/GraphEdit.ts';
 	import { patchInputChoices } from '#lib/Modulate.ts';
 	import { SPLIT_KEY, keepSplit, keptSplit, splitAt } from '#lib/Split.ts';
@@ -224,6 +237,10 @@
 			: doc.tracks.find((t) => t.placements.some((p) => p.clip === clipId))
 	);
 	const reported = $derived(program?.tracks.find((t) => t.id === home?.id));
+	// The kit the clip's notes play, which the roll names keys by, and the other tracks it is on whose own kit isn't that one.
+	const kitted = $derived(clipId ? clipKit(doc, clipId) : null);
+	const kit = $derived(kitted?.kit ?? null);
+	const strangers = $derived(clipId ? kitStrangers(doc, clipId) : []);
 	const uses = $derived(doc.tracks.flatMap((t) => t.placements).filter((p) => p.clip === clipId).length);
 	// A slot plays a voice, so the pickers leave out inserts. What the song already plays comes first in them.
 	const voices = $derived(patches.filter((patch) => !patch.graph.nodes.some((node) => node.type === 'in')));
@@ -288,8 +305,9 @@
 	const number = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
 
 	// The page records each edit in the timeline's history, which outlasts this editor, as opening another timeline ends it.
+	// Every edit passes through here, so here is where the notes on a kit track are given their keys' slots (Kit.ts).
 	function commit(next: Timeline) {
-		if (next !== doc) onchange(next);
+		if (next !== doc) onchange(withKitSlots(next));
 	}
 
 	// The roll's "Clip is now N bars · Undo" takes back the growing. The top bar has the Undo and Redo for everything else.
@@ -830,8 +848,10 @@
 	function audition(note: number, on: boolean) {
 		if (auditionByKeys) return onkey?.(note, on);
 		if (reported?.index === undefined) return;
-		if (on) engine.noteOn(reported.index, note);
-		else engine.noteOff(reported.index, note);
+		if (!on) return engine.noteOff(reported.index, note);
+		// On a kit track the key plays its own sound, unless the image doesn't hold it yet.
+		const slot = liveSlot(kit, reported.slots, note);
+		if (slot !== null) engine.noteOn(reported.index, note, undefined, undefined, slot);
 	}
 
 	function locate(at: number) {
@@ -1176,6 +1196,31 @@
 							/>
 						</div>
 					{/if}
+					<!-- A drum track's kit: which slot each key plays, which the editor gives each of its notes (Kit.ts). -->
+					{@const kitWhy = readonly ? EXAMPLE_NOTE : standardKitWhy(track)}
+					<div class="kit" data-testid="track-kit">
+						{#if track.kit}
+							<span
+								data-testid="kit-sounds"
+								title={`${track.kit.length} keys play these sounds. Each note plays its key's slot, and the roll names each key by its sound.`}
+								>Kit: {soundsText(track.kit)}</span
+							>
+							<button
+								type="button"
+								title={readonly
+									? EXAMPLE_NOTE
+									: "Stop choosing each note's slot by its key. The slots and the notes stay as they are."}
+								onclick={() => commit(dropKit(doc, track.id))}>Not a kit</button
+							>
+						{/if}
+						<button
+							type="button"
+							disabled={!!kitWhy}
+							title={kitWhy ||
+								`The standard set's drums in this track's slots, in place of its patches, each note on the sound for its key, and ${KIT_VOICES} voices at least for the cymbals' tails: ${soundsText(STANDARD_KIT.kit)} on ${STANDARD_KIT.kit.length} keys`}
+							onclick={() => commit(useKit(doc, track.id, STANDARD_KIT))}>Use the standard kit</button
+						>
+					</div>
 					<label>
 						mode
 						<select
@@ -1339,6 +1384,11 @@
 					{#if uses > 1}<p class="muted" data-testid="clip-uses">
 							Placed {uses} times. An edit changes all of them.
 						</p>{/if}
+					{#if kitted && strangers.length}<p class="muted" data-testid="clip-kit-shared">
+							Its notes play the slots {trackName(kitted.track)}'s kit gives their keys, on {strangers
+								.map(trackName)
+								.join(' and ')} too.
+						</p>{/if}
 					{#each clip.play as change, index (index)}
 						<div class="change">
 							<UnitField
@@ -1489,6 +1539,7 @@
 							{clip}
 							bars={clipBars}
 							keyAt={(at) => keyAt(doc, from + at)}
+							{kit}
 							{playhead}
 							{playing}
 							chosen={scoreChosen}
@@ -1517,6 +1568,7 @@
 							bars={clipBars}
 							{grid}
 							slots={home?.slots ?? []}
+							{kit}
 							{choices}
 							{silent}
 							{playhead}
@@ -1872,6 +1924,17 @@
 		align-items: center;
 		gap: 0.3rem;
 		margin-bottom: 0.2rem;
+	}
+	/* What the track's kit is, and its buttons, which go on to a line of their own where the column is narrow. */
+	.kit {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.3rem 0.5rem;
+		margin-bottom: 0.2rem;
+	}
+	.kit > * {
+		white-space: nowrap;
 	}
 	.inspector input,
 	.inspector select {

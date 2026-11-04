@@ -24,6 +24,22 @@
   "listen_for": "The set's organ instruments in turn: Drawbar organ, Percussive organ, Rock organ, Church organ, Reed organ, Accordion, Harmonica, Tango accordion."
  },
  {
+  "name": "Guitar",
+  "file": "Guitar.json",
+  "seconds": 81.75,
+  "group": "instruments",
+  "family": "Guitar",
+  "listen_for": "The set's guitar instruments in turn: Nylon guitar, Steel guitar, Jazz guitar, Clean guitar, Muted guitar, Overdriven guitar, Distortion guitar, Guitar harmonics."
+ },
+ {
+  "name": "Bass",
+  "file": "Bass.json",
+  "seconds": 50.5,
+  "group": "instruments",
+  "family": "Bass",
+  "listen_for": "The set's bass instruments in turn: Acoustic bass, Finger bass, Fretless bass, Slap bass, Synth bass."
+ },
+ {
   "name": "Strings",
   "file": "Strings.json",
   "seconds": 92.25,
@@ -86,6 +102,14 @@
   "group": "instruments",
   "family": "Synth effects",
   "listen_for": "The set's synth effects instruments in turn: Crystal, Atmosphere, Soundtrack, Echoes."
+ },
+ {
+  "name": "Ethnic",
+  "file": "Ethnic.json",
+  "seconds": 72.25,
+  "group": "instruments",
+  "family": "Ethnic",
+  "listen_for": "The set's ethnic instruments in turn: Sitar, Banjo, Koto, Kalimba, Bagpipe, Fiddle, Shanai."
  },
  {
   "name": "Percussive",

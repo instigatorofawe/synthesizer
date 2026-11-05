@@ -40,5 +40,26 @@
   "seconds": 187.5,
   "group": "pieces",
   "listen_for": "Joplin's rag on the standard set's honky-tonk piano, an old upright whose unisons have drifted apart, in a large room, not fast and steady as he asked, its bass striding under the syncopated tune, the second time through the B strain an octave up, as marked."
+ },
+ {
+  "name": "SoldiersJoy",
+  "file": "SoldiersJoy.json",
+  "seconds": 111.0,
+  "group": "pieces",
+  "listen_for": "A fiddle tune as an old-time string band plays it for a dance, three times through: the fiddle kicks off and leads, the banjo takes the tune the second time while the fiddle shuffles chords behind it, and the guitar's boom-chuck and the bass keep the beat."
+ },
+ {
+  "name": "Kappore",
+  "file": "Kappore.json",
+  "seconds": 182.5,
+  "group": "pieces",
+  "listen_for": "A street dancer's song from Edo for the standard set's shakuhachi and koto, the koto following the tune an octave down: the first verse unhurried, the second pressing on with a bamboo flute above, taiko and the kane's chan-chiki, and the clappers quickening at the end."
+ },
+ {
+  "name": "MapleLeafRag",
+  "file": "MapleLeafRag.json",
+  "seconds": 165.75,
+  "group": "pieces",
+  "listen_for": "Joplin's rag as a New Orleans band would swing it: cornet lead with the clarinet a third or sixth above and the trombone smearing in under them, the clarinet alone the second time, a stop-time strain, the trio's first time on piano, and the banjo, tuba and drums driving the last strains home."
  }
 ]

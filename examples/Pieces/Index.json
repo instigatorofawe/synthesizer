@@ -75,5 +75,12 @@
   "seconds": 166.0,
   "group": "pieces",
   "listen_for": "Sousa's march scored here for the standard set's band from the piano edition: cornets and clarinets on the tune, horns on the afterbeats, tuba and drums marching, the trio soft on clarinets and bells, the trombones' chromatic break strain, and the last trio grandioso with a piccolo descant of our own above it."
+ },
+ {
+  "name": "TenthRegimentMarch",
+  "file": "TenthRegimentMarch.json",
+  "seconds": 174.0,
+  "group": "pieces",
+  "listen_for": "A concert band march of 1895 from all of its parts, for the standard set's winds, brass and drums: every strain repeated as printed but the last, the trio soft, the cornets on the tune, the clarinets and flutes above, and the drums resting through D before the band's fff."
  }
 ]

@@ -5,17 +5,25 @@
 # [tool.uv.sources]
 # modsynth = { path = "..", editable = false }
 # ///
-"""Writes examples/Pieces: public-domain pieces arranged for the engine, in the same form as the recipes.
+"""Writes examples/Pieces: public-domain pieces arranged for the engine, and two written for it, in the same form as the
+recipes.
 
-The notes come from the Mutopia Project's editions, which their typesetters placed in the public domain, and everything
-else is a performance made here: the tempo and its rubato, dynamics, pedalling, articulation and the mix. Bach's chorale
-is copied from its LilyPond source below. The others are read from the MIDI files LilyPond wrote from theirs, in
-examples/Pieces/Scores.
+The arranged pieces' notes come from the Mutopia Project's editions, which their typesetters placed in the public domain,
+and everything else is a performance made here: the tempo and its rubato, dynamics, pedalling, articulation, swing, the
+orchestration and the mix. Bach's chorale is copied from its LilyPond source below, and the Tenth Regiment March's drum
+part from its source too, since LilyPond wrote none of its notes to the part's MIDI file. The others are read from the
+MIDI files LilyPond wrote, in examples/Pieces/Scores. Where an arrangement adds a part the edition hasn't, such as the
+piccolo's descant in The Stars and Stripes Forever, it is written here and says so. Every piece in the repertoire is
+public domain in the United States and in the countries where copyright lasts 70 years after its author's death:
+published before 1931, by someone who died before 1956, or traditional.
+
+Night Bus and Coastline are original, written here for these examples, in the styles of house and synthwave.
 
 The pieces play the standard set's instruments and rooms, as a MIDI file does: each such patch is the graph
-examples/Instruments has, exactly, so the library holds it as the set's own built-in patch. Two keep patches of their own:
-the chorale's flugelhorn, which GM has no program for, and the Invention's console channels and small room, which are
-what the board can play. The set plays every instrument at one loudness, so a piece of several instruments trims each
+examples/Instruments has, exactly, so the library holds it as the set's own built-in patch. A few keep patches of their
+own: the chorale's flugelhorn, which GM has no program for, the Invention's console channels and small room, which are
+what the board can play, and the original pieces' sweep filter and echo, with the SidechainDucking recipe's duck, which
+the library holds once for both. The set plays every instrument at one loudness, so a piece of several instruments trims each
 part's fader to keep the mix it was written with, and each send keeps the balance of wet and dry the piece had in a room
 of its own. Each piece is rendered once to set its master gain, so its peak lands where the recipes' do.
 
@@ -31,6 +39,16 @@ Sources, all at https://www.mutopiaproject.org/ftp/ and typeset by the Mutopia m
     MountainKing.mid      GriegE/O46/Dans_l_antre_du_roi_de_la_montagne/Dans_l_antre_du_roi_de_la_montagne.mid, Coyau
     BachInventionInF.mid  BachJS/BWV779/bach-invention-08/bach-invention-08.mid, Allen Garvin, from the Bach-Gesellschaft
     Entertainer.mid       JoplinS/entertainer/entertainer.mid, Chris Sawer, from the original edition of 1902
+    SoldiersJoy.mid       Traditional/soldiers-joy/soldiers-joy.mid, Taj Morton, transcribed by ear
+    Kappore.mid           Traditional/JPM024-Kappore/JPM024-Kappore.mid, patrick stanistreet, from Nagai and Obata's
+                          Collection of Japanese Popular Music, Osaka, 1895
+    MapleLeafRag.mid      JoplinS/maple/maple.mid, Chris Sawer, from the original edition of 1899
+    StLouisRag.mid        TurpinT/turpin/turpin.mid, Stan Sanderson, from Sol Bloom's edition of 1903
+    StarsAndStripesForever.mid
+                          SousaJP/TheStarsAndStripesForever/TheStarsAndStripesForever.mid, Benjamin Bloomfield, from
+                          the John Church Company's piano edition of 1897
+    TenthRegimentMarch/   HallRB/TenthRegimentMarch/TenthRegimentMarch-mids.zip, a file for each part, and its drums from
+                          TenthRegimentMarch-lys.zip, Garrett Fitzgerald, from Carl Fischer's band edition of 1895
 Each of these editions is marked Public Domain on Mutopia, placed there by its typesetter.
 """
 
@@ -147,6 +165,55 @@ def small_room(feedback: float, damp: float, wet: float) -> dict:
         )
     g.out(g.mul(bank, wet))
     return g.json()
+
+
+CUTOFF = 1  # The sweep filter's parameter
+
+
+def sweep() -> dict:
+    """An insert's lowpass, two poles a side, whose cutoff a lane moves: closed to a murmur, or open to let everything
+    through. The electronic pieces sweep a bus with it."""
+    g = Graph()
+    g.params = [
+        {
+            "id": CUTOFF,
+            "name": "cutoff",
+            "scope": "track",
+            "min": 80.0,
+            "max": 18000.0,
+            "default": 18000.0,
+            "smooth_ms": 20,
+        }
+    ]
+    source, cutoff = g.node("in", index=0), g.node("param", param=CUTOFF)
+    g.out(
+        g.filter("lowpass", source.l, cutoff, 0.9),
+        g.filter("lowpass", source.r, cutoff, 0.9),
+    )
+    return g.json()
+
+
+def ping_pong(seconds: float, feedback: float, wet: float) -> dict:
+    """An echo that bounces between the speakers, `seconds` a side, as the PingPongDelay recipe's does: a delay is in
+    seconds, so a piece gives it the length of the note it wants at its tempo."""
+    g = Graph()
+    source = g.node("in", index=0)
+    mono = g.mul(g.add(source.l, source.r), 0.5)
+    left = g.node("delay", {"time": seconds}, max=round(seconds + 0.05, 3))
+    right = g.node("delay", {"in": left, "time": seconds}, max=round(seconds + 0.05, 3))
+    back = g.add(mono, g.mul(right, feedback))
+    g.edges.append(
+        {"from": back.id, "to": left.id, "input": "in"}
+    )  # The loop, which the delays allow
+    g.out(g.add(source.l, g.mul(left, wet)), g.add(source.r, g.mul(right, wet)))
+    return g.json()
+
+
+def recipe_patch(recipe: str, key: str) -> dict:
+    """A recipe's patch, exactly, so that a piece playing it plays the recipe's built-in patch."""
+    return json.loads((HERE / "Recipes" / f"{recipe}.json").read_text())["patches"][
+        key
+    ]["graph"]
 
 
 # Scores -------------------------------------------------------------------------------------------------------------
@@ -302,6 +369,44 @@ def velocity(value: float) -> int:
     return max(1, min(127, round(value)))
 
 
+def unfold(
+    printed: list[Note], order: list[tuple[int, int]]
+) -> tuple[list[Note], list[int]]:
+    """A score as it is played: the notes of each span of the printed score, from tick a up to b, one span after another,
+    so a strain printed once between repeat signs plays twice with its endings between. Returns the notes and where each
+    span starts."""
+    notes, cursor, starts = [], 0, []
+    for a, b in order:
+        starts.append(cursor)
+        notes += [
+            replace(n, tick=n.tick - a + cursor) for n in printed if a <= n.tick < b
+        ]
+        cursor += b - a
+    return notes, starts
+
+
+def swing(tick: int, amount: float, beat: int = PPQ) -> int:
+    """Where a tick falls when each beat's two halves are played long and short, the first taking `amount` of the beat:
+    a half is straight, and two thirds a triplet's lilt. A tick inside a half moves with it."""
+    k, at = divmod(tick, beat)
+    half, split = beat // 2, round(beat * amount)
+    if at < half:
+        return k * beat + round(at * split / half)
+    return k * beat + split + round((at - half) * (beat - split) / (beat - half))
+
+
+def swung(notes: list[Note], amount: float, beat: int = PPQ) -> list[Note]:
+    """The notes with their starts and ends swung."""
+    return [
+        replace(
+            n,
+            tick=swing(n.tick, amount, beat),
+            dur=max(1, swing(n.end, amount, beat) - swing(n.tick, amount, beat)),
+        )
+        for n in notes
+    ]
+
+
 class Tempo:
     """A tempo map built a change at a time. `ramp` glides to the next change rather than holding."""
 
@@ -340,13 +445,26 @@ class Song:
         patch = standard_set()[name]
         return self.patch(name, patch["name"], patch["graph"])
 
-    def bus(self, key: str, insert: str, gain: float = 1.0) -> None:
+    def bus(
+        self,
+        key: str,
+        insert: str | list[str | dict],
+        gain: float = 1.0,
+        output: str | None = None,
+        first_id: int | None = None,
+    ) -> None:
+        """A bus playing its inserts in order. One insert is numbered 100 on from the buses before it; several start at
+        `first_id`. An insert given as a dict brings its own fields, such as a sidechain's `key`."""
+        if isinstance(insert, str):
+            inserts = [{"id": 100 + len(self.buses), "patch": insert}]
+        else:
+            inserts = [
+                {"id": first_id + i} | ({"patch": p} if isinstance(p, str) else p)
+                for i, p in enumerate(insert)
+            ]
         self.buses.append(
-            {
-                "id": key,
-                "gain": gain,
-                "inserts": [{"id": 100 + len(self.buses), "patch": insert}],
-            }
+            {"id": key, "gain": gain, "inserts": inserts}
+            | ({"output": output} if output else {})
         )
 
     def track(
@@ -359,11 +477,17 @@ class Song:
         pan: float = 0.0,
         sends: dict[str, float] | None = None,
         lanes: list[dict] | None = None,
-        inserts: list[str] | None = None,
+        inserts: list[str | dict] | None = None,
         slot_of=None,
         steal: str = "cut",
+        kit: list[dict] | None = None,
+        play: dict | None = None,
+        output: str | None = None,
     ) -> int:
-        """Adds a track whose notes and fader lane are cut into one clip per section they fall in."""
+        """Adds a track whose notes and lanes are cut into one clip per section they fall in. A lane moves the track's
+        fader unless it names a `param` of the track's patch or a `target` of its own. An insert given as a dict brings
+        its own fields, such as a sidechain's `key`. `kit` names a drum track's keys and the slot each plays, for the
+        editor, and `play` is the track's play mode."""
         id = len(self.tracks) + 1
         key = "".join(c for c in name.lower() if c.isalnum())
         bounds = [tick for _, tick in self.sections[1:]] + [self.length]
@@ -390,9 +514,10 @@ class Song:
                     note["slot"] = slot_of(n)
                 clip["notes"].append(note)
             for lane in moves:
+                own = "param" in lane or "target" in lane
                 clip["automation"].append(
-                    {"target": {"mix": "fader", "track": id}}
-                    | {k: v for k, v in lane.items() if k != "target"}
+                    ({} if own else {"target": {"mix": "fader", "track": id}})
+                    | {k: v for k, v in lane.items() if own or k != "target"}
                     | {"tick": lane["tick"] - start}
                 )
             if not clip["automation"]:
@@ -412,13 +537,76 @@ class Song:
                     {"bus": bus, "gain": level} for bus, level in (sends or {}).items()
                 ],
                 "inserts": [
-                    {"id": 50 + id * 4 + i, "patch": p}
+                    {"id": 50 + id * 4 + i}
+                    | ({"patch": p} if isinstance(p, str) else p)
                     for i, p in enumerate(inserts or [])
                 ],
             }
             | ({"steal": steal} if steal != "cut" else {})
+            | ({"kit": kit} if kit else {})
+            | ({"play": play} if play else {})
+            | ({"output": output} if output else {})
         )
         return id
+
+    def insert_id(self, track: int, index: int = 0) -> int:
+        """The id `track` gives its insert at `index`, for a lane that targets it."""
+        return 50 + track * 4 + index
+
+    def placed_track(
+        self,
+        name: str,
+        slots: list[str],
+        notes: list[Note],
+        spans: dict[str, tuple[int, int]],
+        order: list[tuple[str, int]],
+        voices: int,
+        gain: float = 1.0,
+        pan: float = 0.0,
+        sends: dict[str, float] | None = None,
+        slot_of=None,
+        steal: str = "cut",
+        kit: list[dict] | None = None,
+    ) -> int:
+        """Adds a track that plays a score as printed, a clip for each span of it, placed where each plays: a strain
+        between repeat signs is one clip placed twice, as a band reads it, rather than written out again. `notes` are
+        at the printed score's ticks, `spans` name its pieces, from tick a up to b, and `order` places them."""
+        key = "".join(c for c in name.lower() if c.isalnum())
+        for span, (a, b) in spans.items():
+            inside = [n for n in notes if a <= n.tick < b]
+            if not inside:
+                continue
+            clip = {"id": f"{key}-{span}", "length": b - a, "notes": []}
+            for n in inside:
+                note = {"tick": n.tick - a, "note": n.pitch, "vel": n.vel, "dur": n.dur}
+                if slot_of is not None and slot_of(n):
+                    note["slot"] = slot_of(n)
+                clip["notes"].append(note)
+            self.clips.append(clip)
+        made = {c["id"] for c in self.clips}
+        placements = [
+            {"clip": f"{key}-{span}", "tick": tick}
+            for span, tick in order
+            if f"{key}-{span}" in made
+        ]
+        self.tracks.append(
+            {
+                "id": len(self.tracks) + 1,
+                "name": name,
+                "voices": voices,
+                "slots": slots,
+                "gain": gain,
+                "pan": pan,
+                "placements": placements,
+                "sends": [
+                    {"bus": bus, "gain": level} for bus, level in (sends or {}).items()
+                ],
+                "inserts": [],
+            }
+            | ({"steal": steal} if steal != "cut" else {})
+            | ({"kit": kit} if kit else {})
+        )
+        return len(self.tracks)
 
     def project(
         self,
@@ -431,6 +619,8 @@ class Song:
     ) -> dict:
         """`meter` is (tick, beats, unit) changes and `key` (tick, fifths, minor) ones: where the editor draws bars and how
         it spells notes, which the compiler ignores. A piece that gives none is in 4/4 from its first tick, in C major."""
+        ids = [i["id"] for chain in self.tracks + self.buses for i in chain["inserts"]]
+        assert len(ids) == len(set(ids)), f"two inserts share an id in {ids}"
         timeline: dict = {"ppq": PPQ, "tempo": self.tempo.changes}
         if meter:
             timeline["meter"] = [
@@ -1060,6 +1250,1724 @@ def entertainer() -> tuple[dict, str]:
     ), listen
 
 
+def strum(
+    tick: int, pitches: list[int], dur: int, vel: int, spread: int, up: bool = False
+) -> list[Note]:
+    """A chord strummed across its strings, `spread` ticks apart, down from the lowest or up from the highest, each
+    string a little softer than the one before."""
+    order = sorted(pitches, reverse=up)
+    return [
+        Note(tick + i * spread, max(1, dur - i * spread), p, velocity(vel - 2 * i))
+        for i, p in enumerate(order)
+    ]
+
+
+def chords_of(notes: list[Note], step: int) -> dict[int, int]:
+    """The root of the chord a chord track holds at every `step`, as the pitch class of its lowest note, by tick."""
+    roots: dict[int, int] = {}
+    for n in notes:
+        for tick in range(n.tick, n.end, step):
+            roots[tick] = min(roots.get(tick, 127), n.pitch)
+    return {tick: pitch % 12 for tick, pitch in roots.items()}
+
+
+def soldiers_joy() -> tuple[dict, str]:
+    """Traditional, Soldier's Joy, for an old-time string band: fiddle, banjo, guitar and bass."""
+    q, bar = PPQ, 4 * PPQ
+    printed = read_midi(SCORES / "SoldiersJoy.mid")
+    tune, harmony = 1, 2  # The edition's fiddle line and its chords, a chord a beat
+    # The edition prints each strain once between repeat signs, with both endings after it, from a pickup of a beat.
+    pickup, a, a1, a2 = (0, q), (q, 29 * q), (29 * q, 33 * q), (33 * q, 37 * q)
+    b, b1, b2 = (37 * q, 65 * q), (65 * q, 69 * q), (69 * q, 73 * q)
+    # Played three times through, AABB, as a dance band does. Between times B ends as A's first ending does, on D with
+    # the pickup back into A, and only the last time with the edition's last bar.
+    strains = [a, a1, a, a2, b, b1, b]
+    order = [pickup] + strains + [a1] + strains + [a1] + strains + [b2]
+    played, starts = unfold(printed, order)
+    # The fiddle kicks off with three beats on its open D and A strings, and the pickup is the fourth.
+    played = [replace(n, tick=n.tick + 3 * q) for n in played]
+    starts = [s + 3 * q for s in starts]
+    times = [
+        starts[1],
+        starts[9],
+        starts[17],
+    ]  # Where each time through begins, on its first A
+    length = starts[-1] + 3 * q + bar
+    melody = [n for n in played if n.part == tune]
+    root = chords_of([n for n in played if n.part == harmony], q)
+    root[length - bar] = 2  # The last chord is D, held
+    D, G, A = 2, 7, 9
+    which = lambda tick: (
+        max(i for i, t in enumerate(times) if t <= tick) if tick >= times[0] else -1
+    )
+
+    def accent(tick: int) -> int:
+        # The bow leans on the backbeat, as an old-time fiddler's does, and the off-beat eighths are lighter.
+        at = (tick % bar) % (2 * q)
+        return 6 if at == q else 2 if at == 0 else -5
+
+    parts: dict[str, list[Note]] = {
+        name: [] for name in ("Fiddle", "Banjo", "Guitar", "Bass")
+    }
+    # The kick-off: three beats on the open strings, then the pickup.
+    for beat in range(3):
+        for p in (62, 69):
+            parts["Fiddle"].append(Note(beat * q, q - 40, p, 84 if beat != 1 else 90))
+    for n in melody:
+        time = which(n.tick)
+        if time == 1:
+            continue  # The banjo has the tune the second time
+        level = (80, 0, 90)[max(time, 0)] if time >= 0 else 82
+        dur = n.dur - (n.dur // 10 if n.dur < q else n.dur // 6)
+        parts["Fiddle"].append(
+            Note(
+                n.tick,
+                dur,
+                n.pitch,
+                velocity(level + accent(n.tick) + wobble(n.tick, n.pitch)),
+            )
+        )
+        # The last time, the open string under the long notes rings with them.
+        if time == 2 and n.dur >= q and n.tick < length - bar:
+            drone = 74 if root.get(n.tick) == G and n.pitch >= 76 else 69
+            if n.pitch > drone:
+                parts["Fiddle"].append(Note(n.tick, dur, drone, velocity(level - 12)))
+    # The second time the fiddle backs the banjo: double stops on the chord in its shuffle, long, short, short.
+    stops = {D: (62, 69), G: (59, 67), A: (64, 69)}
+    for tick in range(times[1], times[2], 2 * q):
+        for at, dur, lift in (
+            (0, q - 30, 0),
+            (q, q // 2 - 30, -8),
+            (q + q // 2, q // 2 - 30, -4),
+        ):
+            for p in stops[root[tick + at - (tick + at) % q]]:
+                parts["Fiddle"].append(
+                    Note(tick + at, dur, p, velocity(56 + lift + accent(tick + at)))
+                )
+
+    # Banjo: the tune itself the second time, and otherwise clawhammer's bum-ditty, a melody note on the beat, a brush
+    # across the strings and the thumb on the high fifth string, each half bar. It joins when A repeats.
+    brush = {D: (62, 66, 69), G: (62, 67, 71), A: (61, 64, 69)}
+    at_tick = {n.tick: n for n in melody}
+    for n in melody:
+        if which(n.tick) == 1:
+            parts["Banjo"].append(
+                Note(
+                    n.tick,
+                    n.dur + q // 2,
+                    n.pitch,
+                    velocity(94 + accent(n.tick) + wobble(n.tick, n.pitch)),
+                )
+            )
+    for tick in range(starts[3], length - bar, 2 * q):
+        if which(tick) == 1:
+            continue
+        sounding = max((n for n in melody if n.tick <= tick), key=lambda n: n.tick)
+        note = at_tick.get(tick, sounding)
+        parts["Banjo"].append(
+            Note(tick, q + q // 2, note.pitch, velocity(72 + wobble(tick, 7)))
+        )
+        chord = brush[root[tick + q]]
+        parts["Banjo"] += strum(tick + q, list(chord), q // 2 + 40, 54, 10)
+        parts["Banjo"].append(
+            Note(tick + q + q // 2, q // 2 + 60, 69, velocity(58 + wobble(tick, 9)))
+        )
+    parts["Banjo"] += strum(length - bar, [50, 57, 62, 66, 69], bar, 84, 14)
+
+    # Guitar: boom-chuck, the bass note on the beat, alternating root and fifth, and a strum on the backbeat. Bass: the
+    # root and the fifth, on the beat, under the guitar's.
+    shapes = {D: [50, 57, 62, 66], G: [55, 59, 62, 67], A: [57, 61, 64, 69]}
+    booms = {D: (50, 45), G: (43, 50), A: (45, 40)}
+    lows = {D: (38, 33), G: (31, 38), A: (33, 40)}
+    for tick in range(bar, length - bar, q):
+        beat = (tick // q) % 4
+        chord = root[tick]
+        if beat % 2 == 0:
+            boom = booms[chord][beat // 2]
+            parts["Guitar"].append(
+                Note(tick, q - 60, boom, velocity(78 + wobble(tick, boom)))
+            )
+            parts["Bass"].append(
+                Note(
+                    tick,
+                    q + q // 2,
+                    lows[chord][beat // 2],
+                    velocity(86 + wobble(tick, 3)),
+                )
+            )
+        else:
+            parts["Guitar"] += strum(
+                tick, shapes[chord], q // 2, 70 + wobble(tick, 5), 12
+            )
+    last = length - bar
+    parts["Guitar"] += strum(last, [38, 45, 50, 57, 62, 66], bar, 88, 16)
+    parts["Bass"].append(Note(last, bar - q, 38, 96))
+    swing_of = {"Fiddle": 0.56, "Banjo": 0.56, "Guitar": 0.5, "Bass": 0.5}
+
+    tempo = Tempo(216)  # A dance's pace: 108 half notes a minute
+    tempo.glide(last - 2 * q, last, 216, 176)
+    tempo.at(last, 176)
+    sections = [("kickoff", 0)]
+    for i, start in enumerate(times):
+        sections += [(f"a{i + 1}", start), (f"b{i + 1}", starts[1 + 8 * i + 4])]
+    song = Song(tempo, sections, length)
+    song.bus("room", song.standard("MediumRoom"))
+    seats = {  # patch, voices, gain, pan, send
+        "Fiddle": ("Fiddle", 6, 1.0, -0.2, 0.3),
+        "Banjo": ("Banjo", 12, 0.8, 0.35, 0.22),
+        "Guitar": ("SteelGuitar", 10, 0.55, -0.45, 0.25),
+        "Bass": ("AcousticBass", 2, 0.95, 0.05, 0.15),
+    }
+    for name, (patch, voices, gain, pan, send) in seats.items():
+        song.track(
+            name,
+            [song.standard(patch)],
+            swung(sorted(parts[name], key=lambda n: (n.tick, n.pitch)), swing_of[name]),
+            voices,
+            gain,
+            pan,
+            {"room": send},
+            steal="fade",
+        )
+    listen = (
+        "A fiddle tune as an old-time string band plays it for a dance, three times through: the fiddle kicks off and "
+        "leads, the banjo takes the tune the second time while the fiddle shuffles chords behind it, and the guitar's "
+        "boom-chuck and the bass keep the beat."
+    )
+    return song.project(
+        "soldiers-joy", "Soldier's Joy", meter=[(0, 2, 2)], key=[(0, 2, False)]
+    ), listen
+
+
+def kappore() -> tuple[dict, str]:
+    """Traditional, Kappore, a street dancer's song from Edo, for shakuhachi, koto, a bamboo flute and festival drums."""
+    q, bar = PPQ, 2 * PPQ
+    printed = read_midi(SCORES / "Kappore.mid")
+    # The edition: a four-bar introduction between repeat signs, then the song, 64 bars of 2/4 ending on a held A.
+    intro, verse = (0, 4 * bar), (4 * bar, 68 * bar)
+    lead = bar  # A bar for the clappers before anything plays
+    order = [intro, intro, verse, intro, verse, intro]
+    played, starts = unfold(printed, order)
+    played = [replace(n, tick=n.tick + lead) for n in played]
+    starts = [s + lead for s in starts]
+    first, second, v1, between, v2, coda = starts
+    end = (
+        coda + 4 * bar
+    )  # The last note, the introduction's A, is held into a bar of its own
+    length = end + 2 * bar
+    within = lambda span, n: (
+        span <= n.tick < span + (128 * q if span in (v1, v2) else 4 * bar)
+    )
+    parts: dict[str, list[Note]] = {
+        name: [] for name in ("Shakuhachi", "Koto", "Flute", "Taiko", "Percussion")
+    }
+
+    def shape(n: Note, level: float) -> int:
+        # A phrase swells as it climbs, and the notes on the beat are leant on.
+        return velocity(
+            level
+            + (n.pitch - 69) * 0.6
+            + (4 if n.tick % q == 0 else -2)
+            + wobble(n.tick, n.pitch)
+        )
+
+    def blown(n: Note) -> int:
+        # Each note is tongued apart from the next, and a long one held to its end.
+        return n.dur - 40 if n.dur < 2 * q else n.dur - 20
+
+    tuning = [
+        57,
+        59,
+        62,
+        64,
+        66,
+        69,
+        71,
+        74,
+        76,
+        78,
+        81,
+    ]  # A koto tuned to the song's scale, A B D E F sharp
+
+    def sweep(at: int, down: bool = False) -> None:
+        # Sararin: a pick swept across every string, ending on the beat.
+        strings = tuning[::-1] if down else tuning
+        for i, p in enumerate(strings):
+            parts["Koto"].append(
+                Note(at - (len(strings) - i) * 22, q, p, velocity(48 + 3 * i))
+            )
+
+    for n in played:
+        last = n.tick >= coda and n.tick == max(m.tick for m in played)
+        if within(first, n):  # The koto alone, then with the shakuhachi
+            parts["Koto"].append(Note(n.tick, n.dur + q // 2, n.pitch, shape(n, 76)))
+            if n.dur >= q:
+                parts["Koto"].append(
+                    Note(n.tick, n.dur + q // 2, n.pitch - 12, shape(n, 66))
+                )
+        elif within(second, n) or within(coda, n):
+            loud = 80 if within(second, n) else 94
+            parts["Shakuhachi"].append(Note(n.tick, blown(n), n.pitch, shape(n, loud)))
+            parts["Koto"].append(
+                Note(n.tick, n.dur + q // 2, n.pitch - 12, shape(n, loud - 12))
+            )
+            if within(coda, n):
+                parts["Flute"].append(
+                    Note(n.tick, blown(n), n.pitch + 12, shape(n, 84))
+                )
+        elif within(between, n):  # The flute and the koto, as the drums come in
+            parts["Flute"].append(Note(n.tick, blown(n), n.pitch + 12, shape(n, 80)))
+            parts["Koto"].append(Note(n.tick, n.dur + q // 2, n.pitch, shape(n, 78)))
+        else:  # A verse: the shakuhachi sings it, and the koto follows it an octave down, on the beat
+            again = n.tick >= v2
+            parts["Shakuhachi"].append(
+                Note(n.tick, blown(n), n.pitch, shape(n, 90 if again else 78))
+            )
+            if again:
+                parts["Flute"].append(
+                    Note(n.tick, blown(n), n.pitch + 12, shape(n, 78))
+                )
+            if n.tick % q == 0:
+                low = n.pitch - 12 if n.pitch >= 64 else n.pitch
+                parts["Koto"].append(
+                    Note(
+                        n.tick,
+                        max(n.dur, q) + q // 2,
+                        low,
+                        shape(n, 72 if again else 66),
+                    )
+                )
+                if n.dur >= 2 * q:  # Awasezume: a long note plucked in octaves
+                    parts["Koto"].append(
+                        Note(n.tick + 12, max(n.dur, q), low + 12, shape(n, 62))
+                    )
+        if last:
+            for name, shift in (("Shakuhachi", 0), ("Flute", 12), ("Koto", -12)):
+                parts[name] = [m for m in parts[name] if m.tick != n.tick]
+                parts[name].append(
+                    Note(n.tick, end - n.tick + bar, n.pitch + shift, 96)
+                )
+            parts["Koto"].append(Note(n.tick + 14, end - n.tick + bar, n.pitch, 90))
+    sweep(first)
+    sweep(v2, down=True)
+    sweep(coda)
+
+    # The drums: a taiko's don and doko under the second verse and the coda, with its rim's ka, and a kane, the small
+    # gong a festival band keeps time on, chan-chiki on every beat. Every eighth bar the taiko fills.
+    WOOD, KANE, RIM = 76, 67, 37
+
+    def taiko(at: int, pitch: int, vel: float) -> None:
+        parts["Taiko"].append(Note(at, q, pitch, velocity(vel + wobble(at, pitch))))
+
+    def hit(at: int, key: int, vel: float) -> None:
+        parts["Percussion"].append(
+            Note(at, q // 4, key, velocity(vel + wobble(at, key)))
+        )
+
+    for k in range(3):  # The interlude: a stroke a bar, and a roll into the verse
+        taiko(between + k * bar, 45, 84 + 6 * k)
+    for i in range(8):
+        taiko(between + 3 * bar + i * q // 4, 47 if i % 2 else 45, 64 + 5 * i)
+    for start in range(v2, end, bar):
+        k = (start - v2) // bar
+        if k % 8 == 7 or start >= end - bar:
+            for i in range(8):
+                taiko(start + i * q // 4, 47 if i % 2 else 45, 72 + 4 * i)
+        else:
+            taiko(start, 45, 104 if k % 2 == 0 else 96)
+            taiko(start + q, 45, 86)
+            taiko(start + q + q // 2, 47, 72)
+            taiko(start + q + 3 * q // 4, 47, 66)
+            hit(start + q // 2, RIM, 58)
+        for beat in (0, q):
+            hit(start + beat, KANE, 72)
+            hit(start + beat + q // 2, KANE, 54)
+            hit(start + beat + 3 * q // 4, KANE, 60)
+    taiko(end, 43, 112)
+    taiko(end + bar - q // 2, 43, 104)
+    # The clappers, hyoshigi: two strokes to begin, two before the drums come in, and the last strokes quickening.
+    for at in (0, q):
+        hit(at, WOOD, 86)
+    for at in (between - bar, between - q):
+        hit(at, WOOD, 80)
+    for i, at in enumerate((0, 340, 600, 790, 920, 1010, 1070, 1110)):
+        hit(end + bar + at, WOOD, 100 - 2 * i)
+    length = end + bar + 1110 + 2 * bar
+
+    # The shakuhachi gives a long note more breath as it holds it.
+    lanes = []
+    for n in parts["Shakuhachi"]:
+        if n.dur >= 2 * q - 40 and n.tick < end:
+            lanes += [
+                {"param": 4, "tick": n.tick, "value": 0.0},
+                {
+                    "param": 4,
+                    "tick": n.tick + q // 4,
+                    "value": 0.7,
+                    "ramp": n.dur - q // 2,
+                },
+                {"param": 4, "tick": n.end, "value": 0.0},
+            ]
+
+    tempo = Tempo(92)
+    tempo.glide(v1 + 62 * bar, v1 + 63 * bar, 92, 70)  # Into the verse's held A
+    tempo.at(v1 + 63 * bar, 60)
+    tempo.at(between, 100)
+    tempo.glide(v2, v2 + 48 * bar, 104, 116)  # The second verse presses on
+    tempo.at(v2 + 48 * bar, 116)
+    tempo.glide(end - bar, end, 116, 72)
+    tempo.at(end, 72)
+    sections = [
+        ("intro", 0),
+        ("verse", v1),
+        ("interlude", between),
+        ("verse-again", v2),
+        ("coda", coda),
+    ]
+    song = Song(tempo, sections, length)
+    song.bus("room", song.standard("LargeRoom"))
+    kit = [
+        {"note": WOOD, "name": "Hyoshigi (Hi Wood Block)", "slot": 0},
+        {"note": KANE, "name": "Kane (High Agogo)", "slot": 1},
+        {"note": RIM, "name": "Taiko rim (Side Stick)", "slot": 2},
+    ]
+    slot = {WOOD: 0, KANE: 1, RIM: 2}
+    seats = {  # patches, voices, gain, pan, send
+        "Shakuhachi": (["Shakuhachi"], 3, 1.0, -0.15, 0.34),
+        "Koto": (["Koto"], 16, 0.95, 0.3, 0.3),
+        "Flute": (["Flute"], 3, 0.9, -0.4, 0.3),
+        "Taiko": (["Taiko"], 6, 0.5, 0.05, 0.28),
+        "Percussion": (
+            ["KitWoodBlock", "KitAgogo", "KitSideStick"],
+            6,
+            1.5,
+            0.25,
+            0.22,
+        ),
+    }
+    for name, (patches, voices, gain, pan, send) in seats.items():
+        song.track(
+            name,
+            [song.standard(p) for p in patches],
+            sorted(parts[name], key=lambda n: (n.tick, n.pitch)),
+            voices,
+            gain,
+            pan,
+            {"room": send},
+            lanes=lanes if name == "Shakuhachi" else None,
+            slot_of=(lambda n: slot[n.pitch]) if name == "Percussion" else None,
+            steal="fade",
+            kit=kit if name == "Percussion" else None,
+        )
+    listen = (
+        "A street dancer's song from Edo for the standard set's shakuhachi and koto, the koto following the tune an "
+        "octave down: the first verse unhurried, the second pressing on with a bamboo flute above, taiko and the kane's "
+        "chan-chiki, and the clappers quickening at the end."
+    )
+    return song.project(
+        "kappore", "Kappore", meter=[(0, 2, 4)], key=[(0, 1, False)]
+    ), listen
+
+
+def harmony_above(pitch: int, chord: set[int], top: int) -> int:
+    """The nearest note of the chord a third to a sixth above `pitch`, as a second part sings over a tune, or the
+    octave if the chord has none there. Below `top`, or the part drops an octave."""
+    for p in range(pitch + 3, pitch + 10):
+        if p % 12 in chord:
+            return p if p <= top else p - 12
+    return pitch + 12 if pitch + 12 <= top else pitch
+
+
+def led(previous: int, chord: set[int], low: int, high: int) -> int:
+    """The chord's note between `low` and `high` nearest the one before, so an inner part moves as little as it can."""
+    candidates = [p for p in range(low, high + 1) if p % 12 in chord]
+    return min(candidates, key=lambda p: (abs(p - previous), p))
+
+
+def maple_leaf() -> tuple[dict, str]:
+    """Joplin, Maple Leaf Rag, as a New Orleans band plays it: cornet, clarinet, trombone, banjo, tuba and drums, swung."""
+    q, bar = PPQ, 2 * PPQ
+    printed = read_midi(SCORES / "MapleLeafRag.mid")
+    right, left = 1, 2
+    # LilyPond unfolded the repeats, AABBACCDD, from a pickup of an eighth. The band plays B once, with its second
+    # ending, and the rest as written.
+    p0 = q // 2
+    s = lambda k: p0 + k * 16 * bar
+    order = [(0, p0), (s(0), s(1)), (s(1), s(2)), (s(2), s(2) + 15 * bar)]
+    order += [(s(4) - bar, s(4)), (s(4), s(5)), (s(5), s(6)), (s(6), s(7))]
+    order += [(s(7), s(8)), (s(8), s(9))]
+    played, starts = unfold(printed, order)
+    a1, a2, b, _, a3, c1, c2, d1, d2 = starts[1:]
+    end = d2 + 16 * bar
+    last = end - q  # The last chord, on the last bar's second beat
+    length = end + bar
+    strain = lambda tick: max(
+        i for i, t in enumerate((0, a1, a2, b, a3, c1, c2, d1, d2)) if t <= tick
+    )
+    names = ["pickup", "a", "a-clarinet", "b", "a-stop", "c-piano", "c", "d", "d-out"]
+    role = lambda tick: names[strain(tick)]
+    ensemble = {"pickup", "a", "b", "c", "d", "d-out"}
+    level = {
+        "pickup": 88,
+        "a": 88,
+        "a-clarinet": 82,
+        "b": 92,
+        "a-stop": 90,
+        "c-piano": 80,
+        "c": 90,
+        "d": 94,
+        "d-out": 102,
+    }
+
+    # What sounds at each eighth: the left hand's harmony, its bass on the beat, and the right hand's top note.
+    chord_at: dict[int, set[int]] = {}
+    bass_at: dict[int, int] = {}
+    for n in played:
+        if n.part == left:
+            for tick in range(n.tick - n.tick % (q // 2), n.end, q // 2):
+                chord_at.setdefault(tick, set()).add(n.pitch % 12)
+            if n.tick % q == p0 % q or n.tick % (q // 2) == 0:
+                bass_at[n.tick] = min(bass_at.get(n.tick, 127), n.pitch)
+    chord = lambda tick: (
+        chord_at.get(tick - tick % (q // 2))
+        or chord_at.get(tick - tick % (q // 2) - q // 2, {8, 0, 3})
+    )
+    tops: dict[int, Note] = {}
+    for n in played:
+        if n.part == right and (n.tick not in tops or n.pitch > tops[n.tick].pitch):
+            tops[n.tick] = n
+
+    def lean(tick: int) -> int:
+        # A rag leans on its syncopations, the notes that fall between the eighths.
+        return 5 if tick % (q // 2) else 0
+
+    parts: dict[str, list[Note]] = {
+        name: []
+        for name in (
+            "Cornet",
+            "Clarinet",
+            "Trombone",
+            "Tuba",
+            "Banjo",
+            "Piano",
+            "Drums",
+        )
+    }
+    for tick, n in sorted(tops.items()):
+        r = role(tick)
+        vel = level[r] + lean(tick) + wobble(tick, n.pitch)
+        dur = max(40, min(n.dur, q) - 30)
+        if r in ensemble or r == "a-stop":
+            parts["Cornet"].append(Note(tick, dur, n.pitch, velocity(vel)))
+        if r in ensemble:
+            parts["Clarinet"].append(
+                Note(
+                    tick,
+                    dur,
+                    harmony_above(n.pitch, chord(tick), 91),
+                    velocity(vel - 8),
+                )
+            )
+        elif r == "a-clarinet":
+            parts["Clarinet"].append(Note(tick, dur, n.pitch, velocity(vel + 2)))
+    for n in played:
+        if role(n.tick) == "c-piano":
+            parts["Piano"].append(
+                Note(
+                    n.tick,
+                    n.dur,
+                    n.pitch,
+                    velocity(
+                        level["c-piano"]
+                        + lean(n.tick)
+                        + (-8 if n.part == left else 0)
+                        + wobble(n.tick, n.pitch)
+                    ),
+                )
+            )
+
+    # The rhythm: tuba on the beat, the banjo four to the bar, the drums' bass drum on the beat and snare between. In the
+    # stop-time strain they all play only the first beat of every other bar, under the cornet, until the last two bars.
+    def stopped(tick: int) -> bool:
+        return (
+            role(tick) == "a-stop"
+            and tick < a3 + 14 * bar
+            and ((tick - a3) % (2 * bar) != 0)
+        )
+
+    KICK, SNARE, CRASH, WOOD = 36, 38, 49, 76
+    trombone = 56
+    parts["Tuba"].append(
+        Note(0, q // 2 - 40, 39, velocity(level["pickup"]))
+    )  # The pickup's E flat
+    for tick in range(p0, last, q // 2):
+        r = role(tick)
+        if stopped(tick):
+            continue
+        harmony = chord(tick)
+        beat = (tick - p0) % q == 0
+        if beat:
+            low = bass_at.get(tick) or min(
+                (p for p in range(32, 52) if p % 12 in harmony), default=44
+            )
+            low = (
+                low - 12 if low > 46 else low
+            )  # The left hand's chord, when it has no octave, from its root down
+            parts["Tuba"].append(
+                Note(tick, q - 80, low, velocity(level[r] - 2 + wobble(tick, low)))
+            )
+            parts["Drums"].append(Note(tick, q // 4, KICK, velocity(level[r] - 18)))
+            if r == "a-stop" and tick < a3 + 14 * bar:
+                parts["Drums"].append(
+                    Note(tick, q // 4, CRASH, velocity(level[r] - 6))
+                )  # Each stop, choked
+            # The trombone moves through the harmony a beat at a time, as little as it can, under the tune.
+            if r in ensemble and r != "pickup":
+                trombone = led(trombone, harmony, 46, 63)
+                parts["Trombone"].append(
+                    Note(
+                        tick,
+                        q - 40,
+                        trombone,
+                        velocity(level[r] - 10 + wobble(tick, trombone)),
+                    )
+                )
+        if r != "c-piano" and r != "pickup":
+            voicing = sorted({led(p, harmony, 55, 69) for p in (55, 60, 64, 68)})
+            parts["Banjo"] += strum(
+                tick, voicing, q // 2 - 30, (58 if beat else 66) + wobble(tick, 2), 8
+            )
+        if not beat and r != "pickup":
+            parts["Drums"].append(
+                Note(
+                    tick,
+                    q // 4,
+                    SNARE if r in ensemble else WOOD,
+                    velocity(level[r] - (24 if r in ensemble else 20)),
+                )
+            )
+    # Merge the trombone's repeated notes into held ones.
+    held: list[Note] = []
+    for n in parts["Trombone"]:
+        if held and held[-1].pitch == n.pitch and held[-1].end + 40 >= n.tick:
+            held[-1].dur = n.end - held[-1].tick
+        else:
+            held.append(n)
+    parts["Trombone"] = held
+    # A crash where the band comes back in, and on the last chord, which everyone holds.
+    for tick in (b, c2, d2):
+        parts["Drums"].append(Note(tick, q, CRASH, 92))
+    for name in ("Cornet", "Clarinet", "Trombone", "Tuba", "Banjo"):
+        parts[name] = [
+            replace(n, dur=bar) if n.tick >= last else n for n in parts[name]
+        ]
+    parts["Trombone"].append(Note(last, bar, 56, 100))
+    parts["Tuba"].append(Note(last, bar, 32, 104))
+    parts["Banjo"] += strum(last, [56, 60, 63, 68], bar, 90, 14)
+    parts["Drums"] += [Note(last, q // 2, KICK, 100), Note(last, bar, CRASH, 104)]
+
+    # The trombone smears up into each strain the band plays together.
+    lanes = []
+    for start in (a1, b, c2, d1, d2):
+        lanes += [
+            {"param": 1, "tick": start, "value": -2.0},
+            {"param": 1, "tick": start, "value": 0.0, "ramp": q // 2},
+        ]
+
+    # The clarinet's fader comes up for the strain it leads.
+    solo = [{"tick": a2, "value": 1.6}, {"tick": b, "value": 0.6}]
+
+    tempo = Tempo(100)  # Joplin's tempo di marcia
+    tempo.glide(last - bar, last, 100, 84)
+    tempo.at(last, 84)
+    keys = [(0, -4, False), (c1, -5, False), (d1, -4, False)]
+    sections = [
+        ("a", 0),
+        ("a-clarinet", a2),
+        ("b", b),
+        ("a-stop", a3),
+        ("c-piano", c1),
+        ("c", c2),
+        ("d", d1),
+        ("d-out", d2),
+    ]
+    song = Song(tempo, sections, length)
+    song.bus("room", song.standard("MediumRoom"))
+    kit = [
+        {"note": KICK, "name": "Bass Drum 1", "slot": 0},
+        {"note": SNARE, "name": "Acoustic Snare", "slot": 1},
+        {"note": CRASH, "name": "Crash Cymbal 1", "slot": 2},
+        {"note": WOOD, "name": "Hi Wood Block", "slot": 3},
+    ]
+    slot = {KICK: 0, SNARE: 1, CRASH: 2, WOOD: 3}
+    seats = {  # patches, voices, gain, pan, send
+        "Cornet": (["Trumpet"], 2, 1.0, 0.0, 0.25),
+        "Clarinet": (["Clarinet"], 2, 0.6, -0.35, 0.25),
+        "Trombone": (["Trombone"], 2, 0.6, 0.35, 0.25),
+        "Tuba": (["Tuba"], 2, 0.8, 0.1, 0.15),
+        "Banjo": (["Banjo"], 12, 0.7, -0.2, 0.2),
+        "Piano": (["GrandPiano"], 16, 0.9, -0.1, 0.25),
+        "Drums": (
+            ["KitKick", "KitSnare", "KitCrash", "KitWoodBlock"],
+            8,
+            0.75,
+            0.2,
+            0.2,
+        ),
+    }
+    for name, (patches, voices, gain, pan, send) in seats.items():
+        song.track(
+            name,
+            [song.standard(p) for p in patches],
+            swung(sorted(parts[name], key=lambda n: (n.tick, n.pitch)), 0.62, q // 2),
+            voices,
+            gain,
+            pan,
+            {"room": send},
+            lanes={"Trombone": lanes, "Clarinet": solo}.get(name),
+            slot_of=(lambda n: slot[n.pitch]) if name == "Drums" else None,
+            steal="fade",
+            kit=kit if name == "Drums" else None,
+        )
+    listen = (
+        "Joplin's rag as a New Orleans band would swing it: cornet lead with the clarinet a third or sixth above and "
+        "the trombone smearing in under them, the clarinet alone the second time, a stop-time strain, the trio's first "
+        "time on piano, and the banjo, tuba and drums driving the last strains home."
+    )
+    return song.project(
+        "maple", "Maple Leaf Rag", meter=[(0, 2, 4)], pickup=p0, key=keys
+    ), listen
+
+
+def st_louis_rag() -> tuple[dict, str]:
+    """Turpin, The St. Louis Rag, as a nickelodeon's orchestrion plays it: a piano with a mandolin rail, xylophone,
+    bells and drums, every repeat in strict time."""
+    q, bar = PPQ, 2 * PPQ
+    printed = read_midi(SCORES / "StLouisRag.mid")
+    right = 1
+    # The edition prints a four-bar introduction, then four strains, each once with its two endings after it.
+    order = [(0, 4 * bar)]
+    for k in range(4):
+        body = (4 + 17 * k) * bar
+        order += [
+            (body, body + 16 * bar),
+            (body, body + 15 * bar),
+            (body + 16 * bar, body + 17 * bar),
+        ]
+    played, starts = unfold(printed, order)
+    plays = [starts[0]] + [starts[1 + 3 * k + j] for k in range(4) for j in (0, 1)]
+    names = ["intro", "a", "a-again", "b", "b-again", "c", "c-again", "d", "d-again"]
+    end = starts[-1] + bar
+    length = end + bar
+    play_of = lambda tick: names[max(i for i, t in enumerate(plays) if t <= tick)]
+    # Which of the machine's stops are drawn for each time through. Its piano has two loudnesses, as a soft pedal gives.
+    stops = {
+        "intro": {"loud", "xylophone", "drums"},
+        "a": {"loud", "drums"},
+        "a-again": {"xylophone", "kick"},
+        "b": {"loud", "mandolin"},
+        "b-again": {"loud", "xylophone", "drums", "rolls"},
+        "c": {"bells", "triangle"},
+        "c-again": {"loud", "mandolin", "drums"},
+        "d": {"loud", "xylophone", "drums"},
+        "d-again": {"loud", "xylophone", "mandolin", "drums", "rolls"},
+    }
+    parts: dict[str, list[Note]] = {
+        name: [] for name in ("Piano", "Xylophone", "Mandolin", "Bells", "Drums")
+    }
+    tops: dict[int, Note] = {}
+    for n in played:
+        drawn = stops[play_of(n.tick)]
+        # A machine plays every note at the loudness its stop gives, and its melody, the top line, a little louder.
+        top = n.part == right and all(
+            m.pitch <= n.pitch for m in played if m.tick == n.tick and m.part == right
+        )
+        loud = 92 if "loud" in drawn else 72
+        parts["Piano"].append(Note(n.tick, n.dur, n.pitch, loud + (6 if top else 0)))
+        if top:
+            tops[n.tick] = n
+    for tick, n in sorted(tops.items()):
+        drawn = stops[play_of(tick)]
+        if "xylophone" in drawn:
+            parts["Xylophone"].append(Note(tick, n.dur, n.pitch, 96))
+        if "bells" in drawn:
+            parts["Bells"].append(Note(tick, n.dur, n.pitch, 84))
+        if "mandolin" in drawn:
+            # The rail strikes each melody note again and again, a thirty-second apart, for as long as it is held.
+            for at in range(tick, tick + max(n.dur, q // 8), q // 8):
+                parts["Mandolin"].append(
+                    Note(at, q // 8 - 10, n.pitch, 86 if at == tick else 74)
+                )
+    KICK, SNARE, CRASH, TRIANGLE = 36, 38, 49, 81
+    for tick in range(0, end - bar, q // 2):
+        drawn = stops[play_of(tick)]
+        beat = tick % q == 0
+        if beat and ("drums" in drawn or "kick" in drawn):
+            parts["Drums"].append(
+                Note(tick, q // 4, KICK, 92 if tick % bar == 0 else 82)
+            )
+        if not beat and "drums" in drawn:
+            # The snare between the beats, and a roll into every fourth bar's end.
+            if "rolls" in drawn and tick % (4 * bar) == 4 * bar - q // 2:
+                for i in range(4):
+                    parts["Drums"].append(
+                        Note(tick + i * q // 8, q // 8, SNARE, 70 + 6 * i)
+                    )
+            else:
+                parts["Drums"].append(Note(tick, q // 4, SNARE, 76))
+        if "triangle" in drawn and tick % bar == q:
+            parts["Drums"].append(Note(tick, q // 4, TRIANGLE, 70))
+    for start, name in zip(plays, names):
+        if "drums" in stops[name]:
+            parts["Drums"].append(
+                Note(start, q, CRASH, 90)
+            )  # A cymbal on the bass drum's beater, as each strain starts
+    last = starts[-1]
+    parts["Drums"] += [Note(last, q // 4, KICK, 100), Note(last, bar, CRASH, 100)]
+    parts["Piano"] = [
+        replace(n, dur=bar + q) if n.tick >= last else n for n in parts["Piano"]
+    ]
+
+    song = Song(Tempo(100), list(zip(names, plays)), length)
+    song.bus("room", song.standard("MediumRoom"))
+    kit = [
+        {"note": KICK, "name": "Bass Drum 1", "slot": 0},
+        {"note": SNARE, "name": "Acoustic Snare", "slot": 1},
+        {"note": CRASH, "name": "Crash Cymbal 1", "slot": 2},
+        {"note": TRIANGLE, "name": "Open Triangle", "slot": 3},
+    ]
+    slot = {KICK: 0, SNARE: 1, CRASH: 2, TRIANGLE: 3}
+    seats = {  # patches, voices, gain, pan, send
+        "Piano": (["BrightPiano"], 16, 1.0, 0.0, 0.25),
+        "Xylophone": (["Xylophone"], 6, 1.25, 0.3, 0.2),
+        "Mandolin": (["Dulcimer"], 6, 1.2, -0.3, 0.2),
+        "Bells": (["Glockenspiel"], 6, 1.2, 0.25, 0.3),
+        "Drums": (
+            ["KitKick", "KitSnare", "KitCrash", "KitTriangle"],
+            8,
+            1.3,
+            -0.15,
+            0.15,
+        ),
+    }
+    for name, (patches, voices, gain, pan, send) in seats.items():
+        song.track(
+            name,
+            [song.standard(p) for p in patches],
+            sorted(parts[name], key=lambda n: (n.tick, n.pitch)),
+            voices,
+            gain,
+            pan,
+            {"room": send},
+            slot_of=(lambda n: slot[n.pitch]) if name == "Drums" else None,
+            steal="fade",
+            kit=kit if name == "Drums" else None,
+        )
+    listen = (
+        "Turpin's rag as a nickelodeon's orchestrion plays it, in strict time and every repeat: a piano that is loud or "
+        "soft and nothing between, with a mandolin rail, xylophone, bells and drums drawn in and out strain by strain."
+    )
+    keys = [(0, 0, False), (plays[5], -1, False)]
+    return song.project(
+        "st-louis", "The St. Louis Rag", meter=[(0, 2, 4)], key=keys
+    ), listen
+
+
+def sounding(notes: list[Note], tick: int) -> set[int]:
+    """The pitch classes of the notes sounding at `tick`."""
+    return {n.pitch % 12 for n in notes if n.tick <= tick < n.end}
+
+
+def stars_and_stripes() -> tuple[dict, str]:
+    """Sousa, The Stars and Stripes Forever, scored for a military band from the piano edition."""
+    q, bar = PPQ, 4 * PPQ
+    printed = read_midi(SCORES / "StarsAndStripesForever.mid")
+    right, left = 1, 2
+    # LilyPond unfolded the repeats: the introduction, each strain twice, the trio, and then the break strain and the
+    # trio twice more, 212 bars. The band plays it with one break strain, into the trio's last time.
+    played, _ = unfold(printed, [(0, 100 * bar), (156 * bar, 212 * bar)])
+    marks = [("intro", 0), ("a", 4), ("a-again", 20), ("b", 36), ("b-again", 52)]
+    marks += [("trio", 68), ("break", 100), ("grandioso", 124)]
+    end = 156 * bar
+    role = lambda tick: max(
+        (m for m in marks if m[1] * bar <= tick), key=lambda m: m[1]
+    )[0]
+    level = {
+        "intro": 104,
+        "a": 90,
+        "a-again": 96,
+        "b": 70,
+        "b-again": 102,
+        "trio": 66,
+        "break": 104,
+        "grandioso": 110,
+    }
+    loud = {"intro", "a-again", "b-again", "break", "grandioso"}
+    rh = [n for n in played if n.part == right]
+    lh = [n for n in played if n.part == left]
+    by_tick: dict[int, list[Note]] = {}
+    for n in rh:
+        by_tick.setdefault(n.tick, []).append(n)
+
+    def vel(r: str, tick: int, lift: float = 0, under: bool = False) -> int:
+        # The parts under the tune drop back further in the soft strains, where only the clarinets have it.
+        hush = -8 if under and r in ("b", "trio") else 0
+        return velocity(
+            level[r]
+            + lift
+            + hush
+            + (4 if tick % (2 * q) == 0 else 0)
+            + wobble(tick, 11)
+        )
+
+    def tongued(r: str, dur: int) -> int:
+        # A march is played short, and the trio sung.
+        return (
+            dur - 30
+            if r == "trio"
+            else max(60, round(dur * (0.85 if dur <= q else 0.92)))
+        )
+
+    parts: dict[str, list[Note]] = {
+        name: []
+        for name in (
+            "Piccolo",
+            "Clarinets",
+            "Cornets",
+            "Horns",
+            "Trombones",
+            "Tuba",
+            "Bells",
+            "Drums",
+        )
+    }
+    for tick, chord in sorted(by_tick.items()):
+        r = role(tick)
+        top = max(chord, key=lambda n: n.pitch)
+        dur = tongued(r, top.dur)
+        clarinet = top.pitch + 12 if top.pitch < 70 and r != "trio" else top.pitch
+        parts["Clarinets"].append(
+            Note(tick, dur, clarinet, vel(r, tick, -4 if r in loud else 0))
+        )
+        if r != "b" and r != "trio":
+            cornet = top.pitch - 12 if top.pitch > 80 else top.pitch
+            parts["Cornets"].append(Note(tick, dur, cornet, vel(r, tick)))
+        if r == "trio":
+            parts["Bells"].append(Note(tick, dur, top.pitch + 12, vel(r, tick, 6)))
+        if r == "break":  # The right hand's chords below the tune go to the horns
+            for n in chord:
+                if n is not top and n.pitch < top.pitch - 2:
+                    parts["Horns"].append(
+                        Note(tick, tongued(r, n.dur), n.pitch, vel(r, tick, -8))
+                    )
+    # The left hand: its bass on each half note goes to the tuba, an octave down where the piano has no octave, and its
+    # afterbeat chords to the horns. In the break strain its octaves are the trombones' chromatic line.
+    for n in lh:
+        r = role(n.tick)
+        on_beat = n.tick % (2 * q) == 0
+        lowest = all(m.pitch >= n.pitch for m in lh if m.tick == n.tick)
+        if r == "break":
+            if not lowest:
+                parts["Trombones"].append(
+                    Note(n.tick, tongued(r, n.dur), n.pitch, vel(r, n.tick, -2))
+                )
+            else:
+                parts["Tuba"].append(
+                    Note(
+                        n.tick,
+                        tongued(r, n.dur),
+                        n.pitch - 12 if n.pitch > 46 else n.pitch,
+                        vel(r, n.tick),
+                    )
+                )
+        elif on_beat and lowest:
+            low = n.pitch - 12 if n.pitch > 46 else n.pitch
+            parts["Tuba"].append(
+                Note(n.tick, tongued(r, n.dur), low, vel(r, n.tick, under=True))
+            )
+        elif not on_beat:
+            parts["Horns"].append(
+                Note(
+                    n.tick,
+                    max(60, n.dur - 90),
+                    n.pitch,
+                    vel(r, n.tick, -10, under=True),
+                )
+            )
+    # The trombones' countermelody: the harmony a half note at a time, moving as little as it can, in the strains the
+    # band plays loud, and held a bar at a time in the trio.
+    trombone = 58
+    for tick in range(4 * bar, end - bar, 2 * q):
+        r = role(tick)
+        if r == "break" or (r == "trio" and tick % bar):
+            continue
+        harmony = sounding(lh, tick) | sounding(rh, tick)
+        if not harmony:
+            continue
+        trombone = led(trombone, harmony, 50, 65)
+        long = bar if r == "trio" else 2 * q
+        lift = -10 if r != "grandioso" else -2
+        parts["Trombones"].append(
+            Note(tick, long - 50, trombone, vel(r, tick, lift, under=True))
+        )
+    # The piccolo's descant over the last trio, written here, for the edition has none: the harmony's notes in eighths,
+    # high above the tune, rising and falling over two bars.
+    grand = 124 * bar
+    previous = 0
+    for tick in range(grand, end - bar, q // 2):
+        harmony = sounding(lh, tick) | sounding(rh, tick)
+        target = 91 + 5 * math.sin(2 * math.pi * (tick - grand) / (2 * bar))
+        options = sorted(
+            (p for p in range(84, 99) if p % 12 in harmony and p != previous),
+            key=lambda p: abs(p - target),
+        )
+        if not options:
+            continue
+        previous = options[0]
+        parts["Piccolo"].append(
+            Note(
+                tick,
+                q // 2 - 40,
+                previous,
+                velocity(86 + (6 if tick % q == 0 else 0) + wobble(tick, 5)),
+            )
+        )
+    # The drums: the bass drum on the half notes, with the cymbals in the loud strains, and the snare on the afterbeats,
+    # rolling into the end of every fourth bar.
+    KICK, SNARE, CRASH = 36, 38, 49
+    for tick in range(0, end - bar, q):
+        r = role(tick)
+        half = tick % (2 * q) == 0
+        if half and (r != "trio" or tick % bar == 0):
+            parts["Drums"].append(Note(tick, q // 4, KICK, vel(r, tick, -14)))
+            if r in loud and tick % bar == 0:
+                parts["Drums"].append(Note(tick, q // 2, CRASH, vel(r, tick, -22)))
+        if not half:
+            if r in loud and tick % (4 * bar) == 4 * bar - q:
+                for i in range(8):
+                    parts["Drums"].append(
+                        Note(
+                            tick + i * q // 8,
+                            q // 8,
+                            SNARE,
+                            velocity(level[r] - 34 + 3 * i),
+                        )
+                    )
+            else:
+                parts["Drums"].append(
+                    Note(tick, q // 4, SNARE, vel(r, tick, -26 if r != "trio" else -30))
+                )
+    stinger = end - 2 * q  # The last chord, on the last bar's third beat
+    parts["Drums"] += [Note(stinger, q // 4, KICK, 112), Note(stinger, q, CRASH, 108)]
+    parts["Tuba"].append(Note(stinger, q - 60, 32, 112))
+    parts["Trombones"] += [Note(stinger, q - 60, p, 108) for p in (44, 51, 56)]
+    parts["Horns"] += [Note(stinger, q - 60, p, 100) for p in (60, 63, 68)]
+    parts["Piccolo"].append(Note(stinger, q - 60, 92, 104))
+
+    # The clarinets' fader comes up where they have the tune alone.
+    clarinets = []
+    for name, start, stop in (("b", 36, 52), ("trio", 68, 100)):
+        clarinets += [(start * bar, 1.1), (stop * bar - 1, 1.1), (stop * bar, 0.7)]
+    clarinets = [(0, 0.7)] + clarinets
+    sections = [(name, start * bar) for name, start in marks]
+    song = Song(Tempo(240), sections, end)  # Half notes at 120, a march's step
+    song.bus("hall", song.standard("MediumHall"))
+    kit = [
+        {"note": KICK, "name": "Bass Drum 1", "slot": 0},
+        {"note": SNARE, "name": "Acoustic Snare", "slot": 1},
+        {"note": CRASH, "name": "Crash Cymbal 1", "slot": 2},
+    ]
+    slot = {KICK: 0, SNARE: 1, CRASH: 2}
+    seats = {  # patches, voices, gain, pan, send
+        "Piccolo": (["Flute"], 2, 0.9, -0.3, 0.3),
+        "Clarinets": (["Clarinet"], 4, 0.7, -0.4, 0.3),
+        "Cornets": (["Trumpet"], 4, 0.9, -0.1, 0.28),
+        "Horns": (["FrenchHorn"], 8, 0.5, 0.25, 0.35),
+        "Trombones": (["Trombone"], 6, 0.6, 0.4, 0.3),
+        "Tuba": (["Tuba"], 3, 0.8, 0.15, 0.2),
+        "Bells": (["Glockenspiel"], 4, 0.4, 0.1, 0.3),
+        "Drums": (["KitKick", "KitSnare", "KitCrash"], 8, 0.45, 0.0, 0.25),
+    }
+    for name, (patches, voices, gain, pan, send) in seats.items():
+        song.track(
+            name,
+            [song.standard(p) for p in patches],
+            sorted(parts[name], key=lambda n: (n.tick, n.pitch)),
+            voices,
+            gain,
+            pan,
+            {"hall": send},
+            fader(clarinets) if name == "Clarinets" else None,
+            slot_of=(lambda n: slot[n.pitch]) if name == "Drums" else None,
+            steal="fade",
+            kit=kit if name == "Drums" else None,
+        )
+    listen = (
+        "Sousa's march scored here for the standard set's band from the piano edition: cornets and clarinets on the "
+        "tune, horns on the afterbeats, tuba and drums marching, the trio soft on clarinets and bells, the trombones' "
+        "chromatic break strain, and the last trio grandioso with a piccolo descant of our own above it."
+    )
+    keys = [(0, -3, False), (68 * bar, -4, False)]
+    return song.project(
+        "stars-and-stripes",
+        "The Stars and Stripes Forever",
+        meter=[(0, 2, 2)],
+        key=keys,
+    ), listen
+
+
+# The Tenth Regiment March's band, part by part as the edition has them: the file in examples/Pieces/Scores/
+# TenthRegimentMarch, how far it sounds from where it is written, and the section that plays it. The B flat parts sound a
+# tone lower, or a ninth for the tenor sax, the bass clarinet and the baritone; the alto sax a major sixth lower; the
+# horns, in F, a fifth lower. The baritone sax's part is written a tritone from concert, and so it doubles the bass
+# clarinet. Each was checked against the edition's own concert-pitch score where it has them. The E flat clarinet
+# doubles the flutes and the trumpets the second and third cornets, note for note, and the set plays two players in
+# unison no louder than one, so they are left out, as unisons within a section are.
+BAND = {
+    "Flute1": (0, "Flutes"),
+    "Flute2": (0, "Flutes"),
+    "Oboe": (0, "Oboe"),
+    "Clar1": (-2, "Clarinets"),
+    "Clar2": (-2, "Clarinets"),
+    "Clar3": (-2, "Clarinets"),
+    "ClarBass": (-14, "Bass clarinet"),
+    "Bassoon": (0, "Bassoon"),
+    "SaxAlto": (-9, "Alto sax"),
+    "SaxTenor": (-14, "Tenor and baritone saxes"),
+    "SaxBari": (6, "Tenor and baritone saxes"),
+    "CornetSolo": (-2, "Solo cornets"),
+    "Cornet1": (-2, "Solo cornets"),
+    "Cornet2": (-2, "Cornets"),
+    "Cornet3": (-2, "Cornets"),
+    "Horn1": (-7, "Horns"),
+    "Horn2": (-7, "Horns"),
+    "Horn3": (-7, "Horns"),
+    "Horn4": (-7, "Horns"),
+    "Trombone1": (0, "Trombones"),
+    "Trombone2": (0, "Trombones"),
+    "Trombone3": (0, "Trombones"),
+    "BaritoneBC": (0, "Euphonium"),
+    "Basses": (0, "Basses"),
+}
+
+
+def tenth_regiment() -> tuple[dict, str]:
+    """R. B. Hall, Tenth Regiment March, for a concert band, from the edition's parts."""
+    q, bar, e = PPQ, 3 * PPQ, PPQ // 2  # 6/8: a bar of six eighths, two beats of three
+    # The parts print the introduction, then each strain once between repeat signs with its two endings after it. Each
+    # printed span is a clip, and the band plays every repeat but the last strain's, which ends with its second ending.
+    printed = {"intro": (0, 4), "a": (4, 19), "a-first": (19, 20), "a-second": (20, 21)}
+    printed |= {"bc": (21, 52), "bc-first": (52, 53), "bc-second": (53, 54)}
+    printed |= {"trio": (54, 69), "trio-first": (69, 70), "trio-second": (70, 71)}
+    printed |= {"de": (71, 102), "de-second": (103, 104)}
+    spans = {name: (a * bar, b * bar) for name, (a, b) in printed.items()}
+    played = [
+        "intro",
+        "a",
+        "a-first",
+        "a",
+        "a-second",
+        "bc",
+        "bc-first",
+        "bc",
+        "bc-second",
+    ]
+    played += ["trio", "trio-first", "trio", "trio-second", "de", "de-second"]
+    order, cursor = [], 0
+    for name in played:
+        order.append((name, cursor))
+        cursor += spans[name][1] - spans[name][0]
+    end = cursor
+    at = dict(reversed(order))  # Where each span first plays
+
+    # The edition's dynamics, by printed bar: ff for the introduction, p for A until its last bars, ff for B and C, p
+    # for the trio, ff for D and fff for E.
+    def dynamic(bar_: int) -> float:
+        for until, level in (
+            (3, 100),
+            (15, 62),
+            (18, 88),
+            (20, 70),
+            (51, 100),
+            (53, 92),
+            (70, 58),
+            (86, 100),
+            (104, 112),
+        ):
+            if bar_ <= until:
+                return level
+        return 100
+
+    sections: dict[str, dict[tuple[int, int], Note]] = {}
+    for part, (shift, section) in BAND.items():
+        for n in read_midi(SCORES / "TenthRegimentMarch" / f"{part}.mid"):
+            w = n.tick // bar
+            # A march is played short: an eighth or a quarter detached, a long note to its end.
+            dur = (
+                round(n.dur * 0.7)
+                if n.dur <= q
+                else round(n.dur * 0.85)
+                if n.dur <= 3 * e
+                else n.dur - 40
+            )
+            # The pickup into A, after the introduction and after its first ending, is marked p.
+            level = 62 if w in (3, 19) and n.tick % bar >= 3 * e else dynamic(w)
+            lean = 6 if n.tick % (3 * e) == 0 else 0
+            note = Note(
+                n.tick,
+                max(40, dur),
+                n.pitch + shift,
+                velocity(level + lean + wobble(n.tick, n.pitch)),
+            )
+            # Two of a section's players in unison are one note.
+            mine = sections.setdefault(section, {})
+            known = mine.get((n.tick, note.pitch))
+            if known is None or known.dur < note.dur:
+                mine[(n.tick, note.pitch)] = note
+
+    # The drums, from the edition's part for snare and bass drum, whose file has none of its notes: in the soft strains a
+    # quarter and an eighth twice a bar on the snare, in the loud ones the snare on the eighths after each beat and a
+    # turn into every fourth bar, and rolls in thirty-seconds where it has them. They rest through D, and the cymbals
+    # crash with the bass drum in the loudest strains.
+    KICK, SNARE, CRASH = 36, 38, 49
+    drums: list[Note] = []
+
+    def roll(at: int, length: int, vel: float) -> None:
+        for i in range(length // (q // 8)):
+            drums.append(
+                Note(
+                    at + i * q // 8,
+                    q // 8,
+                    SNARE,
+                    velocity(vel - 10 + 10 * i * (q // 8) / length),
+                )
+            )
+
+    def struck(at: int, key: int, vel: float, dur: int = e) -> None:
+        drums.append(Note(at, dur, key, velocity(vel + wobble(at, key))))
+
+    soft_bar = lambda at, v: [
+        struck(at + o, SNARE, v - 6 + (6 if o % (3 * e) == 0 else 0))
+        for o in (0, 2 * e, 3 * e, 5 * e)
+    ]
+    loud_bar = lambda at, v: [
+        struck(at + o, SNARE, v - 14) for o in (e, 2 * e, 4 * e, 5 * e)
+    ]
+    turn_bar = lambda at, v: [
+        struck(at + o, SNARE, v - 14 + 2 * o // e)
+        for o in (e, 2 * e, 3 * e, 4 * e, 5 * e)
+    ]
+    turns = {24, 28, 36, 40, 48, 90, 94, 98}  # The bars that turn into the next phrase
+    for w in range(104):
+        start, v = w * bar, dynamic(w)
+        if w <= 1:
+            roll(start, 3 * e, v)
+            roll(start + 3 * e, 3 * e, v)
+            struck(start, KICK, v)
+            struck(start + 3 * e, KICK, v)
+        elif w == 2:
+            struck(start, SNARE, v)
+            struck(start, KICK, v)
+            roll(start + 3 * e, 4 * e, v)
+            struck(start + 3 * e, KICK, v)
+        elif w == 3:  # The roll's end, tied over, and the bass drum under it
+            struck(start, KICK, v)
+        elif w in (19, 20, 52, 53, 69, 70):  # An ending: one stroke
+            struck(start, SNARE, v)
+            struck(start, KICK, v)
+        elif w == 103:  # The last ending's stinger
+            for o in (0, 2 * e, 2 * e + q // 4, 3 * e):
+                struck(start + o, SNARE, v)
+            struck(start, KICK, v)
+            struck(start + 3 * e, KICK, v + 6)
+            struck(start + 3 * e, CRASH, v + 4, bar)
+        elif 4 <= w <= 15 or 54 <= w <= 68:
+            soft_bar(start, v)
+            struck(start, KICK, v - 4)
+            struck(start + 3 * e, KICK, v - 8)
+        elif w in (16, 17):
+            for o in (0, 2 * e):
+                struck(start + o, SNARE, v)
+            roll(start + 3 * e, 3 * e, v)
+            struck(start, KICK, v)
+            struck(start + 5 * e, KICK, v - 6)
+        elif w == 18:
+            struck(start, SNARE, v)
+            roll(start + 3 * e, 3 * e, v + 6)
+            struck(start, KICK, v)
+            struck(start + 3 * e, KICK, v)
+        elif 71 <= w <= 86 or w == 102:
+            continue  # D: the drums rest
+        else:  # B, C and E
+            (turn_bar if w in turns else loud_bar)(start, v)
+            struck(start, KICK, v - 4)
+            if w not in turns:
+                struck(start + 3 * e, KICK, v - 8)
+            if w % 2 == 1:
+                struck(start, CRASH, v - 26, q)
+
+    song = Song(Tempo(180), [], end + bar)  # A dotted quarter at 120, a march's step
+    song.bus("hall", song.standard("MediumHall"))
+    kit = [
+        {"note": KICK, "name": "Bass Drum 1", "slot": 0},
+        {"note": SNARE, "name": "Acoustic Snare", "slot": 1},
+        {"note": CRASH, "name": "Crash Cymbal 1", "slot": 2},
+    ]
+    slot = {KICK: 0, SNARE: 1, CRASH: 2}
+    # The band as it sits: woodwinds to the left, cornets to the right of centre, horns, trombones and the low brass
+    # behind. The set plays every instrument at one loudness, so each fader sets where its section sits in the band.
+    seats = {  # patches, voices, gain, pan, send
+        "Flutes": (["Flute"], 5, 0.6, -0.55, 0.3),
+        "Oboe": (["Oboe"], 3, 0.35, -0.35, 0.3),
+        "Clarinets": (["Clarinet"], 8, 0.75, -0.45, 0.3),
+        "Bass clarinet": (["Clarinet"], 2, 0.35, -0.2, 0.3),
+        "Bassoon": (["Bassoon"], 2, 0.4, -0.15, 0.3),
+        "Alto sax": (["AltoSax"], 3, 0.35, -0.25, 0.3),
+        "Tenor and baritone saxes": (["TenorSax"], 4, 0.5, -0.1, 0.3),
+        "Solo cornets": (["Trumpet"], 5, 1.4, 0.2, 0.28),
+        "Cornets": (["Trumpet"], 5, 0.6, 0.35, 0.28),
+        "Horns": (["FrenchHorn"], 8, 0.5, 0.05, 0.35),
+        "Trombones": (["Trombone"], 7, 0.55, 0.5, 0.3),
+        "Euphonium": (["Tuba"], 2, 0.7, 0.25, 0.3),
+        "Basses": (["Tuba"], 3, 1.2, 0.1, 0.2),
+        "Drums": (["KitKick", "KitSnare", "KitCrash"], 8, 0.55, 0.0, 0.25),
+    }
+    sections_notes = {
+        name: list(notes.values()) for name, notes in sections.items()
+    } | {"Drums": drums}
+    for name, (patches, voices, gain, pan, send) in seats.items():
+        song.placed_track(
+            name,
+            [song.standard(p) for p in patches],
+            sorted(sections_notes[name], key=lambda n: (n.tick, n.pitch)),
+            spans,
+            order,
+            voices,
+            gain,
+            pan,
+            {"hall": send},
+            slot_of=(lambda n: slot[n.pitch]) if name == "Drums" else None,
+            steal="fade",
+            kit=kit if name == "Drums" else None,
+        )
+    listen = (
+        "A concert band march of 1895 from all of its parts, for the standard set's winds, brass and drums: every "
+        "strain repeated as printed but the last, the trio soft, the cornets on the tune, the clarinets and flutes "
+        "above, and the drums resting through D before the band's fff."
+    )
+    keys = [(0, -1, False), (at["trio"], -2, False)]
+    return song.project(
+        "tenth-regiment", "Tenth Regiment March", meter=[(0, 6, 8)], key=keys
+    ), listen
+
+
+# Original pieces ----------------------------------------------------------------------------------------------------
+
+
+def night_bus() -> tuple[dict, str]:
+    """Night Bus, a house track written for the examples: four on the floor at 122 bpm in A minor, chords pumping
+    under a sidechained kick, a filter sweep into each section and a hook in the drop."""
+    s, beat, bar = PPQ // 4, PPQ, 4 * PPQ  # A sixteenth, a beat, a bar
+    groove, breakdown, build, drop, outro, end = (
+        b * bar for b in (8, 24, 32, 40, 56, 64)
+    )
+    # A bar each: the bass's root and the chord's notes above it, without the root, as a keyboard plays them.
+    loop = [
+        (33, [60, 64, 67, 71]),
+        (38, [60, 64, 65, 69]),
+        (29, [60, 64, 67, 69]),
+        (28, [59, 62, 64, 67]),
+    ]
+    chord = lambda tick: loop[(tick // bar) % 4]
+    parts: dict[str, list[Note]] = {
+        name: [] for name in ("Kick", "Drums", "Bass", "Chords", "Pad", "Lead", "Riser")
+    }
+
+    def hit(name: str, tick: int, key: int, vel: float, dur: int = s) -> None:
+        parts[name].append(Note(tick, dur, key, velocity(vel + wobble(tick, key))))
+
+    KICK, CLAP, CLOSED, OPEN, SHAKER, SNARE, CRASH = 36, 39, 42, 46, 70, 38, 49
+    within = lambda t, *spans: any(a <= t < b for a, b in spans)
+    for t in range(0, end, bar):
+        if within(t, (0, breakdown), (drop, end)):
+            for k in range(4):  # Four on the floor
+                hit("Kick", t + k * beat, KICK, 112 if k == 0 else 104, beat // 2)
+        if within(t, (groove, breakdown), (drop, outro + 4 * bar)):
+            for k in (1, 3):
+                hit("Drums", t + k * beat, CLAP, 90)
+        for step in range(16):
+            at = t + step * s
+            if step % 2 and within(t, (0, breakdown), (drop, end)):
+                hit("Drums", at, CLOSED, 54 if step % 4 == 1 else 62)
+            if step % 4 == 2 and within(t, (groove, breakdown), (drop, end - 2 * bar)):
+                hit("Drums", at, OPEN, 80, 2 * s)  # The open hat on every offbeat
+            if within(t, (breakdown, build), (drop, outro)):
+                hit("Drums", at, SHAKER, 44 if step % 2 else 56)
+        root, notes = chord(t)
+        # The bass on the offbeats, the last an octave up, and a ghost note in the drop.
+        if within(t, (4 * bar, breakdown), (drop, end)):
+            steps = [(2, 0), (6, 0), (10, 0), (14, 12)] + (
+                [(7, 12)] if within(t, (drop, outro)) else []
+            )
+            for step, up in steps:
+                hit(
+                    "Bass",
+                    t + step * s,
+                    root + up,
+                    96 if up == 0 else 84,
+                    2 * s - 30 if step != 7 else s - 20,
+                )
+        # The chords: stabs on the offbeats, held through the breakdown, and the pad's slow chord above them.
+        if within(t, (12 * bar, breakdown), (build, outro + 4 * bar)):
+            for step, length in ((2, 3), (7, 2), (10, 4)):
+                lift = 6 * (t - build) / (8 * bar) if within(t, (build, drop)) else 0
+                for p in notes:
+                    hit("Chords", t + step * s, p, 76 + lift, length * s - 30)
+        elif within(t, (breakdown, build)):
+            for p in notes:
+                hit("Chords", t, p, 66, bar - 40)
+        if within(t, (16 * bar, outro)):
+            soft = 74 if within(t, (breakdown, drop)) else 60
+            for p in [root + 24] + notes:
+                hit("Pad", t, p, soft, bar - 20)
+    # The build: a snare in eighths, then sixteenths, then thirty-seconds, rising, and a cymbal swelling backwards into
+    # the drop. Crashes where the groove, the drop and its second half start, and at the end.
+    for i, (length, every) in enumerate(((4, 2 * s), (2, s), (2, s // 2))):
+        start = build + (0, 4, 6)[i] * bar
+        for at in range(start, start + length * bar, every):
+            hit("Drums", at, SNARE, 56 + 50 * (at - build) / (8 * bar), every)
+    parts["Riser"].append(Note(drop - 2 * bar, 2 * bar, 60, 96))
+    for at in (groove, drop, drop + 8 * bar, end):
+        hit("Drums", at, CRASH, 96, 2 * beat)
+    hit("Kick", end, KICK, 112, beat // 2)
+
+    # The hook, four bars over the loop, sung by a synthesised voice: twice through the drop, the second time ending
+    # higher, and its first half alone, quiet, late in the breakdown. Each note is (sixteenth, sixteenths long, key).
+    hook = [
+        [(2, 2, 76), (4, 4, 79), (8, 2, 81), (10, 4, 79), (14, 2, 76)],
+        [(0, 4, 74), (4, 2, 76), (6, 6, 77), (12, 4, 76)],
+        [(2, 2, 72), (4, 4, 76), (8, 2, 79), (10, 6, 81)],
+        [(0, 6, 79), (6, 2, 76), (8, 8, 71)],
+    ]
+    higher = [(0, 4, 79), (4, 4, 81), (8, 8, 76)]
+    for start, bars, level in ((28 * bar, 2, 58), (drop, 16, 90)):
+        for k in range(bars):
+            phrase = hook[k % 4] if k % 8 != 7 else higher
+            for step, length, p in phrase:
+                hit("Lead", start + k * bar + step * s, p, level, length * s - 20)
+
+    # The filter on the music's bus: opening through the introduction and the groove, closing for the breakdown, and
+    # opening again through the build, then closing over the last bars.
+    FILTER = 110
+    lane = lambda tick, value, ramp=0: (
+        {"target": {"insert": FILTER}, "param": CUTOFF, "tick": tick, "value": value}
+        | ({"ramp": ramp, "curve": "exp"} if ramp else {})
+    )
+    sweeps = [lane(0, 350.0), lane(0, 1800.0, groove), lane(groove, 18000.0, 8 * bar)]
+    sweeps += [
+        lane(breakdown, 700.0, 2 * bar),
+        lane(build, 300.0),
+        lane(build, 18000.0, 8 * bar),
+    ]
+    sweeps += [lane(outro + 4 * bar, 400.0, 4 * bar)]
+
+    sections = [
+        ("intro", 0),
+        ("groove", groove),
+        ("breakdown", breakdown),
+        ("build", build),
+    ]
+    sections += [("drop", drop), ("outro", outro)]
+    song = Song(Tempo(122), sections, end + bar)
+    song.patch("sweep", "Sweep filter", sweep())
+    song.patch("duck", "Duck", recipe_patch("SidechainDucking", "duck"))
+    # The bass, chords and pad share a bus, which the filter sweeps and the kick ducks, so the music breathes with the
+    # beat.
+    song.bus("music", ["sweep", {"patch": "duck", "key": "track:1"}], first_id=FILTER)
+    song.bus("plate", song.standard("Plate"))
+    song.bus("room", song.standard("SmallRoom"))
+    kit = [
+        {"note": SNARE, "name": "Acoustic Snare", "slot": 0},
+        {"note": CLAP, "name": "Hand Clap", "slot": 1},
+        {"note": CLOSED, "name": "Closed Hi-Hat", "slot": 2},
+        {"note": OPEN, "name": "Open Hi-Hat", "slot": 2},
+        {"note": CRASH, "name": "Crash Cymbal 1", "slot": 3},
+        {"note": SHAKER, "name": "Maracas", "slot": 4},
+    ]
+    slot = {SNARE: 0, CLAP: 1, CLOSED: 2, OPEN: 2, CRASH: 3, SHAKER: 4}
+    seats = {  # patches, voices, gain, pan, sends, output
+        "Kick": (["KitKick"], 2, 1.0, 0.0, {"room": 0.08}, None),
+        "Drums": (
+            ["KitSnare", "KitClap", "KitHiHat", "KitCrash", "KitShaker"],
+            10,
+            0.6,
+            0.1,
+            {"room": 0.2},
+            None,
+        ),
+        "Bass": (["SynthBass"], 2, 1.2, 0.0, {}, "bus:music"),
+        "Chords": (["ElectricPiano"], 12, 0.55, -0.2, {"plate": 0.25}, "bus:music"),
+        "Pad": (["WarmPad"], 10, 0.45, 0.2, {"plate": 0.35}, "bus:music"),
+        "Lead": (["VoiceLead"], 2, 1.1, 0.0, {"plate": 0.3}, None),
+        "Riser": (["ReverseCymbal"], 2, 0.5, -0.1, {"plate": 0.2}, None),
+    }
+    for name, (patches, voices, gain, pan, sends, output) in seats.items():
+        song.track(
+            name,
+            [song.standard(p) for p in patches],
+            sorted(parts[name], key=lambda n: (n.tick, n.pitch)),
+            voices,
+            gain,
+            pan,
+            sends,
+            lanes=sweeps if name == "Bass" else None,
+            slot_of=(lambda n: slot[n.pitch]) if name == "Drums" else None,
+            steal="fade",
+            kit=kit if name == "Drums" else None,
+            play={"mode": "legato", "glide": 0.035} if name == "Lead" else None,
+            output=output,
+        )
+    listen = (
+        "A house track written for these examples: four on the floor, an offbeat bass and electric piano chords that "
+        "duck under every kick, a filter that opens the groove, closes for the breakdown and sweeps up through the "
+        "build, and a sung synth hook in the drop."
+    )
+    return song.project("night-bus", "Night Bus", key=[(0, 0, True)]), listen
+
+
+def coastline() -> tuple[dict, str]:
+    """Coastline, a synthwave track written for the examples: an arpeggio through a dotted-eighth echo, a gliding saw
+    lead, big snares and tom fills, and the last chorus a tone higher."""
+    s, beat, bar = PPQ // 4, PPQ, 4 * PPQ
+    verse, chorus, bridge, again, outro, end = (
+        b * bar for b in (8, 16, 32, 40, 56, 60)
+    )
+    # A bar each, Am, F, C and G: the bass's root, the pad's chord and the arpeggio's four notes.
+    loop = [
+        (33, [57, 60, 64, 67], [57, 60, 64, 69]),
+        (29, [53, 57, 60, 64], [53, 57, 60, 65]),
+        (36, [55, 60, 64, 67], [55, 60, 64, 67]),
+        (31, [55, 59, 62, 67], [55, 59, 62, 67]),
+    ]
+    up = lambda tick: (
+        2 if tick >= again else 0
+    )  # The last chorus and the ending, a tone up, in B minor
+    chord = lambda tick: loop[(tick // bar) % 4]
+    parts: dict[str, list[Note]] = {
+        name: [] for name in ("Pad", "Arpeggio", "Bass", "Drums", "Snare", "Lead")
+    }
+
+    def play(
+        name: str, tick: int, key: int, vel: float, dur: int, pitched: bool = True
+    ) -> None:
+        shift = up(tick) if pitched else 0
+        parts[name].append(
+            Note(tick, dur, key + shift, velocity(vel + wobble(tick, key)))
+        )
+
+    KICK, CLOSED, OPEN, CRASH, SNARE = 36, 42, 46, 49, 38
+    TOMS = [50, 50, 48, 48, 45, 45, 41, 41]  # High to low, two sixteenths each
+    within = lambda t, *spans: any(a <= t < b for a, b in spans)
+    drums_in = ((verse, bridge), (again, outro))
+    for t in range(0, end, bar):
+        root, pad, arp = (
+            chord(t)
+            if t < outro
+            else (loop[(t // bar) % 4] if t < end - bar else loop[0])
+        )
+        last = t == end - bar
+        if last:  # The ending: B minor, held
+            root, pad, arp = loop[0]
+        for p in pad:
+            play(
+                "Pad",
+                t,
+                p,
+                62 if within(t, (0, verse), (bridge, again)) else 70,
+                bar * (2 if last else 1) - 20,
+            )
+        # The arpeggio: the chord's four notes in sixteenths, up, and an octave higher every other beat.
+        if not last:
+            for i in range(16):
+                p = arp[i % 4] + (12 if (i // 4) % 2 else 0)
+                play("Arpeggio", t + i * s, p, 100 if i % 4 == 0 else 88, s - 15)
+        if within(t, (verse, end - bar)):
+            for i in range(
+                8
+            ):  # Driving eighths, an octave up on the fourth of each four
+                play(
+                    "Bass",
+                    t + i * 2 * s,
+                    root + (12 if i % 4 == 3 else 0),
+                    92 if i % 2 == 0 else 84,
+                    2 * s - 30,
+                )
+        if within(t, *drums_in):
+            hot = within(t, (chorus, bridge), (again, outro))
+            kicks = (0, 2 * beat, 2 * beat + 2 * s) if hot else (0, 2 * beat)
+            for k in kicks:
+                play("Drums", t + k, KICK, 104, s, pitched=False)
+            for k in (beat, 3 * beat):
+                play("Snare", t + k, SNARE, 100, beat, pitched=False)
+            for i in range(8):
+                key = OPEN if hot and i == 7 else CLOSED
+                play(
+                    "Drums",
+                    t + i * 2 * s,
+                    key,
+                    70 if i % 2 == 0 else 56,
+                    2 * s if key == OPEN else s,
+                    pitched=False,
+                )
+            # A tom fill down the kit into every eighth bar.
+            if (t // bar) % 8 == 7:
+                parts["Drums"] = [
+                    n
+                    for n in parts["Drums"]
+                    if not (n.tick >= t + 2 * beat and n.pitch == CLOSED)
+                ]
+                parts["Snare"] = [n for n in parts["Snare"] if n.tick != t + 3 * beat]
+                for i, tom in enumerate(TOMS):
+                    play(
+                        "Drums", t + 2 * beat + i * s, tom, 90 + 2 * i, s, pitched=False
+                    )
+        elif within(t, (bridge, again - 2 * bar)):
+            play(
+                "Drums", t, KICK, 92, s, pitched=False
+            )  # The bridge: a kick on each bar's first beat
+    # Into the last chorus: the snare in sixteenths for two bars, louder, then the toms.
+    for at in range(again - 2 * bar, again - beat, s):
+        play(
+            "Snare",
+            at,
+            SNARE,
+            58 + 44 * (at - again + 2 * bar) / (2 * bar),
+            s,
+            pitched=False,
+        )
+    for i, tom in enumerate(TOMS[::2]):
+        play("Drums", again - beat + i * s, tom, 104, s, pitched=False)
+    for at in (verse, chorus, chorus + 8 * bar, again, again + 8 * bar, outro):
+        play("Drums", at, CRASH, 100, 2 * beat, pitched=False)
+    play("Drums", end - bar, KICK, 104, s, pitched=False)
+
+    # The lead: eight bars over the loop, twice through each chorus, the second time resolving down onto A. Each note is
+    # (beat, beats long, key).
+    tune = [
+        [(0, 1, 76), (1, 0.5, 74), (1.5, 0.5, 72), (2, 1, 74), (3, 1, 76)],
+        [(0, 2, 77), (2, 1, 76), (3, 1, 72)],
+        [(0, 1.5, 76), (1.5, 0.5, 79), (2, 1, 79), (3, 1, 76)],
+        [(0, 3, 74), (3, 1, 71)],
+        [(0, 1, 72), (1, 1, 76), (2, 1, 81), (3, 0.5, 79), (3.5, 0.5, 76)],
+        [(0, 1.5, 77), (1.5, 0.5, 76), (2, 1, 74), (3, 1, 72)],
+        [(0, 2, 76), (2, 1, 74), (3, 1, 72)],
+        [(0, 2, 71), (2, 2, 74)],
+    ]
+    resolve = [(0, 1, 74), (1, 1, 72), (2, 2, 71)]
+    vibrato = []
+    for start in (chorus, again):
+        for k in range(16):
+            phrase = resolve if k == 15 else tune[k % 8]
+            for at, length, p in phrase:
+                tick = start + k * bar + round(at * beat)
+                dur = round(length * beat) - 30
+                play("Lead", tick, p, 92 if at == int(at) else 84, dur)
+                if length >= 2:  # Vibrato comes in on the long notes
+                    vibrato += [
+                        {"param": 2, "tick": tick, "value": 0.0},
+                        {
+                            "param": 2,
+                            "tick": tick + beat // 2,
+                            "value": 0.6,
+                            "ramp": dur - beat // 2,
+                        },
+                        {"param": 2, "tick": tick + dur, "value": 0.0},
+                    ]
+
+    # The filter on the synths' bus opens through the introduction, and closes and opens again through the bridge.
+    FILTER = 110
+    lane = lambda tick, value, ramp=0: (
+        {"target": {"insert": FILTER}, "param": CUTOFF, "tick": tick, "value": value}
+        | ({"ramp": ramp, "curve": "exp"} if ramp else {})
+    )
+    sweeps = [lane(0, 400.0), lane(0, 18000.0, verse), lane(bridge, 900.0, 4 * bar)]
+    sweeps += [lane(bridge + 4 * bar, 18000.0, 4 * bar)]
+
+    sections = [("intro", 0), ("verse", verse), ("chorus", chorus), ("bridge", bridge)]
+    sections += [("chorus-up", again), ("outro", outro)]
+    song = Song(Tempo(100), sections, end + bar)
+    song.patch("sweep", "Sweep filter", sweep())
+    song.patch(
+        "echo", "Dotted-eighth echo", ping_pong(0.45, 0.38, 0.4)
+    )  # A dotted eighth at 100 bpm
+    song.bus("synths", ["sweep"], first_id=FILTER)
+    song.bus("hall", song.standard("LargeHall"))
+    song.bus("room", song.standard("LargeRoom"))
+    kit = [
+        {"note": KICK, "name": "Bass Drum 1", "slot": 0},
+        {"note": CLOSED, "name": "Closed Hi-Hat", "slot": 1},
+        {"note": OPEN, "name": "Open Hi-Hat", "slot": 1},
+        {"note": CRASH, "name": "Crash Cymbal 1", "slot": 2},
+    ] + [
+        {"note": t, "name": n, "slot": 3}
+        for t, n in (
+            (41, "Low Floor Tom"),
+            (45, "Low Tom"),
+            (48, "Hi-Mid Tom"),
+            (50, "High Tom"),
+        )
+    ]
+    slot = {KICK: 0, CLOSED: 1, OPEN: 1, CRASH: 2, 41: 3, 45: 3, 48: 3, 50: 3}
+    seats = {  # patches, voices, gain, pan, sends, output, inserts
+        "Pad": (["PolysynthPad"], 10, 0.8, -0.15, {"hall": 0.3}, "bus:synths", None),
+        "Arpeggio": (
+            ["SquareLead"],
+            4,
+            0.7,
+            0.25,
+            {"hall": 0.2},
+            "bus:synths",
+            ["echo"],
+        ),
+        "Bass": (["SynthBass"], 2, 0.6, 0.0, {}, None, None),
+        "Drums": (
+            ["KitKick", "KitHiHat", "KitCrash", "KitToms"],
+            8,
+            0.7,
+            0.05,
+            {"room": 0.2},
+            None,
+            None,
+        ),
+        "Snare": (["KitSnare"], 3, 0.75, 0.0, {"room": 0.7}, None, None),
+        "Lead": (["SawLead"], 2, 1.0, 0.0, {"hall": 0.35}, None, None),
+    }
+    for name, (patches, voices, gain, pan, sends, output, inserts) in seats.items():
+        song.track(
+            name,
+            [song.standard(p) for p in patches],
+            sorted(parts[name], key=lambda n: (n.tick, n.pitch)),
+            voices,
+            gain,
+            pan,
+            sends,
+            lanes={"Pad": sweeps, "Lead": vibrato}.get(name),
+            inserts=inserts,
+            slot_of=(lambda n: slot[n.pitch]) if name == "Drums" else None,
+            steal="fade",
+            kit=kit if name == "Drums" else None,
+            play={"mode": "legato", "glide": 0.03} if name == "Lead" else None,
+            output=output,
+        )
+    listen = (
+        "A synthwave track written for these examples: a square-wave arpeggio echoing across the speakers through a "
+        "filter that opens the song, driving eighths in the bass, big room snares and tom fills, and a gliding saw "
+        "lead whose last chorus goes up a tone."
+    )
+    keys = [(0, 0, True), (again, 2, True)]
+    return song.project("coastline", "Coastline", key=keys), listen
+
+
 MAKERS = {
     "BachPreludeInC": prelude,
     "PassionChorale": chorale,
@@ -1067,6 +2975,14 @@ MAKERS = {
     "HallOfTheMountainKing": king,
     "BachInventionInF": invention,
     "TheEntertainer": entertainer,
+    "SoldiersJoy": soldiers_joy,
+    "Kappore": kappore,
+    "MapleLeafRag": maple_leaf,
+    "StLouisRag": st_louis_rag,
+    "StarsAndStripesForever": stars_and_stripes,
+    "TenthRegimentMarch": tenth_regiment,
+    "NightBus": night_bus,
+    "Coastline": coastline,
 }
 
 

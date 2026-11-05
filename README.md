@@ -21,7 +21,7 @@ checked against committed renders in [golden](golden).
 | `examples/Listen.py` | Plays each oscillator and mode through the sound card, with `uv run examples/Listen.py`. `--list` shows the recipes and pieces. |
 | `examples/Recipes` | 74 standalone projects, from a supersaw to a drum loop, that `Listen.py` plays. |
 | `examples/Instruments` | The standard set: 104 instruments for General MIDI's 128 programs, a 23-sound drum kit and GM2's effects, one example per family. `MakeInstruments.py` writes them from the modules in `examples/Sounds`, sets each one's level, and writes `GeneralMidi.json`, which program and key each plays. |
-| `examples/Pieces` | Six public-domain pieces arranged for the engine, from a Bach prelude on harpsichord to Grieg's trolls for orchestra. `MakePieces.py` writes them from the scores in `Scores`. |
+| `examples/Pieces` | Fourteen pieces. Twelve are public-domain pieces arranged for the engine, from a Bach prelude on harpsichord and Grieg's trolls for orchestra to Maple Leaf Rag for a New Orleans band, a fiddle tune, a Japanese street song and two marches for band. Two are house and synthwave tracks written for the examples. `MakePieces.py` writes them, the arrangements from the scores in `Scores`. |
 
 ## Native
 

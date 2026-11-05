@@ -61,5 +61,19 @@
   "seconds": 165.75,
   "group": "pieces",
   "listen_for": "Joplin's rag as a New Orleans band would swing it: cornet lead with the clarinet a third or sixth above and the trombone smearing in under them, the clarinet alone the second time, a stop-time strain, the trio's first time on piano, and the banjo, tuba and drums driving the last strains home."
+ },
+ {
+  "name": "StLouisRag",
+  "file": "StLouisRag.json",
+  "seconds": 169.75,
+  "group": "pieces",
+  "listen_for": "Turpin's rag as a nickelodeon's orchestrion plays it, in strict time and every repeat: a piano that is loud or soft and nothing between, with a mandolin rail, xylophone, bells and drums drawn in and out strain by strain."
+ },
+ {
+  "name": "StarsAndStripesForever",
+  "file": "StarsAndStripesForever.json",
+  "seconds": 166.0,
+  "group": "pieces",
+  "listen_for": "Sousa's march scored here for the standard set's band from the piano edition: cornets and clarinets on the tune, horns on the afterbeats, tuba and drums marching, the trio soft on clarinets and bells, the trombones' chromatic break strain, and the last trio grandioso with a piccolo descant of our own above it."
  }
 ]

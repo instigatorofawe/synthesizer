@@ -149,6 +149,55 @@ def small_room(feedback: float, damp: float, wet: float) -> dict:
     return g.json()
 
 
+CUTOFF = 1  # The sweep filter's parameter
+
+
+def sweep() -> dict:
+    """An insert's lowpass, two poles a side, whose cutoff a lane moves: closed to a murmur, or open to let everything
+    through. The electronic pieces sweep a bus with it."""
+    g = Graph()
+    g.params = [
+        {
+            "id": CUTOFF,
+            "name": "cutoff",
+            "scope": "track",
+            "min": 80.0,
+            "max": 18000.0,
+            "default": 18000.0,
+            "smooth_ms": 20,
+        }
+    ]
+    source, cutoff = g.node("in", index=0), g.node("param", param=CUTOFF)
+    g.out(
+        g.filter("lowpass", source.l, cutoff, 0.9),
+        g.filter("lowpass", source.r, cutoff, 0.9),
+    )
+    return g.json()
+
+
+def ping_pong(seconds: float, feedback: float, wet: float) -> dict:
+    """An echo that bounces between the speakers, `seconds` a side, as the PingPongDelay recipe's does: a delay is in
+    seconds, so a piece gives it the length of the note it wants at its tempo."""
+    g = Graph()
+    source = g.node("in", index=0)
+    mono = g.mul(g.add(source.l, source.r), 0.5)
+    left = g.node("delay", {"time": seconds}, max=round(seconds + 0.05, 3))
+    right = g.node("delay", {"in": left, "time": seconds}, max=round(seconds + 0.05, 3))
+    back = g.add(mono, g.mul(right, feedback))
+    g.edges.append(
+        {"from": back.id, "to": left.id, "input": "in"}
+    )  # The loop, which the delays allow
+    g.out(g.add(source.l, g.mul(left, wet)), g.add(source.r, g.mul(right, wet)))
+    return g.json()
+
+
+def recipe_patch(recipe: str, key: str) -> dict:
+    """A recipe's patch, exactly, so that a piece playing it plays the recipe's built-in patch."""
+    return json.loads((HERE / "Recipes" / f"{recipe}.json").read_text())["patches"][
+        key
+    ]["graph"]
+
+
 # Scores -------------------------------------------------------------------------------------------------------------
 
 
@@ -2494,6 +2543,413 @@ def tenth_regiment() -> tuple[dict, str]:
     ), listen
 
 
+# Original pieces ----------------------------------------------------------------------------------------------------
+
+
+def night_bus() -> tuple[dict, str]:
+    """Night Bus, a house track written for the examples: four on the floor at 122 bpm in A minor, chords pumping
+    under a sidechained kick, a filter sweep into each section and a hook in the drop."""
+    s, beat, bar = PPQ // 4, PPQ, 4 * PPQ  # A sixteenth, a beat, a bar
+    groove, breakdown, build, drop, outro, end = (
+        b * bar for b in (8, 24, 32, 40, 56, 64)
+    )
+    # A bar each: the bass's root and the chord's notes above it, without the root, as a keyboard plays them.
+    loop = [
+        (33, [60, 64, 67, 71]),
+        (38, [60, 64, 65, 69]),
+        (29, [60, 64, 67, 69]),
+        (28, [59, 62, 64, 67]),
+    ]
+    chord = lambda tick: loop[(tick // bar) % 4]
+    parts: dict[str, list[Note]] = {
+        name: [] for name in ("Kick", "Drums", "Bass", "Chords", "Pad", "Lead", "Riser")
+    }
+
+    def hit(name: str, tick: int, key: int, vel: float, dur: int = s) -> None:
+        parts[name].append(Note(tick, dur, key, velocity(vel + wobble(tick, key))))
+
+    KICK, CLAP, CLOSED, OPEN, SHAKER, SNARE, CRASH = 36, 39, 42, 46, 70, 38, 49
+    within = lambda t, *spans: any(a <= t < b for a, b in spans)
+    for t in range(0, end, bar):
+        if within(t, (0, breakdown), (drop, end)):
+            for k in range(4):  # Four on the floor
+                hit("Kick", t + k * beat, KICK, 112 if k == 0 else 104, beat // 2)
+        if within(t, (groove, breakdown), (drop, outro + 4 * bar)):
+            for k in (1, 3):
+                hit("Drums", t + k * beat, CLAP, 90)
+        for step in range(16):
+            at = t + step * s
+            if step % 2 and within(t, (0, breakdown), (drop, end)):
+                hit("Drums", at, CLOSED, 54 if step % 4 == 1 else 62)
+            if step % 4 == 2 and within(t, (groove, breakdown), (drop, end - 2 * bar)):
+                hit("Drums", at, OPEN, 80, 2 * s)  # The open hat on every offbeat
+            if within(t, (breakdown, build), (drop, outro)):
+                hit("Drums", at, SHAKER, 44 if step % 2 else 56)
+        root, notes = chord(t)
+        # The bass on the offbeats, the last an octave up, and a ghost note in the drop.
+        if within(t, (4 * bar, breakdown), (drop, end)):
+            steps = [(2, 0), (6, 0), (10, 0), (14, 12)] + (
+                [(7, 12)] if within(t, (drop, outro)) else []
+            )
+            for step, up in steps:
+                hit(
+                    "Bass",
+                    t + step * s,
+                    root + up,
+                    96 if up == 0 else 84,
+                    2 * s - 30 if step != 7 else s - 20,
+                )
+        # The chords: stabs on the offbeats, held through the breakdown, and the pad's slow chord above them.
+        if within(t, (12 * bar, breakdown), (build, outro + 4 * bar)):
+            for step, length in ((2, 3), (7, 2), (10, 4)):
+                lift = 6 * (t - build) / (8 * bar) if within(t, (build, drop)) else 0
+                for p in notes:
+                    hit("Chords", t + step * s, p, 76 + lift, length * s - 30)
+        elif within(t, (breakdown, build)):
+            for p in notes:
+                hit("Chords", t, p, 66, bar - 40)
+        if within(t, (16 * bar, outro)):
+            soft = 74 if within(t, (breakdown, drop)) else 60
+            for p in [root + 24] + notes:
+                hit("Pad", t, p, soft, bar - 20)
+    # The build: a snare in eighths, then sixteenths, then thirty-seconds, rising, and a cymbal swelling backwards into
+    # the drop. Crashes where the groove, the drop and its second half start, and at the end.
+    for i, (length, every) in enumerate(((4, 2 * s), (2, s), (2, s // 2))):
+        start = build + (0, 4, 6)[i] * bar
+        for at in range(start, start + length * bar, every):
+            hit("Drums", at, SNARE, 56 + 50 * (at - build) / (8 * bar), every)
+    parts["Riser"].append(Note(drop - 2 * bar, 2 * bar, 60, 96))
+    for at in (groove, drop, drop + 8 * bar, end):
+        hit("Drums", at, CRASH, 96, 2 * beat)
+    hit("Kick", end, KICK, 112, beat // 2)
+
+    # The hook, four bars over the loop, sung by a synthesised voice: twice through the drop, the second time ending
+    # higher, and its first half alone, quiet, late in the breakdown. Each note is (sixteenth, sixteenths long, key).
+    hook = [
+        [(2, 2, 76), (4, 4, 79), (8, 2, 81), (10, 4, 79), (14, 2, 76)],
+        [(0, 4, 74), (4, 2, 76), (6, 6, 77), (12, 4, 76)],
+        [(2, 2, 72), (4, 4, 76), (8, 2, 79), (10, 6, 81)],
+        [(0, 6, 79), (6, 2, 76), (8, 8, 71)],
+    ]
+    higher = [(0, 4, 79), (4, 4, 81), (8, 8, 76)]
+    for start, bars, level in ((28 * bar, 2, 58), (drop, 16, 90)):
+        for k in range(bars):
+            phrase = hook[k % 4] if k % 8 != 7 else higher
+            for step, length, p in phrase:
+                hit("Lead", start + k * bar + step * s, p, level, length * s - 20)
+
+    # The filter on the music's bus: opening through the introduction and the groove, closing for the breakdown, and
+    # opening again through the build, then closing over the last bars.
+    FILTER = 110
+    lane = lambda tick, value, ramp=0: (
+        {"target": {"insert": FILTER}, "param": CUTOFF, "tick": tick, "value": value}
+        | ({"ramp": ramp, "curve": "exp"} if ramp else {})
+    )
+    sweeps = [lane(0, 350.0), lane(0, 1800.0, groove), lane(groove, 18000.0, 8 * bar)]
+    sweeps += [
+        lane(breakdown, 700.0, 2 * bar),
+        lane(build, 300.0),
+        lane(build, 18000.0, 8 * bar),
+    ]
+    sweeps += [lane(outro + 4 * bar, 400.0, 4 * bar)]
+
+    sections = [
+        ("intro", 0),
+        ("groove", groove),
+        ("breakdown", breakdown),
+        ("build", build),
+    ]
+    sections += [("drop", drop), ("outro", outro)]
+    song = Song(Tempo(122), sections, end + bar)
+    song.patch("sweep", "Sweep filter", sweep())
+    song.patch("duck", "Duck", recipe_patch("SidechainDucking", "duck"))
+    # The bass, chords and pad share a bus, which the filter sweeps and the kick ducks, so the music breathes with the
+    # beat.
+    song.bus("music", ["sweep", {"patch": "duck", "key": "track:1"}], first_id=FILTER)
+    song.bus("plate", song.standard("Plate"))
+    song.bus("room", song.standard("SmallRoom"))
+    kit = [
+        {"note": SNARE, "name": "Acoustic Snare", "slot": 0},
+        {"note": CLAP, "name": "Hand Clap", "slot": 1},
+        {"note": CLOSED, "name": "Closed Hi-Hat", "slot": 2},
+        {"note": OPEN, "name": "Open Hi-Hat", "slot": 2},
+        {"note": CRASH, "name": "Crash Cymbal 1", "slot": 3},
+        {"note": SHAKER, "name": "Maracas", "slot": 4},
+    ]
+    slot = {SNARE: 0, CLAP: 1, CLOSED: 2, OPEN: 2, CRASH: 3, SHAKER: 4}
+    seats = {  # patches, voices, gain, pan, sends, output
+        "Kick": (["KitKick"], 2, 1.0, 0.0, {"room": 0.08}, None),
+        "Drums": (
+            ["KitSnare", "KitClap", "KitHiHat", "KitCrash", "KitShaker"],
+            10,
+            0.6,
+            0.1,
+            {"room": 0.2},
+            None,
+        ),
+        "Bass": (["SynthBass"], 2, 1.2, 0.0, {}, "bus:music"),
+        "Chords": (["ElectricPiano"], 12, 0.55, -0.2, {"plate": 0.25}, "bus:music"),
+        "Pad": (["WarmPad"], 10, 0.45, 0.2, {"plate": 0.35}, "bus:music"),
+        "Lead": (["VoiceLead"], 2, 1.1, 0.0, {"plate": 0.3}, None),
+        "Riser": (["ReverseCymbal"], 2, 0.5, -0.1, {"plate": 0.2}, None),
+    }
+    for name, (patches, voices, gain, pan, sends, output) in seats.items():
+        song.track(
+            name,
+            [song.standard(p) for p in patches],
+            sorted(parts[name], key=lambda n: (n.tick, n.pitch)),
+            voices,
+            gain,
+            pan,
+            sends,
+            lanes=sweeps if name == "Bass" else None,
+            slot_of=(lambda n: slot[n.pitch]) if name == "Drums" else None,
+            steal="fade",
+            kit=kit if name == "Drums" else None,
+            play={"mode": "legato", "glide": 0.035} if name == "Lead" else None,
+            output=output,
+        )
+    listen = (
+        "A house track written for these examples: four on the floor, an offbeat bass and electric piano chords that "
+        "duck under every kick, a filter that opens the groove, closes for the breakdown and sweeps up through the "
+        "build, and a sung synth hook in the drop."
+    )
+    return song.project("night-bus", "Night Bus", key=[(0, 0, True)]), listen
+
+
+def coastline() -> tuple[dict, str]:
+    """Coastline, a synthwave track written for the examples: an arpeggio through a dotted-eighth echo, a gliding saw
+    lead, big snares and tom fills, and the last chorus a tone higher."""
+    s, beat, bar = PPQ // 4, PPQ, 4 * PPQ
+    verse, chorus, bridge, again, outro, end = (
+        b * bar for b in (8, 16, 32, 40, 56, 60)
+    )
+    # A bar each, Am, F, C and G: the bass's root, the pad's chord and the arpeggio's four notes.
+    loop = [
+        (33, [57, 60, 64, 67], [57, 60, 64, 69]),
+        (29, [53, 57, 60, 64], [53, 57, 60, 65]),
+        (36, [55, 60, 64, 67], [55, 60, 64, 67]),
+        (31, [55, 59, 62, 67], [55, 59, 62, 67]),
+    ]
+    up = lambda tick: (
+        2 if tick >= again else 0
+    )  # The last chorus and the ending, a tone up, in B minor
+    chord = lambda tick: loop[(tick // bar) % 4]
+    parts: dict[str, list[Note]] = {
+        name: [] for name in ("Pad", "Arpeggio", "Bass", "Drums", "Snare", "Lead")
+    }
+
+    def play(
+        name: str, tick: int, key: int, vel: float, dur: int, pitched: bool = True
+    ) -> None:
+        shift = up(tick) if pitched else 0
+        parts[name].append(
+            Note(tick, dur, key + shift, velocity(vel + wobble(tick, key)))
+        )
+
+    KICK, CLOSED, OPEN, CRASH, SNARE = 36, 42, 46, 49, 38
+    TOMS = [50, 50, 48, 48, 45, 45, 41, 41]  # High to low, two sixteenths each
+    within = lambda t, *spans: any(a <= t < b for a, b in spans)
+    drums_in = ((verse, bridge), (again, outro))
+    for t in range(0, end, bar):
+        root, pad, arp = (
+            chord(t)
+            if t < outro
+            else (loop[(t // bar) % 4] if t < end - bar else loop[0])
+        )
+        last = t == end - bar
+        if last:  # The ending: B minor, held
+            root, pad, arp = loop[0]
+        for p in pad:
+            play(
+                "Pad",
+                t,
+                p,
+                62 if within(t, (0, verse), (bridge, again)) else 70,
+                bar * (2 if last else 1) - 20,
+            )
+        # The arpeggio: the chord's four notes in sixteenths, up, and an octave higher every other beat.
+        if not last:
+            for i in range(16):
+                p = arp[i % 4] + (12 if (i // 4) % 2 else 0)
+                play("Arpeggio", t + i * s, p, 100 if i % 4 == 0 else 88, s - 15)
+        if within(t, (verse, end - bar)):
+            for i in range(
+                8
+            ):  # Driving eighths, an octave up on the fourth of each four
+                play(
+                    "Bass",
+                    t + i * 2 * s,
+                    root + (12 if i % 4 == 3 else 0),
+                    92 if i % 2 == 0 else 84,
+                    2 * s - 30,
+                )
+        if within(t, *drums_in):
+            hot = within(t, (chorus, bridge), (again, outro))
+            kicks = (0, 2 * beat, 2 * beat + 2 * s) if hot else (0, 2 * beat)
+            for k in kicks:
+                play("Drums", t + k, KICK, 104, s, pitched=False)
+            for k in (beat, 3 * beat):
+                play("Snare", t + k, SNARE, 100, beat, pitched=False)
+            for i in range(8):
+                key = OPEN if hot and i == 7 else CLOSED
+                play(
+                    "Drums",
+                    t + i * 2 * s,
+                    key,
+                    70 if i % 2 == 0 else 56,
+                    2 * s if key == OPEN else s,
+                    pitched=False,
+                )
+            # A tom fill down the kit into every eighth bar.
+            if (t // bar) % 8 == 7:
+                parts["Drums"] = [
+                    n
+                    for n in parts["Drums"]
+                    if not (n.tick >= t + 2 * beat and n.pitch == CLOSED)
+                ]
+                parts["Snare"] = [n for n in parts["Snare"] if n.tick != t + 3 * beat]
+                for i, tom in enumerate(TOMS):
+                    play(
+                        "Drums", t + 2 * beat + i * s, tom, 90 + 2 * i, s, pitched=False
+                    )
+        elif within(t, (bridge, again - 2 * bar)):
+            play(
+                "Drums", t, KICK, 92, s, pitched=False
+            )  # The bridge: a kick on each bar's first beat
+    # Into the last chorus: the snare in sixteenths for two bars, louder, then the toms.
+    for at in range(again - 2 * bar, again - beat, s):
+        play(
+            "Snare",
+            at,
+            SNARE,
+            58 + 44 * (at - again + 2 * bar) / (2 * bar),
+            s,
+            pitched=False,
+        )
+    for i, tom in enumerate(TOMS[::2]):
+        play("Drums", again - beat + i * s, tom, 104, s, pitched=False)
+    for at in (verse, chorus, chorus + 8 * bar, again, again + 8 * bar, outro):
+        play("Drums", at, CRASH, 100, 2 * beat, pitched=False)
+    play("Drums", end - bar, KICK, 104, s, pitched=False)
+
+    # The lead: eight bars over the loop, twice through each chorus, the second time resolving down onto A. Each note is
+    # (beat, beats long, key).
+    tune = [
+        [(0, 1, 76), (1, 0.5, 74), (1.5, 0.5, 72), (2, 1, 74), (3, 1, 76)],
+        [(0, 2, 77), (2, 1, 76), (3, 1, 72)],
+        [(0, 1.5, 76), (1.5, 0.5, 79), (2, 1, 79), (3, 1, 76)],
+        [(0, 3, 74), (3, 1, 71)],
+        [(0, 1, 72), (1, 1, 76), (2, 1, 81), (3, 0.5, 79), (3.5, 0.5, 76)],
+        [(0, 1.5, 77), (1.5, 0.5, 76), (2, 1, 74), (3, 1, 72)],
+        [(0, 2, 76), (2, 1, 74), (3, 1, 72)],
+        [(0, 2, 71), (2, 2, 74)],
+    ]
+    resolve = [(0, 1, 74), (1, 1, 72), (2, 2, 71)]
+    vibrato = []
+    for start in (chorus, again):
+        for k in range(16):
+            phrase = resolve if k == 15 else tune[k % 8]
+            for at, length, p in phrase:
+                tick = start + k * bar + round(at * beat)
+                dur = round(length * beat) - 30
+                play("Lead", tick, p, 92 if at == int(at) else 84, dur)
+                if length >= 2:  # Vibrato comes in on the long notes
+                    vibrato += [
+                        {"param": 2, "tick": tick, "value": 0.0},
+                        {
+                            "param": 2,
+                            "tick": tick + beat // 2,
+                            "value": 0.6,
+                            "ramp": dur - beat // 2,
+                        },
+                        {"param": 2, "tick": tick + dur, "value": 0.0},
+                    ]
+
+    # The filter on the synths' bus opens through the introduction, and closes and opens again through the bridge.
+    FILTER = 110
+    lane = lambda tick, value, ramp=0: (
+        {"target": {"insert": FILTER}, "param": CUTOFF, "tick": tick, "value": value}
+        | ({"ramp": ramp, "curve": "exp"} if ramp else {})
+    )
+    sweeps = [lane(0, 400.0), lane(0, 18000.0, verse), lane(bridge, 900.0, 4 * bar)]
+    sweeps += [lane(bridge + 4 * bar, 18000.0, 4 * bar)]
+
+    sections = [("intro", 0), ("verse", verse), ("chorus", chorus), ("bridge", bridge)]
+    sections += [("chorus-up", again), ("outro", outro)]
+    song = Song(Tempo(100), sections, end + bar)
+    song.patch("sweep", "Sweep filter", sweep())
+    song.patch(
+        "echo", "Dotted-eighth echo", ping_pong(0.45, 0.38, 0.4)
+    )  # A dotted eighth at 100 bpm
+    song.bus("synths", ["sweep"], first_id=FILTER)
+    song.bus("hall", song.standard("LargeHall"))
+    song.bus("room", song.standard("LargeRoom"))
+    kit = [
+        {"note": KICK, "name": "Bass Drum 1", "slot": 0},
+        {"note": CLOSED, "name": "Closed Hi-Hat", "slot": 1},
+        {"note": OPEN, "name": "Open Hi-Hat", "slot": 1},
+        {"note": CRASH, "name": "Crash Cymbal 1", "slot": 2},
+    ] + [
+        {"note": t, "name": n, "slot": 3}
+        for t, n in (
+            (41, "Low Floor Tom"),
+            (45, "Low Tom"),
+            (48, "Hi-Mid Tom"),
+            (50, "High Tom"),
+        )
+    ]
+    slot = {KICK: 0, CLOSED: 1, OPEN: 1, CRASH: 2, 41: 3, 45: 3, 48: 3, 50: 3}
+    seats = {  # patches, voices, gain, pan, sends, output, inserts
+        "Pad": (["PolysynthPad"], 10, 0.8, -0.15, {"hall": 0.3}, "bus:synths", None),
+        "Arpeggio": (
+            ["SquareLead"],
+            4,
+            0.7,
+            0.25,
+            {"hall": 0.2},
+            "bus:synths",
+            ["echo"],
+        ),
+        "Bass": (["SynthBass"], 2, 0.6, 0.0, {}, None, None),
+        "Drums": (
+            ["KitKick", "KitHiHat", "KitCrash", "KitToms"],
+            8,
+            0.7,
+            0.05,
+            {"room": 0.2},
+            None,
+            None,
+        ),
+        "Snare": (["KitSnare"], 3, 0.75, 0.0, {"room": 0.7}, None, None),
+        "Lead": (["SawLead"], 2, 1.0, 0.0, {"hall": 0.35}, None, None),
+    }
+    for name, (patches, voices, gain, pan, sends, output, inserts) in seats.items():
+        song.track(
+            name,
+            [song.standard(p) for p in patches],
+            sorted(parts[name], key=lambda n: (n.tick, n.pitch)),
+            voices,
+            gain,
+            pan,
+            sends,
+            lanes={"Pad": sweeps, "Lead": vibrato}.get(name),
+            inserts=inserts,
+            slot_of=(lambda n: slot[n.pitch]) if name == "Drums" else None,
+            steal="fade",
+            kit=kit if name == "Drums" else None,
+            play={"mode": "legato", "glide": 0.03} if name == "Lead" else None,
+            output=output,
+        )
+    listen = (
+        "A synthwave track written for these examples: a square-wave arpeggio echoing across the speakers through a "
+        "filter that opens the song, driving eighths in the bass, big room snares and tom fills, and a gliding saw "
+        "lead whose last chorus goes up a tone."
+    )
+    keys = [(0, 0, True), (again, 2, True)]
+    return song.project("coastline", "Coastline", key=keys), listen
+
+
 MAKERS = {
     "BachPreludeInC": prelude,
     "PassionChorale": chorale,
@@ -2507,6 +2963,8 @@ MAKERS = {
     "StLouisRag": st_louis_rag,
     "StarsAndStripesForever": stars_and_stripes,
     "TenthRegimentMarch": tenth_regiment,
+    "NightBus": night_bus,
+    "Coastline": coastline,
 }
 
 

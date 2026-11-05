@@ -82,5 +82,19 @@
   "seconds": 174.0,
   "group": "pieces",
   "listen_for": "A concert band march of 1895 from all of its parts, for the standard set's winds, brass and drums: every strain repeated as printed but the last, the trio soft, the cornets on the tune, the clarinets and flutes above, and the drums resting through D before the band's fff."
+ },
+ {
+  "name": "NightBus",
+  "file": "NightBus.json",
+  "seconds": 138.0,
+  "group": "pieces",
+  "listen_for": "A house track written for these examples: four on the floor, an offbeat bass and electric piano chords that duck under every kick, a filter that opens the groove, closes for the breakdown and sweeps up through the build, and a sung synth hook in the drop."
+ },
+ {
+  "name": "Coastline",
+  "file": "Coastline.json",
+  "seconds": 150.0,
+  "group": "pieces",
+  "listen_for": "A synthwave track written for these examples: a square-wave arpeggio echoing across the speakers through a filter that opens the song, driving eighths in the bass, big room snares and tom fills, and a gliding saw lead whose last chorus goes up a tone."
  }
 ]

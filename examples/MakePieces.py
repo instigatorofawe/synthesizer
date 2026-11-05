@@ -5,17 +5,25 @@
 # [tool.uv.sources]
 # modsynth = { path = "..", editable = false }
 # ///
-"""Writes examples/Pieces: public-domain pieces arranged for the engine, in the same form as the recipes.
+"""Writes examples/Pieces: public-domain pieces arranged for the engine, and two written for it, in the same form as the
+recipes.
 
-The notes come from the Mutopia Project's editions, which their typesetters placed in the public domain, and everything
-else is a performance made here: the tempo and its rubato, dynamics, pedalling, articulation and the mix. Bach's chorale
-is copied from its LilyPond source below. The others are read from the MIDI files LilyPond wrote from theirs, in
-examples/Pieces/Scores.
+The arranged pieces' notes come from the Mutopia Project's editions, which their typesetters placed in the public domain,
+and everything else is a performance made here: the tempo and its rubato, dynamics, pedalling, articulation, swing, the
+orchestration and the mix. Bach's chorale is copied from its LilyPond source below, and the Tenth Regiment March's drum
+part from its source too, since LilyPond wrote none of its notes to the part's MIDI file. The others are read from the
+MIDI files LilyPond wrote, in examples/Pieces/Scores. Where an arrangement adds a part the edition hasn't, such as the
+piccolo's descant in The Stars and Stripes Forever, it is written here and says so. Every piece in the repertoire is
+public domain in the United States and in the countries where copyright lasts 70 years after its author's death:
+published before 1931, by someone who died before 1956, or traditional.
+
+Night Bus and Coastline are original, written here for these examples, in the styles of house and synthwave.
 
 The pieces play the standard set's instruments and rooms, as a MIDI file does: each such patch is the graph
-examples/Instruments has, exactly, so the library holds it as the set's own built-in patch. Two keep patches of their own:
-the chorale's flugelhorn, which GM has no program for, and the Invention's console channels and small room, which are
-what the board can play. The set plays every instrument at one loudness, so a piece of several instruments trims each
+examples/Instruments has, exactly, so the library holds it as the set's own built-in patch. A few keep patches of their
+own: the chorale's flugelhorn, which GM has no program for, the Invention's console channels and small room, which are
+what the board can play, and the original pieces' sweep filter and echo, with the SidechainDucking recipe's duck, which
+the library holds once for both. The set plays every instrument at one loudness, so a piece of several instruments trims each
 part's fader to keep the mix it was written with, and each send keeps the balance of wet and dry the piece had in a room
 of its own. Each piece is rendered once to set its master gain, so its peak lands where the recipes' do.
 
@@ -31,6 +39,16 @@ Sources, all at https://www.mutopiaproject.org/ftp/ and typeset by the Mutopia m
     MountainKing.mid      GriegE/O46/Dans_l_antre_du_roi_de_la_montagne/Dans_l_antre_du_roi_de_la_montagne.mid, Coyau
     BachInventionInF.mid  BachJS/BWV779/bach-invention-08/bach-invention-08.mid, Allen Garvin, from the Bach-Gesellschaft
     Entertainer.mid       JoplinS/entertainer/entertainer.mid, Chris Sawer, from the original edition of 1902
+    SoldiersJoy.mid       Traditional/soldiers-joy/soldiers-joy.mid, Taj Morton, transcribed by ear
+    Kappore.mid           Traditional/JPM024-Kappore/JPM024-Kappore.mid, patrick stanistreet, from Nagai and Obata's
+                          Collection of Japanese Popular Music, Osaka, 1895
+    MapleLeafRag.mid      JoplinS/maple/maple.mid, Chris Sawer, from the original edition of 1899
+    StLouisRag.mid        TurpinT/turpin/turpin.mid, Stan Sanderson, from Sol Bloom's edition of 1903
+    StarsAndStripesForever.mid
+                          SousaJP/TheStarsAndStripesForever/TheStarsAndStripesForever.mid, Benjamin Bloomfield, from
+                          the John Church Company's piano edition of 1897
+    TenthRegimentMarch/   HallRB/TenthRegimentMarch/TenthRegimentMarch-mids.zip, a file for each part, and its drums from
+                          TenthRegimentMarch-lys.zip, Garrett Fitzgerald, from Carl Fischer's band edition of 1895
 Each of these editions is marked Public Domain on Mutopia, placed there by its typesetter.
 """
 

@@ -1077,22 +1077,27 @@ describe('the gaps the pieces found', () => {
 	});
 });
 
-// What the compiler plays at a tick, written out again from `LaneState` and `compile_clip` in Compiler.hpp, for straight ramps:
-// each point, by tick and then as the clip lists it, goes from where the lane is then to its value, at once or over its ramp.
-// The editor's drawing and its points are held to this.
+// What the compiler plays at a tick, written out again from `LaneState` and `compile_clip` in Compiler.hpp: each point, by tick
+// and then as the clip lists it, goes from where the lane is then to its value, at once or over its ramp, in a straight line or
+// by equal ratios along an exp curve. The editor's drawing and its points are held to this.
 function played(clip: Clip, key: string, start: number, tick: number): number {
 	const points = clip.automation
 		.map((point, i) => ({ point, i }))
 		.filter(({ point }) => laneKey(point.param, point.target) === key)
 		.sort((a, b) => a.point.tick - b.point.tick || a.i - b.i);
-	type State = { from: number; to: number; begin: number; end: number };
-	const at = (s: State, t: number) =>
-		t >= s.end ? s.to : t <= s.begin ? s.from : s.from + ((s.to - s.from) * (t - s.begin)) / (s.end - s.begin);
-	let state: State = { from: start, to: start, begin: 0, end: 0 };
+	type State = { from: number; to: number; begin: number; end: number; exp: boolean };
+	const at = (s: State, t: number) => {
+		if (t >= s.end) return s.to;
+		if (t <= s.begin) return s.from;
+		const along = (t - s.begin) / (s.end - s.begin);
+		return s.exp ? curveAt(s.from, s.to, along) : s.from + (s.to - s.from) * along;
+	};
+	let state: State = { from: start, to: start, begin: 0, end: 0, exp: false };
 	for (const { point } of points) {
 		if (point.tick > tick) break;
 		const ramp = point.ramp ?? 0;
-		state = { from: at(state, point.tick), to: point.value, begin: point.tick, end: point.tick + ramp };
+		const exp = point.curve === 'exp' && ramp > 0;
+		state = { from: at(state, point.tick), to: point.value, begin: point.tick, end: point.tick + ramp, exp };
 	}
 	return at(state, tick);
 }
@@ -1108,13 +1113,18 @@ function drawnAt(curve: { tick: number; value: number }[], tick: number): number
 const laneIn = (clip: Clip, key: string) => lanesOf(clip).find((lane) => lane.key === key)!;
 
 // That a lane draws what it plays, tick by tick, and that each of its points is on that. A point with another at its tick is
-// the top or the foot of a jump, where the lane is only on the way past.
+// the top or the foot of a jump, where the lane is only on the way past. An exp ramp is drawn in 32 straight steps, which
+// stray from its curve by a fifth of a percent at most, so a lane with one is held to half a percent.
 function drawsWhatPlays(clip: Clip, key: string, start: number, every = 30) {
 	const lane = laneIn(clip, key);
 	const curve = laneCurve(lane, clip.length, start);
+	const bent = lane.points.some(({ point }) => point.curve === 'exp');
 	for (let tick = 0; tick <= clip.length; tick += every) {
 		const drawn = drawnAt(curve, tick);
-		if (drawn !== undefined) expect(drawn, `at ${tick}`).toBeCloseTo(played(clip, key, start, tick), 9);
+		if (drawn === undefined) continue;
+		const plays = played(clip, key, start, tick);
+		if (bent) expect(Math.abs(drawn - plays), `at ${tick}`).toBeLessThanOrEqual(5e-3 * Math.abs(plays) + 1e-9);
+		else expect(drawn, `at ${tick}`).toBeCloseTo(plays, 9);
 	}
 	const shown = lanePoints(lane, start);
 	shown.forEach((point, k) => {

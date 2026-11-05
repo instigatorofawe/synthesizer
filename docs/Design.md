@@ -1,4 +1,4 @@
-# modsynth design, revision 35
+# modsynth design, revision 36
 
 Status: Milestones 1 to 7 are implemented. Of Milestone 5, BLE and showing a target's fit in the editor are not built.
 The wire format is frozen at version 1, now at revision 8. `docs/Format.md` is its specification, and where this document and that one differ, that
@@ -656,9 +656,10 @@ moved more than 1% from them, if `firmware/NucleoCosts.hpp` isn't what they and 
 takes more instructions than its bound. A count depends on the compiler too, so that job runs in Debian trixie, whose arm-none-eabi-gcc
 14.2.1 wrote the baseline, and a change meant to move counts runs `tools/Bench.py m4` there and then `tools/Bench.py baseline`.
 
-The pieces stay out of the QEMU bench (open 31). Their full renders would take 13 minutes against 5.2 for every recipe, and the bound already
+The pieces stay out of the QEMU bench (open 31). Their full renders would take 34 minutes against 5.2 for every recipe, and the bound already
 says which fit the board: the first four, without their reverb, take 4 to 20 times a frame's budget [board], The Entertainer 7.4 times, and
-the Invention fits, room and all. `bench/ParallelBench.cpp` times their first 20
+the Invention fits, room and all. The eight of revision 36 are refused: Soldier's Joy for its room's 101 KB of bulk memory against 64, and the
+others first for 40 to 68 KB of fast memory against 32 [measured]. `bench/ParallelBench.cpp` times their first 20
 seconds on a host, section 18.
 
 **The size gate.** `firmware/Check.sh` fails a board firmware over 112 KB of flash, with 16 KB left before its 128 KB runs into slot A. The
@@ -1258,18 +1259,19 @@ guards, "used by", the timelines an edit affects and exports treat them as they 
 - The Patch view's header says which timelines use the patch, or which a save of it changes, counting the unsaved edits, so it agrees with where the keys play it: a timeline with a draft counts as the draft has it, and a patch reaches
   a timeline through any patch that expands it, as the graphs are now. The library lists each timeline with the patches it plays as saved, for the rest.
 - An example with one patch names its built-in after itself, as `builtin-Kick808`, and one with several adds the part, as `builtin-PassionChorale-horn`, named "PassionChorale Horn". A graph several examples share is one built-in,
-  named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 74 recipes and 6 pieces make 136 built-ins from 140
-  patches, and 29 recordings from 30 [measured].
+  named after the example with fewer patches and then the first by name, so the drum loop plays Kick808, Snare, HiHat and Clap. Recordings with the same contents are one too. The 106 examples, 74 recipes, the standard set's 18 and 14 pieces,
+  make 253 built-ins from 362 patches, and 29 recordings from 30 [measured].
 - A built-in follows what ships, as any shared patch follows its latest graph: a version that changes an example changes every timeline playing that built-in, and its editor says which. One that no longer ships goes, unless something
   uses it, and then it stays as it was, still read-only.
 - Every page carries the built-ins' graphs, which took the demo library's data from 32 KB to 223 KB [measured], but their recordings only once a saved timeline or one of the library's own patches uses them. A built-in opened, or put in an edit, before then fetches its recordings from
   `/assets` by id, and nothing compiles until they have arrived. So a library that uses no built-in loads the same samples it did before there were any. Together they hold about 480 KB.
 
-**Pieces.** `examples/Pieces` holds six public-domain pieces arranged for the engine, one to three minutes each, and the browser lists them
-first among the examples. In every other way they are recipes. `MakePieces.py` writes them from the Mutopia Project's public-domain
-editions: the notes are the score's, and the instruments, rubato, dynamics, pedalling and mix are a performance written in code. They sit
-outside `examples/Recipes` because the benchmarks render every recipe in full, three times over on QEMU, and the pieces are 13 minutes of
-music against 5.2 for all 74 recipes. Writing the first four tested what a timeline can say, and what it couldn't is in section 24, opens 26 to 31.
+**Pieces.** `examples/Pieces` holds fourteen pieces, one to three minutes each, and the browser lists them first among the examples. In
+every other way they are recipes. Twelve are public-domain pieces arranged for the engine: Bach, Beethoven and Grieg, two rags, an old-time
+fiddle tune, a Japanese street song, a Sousa march and a band march. `MakePieces.py` writes them from the Mutopia Project's public-domain
+editions: the notes are the score's, and the instruments, rubato, swing, dynamics, pedalling and mix are a performance written in code. Two,
+a house track and a synthwave track, were written for the examples. They sit outside `examples/Recipes` because the benchmarks render every
+recipe in full, three times over on QEMU, and the pieces are 34 minutes of music against 5.2 for all 74 recipes. Writing the first four tested what a timeline can say, and what it couldn't is in section 24, opens 26 to 31.
 Bach's Invention No. 8 is written for the board: a naive pulse for one hand and a triangle for the other, a voice each, in a mono room, with its
 closing slowdown written into where its last notes fall, since a tempo change would cut frames in two. Its bound is 61% of the board's frame.
 
@@ -1826,6 +1828,8 @@ fade slot is a quarter of a track's voices; a round robin counts every note on t
 | 27 | A sustain pedal? | A timeline has none, so `MakePieces.py` writes Für Elise's pedalling into how long its notes are, and MIDI import a file's. The piano roll then shows the pedal's notes rather than the player's, and moving a pedal change means rewriting durations. Recommended: a pedal lane per track that the compiler applies to note lengths, as it writes a tempo ramp as steps, so the format and engine stay as they are. A key played live under the pedal would still need the engine to hold its voice. |
 | 29 | Should a comb's delay be fractional? | A comb rounds its delay down to a whole sample, so a Karplus-Strong string is out of tune by up to half a sample of its period, by a different amount at each run rate [measured: the PluckedString recipe at A5 is 10.7 cents flat at 44.1 kHz and 3.8 cents sharp at 48 kHz, and within 2 cents at A3]. That breaks section 9's premise that frequencies stay correct at any rate. The pieces pluck with oscillators instead. Recommended: an interpolated read, as a new op, since `Comb` has no modes to add one to. |
 | 30 | Can a ramp end on one tempo and the next change start another? | No. A ramp ends on the next change's tempo, so slowing into a fermata that holds slower still means ramping toward the fermata's own tempo, as the chorale's eight fermatas do. Recommended: an optional end tempo on a ramped change, compiled as steps like any ramp. |
+| 34 | Should a clip or a track swing? | A timeline has no swing, so `MakePieces.py` writes Maple Leaf Rag's and Soldier's Joy's into where their notes fall, and the piano roll then shows the notes off the grid, where a player would have written them on it. Changing how much a song swings means moving every note again. Recommended: an editor-only amount on a clip, with its grid, that the compiler applies to note starts and ends as it reads them, as it writes a tempo ramp as steps, so the format and engine stay as they are. |
+| 35 | Should a delay follow the tempo? | A delay's time is in seconds, so Coastline's dotted-eighth echo is 0.45 s, which is a dotted eighth only at 100 bpm, and a song with a tempo change, or a patch shared between songs, echoes off the beat. Recommended: a lane that sets the time where the tempo changes, written by the editor from a time in beats, since a patch knows nothing of the timeline's tempo. A delay whose time moves while it sounds bends what it holds, which an echo usually wants anyway. |
 
 **Built from the UX gaps the user found** (revision 31). The user said patches can't be dragged onto the timeline, a right-click
 sometimes does nothing, the keys sometimes stick at 1/4 note entry, and notes can fail to reach the timeline. None of this changes the
@@ -1985,6 +1989,48 @@ Choices made here that the user hasn't weighed in on:
 - **The song's ticks are the file's,** split in two, four or eight only where a time signature's beat isn't a whole number of them.
 - **Each track starts as GM says a channel does:** volume 100 (fader 0.62), centre pan, reverb send 40 (0.315 to LargeHall) and
   chorus 0, with the set's defaults for the four parameters.
+
+**Built from more pieces** (revision 36). The user asked to expand the library of pieces, perhaps to other genres, and chose ragtime and
+early jazz, folk and world music, marches, and electronic pieces written for the examples, two of each. Nothing in the format, the compiler or
+the engine changes. `MakePieces.py`'s builder gained kit tracks, inserts with fields of their own such as a sidechain's key, lanes on a
+patch's or an insert's parameters, play modes, a track's output to a bus, and a track whose repeated strains are one clip placed twice. The
+six pieces before regenerate byte for byte [measured].
+- **Soldier's Joy**, traditional, for an old-time string band: fiddle, banjo, guitar and bass, AABB three times, the banjo's clawhammer
+  bum-ditty and the guitar's boom-chuck made from the edition's chords, and the banjo taking the tune the second time.
+- **Kappore**, a street song of Edo from Nagai and Obata's collection of 1895, for shakuhachi, a koto following it an octave down, a bamboo
+  flute, taiko, kane and hyoshigi, the second verse faster.
+- **Maple Leaf Rag** for a New Orleans band, swung: cornet, a clarinet a third or sixth above, a trombone that moves through the harmony and
+  smears into the strains, banjo, tuba and drums, with a strain for the clarinet, one in stop time and the trio's first time on piano.
+- **The St. Louis Rag**, Tom Turpin's of 1903, as a nickelodeon's orchestrion plays it: in strict time, every repeat, a piano with two
+  loudnesses, and stops for a mandolin rail, xylophone, bells and drums drawn strain by strain.
+- **The Stars and Stripes Forever**, scored here for a military band from the piano edition, with one break strain into the last trio, which
+  has a piccolo descant written here, since the edition has none of Sousa's obbligato.
+- **Tenth Regiment March**, R. B. Hall's of 1895, from the band edition's parts, each moved to concert pitch [measured: the B flat parts,
+  unfolded, equal the edition's concert-pitch score note for note but for a tie across a repeat], and its drum part transcribed from its
+  LilyPond source, since LilyPond wrote none of its notes to the part's MIDI file.
+- **Night Bus** and **Coastline**, written here. Night Bus is house at 122 bpm, its bass, chords and pad on a bus that a lowpass sweeps and
+  the kick ducks with the SidechainDucking recipe's own duck. Coastline is synthwave at 100 bpm: an arpeggio through a dotted-eighth
+  ping-pong, a gliding saw lead, tom fills, and the last chorus a tone up.
+
+Choices made here that the user hasn't weighed in on:
+- **What counts as public domain:** published before 1931 by someone who died before 1956, or traditional, so that a piece is free in the
+  United States and where copyright lasts 70 years after its author's death. That rules out W. C. Handy's St. Louis Blues. Every edition used
+  is marked Public Domain on Mutopia.
+- **Which pieces:** from what Mutopia has in the public domain. It has no tango or choro, and its jazz is rags for piano, so folk and world
+  are an American fiddle tune and a Japanese song, and early jazz is a rag as a band plays it.
+- **Cuts, to keep each to three minutes:** Maple Leaf Rag plays B once, The Stars and Stripes Forever one break strain of two, and the Tenth
+  Regiment March its last strain once.
+- **Unisons:** two players of a section in unison are one note, since two voices playing the same note on one track sum 6 dB louder rather
+  than sounding like two players. The march's E flat clarinet and trumpets double the flutes and cornets note for note and are left out.
+  With its repeated strains placed twice rather than written out, that takes the march from 831 KB to 468 KB, under the 500 KB the
+  pre-commit hook allows.
+- **The baritone sax:** its part is written a tritone from concert, which no saxophone is, and played a tritone up it doubles the bass
+  clarinet, so that is how it plays.
+- **The originals** are in the styles they name, on the set's instruments, and imitate no recording.
+
+What the pieces found is open 34 and 35: a timeline has no swing, and a delay's time is in seconds rather than beats. The editor's lane test
+modelled straight ramps only, and Coastline's filter, the first exp ramp in an example, now holds its drawing to exp curves as the compiler
+plays them.
 
 **Declined.** Importing PureData patches, which the user decided against in revision 20 after it was scoped: the graph already has PureData's
 nodes, wires, inlets and subpatches, but its control logic, message envelopes and voice idioms have no counterpart here, and many common
